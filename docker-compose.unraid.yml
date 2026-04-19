@@ -23,9 +23,19 @@
 
 services:
   nginx:
+    # Only nginx is published to the host — everything else (frontend,
+    # backend, Postgres, Redis, SearXNG) stays on the internal docker
+    # network and is reached through the nginx reverse proxy. That's
+    # both simpler (one URL: http://<unraid-ip>:8087) and safer (your
+    # database is never exposed on the LAN).
+    #
+    # Default ports deliberately picked outside the well-known
+    # 80/443/8080/8443/9000 cluster so they don't collide with the
+    # Unraid UI, Portainer, the *arr stack, qBittorrent, etc.
+    # Override in .env if 8087/8488 also clash on your box.
     ports:
-      - "${NGINX_HTTP_PORT:-8181}:80"
-      - "${NGINX_HTTPS_PORT:-8443}:443"
+      - "${NGINX_HTTP_PORT:-8087}:80"
+      - "${NGINX_HTTPS_PORT:-8488}:443"
 
   postgres:
     volumes:

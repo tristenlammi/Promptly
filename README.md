@@ -50,7 +50,7 @@ Production deployments need HTTPS. Pick one:
 
 ## Unraid install
 
-Promptly ships an Unraid overlay (`docker-compose.unraid.yml`) that bind-mounts every stateful container into `/mnt/user/appdata/promptly/` and picks Unraid-safe ports (`8181` HTTP, `8443` HTTPS) so it doesn't fight the Unraid web UI.
+Promptly ships an Unraid overlay (`docker-compose.unraid.yml`) that bind-mounts every stateful container into `/mnt/user/appdata/promptly/` and picks uncommon host ports (`8087` HTTP, `8488` HTTPS) so it doesn't collide with the Unraid web UI, the *arr stack, Portainer, qBittorrent, or any of the usual high-port suspects.
 
 ### 1. Install the Compose Manager plugin
 
@@ -109,8 +109,10 @@ docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
 
 By default the stack listens on:
 
-- `http://tower.local:8181`  — Promptly
-- `http://tower.local:8443`  — TLS (only useful once you wire a cert in `nginx/`)
+- `http://tower.local:8087`  — Promptly (or your Unraid IP, e.g. `http://192.168.50.247:8087`)
+- `http://tower.local:8488`  — TLS (only useful once you wire a cert in `nginx/`)
+
+That single URL serves the React UI **and** proxies the API. The other containers (Frontend, Backend, Postgres, Redis, SearXNG) stay on the internal `promptly` docker network with no host ports — that's intentional and means your database is never exposed on the LAN.
 
 Open the HTTP URL — the first visit launches the setup wizard for the bootstrap admin account. Subsequent users join via the admin's invite flow.
 
