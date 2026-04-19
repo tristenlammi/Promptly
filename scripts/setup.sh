@@ -101,8 +101,8 @@ printf '\n'
 
 # ---------- 6. final report ----------
 domain=$(grep -E '^DOMAIN=' .env | cut -d= -f2-)
-http_port=$(grep -E '^NGINX_HTTP_PORT=' .env | cut -d= -f2- || echo "80")
-http_port=${http_port:-80}
+http_port=$(grep -E '^NGINX_HTTP_PORT=' .env | cut -d= -f2- || echo "8087")
+http_port=${http_port:-8087}
 
 bold ""
 bold "=========================================================="
@@ -117,7 +117,11 @@ if [[ "$domain" == "localhost" || "$domain" == "" ]]; then
     echo "    http://localhost:${http_port}"
   fi
 else
-  echo "    http://${domain}"
+  if [[ "$http_port" == "80" ]]; then
+    echo "    http://${domain}"
+  else
+    echo "    http://${domain}:${http_port}"
+  fi
   echo
   echo "  (Front it with Cloudflare Tunnel, Caddy, or a TLS-terminating"
   echo "   reverse proxy for HTTPS — see README.md > 'TLS termination'.)"

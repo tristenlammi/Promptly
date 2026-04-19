@@ -24,7 +24,9 @@ That's it. The script:
 4. Builds and starts the full stack.
 5. Waits for the backend health check to go green.
 
-Open `http://chat.example.com` (or `http://localhost`) — the first visit launches a setup wizard that creates the bootstrap admin account. Subsequent users join via the admin's invite flow (Account → Invites). Open registration is intentionally disabled.
+Open `http://chat.example.com:8087` (or `http://localhost:8087`) — the first visit launches a setup wizard that creates the bootstrap admin account. Subsequent users join via the admin's invite flow (Account → Invites). Open registration is intentionally disabled.
+
+> The stack defaults to port `8087` (HTTP) / `8488` (HTTPS) so it doesn't fight the standard 80/443 used by reverse proxies, the Unraid UI, etc. Override with `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT` in `.env` if you'd rather bind 80/443 directly.
 
 > **Windows / Docker Desktop?** Use `.\scripts\setup.ps1` instead — same behaviour, PowerShell flavour.
 
@@ -42,23 +44,23 @@ Alembic migrations run automatically on backend boot via `backend/entrypoint.sh`
 
 Production deployments need HTTPS. Pick one:
 
-1. **Cloudflare Tunnel (easiest).** `cloudflared tunnel --url http://localhost:80` and point your DNS at the tunnel.
-2. **Caddy / Traefik in front of nginx.** They handle Let's Encrypt automatically — proxy them to `localhost:${NGINX_HTTP_PORT}`.
+1. **Cloudflare Tunnel (easiest).** `cloudflared tunnel --url http://localhost:8087` and point your DNS at the tunnel.
+2. **Caddy / Traefik in front of nginx.** They handle Let's Encrypt automatically — proxy them to `localhost:${NGINX_HTTP_PORT:-8087}`.
 3. **Add `:443` to nginx directly.** See [TLS termination](#tls-termination) below.
 
 ---
 
 ## Unraid install
 
-Promptly ships an Unraid overlay (`docker-compose.unraid.yml`) that bind-mounts every stateful container into `/mnt/user/appdata/promptly/` and picks uncommon host ports (`8087` HTTP, `8488` HTTPS) so it doesn't collide with the Unraid web UI, the *arr stack, Portainer, qBittorrent, or any of the usual high-port suspects.
+The base `docker-compose.yml` is already Unraid-friendly — uncommon ports (`8087` / `8488`) so it doesn't collide with the Unraid web UI or other community containers, and bind-mounted data under `./data/` so the CA Appdata Backup plugin and Krusader can see everything directly. There's nothing Unraid-specific to load.
 
 ### 1. Install the Compose Manager plugin
 
-In the Unraid UI: **Apps → search "Compose Manager" → Install**. (Author: dcflachs / dlandon, available via Community Apps.) After install, restart the Unraid web UI if prompted.
+In the Unraid UI: **Apps → search "Compose Manager" → Install**. (Author: dcflachs / dlandon, available via Community Apps.) Restart the UI if prompted.
 
 ### 2. Pull the project into appdata
 
-SSH into the Unraid box (or use the **Tools → Terminal** window in the UI):
+SSH into the Unraid box (or open **Tools → Terminal**):
 
 ```bash
 mkdir -p /mnt/user/appdata/promptly
@@ -66,59 +68,65 @@ cd /mnt/user/appdata/promptly
 git clone https://github.com/tristenlammi/Promptly.git .
 ```
 
+(Trailing `.` clones the repo *contents* into the existing folder.)
+
 ### 3. Create `.env` and seed secrets
 
 ```bash
 cp .env.example .env
-
-# Strong random secrets — Unraid ships openssl in /usr/bin.
 sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|"               .env
 sed -i "s|^SEARXNG_SECRET=.*|SEARXNG_SECRET=$(openssl rand -hex 32)|"       .env
 sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" .env
-
-# Set DOMAIN to whatever URL users will hit. For LAN-only:
-sed -i "s|^DOMAIN=.*|DOMAIN=tower.local|" .env    # or your unraid hostname / IP
-
-# Optional: drop in your provider keys now, or do it later via the Models tab.
-nano .env
+sed -i "s|^DOMAIN=.*|DOMAIN=tower.local|"                                   .env   # or your IP
+nano .env    # optional: drop in OPENROUTER_API_KEY etc.
 ```
 
-### 4. Add the stack to Compose Manager
+### 4. Register the stack in Compose Manager
 
-In the Unraid web UI: **Docker → Compose → Add New Stack**.
+**Docker → Compose → Add New Stack**
 
 - **Stack name:** `Promptly`
 - **Stack location:** `/mnt/user/appdata/promptly`
-- **Compose file(s):** `docker-compose.yml,docker-compose.unraid.yml`
-  (Compose Manager understands the comma-separated overlay list. Listing the Unraid file second is what makes the bind-mounts and port overrides win.)
+- **Compose file(s):** `docker-compose.yml`  *(just the one — no overlays needed)*
 
-Save the stack.
+Save, then click **Compose Up**. First boot takes 3-5 minutes (image pulls + the backend / frontend image builds). The log window streams progress.
 
-### 5. Bring it up
-
-Click **Compose Up** on the Promptly stack row. First boot takes 3–5 minutes (Docker pulls Postgres / Redis / SearXNG / nginx and builds the backend + frontend images). The Compose Manager log window streams the build output.
-
-You can also start it from the terminal:
+Equivalent terminal command:
 
 ```bash
 cd /mnt/user/appdata/promptly
-docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
+docker compose up -d
 ```
 
-### 6. Access the UI
+### 5. Open it
 
-By default the stack listens on:
-
-- `http://tower.local:8087`  — Promptly (or your Unraid IP, e.g. `http://192.168.50.247:8087`)
-- `http://tower.local:8488`  — TLS (only useful once you wire a cert in `nginx/`)
+- `http://tower.local:8087` — Promptly (or your Unraid IP, e.g. `http://192.168.50.247:8087`)
+- `http://tower.local:8488` — HTTPS (only useful once a cert is wired into `nginx/`)
 
 That single URL serves the React UI **and** proxies the API. The other containers (Frontend, Backend, Postgres, Redis, SearXNG) stay on the internal `promptly` docker network with no host ports — that's intentional and means your database is never exposed on the LAN.
 
-Open the HTTP URL — the first visit launches the setup wizard for the bootstrap admin account. Subsequent users join via the admin's invite flow.
+First visit launches the setup wizard for the bootstrap admin account. Subsequent users join via the admin's invite flow.
 
-### 7. (Optional) front it with HTTPS
+### Where your data lives
 
-Easiest path on Unraid: pair Promptly with the **SWAG** Docker container (Community Apps → SWAG by linuxserver.io) on the same `promptly` network, then drop a config snippet into `swag/nginx/proxy-confs/promptly.subdomain.conf.sample`:
+Everything stateful lives under the project directory in a single `data/` folder:
+
+```
+/mnt/user/appdata/promptly/
+├── data/
+│   ├── postgres/      # database (back this up)
+│   ├── redis/         # cache + rate-limit counters
+│   ├── uploads/       # user files + AI-generated artefacts (back this up)
+│   └── whiteboard/    # Excalidraw snapshots
+├── searxng/           # search engine config (in git)
+└── docker-compose.yml
+```
+
+The CA Appdata Backup plugin automatically picks up `/mnt/user/appdata/promptly/` — just configure it to **stop containers before backup** so Postgres flushes cleanly.
+
+### Optional — front with HTTPS
+
+Easiest on Unraid: pair Promptly with the **SWAG** container (Community Apps → SWAG by linuxserver.io) on the same `promptly` network, then drop a config snippet into `swag/nginx/proxy-confs/promptly.subdomain.conf`:
 
 ```nginx
 server {
@@ -131,7 +139,7 @@ server {
     location / {
         include /config/nginx/proxy.conf;
         resolver 127.0.0.11 valid=30s;
-        set $upstream_app Promptly-Nginx;   # container_name from docker-compose.yml
+        set $upstream_app Promptly-Nginx;
         set $upstream_port 80;
         set $upstream_proto http;
         proxy_pass $upstream_proto://$upstream_app:$upstream_port;
@@ -139,17 +147,17 @@ server {
 }
 ```
 
-Cloudflare Tunnel works equally well — install the `cloudflared` Docker container, point it at `http://Promptly-Nginx:80`, and let Cloudflare terminate TLS at their edge.
+Cloudflare Tunnel works equally well — run the `cloudflared` Docker container, point it at `http://Promptly-Nginx:80`, and let Cloudflare terminate TLS at their edge.
 
 ### Day-2 on Unraid
 
 | Task | How |
 |---|---|
-| **Update Promptly** | `cd /mnt/user/appdata/promptly && git pull && docker compose -f docker-compose.yml -f docker-compose.unraid.yml build && docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d` |
-| **Backup** | The CA Appdata Backup plugin already snapshots `/mnt/user/appdata/promptly/` nightly. Set it to **stop containers before backup** so Postgres flushes cleanly. |
-| **Move appdata to a different share** | Stop the stack, `mv /mnt/user/appdata/promptly /mnt/user/<new-share>/promptly`, edit the bind-mount paths in `docker-compose.unraid.yml`, restart. |
+| **Update** | `cd /mnt/user/appdata/promptly && git pull && docker compose build && docker compose up -d` |
+| **Backup** | CA Appdata Backup plugin nightly. Set "stop containers before backup". |
+| **Move appdata to a different share** | Stop the stack, `mv /mnt/user/appdata/promptly /mnt/user/<new-share>/promptly`, point the Compose Manager stack location at the new path, restart. |
 | **View logs** | `docker logs -f Promptly-Backend` (or the Compose Manager log window) |
-| **Reset everything (wipe DB)** | `docker compose ... down`, then `rm -rf /mnt/user/appdata/promptly/{postgres,redis,uploads,whiteboard,searxng}` |
+| **Reset everything (wipe DB)** | `docker compose down && rm -rf data/` |
 
 ---
 

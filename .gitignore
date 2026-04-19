@@ -34,7 +34,13 @@ htmlcov/
 # Keep versions tracked, ignore local scratch
 backend/alembic/versions/*.pyc
 
-# ---- Docker volumes (never commit volume data) ----
+# ---- Stateful container data (bind-mounted from compose) ----
+# Created on first `docker compose up` and contains the live
+# database, uploads, redis snapshots, etc. Never goes in git.
+data/
+
+# Legacy named-volume directory names (kept for cleanup of
+# earlier installs that may still have them lying around).
 postgres_data/
 redis_data/
 uploads/

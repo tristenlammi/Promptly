@@ -101,7 +101,7 @@ Write-Host ""
 $domainLine = (Get-Content ".env" | Where-Object { $_ -match "^DOMAIN=" } | Select-Object -First 1)
 $portLine   = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
 $useDomain  = if ($domainLine) { $domainLine.Substring(7) } else { "localhost" }
-$usePort    = if ($portLine)   { $portLine.Substring(16) } else { "80" }
+$usePort    = if ($portLine)   { $portLine.Substring(16) } else { "8087" }
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
@@ -113,7 +113,8 @@ if ($useDomain -eq "localhost" -or $useDomain -eq "") {
     if ($usePort -eq "80") { Write-Host "    http://localhost" }
     else                   { Write-Host "    http://localhost:$usePort" }
 } else {
-    Write-Host "    http://$useDomain"
+    if ($usePort -eq "80") { Write-Host "    http://$useDomain" }
+    else                   { Write-Host "    http://${useDomain}:$usePort" }
     Write-Host ""
     Write-Host "  (Front it with Cloudflare Tunnel, Caddy, or a TLS-terminating"
     Write-Host "   reverse proxy for HTTPS - see README.md > 'TLS termination'.)"

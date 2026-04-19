@@ -1,14 +1,46 @@
-# Compose project name — drives the prefix on the auto-generated network
-# and volumes so `docker volume ls` etc. read e.g. `Promptly_postgres_data`.
+# ============================================================
+# Promptly — single-file production compose.
+#
+# This is the only file you need to bring the stack up:
+#
+#   docker compose up -d
+#
+# Works the same on Unraid (Compose Manager points at this
+# file), a plain Linux server, or Docker Desktop. The defaults
+# are tuned for "drop in and run" — ports stay out of the
+# well-known cluster so they don't collide with the Unraid web
+# UI, Portainer, the *arr stack, qBittorrent etc., and all
+# stateful data lives in ./data/ alongside the compose file
+# so backups and inspection are trivial.
+#
+# Override anything via .env (see .env.example). The most
+# common ones are:
+#   - NGINX_HTTP_PORT / NGINX_HTTPS_PORT (default 8087 / 8488)
+#   - DOMAIN
+#
+# `docker-compose.dev.yml` exists separately for local
+# development (Vite HMR, exposed Postgres). Don't load it on
+# a production / Unraid host.
+# ============================================================
+
+# Compose project name — drives the prefix on auto-generated
+# resources (volumes, default network) so they read e.g.
+# "promptly_*" in `docker volume ls`.
 name: Promptly
 
 services:
   nginx:
     image: nginx:alpine
     container_name: Promptly-Nginx
+    # Only nginx publishes ports to the host — everything else
+    # (frontend, backend, Postgres, Redis, SearXNG) stays on the
+    # internal "promptly" docker network and is reached through
+    # this reverse proxy. That's simpler for the user (one URL:
+    # http://<host>:8087 serves UI + API) and safer (your
+    # database is never exposed on the LAN).
     ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
+      - "${NGINX_HTTP_PORT:-8087}:80"
+      - "${NGINX_HTTPS_PORT:-8488}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
@@ -17,8 +49,9 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      # nginx:alpine ships wget. We hit a static path the SPA serves to
-      # confirm both nginx and the upstream frontend container are alive.
+      # nginx:alpine ships wget. We hit a static path the SPA
+      # serves to confirm both nginx and the upstream frontend
+      # container are alive.
       test: ["CMD", "wget", "-qO-", "--tries=1", "--timeout=2", "http://127.0.0.1/"]
       interval: 30s
       timeout: 5s
@@ -63,8 +96,11 @@ services:
       - SEARCH_RESULT_COUNT=${SEARCH_RESULT_COUNT:-5}
       - SEARCH_CONCURRENT_REQUESTS=${SEARCH_CONCURRENT_REQUESTS:-3}
     volumes:
-      - uploads:/app/uploads
-      - whiteboard_snapshots:/app/whiteboard
+      # Bind-mount user data into the project directory so it's
+      # always next to the compose file — easy to back up, easy
+      # to inspect, and survives container recreation.
+      - ./data/uploads:/app/uploads
+      - ./data/whiteboard:/app/whiteboard
     expose:
       - "8000"
     depends_on:
@@ -74,10 +110,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      # The /api/health endpoint pings Postgres, Redis, and SearXNG and
-      # returns 503 if any of them is unreachable, so this single probe
-      # also surfaces upstream-dependency failures via `docker compose ps`.
-      # Long start_period because Alembic migrations run on first boot.
+      # The /api/health endpoint pings Postgres, Redis, and
+      # SearXNG and returns 503 if any of them is unreachable,
+      # so this single probe also surfaces upstream-dependency
+      # failures via `docker compose ps`. Long start_period
+      # because Alembic migrations run on first boot.
       test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)\""]
       interval: 30s
       timeout: 5s
@@ -94,7 +131,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=promptly
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U promptly -d promptly"]
       interval: 10s
@@ -108,7 +145,7 @@ services:
     image: redis:7-alpine
     container_name: Promptly-Redis
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -119,9 +156,10 @@ services:
       - promptly
 
   searxng:
-    # Pinned to a specific dated build so a `docker compose pull` can't
-    # silently break web search. Bump the tag deliberately when you want
-    # to upgrade. Tag list: https://hub.docker.com/r/searxng/searxng/tags
+    # Pinned to a specific dated build so a `docker compose
+    # pull` can't silently break web search. Bump the tag
+    # deliberately when you want to upgrade.
+    # Tag list: https://hub.docker.com/r/searxng/searxng/tags
     image: searxng/searxng:2026.4.17-e8299a4c3
     container_name: Promptly-SearXNG
     volumes:
@@ -142,25 +180,13 @@ services:
     restart: unless-stopped
     networks:
       - promptly
-    # NOTE: On first run, you may need to temporarily remove `cap_drop: ALL`
-    # to allow SearXNG to create /etc/searxng/uwsgi.ini, then restore it.
+    # NOTE: On first run, SearXNG occasionally can't write
+    # /etc/searxng/uwsgi.ini with `cap_drop: ALL`. If the
+    # container loops on startup, temporarily comment out the
+    # `cap_drop` block, run `docker compose up -d searxng`,
+    # then restore the cap-drop and recreate.
 
-# Network and volumes keep their original lowercase names so existing
-# data (postgres + uploads) survives the rename to project=Promptly.
-# Container names are the only thing the user actually sees in
-# `docker ps` / Docker Desktop, so that's where the friendlier
-# "Promptly - X" scheme matters most.
 networks:
   promptly:
     name: promptly
     driver: bridge
-
-volumes:
-  postgres_data:
-    name: promptly_postgres_data
-  redis_data:
-    name: promptly_redis_data
-  uploads:
-    name: promptly_uploads
-  whiteboard_snapshots:
-    name: promptly_whiteboard_snapshots
