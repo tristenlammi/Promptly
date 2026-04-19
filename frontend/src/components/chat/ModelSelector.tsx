@@ -6,7 +6,16 @@ import { useAvailableModels } from "@/hooks/useProviders";
 import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
-export function ModelSelector() {
+interface ModelSelectorProps {
+  /** Compact rendering for tight headers (mobile). Collapses the trigger
+   *  to an icon-only button — no model name, no provider — so it stops
+   *  shoving the hamburger into the Share button on small screens. The
+   *  dropdown opens at the same right-anchored position and is identical
+   *  to the desktop list, so power users still get full control. */
+  compact?: boolean;
+}
+
+export function ModelSelector({ compact = false }: ModelSelectorProps) {
   const { isLoading } = useAvailableModels();
   const available = useModelStore((s) => s.available);
   const selected = useSelectedModel();
@@ -42,6 +51,22 @@ export function ModelSelector() {
   }
 
   if (available.length === 0) {
+    if (compact) {
+      return (
+        <button
+          onClick={() => navigate("/models")}
+          aria-label="Configure a model"
+          title="Configure a model"
+          className={cn(
+            "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+            "border border-dashed border-[var(--border)] text-[var(--text-muted)]",
+            "hover:text-[var(--text)]"
+          )}
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      );
+    }
     return (
       <button
         onClick={() => navigate("/models")}
@@ -59,29 +84,60 @@ export function ModelSelector() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-input border px-3 py-1.5 text-xs",
-          "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-          "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
-        )}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className="max-w-[220px] truncate">{label}</span>
-        {selected?.supports_vision && <VisionBadge compact />}
-        <ChevronDown
-          className={cn("h-3 w-3 transition-transform", open && "rotate-180")}
-        />
-      </button>
+      {compact ? (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label={selected ? `Model: ${label}. Tap to change.` : "Select a model"}
+          title={label}
+          className={cn(
+            "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+            "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
+            "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+          )}
+        >
+          {/* Tiny vision dot in the top-right corner so power users
+              still know at a glance whether the active model can see
+              images. Hidden when the model isn't vision-capable. */}
+          {selected?.supports_vision && (
+            <span
+              aria-hidden
+              className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-violet-500"
+            />
+          )}
+          <ChevronDown
+            className={cn("h-4 w-4 transition-transform", open && "rotate-180")}
+          />
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-input border px-3 py-1.5 text-xs",
+            "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
+            "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+          )}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+        >
+          <span className="max-w-[220px] truncate">{label}</span>
+          {selected?.supports_vision && <VisionBadge compact />}
+          <ChevronDown
+            className={cn("h-3 w-3 transition-transform", open && "rotate-180")}
+          />
+        </button>
+      )}
 
       {open && (
         <div
           role="listbox"
           className={cn(
-            "promptly-scroll absolute right-0 z-20 mt-1 max-h-96 w-80 overflow-y-auto rounded-card border shadow-lg",
-            "border-[var(--border)] bg-[var(--surface)]"
+            "promptly-scroll absolute right-0 z-20 mt-1 max-h-96 overflow-y-auto rounded-card border shadow-lg",
+            "border-[var(--border)] bg-[var(--surface)]",
+            // Wider on desktop, but cap to viewport width on mobile so
+            // the dropdown never scrolls horizontally off-screen.
+            "w-[min(20rem,calc(100vw-1.5rem))]"
           )}
         >
           {grouped.map((group) => (

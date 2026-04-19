@@ -9,6 +9,7 @@ import { SplitPane } from "@/components/study/SplitPane";
 import { StudyChat } from "@/components/study/StudyChat";
 import { WhiteboardPanel } from "@/components/study/Whiteboard/WhiteboardPanel";
 import { studyApi } from "@/api/study";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useStudyProjectQuery, useStudySessionQuery } from "@/hooks/useStudy";
 import { useStudyStream } from "@/hooks/useStudyStream";
 import { useStudyStore } from "@/store/studyStore";
@@ -32,6 +33,7 @@ export function StudySessionPage() {
   const setSubmissionError = useStudyStore((s) => s.setSubmissionError);
   const appendStudyMessage = useStudyStore((s) => s.appendMessage);
   const selectedModel = useSelectedModel();
+  const isMobile = useIsMobile();
 
   const { data: session, isLoading: sessionLoading } = useStudySessionQuery(
     sessionId ?? null
@@ -156,15 +158,21 @@ export function StudySessionPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate("/study")}
+              aria-label="Back to Study"
+              title="Back to Study"
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-input border px-2.5 py-1.5 text-xs",
+                "inline-flex items-center gap-1.5 rounded-input border",
                 "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]",
-                "hover:bg-black/[0.03] hover:text-[var(--text)] dark:hover:bg-white/[0.04]"
+                "hover:bg-black/[0.03] hover:text-[var(--text)] dark:hover:bg-white/[0.04]",
+                isMobile
+                  ? "h-9 w-9 justify-center"
+                  : "px-2.5 py-1.5 text-xs"
               )}
             >
-              <ArrowLeft className="h-3.5 w-3.5" /> Back to Study
+              <ArrowLeft className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+              {!isMobile && "Back to Study"}
             </button>
-            <ModelSelector />
+            <ModelSelector compact={isMobile} />
           </div>
         }
       />

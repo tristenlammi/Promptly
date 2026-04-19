@@ -21,6 +21,7 @@ import {
 import { filesApi } from "@/api/files";
 import type { WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
@@ -82,6 +83,7 @@ export function InputBar({
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const invalidateFiles = useInvalidateFiles();
+  const isMobile = useIsMobile();
   const selectedModel = useModelStore((s) =>
     s.available.find(
       (m) =>
@@ -333,16 +335,23 @@ export function InputBar({
                   onClick={() => setPickerOpen(true)}
                   disabled={disabled || streaming}
                   className={cn(
-                    "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs transition",
+                    "inline-flex items-center rounded-full border transition",
                     "border-[var(--border)] text-[var(--text-muted)]",
                     "hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
-                    "disabled:cursor-not-allowed disabled:opacity-50"
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    // Mobile: icon-only circle, matching Web/Tools
+                    // toggles for a consistent four-pill row.
+                    isMobile
+                      ? "h-9 w-9 justify-center"
+                      : "h-8 gap-1.5 px-2.5 text-xs"
                   )}
                   aria-label="Attach files"
                   title="Attach files"
                 >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span className="font-medium">Attach</span>
+                  <Paperclip
+                    className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"}
+                  />
+                  {!isMobile && <span className="font-medium">Attach</span>}
                 </button>
               )}
               {onWebSearchModeChange && (
@@ -392,7 +401,12 @@ export function InputBar({
             )}
           </div>
         </div>
-        <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] text-[var(--text-muted)]">
+        {/* Footer row is desktop-only. On mobile we hide it entirely so
+            the composer hugs the bottom safe-area inset and the
+            on-screen keyboard doesn't fight a redundant strip of
+            text. The web-search mode is still discoverable via the
+            pill above; the keyboard hint is meaningless on touch. */}
+        <div className="mt-1.5 hidden items-center justify-between gap-3 text-[11px] text-[var(--text-muted)] md:flex">
           <span className="truncate">
             {uploadingCount > 0 ? (
               <span className="inline-flex items-center gap-1.5">
@@ -409,7 +423,9 @@ export function InputBar({
               footer
             )}
           </span>
-          <span className="shrink-0">Enter to send · Shift+Enter for newline</span>
+          <span className="shrink-0">
+            Enter to send · Shift+Enter for newline
+          </span>
         </div>
       </div>
 

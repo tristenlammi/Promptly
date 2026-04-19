@@ -11,18 +11,26 @@ interface MessageStatsProps {
   className?: string;
 }
 
-/** Render a USD figure with appropriate precision.
+// Approximate USD → AUD conversion. Promptly is shipped to a small
+// circle of friends/family in Australia and we'd rather show prices
+// in their local currency than make them mentally convert every time.
+// Bump this when the rate moves materially — it's not worth wiring up
+// a live FX feed for sub-cent estimates next to a chat bubble.
+const USD_TO_AUD = 1.55;
+
+/** Render an AUD figure with appropriate precision.
  *
- *  Tiny figures (<$0.01) get four decimals — typical model token costs
+ *  Tiny figures (<A$0.01) get four decimals — typical model token costs
  *  land around $0.0001-$0.01, and rounding to two would just print
- *  "$0.00" for almost every message. Larger figures collapse back to
+ *  "A$0.00" for almost every message. Larger figures collapse back to
  *  the conventional two decimals.
  */
-function formatCostUsd(cost: number): string {
-  if (!Number.isFinite(cost) || cost <= 0) return "$0.00";
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  if (cost < 1) return `$${cost.toFixed(3)}`;
-  return `$${cost.toFixed(2)}`;
+function formatCostAud(usd: number): string {
+  const aud = usd * USD_TO_AUD;
+  if (!Number.isFinite(aud) || aud <= 0) return "A$0.00";
+  if (aud < 0.01) return `A$${aud.toFixed(4)}`;
+  if (aud < 1) return `A$${aud.toFixed(3)}`;
+  return `A$${aud.toFixed(2)}`;
 }
 
 /** Format a millisecond duration as a compact human string. */
@@ -43,10 +51,14 @@ function formatTokens(n: number | null | undefined): string | null {
 }
 
 /**
- * Tiny Info icon + hover/focus tooltip showing per-message performance
- * metrics. Renders nothing if no metrics are available (e.g. historical
- * messages from before the metrics migration). Pure CSS — no portal — so
- * it works inside the message column without extra plumbing.
+ * Tiny info icon + hover/focus tooltip showing per-message performance
+ * metrics AND cost. Renders nothing if no metrics are available (e.g.
+ * historical messages from before the metrics migration).
+ *
+ * Hidden entirely on mobile (``hidden md:inline-flex``) — phone screens
+ * are too tight for a hover tooltip pattern and the info isn't critical
+ * enough to warrant a dedicated tap-to-open sheet. Desktop users get
+ * the full breakdown by hovering the single grey ``i``.
  */
 export function MessageStats({
   promptTokens,
@@ -62,7 +74,7 @@ export function MessageStats({
   const completion = formatTokens(completionTokens);
   const cost =
     typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd > 0
-      ? formatCostUsd(costUsd)
+      ? formatCostAud(costUsd)
       : null;
 
   // If we have literally nothing to show, skip the UI entirely.
@@ -101,111 +113,86 @@ export function MessageStats({
       value: completion,
     });
   }
+  if (cost) {
+    rows.push({
+      icon: (
+        <Coins className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+      ),
+      label: "Cost (AUD)",
+      value: cost,
+    });
+  }
 
   const summary = [
     ttft && `thought ${ttft}`,
     total && `total ${total}`,
     prompt && `${prompt} prompt tokens`,
     completion && `${completion} response tokens`,
+    cost && `cost ${cost}`,
   ]
     .filter(Boolean)
     .join(", ");
 
   return (
-    <span className={cn("inline-flex items-center gap-0.5", className)}>
-      {/* Performance metrics — grey info icon, present whenever any
-          token / latency value is available. */}
-      {(ttft || total || prompt || completion) && (
-        <span className="group/stats relative inline-flex">
-          <button
-            type="button"
-            className={cn(
-              "inline-flex h-4 w-4 items-center justify-center rounded-full",
-              "text-[var(--text-muted)] transition",
-              "hover:bg-black/[0.05] hover:text-[var(--text)]",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]",
-              "dark:hover:bg-white/[0.08]"
-            )}
-            aria-label={`Message stats: ${summary}`}
-          >
-            <Info className="h-3 w-3" aria-hidden />
-          </button>
-          <div
-            role="tooltip"
-            className={cn(
-              "pointer-events-none absolute left-0 top-full z-20 mt-1.5",
-              "w-max min-w-[10rem] max-w-[16rem] rounded-card border shadow-lg",
-              "border-[var(--border)] bg-[var(--surface)] px-3 py-2",
-              "opacity-0 transition-opacity duration-100",
-              "group-hover/stats:opacity-100 group-focus-within/stats:opacity-100"
-            )}
-          >
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-              Response stats
-            </div>
-            <ul className="space-y-1 text-xs">
-              {rows.map((row) => (
-                <li
-                  key={row.label}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <span className="inline-flex items-center gap-1.5 text-[var(--text-muted)]">
-                    {row.icon}
-                    {row.label}
-                  </span>
-                  <span className="font-medium tabular-nums text-[var(--text)]">
-                    {row.value}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </span>
+    <span
+      className={cn(
+        // Desktop only — phone headers are too tight for the tooltip
+        // and the info isn't critical to chat flow.
+        "hidden items-center md:inline-flex",
+        className
       )}
-
-      {/* Cost — green sibling icon. Only renders when the provider
-          actually reported a cost (cost > 0). Same hover/focus
-          tooltip pattern as the stats icon for consistency. */}
-      {cost && (
-        <span className="group/cost relative inline-flex">
-          <button
-            type="button"
-            className={cn(
-              "inline-flex h-4 w-4 items-center justify-center rounded-full",
-              "text-emerald-600 transition",
-              "hover:bg-emerald-500/10 hover:text-emerald-700",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500",
-              "dark:text-emerald-400 dark:hover:bg-emerald-400/10 dark:hover:text-emerald-300"
-            )}
-            aria-label={`Estimated cost: ${cost}`}
-          >
-            <Info className="h-3 w-3" aria-hidden />
-          </button>
-          <div
-            role="tooltip"
-            className={cn(
-              "pointer-events-none absolute left-0 top-full z-20 mt-1.5",
-              "w-max min-w-[10rem] max-w-[16rem] rounded-card border shadow-lg",
-              "border-[var(--border)] bg-[var(--surface)] px-3 py-2",
-              "opacity-0 transition-opacity duration-100",
-              "group-hover/cost:opacity-100 group-focus-within/cost:opacity-100"
-            )}
-          >
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-              Estimated cost
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <Coins className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-              <span className="font-medium tabular-nums text-[var(--text)]">
-                {cost} USD
-              </span>
-            </div>
-            <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-              Provider-reported total for this reply (model + tools).
-            </div>
+    >
+      <span className="group/stats relative inline-flex">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-4 w-4 items-center justify-center rounded-full",
+            "text-[var(--text-muted)] transition",
+            "hover:bg-black/[0.05] hover:text-[var(--text)]",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]",
+            "dark:hover:bg-white/[0.08]"
+          )}
+          aria-label={`Message stats: ${summary}`}
+        >
+          <Info className="h-3 w-3" aria-hidden />
+        </button>
+        <div
+          role="tooltip"
+          className={cn(
+            "pointer-events-none absolute left-0 top-full z-20 mt-1.5",
+            "w-max min-w-[11rem] max-w-[18rem] rounded-card border shadow-lg",
+            "border-[var(--border)] bg-[var(--surface)] px-3 py-2",
+            "opacity-0 transition-opacity duration-100",
+            "group-hover/stats:opacity-100 group-focus-within/stats:opacity-100"
+          )}
+        >
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            Response stats
           </div>
-        </span>
-      )}
+          <ul className="space-y-1 text-xs">
+            {rows.map((row) => (
+              <li
+                key={row.label}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="inline-flex items-center gap-1.5 text-[var(--text-muted)]">
+                  {row.icon}
+                  {row.label}
+                </span>
+                <span className="font-medium tabular-nums text-[var(--text)]">
+                  {row.value}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {cost && (
+            <div className="mt-1.5 border-t border-[var(--border)] pt-1.5 text-[10px] text-[var(--text-muted)]">
+              Cost converted from provider USD at ~A${USD_TO_AUD.toFixed(2)}
+              /USD.
+            </div>
+          )}
+        </div>
+      </span>
     </span>
   );
 }

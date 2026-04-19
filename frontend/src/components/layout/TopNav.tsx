@@ -59,7 +59,13 @@ export function TopNav({ title, subtitle, actions, className }: TopNavProps) {
             {title}
           </h1>
           {subtitle && (
-            <p className="truncate text-xs text-[var(--text-muted)]">{subtitle}</p>
+            // Hidden on mobile — the active model is already represented
+            // by the chevron in the top-right and a second header line
+            // wastes vertical space on phones. Desktop still gets the
+            // long "Provider · Model · Routing" subtitle.
+            <p className="hidden truncate text-xs text-[var(--text-muted)] md:block">
+              {subtitle}
+            </p>
           )}
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { Wrench } from "lucide-react";
 
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 interface ToolsToggleProps {
@@ -25,6 +26,7 @@ export function ToolsToggle({
   onToggle,
   disabled,
 }: ToolsToggleProps) {
+  const isMobile = useIsMobile();
   return (
     <button
       type="button"
@@ -38,19 +40,27 @@ export function ToolsToggle({
           : "Enable AI tools (echo, file generation, more coming)"
       }
       className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs transition",
+        "inline-flex items-center rounded-full border transition",
         "disabled:cursor-not-allowed disabled:opacity-40",
+        // Mobile collapses to an icon-only circle to match the
+        // WebSearchToggle and Attach button. Active state is carried
+        // by the accent ring + accent icon — no text needed.
+        isMobile
+          ? "h-9 w-9 justify-center"
+          : "h-8 gap-1.5 px-2.5 text-xs",
         enabled
           ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
           : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
       )}
     >
-      <Wrench className="h-3.5 w-3.5" />
-      {/* Phase A polish: keep the label visible even when the toggle
-          is off. Hiding it on a per-session boolean made the affordance
-          easy to miss — users who didn't know the icon meant "tools"
-          had no way to discover it without hovering. */}
-      <span className="font-medium">Tools</span>
+      <Wrench className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+      {!isMobile && (
+        // Phase A polish: keep the label visible even when the toggle
+        // is off (desktop). Hiding it on a per-session boolean made the
+        // affordance easy to miss for users who didn't know the icon
+        // meant "tools".
+        <span className="font-medium">Tools</span>
+      )}
     </button>
   );
 }

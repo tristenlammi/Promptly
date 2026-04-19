@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Globe, GlobeLock } from "lucide-react";
 
 import type { WebSearchMode } from "@/api/types";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 interface WebSearchToggleProps {
@@ -47,6 +48,7 @@ export function WebSearchToggle({
 }: WebSearchToggleProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useIsMobile();
 
   // Close the popover when the user clicks anywhere outside it.
   useEffect(() => {
@@ -84,25 +86,38 @@ export function WebSearchToggle({
         aria-label={`Web search: ${meta.label}. ${meta.description}`}
         title={`Web search: ${meta.label} — ${meta.description}`}
         className={cn(
-          "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs transition",
+          "inline-flex items-center rounded-full border transition",
           "disabled:cursor-not-allowed disabled:opacity-40",
-          active
-            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
-            : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
+          // Mobile: icon-only circular target. The accent fill carries
+          // the "always" mode (filled) vs accent border for "auto"
+          // (outlined) vs muted for "off". Three distinct visual
+          // states without any text in the chip.
+          isMobile
+            ? "h-9 w-9 justify-center"
+            : "h-8 gap-1.5 px-2.5 text-xs",
+          mode === "always"
+            ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"
+            : mode === "auto"
+              ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+              : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
         )}
       >
-        <Icon className="h-3.5 w-3.5" />
-        <span className="font-medium">Web</span>
-        <span
-          className={cn(
-            "rounded-full px-1.5 py-px text-[10px] uppercase tracking-wide",
-            active
-              ? "bg-[var(--accent)]/20 text-[var(--accent)]"
-              : "bg-black/[0.04] text-[var(--text-muted)] dark:bg-white/[0.06]"
-          )}
-        >
-          {meta.label}
-        </span>
+        <Icon className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+        {!isMobile && (
+          <>
+            <span className="font-medium">Web</span>
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-px text-[10px] uppercase tracking-wide",
+                active
+                  ? "bg-[var(--accent)]/20 text-[var(--accent)]"
+                  : "bg-black/[0.04] text-[var(--text-muted)] dark:bg-white/[0.06]"
+              )}
+            >
+              {meta.label}
+            </span>
+          </>
+        )}
       </button>
 
       {open && (
