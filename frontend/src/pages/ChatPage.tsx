@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { GitBranch, Share2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Clock, Ghost, GitBranch, Share2 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
 import { chatApi } from "@/api/chat";
@@ -22,7 +23,7 @@ import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { useSelectedModel } from "@/store/modelStore";
-import type { ChatMessage, WebSearchMode } from "@/api/types";
+import type { ChatMessage, TemporaryMode, WebSearchMode } from "@/api/types";
 import { cn } from "@/utils/cn";
 
 // Defaults applied when the user has never touched the toggles.
@@ -37,6 +38,17 @@ export function ChatPage() {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  // Phase Z1 — temporary chat mode picked from the sidebar split button.
+  // Carried via ``?temporary=ephemeral`` or ``?temporary=one_hour`` so a
+  // hard refresh on /chat preserves the selection. Once the conversation
+  // is created the mode is persisted on the row, so we don't need to keep
+  // the query string after the navigate(`/chat/{id}`) replace.
+  const pendingTemporaryMode = useMemo<TemporaryMode | null>(() => {
+    if (id) return null;
+    const raw = new URLSearchParams(location.search).get("temporary");
+    if (raw === "ephemeral" || raw === "one_hour") return raw;
+    return null;
+  }, [id, location.search]);
   const setActive = useChatStore((s) => s.setActive);
   const setMessages = useChatStore((s) => s.setMessages);
   const upsertConversation = useChatStore((s) => s.upsertConversation);
@@ -49,6 +61,7 @@ export function ChatPage() {
   const { sendMessage, editAndResend, reattach, cancel } = useStreamingChat();
   const selectedModel = useSelectedModel();
   const isMobile = useIsMobile();
+  const queryClient = useQueryClient();
 
   // Both toggles seed from the user's persisted preferences (server-side
   // ``users.settings``) and write back whenever the user flips them. The
@@ -236,6 +249,44 @@ export function ChatPage() {
     }
   }, [id]);
 
+  // Phase Z1 — ephemeral chat cleanup. Track the most recently active
+  // conversation along with its temporary_mode; whenever the user
+  // navigates to a different chat (or unmounts ChatPage entirely), if
+  // the previous chat was ephemeral, fire DELETE so it disappears
+  // immediately instead of waiting for the 24h sweeper backstop.
+  // Fire-and-forget — failures are harmless because the sweeper still
+  // catches it eventually.
+  const removeConversation = useChatStore((s) => s.removeConversation);
+  const lastActiveRef = useRef<{ id: string; mode: TemporaryMode | null } | null>(
+    null
+  );
+  useEffect(() => {
+    const previous = lastActiveRef.current;
+    if (id && conversation) {
+      lastActiveRef.current = {
+        id,
+        mode: (conversation.temporary_mode as TemporaryMode | null) ?? null,
+      };
+    } else if (!id) {
+      lastActiveRef.current = null;
+    }
+    if (previous && previous.mode === "ephemeral" && previous.id !== id) {
+      void chatApi.remove(previous.id).catch(() => {});
+      removeConversation(previous.id);
+    }
+  }, [id, conversation, removeConversation]);
+
+  useEffect(() => {
+    return () => {
+      const previous = lastActiveRef.current;
+      if (previous && previous.mode === "ephemeral") {
+        void chatApi.remove(previous.id).catch(() => {});
+        removeConversation(previous.id);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Deep-link hash handler: ``#m-<message_id>`` (set by sidebar search
   // jump-to-message). We wait until the conversation messages have been
   // hydrated, then scroll the bubble into view and apply a transient
@@ -297,8 +348,20 @@ export function ChatPage() {
             provider_id: selectedModel.provider_id,
             model_id: selectedModel.model_id,
             web_search_mode: webSearchMode,
+            temporary_mode: pendingTemporaryMode,
           });
           upsertConversation(conv);
+          // Preseed the conversation-detail query cache so the chat page
+          // doesn't blink "no conversation" between the navigate and
+          // the first GET. The detail extends the summary with messages,
+          // so a stub list is enough; the real fetch will replace it.
+          // Critical for Phase Z1's tinted temporary-chat banner: it
+          // reads ``conversation.temporary_mode`` and would otherwise
+          // briefly disappear immediately after first send.
+          queryClient.setQueryData(["conversation", conv.id], {
+            ...conv,
+            messages: [],
+          });
           conversationId = conv.id;
           navigate(`/chat/${conv.id}`, { replace: true });
         } catch (err) {
@@ -333,6 +396,8 @@ export function ChatPage() {
       upsertConversation,
       webSearchMode,
       toolsEnabled,
+      pendingTemporaryMode,
+      queryClient,
     ]
   );
 
@@ -363,6 +428,13 @@ export function ChatPage() {
   const hasMessages =
     storeMessageCount > 0 || (conversation?.messages.length ?? 0) > 0;
 
+  // Phase Z1 — what kind of chat is this? Either it's an in-flight
+  // pre-creation /chat?temporary=… selection, or the conversation has
+  // already been persisted with the mode on the row.
+  const effectiveTemporaryMode: TemporaryMode | null =
+    pendingTemporaryMode ??
+    ((conversation?.temporary_mode as TemporaryMode | null) ?? null);
+
   // Footer line under the input bar reflects which web-search mode is
   // currently active so the user understands what'll happen on send
   // without having to open the picker. "Off" falls through to the
@@ -390,7 +462,7 @@ export function ChatPage() {
         subtitle={subtitle}
         actions={
           <div className="flex items-center gap-2">
-            {id && isOwner && (
+            {id && isOwner && !effectiveTemporaryMode && (
               <button
                 type="button"
                 onClick={() => setShareOpen(true)}
@@ -416,6 +488,12 @@ export function ChatPage() {
         }
       />
       <div className="flex min-h-0 flex-1 flex-col">
+        {effectiveTemporaryMode && (
+          <TemporaryChatBanner
+            mode={effectiveTemporaryMode}
+            expiresAt={conversation?.expires_at ?? null}
+          />
+        )}
         {conversation?.parent_conversation_id && (
           <BranchBanner
             parentId={conversation.parent_conversation_id}
@@ -494,6 +572,79 @@ function BranchBanner({ parentId, parentMessageId }: BranchBannerProps) {
       >
         Jump to original →
       </button>
+    </div>
+  );
+}
+
+/**
+ * Phase Z1 — tinted strip above the chat that announces "this is a
+ * temporary chat" the way Chrome's incognito header does. Two
+ * flavors:
+ *   - ephemeral → ghost icon, neutral copy ("Disappears when you leave").
+ *   - one_hour  → clock icon + a live countdown ("Expires in 47m").
+ *
+ * Mobile collapses the secondary copy so the strip stays a single
+ * line and doesn't eat scroll real estate.
+ */
+function TemporaryChatBanner({
+  mode,
+  expiresAt,
+}: {
+  mode: TemporaryMode;
+  expiresAt: string | null;
+}) {
+  // Tick once a minute for the 1-hour countdown so the visible "47m
+  // remaining" stays roughly accurate without burning CPU.
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (mode !== "one_hour") return;
+    const t = window.setInterval(() => force((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, [mode]);
+
+  const Icon = mode === "ephemeral" ? Ghost : Clock;
+  const title =
+    mode === "ephemeral" ? "Temporary chat" : "Temporary chat (1 hour)";
+
+  let detail = "Disappears when you navigate away.";
+  if (mode === "one_hour") {
+    if (expiresAt) {
+      const deltaMs = new Date(expiresAt).getTime() - Date.now();
+      if (deltaMs <= 0) {
+        detail = "Expiring now…";
+      } else {
+        const mins = Math.max(1, Math.round(deltaMs / 60_000));
+        if (mins < 60) {
+          detail = `Expires in ${mins}m. Sliding TTL — every message resets the timer.`;
+        } else {
+          const hrs = Math.floor(mins / 60);
+          const remMins = mins % 60;
+          detail = `Expires in ${hrs}h ${remMins}m. Sliding TTL — every message resets the timer.`;
+        }
+      }
+    } else {
+      detail = "Auto-deletes 1 hour after your last message.";
+    }
+  }
+
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex items-center gap-2 border-b px-4 py-2 text-xs",
+        // Chrome-style tinted bar — distinct enough that you can't
+        // miss it, calm enough that it doesn't scream. Uses amber
+        // for the warm "temporary" feel so it doesn't clash with the
+        // app's blue/violet accent.
+        "border-amber-500/30 bg-amber-500/10 text-amber-800",
+        "dark:text-amber-200"
+      )}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="font-semibold">{title}</span>
+      <span className="hidden text-amber-700/80 dark:text-amber-200/70 sm:inline">
+        · {detail}
+      </span>
     </div>
   );
 }

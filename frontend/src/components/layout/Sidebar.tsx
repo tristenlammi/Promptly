@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   BookOpen,
+  Clock,
   FolderOpen,
   LogOut,
-  MessageSquarePlus,
   MessagesSquare,
   Pin,
   PanelLeftClose,
@@ -35,6 +35,7 @@ import { Inbox, Users } from "lucide-react";
 import { ConversationSearchBox } from "./ConversationSearchBox";
 import { DeleteChatModal } from "./DeleteChatModal";
 import { InstallAppButton } from "./InstallAppButton";
+import { NewChatButton } from "./NewChatButton";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -42,7 +43,6 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
-  const navigate = useNavigate();
   const { id: activeId } = useParams<{ id?: string }>();
   const conversations = useChatStore((s) => s.conversations);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
@@ -78,14 +78,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         >
           <PanelLeftOpen className="h-4 w-4" />
         </button>
-        <button
-          onClick={() => navigate("/chat/new")}
-          className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent)] text-white hover:opacity-90"
-          aria-label="New chat"
-          title="New chat"
-        >
-          <MessageSquarePlus className="h-4 w-4" />
-        </button>
+        <div className="mb-3">
+          <NewChatButton compact />
+        </div>
         <nav className="flex flex-col items-center gap-1">
           <SideIcon to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" />
           <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
@@ -126,15 +121,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </button>
       </div>
 
-      {/* New chat */}
+      {/* New chat — split button: main click starts a normal chat,
+          chevron opens a popover with two temporary chat options
+          (ephemeral / 1-hour). See NewChatButton for the popover UI. */}
       <div className="px-3">
-        <button
-          onClick={() => navigate("/chat/new")}
-          className="flex w-full items-center gap-2 rounded-input bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-90"
-        >
-          <MessageSquarePlus className="h-4 w-4" />
-          New chat
-        </button>
+        <NewChatButton />
       </div>
 
       {/* Nav */}
@@ -227,6 +218,51 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
     <div className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
       {children}
     </div>
+  );
+}
+
+/**
+ * Phase Z1 — clock pill rendered next to the title of a 1-hour
+ * temporary chat in the sidebar. Reads ``expires_at`` from the
+ * conversation row and re-renders once a minute so the displayed
+ * countdown drifts at most ~30 s. Cheap to leave running for every
+ * temporary chat in the list because we only schedule a single
+ * shared interval per badge.
+ */
+function TemporaryCountdownBadge({ expiresAt }: { expiresAt: string | null }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => force((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+  if (!expiresAt) {
+    return (
+      <Clock
+        className="h-3 w-3 shrink-0 text-amber-500"
+        aria-label="Temporary chat"
+      />
+    );
+  }
+  const deltaMs = new Date(expiresAt).getTime() - Date.now();
+  let label: string;
+  if (deltaMs <= 0) {
+    label = "0m";
+  } else {
+    const mins = Math.max(1, Math.round(deltaMs / 60_000));
+    label = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h`;
+  }
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1 py-px",
+        "text-[9px] font-semibold tabular-nums",
+        "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+      )}
+      title={`Auto-deletes in ${label}`}
+    >
+      <Clock className="h-2.5 w-2.5" />
+      {label}
+    </span>
   );
 }
 
@@ -331,6 +367,9 @@ function ConversationRow({
           onClick={() => navigate(`/chat/${conv.id}`)}
         >
           {conv.starred && <Star className="h-3 w-3 shrink-0 fill-current text-yellow-500" />}
+          {conv.temporary_mode === "one_hour" && (
+            <TemporaryCountdownBadge expiresAt={conv.expires_at ?? null} />
+          )}
           <span className="truncate">{title}</span>
           {conv.role === "collaborator" && (
             <span

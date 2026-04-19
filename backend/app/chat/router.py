@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -229,6 +229,13 @@ async def list_conversations(
         .subquery()
     )
 
+    # Phase Z1 — temporary chat filtering:
+    #   * Ephemeral chats are never listed; they're meant to be
+    #     unfindable once the user navigates away.
+    #   * Any expired chat (ephemeral or one_hour) is filtered out
+    #     even if the sweeper hasn't reaped it yet, so the user never
+    #     sees a stale row in the sidebar.
+    now = datetime.now(timezone.utc)
     result = await db.execute(
         select(Conversation)
         .outerjoin(
@@ -238,6 +245,14 @@ async def list_conversations(
         .where(
             (Conversation.user_id == user.id)
             | (accepted_share.c.conversation_id.is_not(None))
+        )
+        .where(
+            (Conversation.temporary_mode.is_(None))
+            | (Conversation.temporary_mode == "one_hour")
+        )
+        .where(
+            (Conversation.expires_at.is_(None))
+            | (Conversation.expires_at > now)
         )
         .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
         .limit(limit)
@@ -261,12 +276,26 @@ async def create_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ConversationSummary:
+    # Phase Z1 — temporary chats. Compute ``expires_at`` from the
+    # requested mode so the sweeper has a wall-clock deadline; the
+    # client never sets the timestamp itself.
+    expires_at: datetime | None = None
+    if payload.temporary_mode == "one_hour":
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    elif payload.temporary_mode == "ephemeral":
+        # 24h backstop — the frontend deletes proactively on
+        # navigate-away, but if a tab crashes (or the user goes offline
+        # mid-stream) the sweeper still cleans up eventually.
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+
     conv = Conversation(
         user_id=user.id,
         title=payload.title,
         model_id=payload.model_id,
         provider_id=payload.provider_id,
         web_search_mode=payload.web_search_mode,
+        temporary_mode=payload.temporary_mode,
+        expires_at=expires_at,
     )
     db.add(conv)
     await db.commit()
@@ -634,6 +663,11 @@ async def send_message(
     if payload.web_search_mode is not None:
         conv.web_search_mode = payload.web_search_mode
     conv.updated_at = datetime.now(timezone.utc)
+    # Phase Z1 — slide the 1-hour TTL forward on every send. Ephemeral
+    # chats keep their original 24h backstop (the frontend deletes
+    # them on navigate-away long before the backstop matters).
+    if conv.temporary_mode == "one_hour":
+        conv.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
     await db.commit()
     await db.refresh(user_msg)

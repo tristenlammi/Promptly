@@ -69,6 +69,26 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         nullable=True,
     )
 
+    # Temporary chats (Phase Z1):
+    #   * NULL          — permanent (the default; existing chats are all NULL).
+    #   * "ephemeral"   — deleted as soon as the user navigates away.
+    #                     Hidden from the sidebar listing entirely so they
+    #                     can't be re-opened. A 24h backstop ``expires_at``
+    #                     guards against orphans if the cleanup DELETE fails.
+    #   * "one_hour"    — auto-deleted 1 hour after the last message.
+    #                     Visible in the sidebar with a clock badge so the
+    #                     user can find them while they're alive. The router
+    #                     slides ``expires_at`` forward on every send.
+    # Free-text VARCHAR rather than a Postgres ENUM so we can add modes
+    # (``"one_day"``? ``"private_session"``?) without DDL pain. Unknown
+    # values are treated as permanent at the API boundary.
+    temporary_mode: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation id={self.id} title={self.title!r}>"
 

@@ -424,7 +424,19 @@ export interface ConversationSummary {
   parent_conversation_id?: string | null;
   parent_message_id?: string | null;
   branched_at?: string | null;
+  /** Phase Z1 — temporary chat lifecycle.
+   *  ``null`` for normal permanent chats. ``"ephemeral"`` chats are
+   *  deleted as soon as the user navigates away. ``"one_hour"`` chats
+   *  auto-delete 1 hour after the last message; ``expires_at`` carries
+   *  the live deadline so the UI can render a countdown. */
+  temporary_mode?: TemporaryMode | null;
+  expires_at?: string | null;
 }
+
+/** Phase Z1 — short-lived conversation modes. See ConversationSummary
+ *  for full semantics. ``ephemeral`` = "incognito tab", ``one_hour`` =
+ *  "scratchpad with sliding TTL". */
+export type TemporaryMode = "ephemeral" | "one_hour";
 
 /** Identity of a user that participates in a shared conversation —
  *  owner or accepted collaborator. */

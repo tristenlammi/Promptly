@@ -25,6 +25,7 @@ from app.observability.capture import (
     capture_error,
     install_error_capture,
 )
+from app.chat.temporary_sweeper import start_sweeper
 from app.redis_client import close_redis, redis
 
 # Configure the JSON logger + in-memory ring buffer *before* any other
@@ -58,10 +59,21 @@ async def lifespan(_: FastAPI):
         settings.DEBUG,
         settings.DOMAIN,
     )
+    # Phase Z1 — start the temporary-chat sweeper. Hard-deletes any
+    # conversation past its ``expires_at`` so the DB doesn't accumulate
+    # ephemeral / 1-hour rows forever. The listing endpoint already
+    # lazy-filters expired rows so the sweeper interval is purely a
+    # housekeeping concern.
+    sweeper_task = start_sweeper()
     try:
         yield
     finally:
         logger.info("Promptly backend shutting down")
+        sweeper_task.cancel()
+        try:
+            await sweeper_task
+        except (asyncio.CancelledError, Exception):
+            pass
         await close_redis()
 
 

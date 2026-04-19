@@ -94,6 +94,18 @@ async def get_accessible_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found",
         )
+    # Phase Z1 — temporary chats lazy-expire. A conversation past its
+    # ``expires_at`` is treated as if the sweeper has already deleted
+    # it: 404 same as a stranger's chat. The actual row is reaped by
+    # the background sweeper a few minutes later.
+    if conv.expires_at is not None:
+        from datetime import datetime, timezone as _tz
+
+        if conv.expires_at <= datetime.now(_tz.utc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found",
+            )
     if conv.user_id == user.id:
         return conv, "owner"
 

@@ -17,6 +17,11 @@ MessageRole = Literal["user", "assistant", "system"]
 # send/edit message payloads as a per-turn override.
 WebSearchMode = Literal["off", "auto", "always"]
 
+# Temporary-chat lifecycle modes (Phase Z1). See ``Conversation.temporary_mode``
+# for full semantics. Used both on the create payload and on the listing
+# responses so the frontend can render the right badge / chrome.
+TemporaryMode = Literal["ephemeral", "one_hour"]
+
 
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -119,6 +124,11 @@ class ConversationSummary(BaseModel):
     parent_conversation_id: uuid.UUID | None = None
     parent_message_id: uuid.UUID | None = None
     branched_at: datetime | None = None
+    # Phase Z1 — temporary chat lifecycle. ``None`` for normal chats;
+    # set to ``"ephemeral"`` or ``"one_hour"`` for short-lived ones.
+    # ``expires_at`` ticks the countdown on the client.
+    temporary_mode: TemporaryMode | None = None
+    expires_at: datetime | None = None
 
 
 class ConversationParticipantBrief(BaseModel):
@@ -144,6 +154,10 @@ class ConversationCreate(BaseModel):
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
     web_search_mode: WebSearchMode = "off"
+    # Phase Z1 — opt into temporary lifecycle at creation time. ``None``
+    # produces a normal permanent chat. The router computes ``expires_at``
+    # itself; the client only picks the mode.
+    temporary_mode: TemporaryMode | None = None
 
 
 class ConversationUpdate(BaseModel):

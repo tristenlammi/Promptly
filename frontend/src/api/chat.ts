@@ -6,6 +6,7 @@ import type {
   InviteRow,
   SendMessageResponse,
   ShareRow,
+  TemporaryMode,
   WebSearchMode,
 } from "./types";
 
@@ -14,6 +15,10 @@ export interface CreateConversationPayload {
   model_id?: string | null;
   provider_id?: string | null;
   web_search_mode?: WebSearchMode;
+  /** Phase Z1 — request a temporary chat. ``null`` / undefined produces
+   *  a normal permanent chat. The server computes ``expires_at`` from
+   *  the chosen mode; the client only picks the policy. */
+  temporary_mode?: TemporaryMode | null;
 }
 
 export interface UpdateConversationPayload {
