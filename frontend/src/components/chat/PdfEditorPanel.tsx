@@ -290,7 +290,11 @@ function PdfEditorPanelInner({ attachment, onClose }: InnerProps) {
       <aside
         ref={panelRef}
         className={cn(
-          "flex h-full w-full max-w-[36rem] flex-col",
+          // Wider editor pane — 52rem comfortably fits two columns of
+          // text + the toolbar without forcing the user to side-scroll
+          // long lines. Capped at 92vw so it never fully obscures the
+          // chat on narrower windows.
+          "flex h-full w-full max-w-[min(52rem,92vw)] flex-col",
           "border-l border-[var(--border)] bg-[var(--bg)] shadow-2xl"
         )}
       >
@@ -458,7 +462,9 @@ function PdfPreviewPanelInner({
       <aside
         ref={panelRef}
         className={cn(
-          "flex h-full w-full max-w-[36rem] flex-col",
+          // Match the editor variant — wider pane so the embedded PDF
+          // page renders at a readable zoom level by default.
+          "flex h-full w-full max-w-[min(52rem,92vw)] flex-col",
           "border-l border-[var(--border)] bg-[var(--bg)] shadow-2xl"
         )}
       >

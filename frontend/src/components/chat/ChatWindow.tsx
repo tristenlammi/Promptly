@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
-import { Eye, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Eye, X } from "lucide-react";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -40,10 +40,72 @@ export function ChatWindow({
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamError = useChatStore((s) => s.streamError);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // ``pinnedToBottom`` controls auto-follow during streaming. We keep
+  // it in a ref so the high-frequency streamingContent effect doesn't
+  // re-render the tree on every token, and mirror it into state only
+  // for the "Jump to latest" affordance below.
+  const pinnedRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const messagesCountRef = useRef(messages.length);
 
+  // Track whether the user is parked at (or near) the bottom of the
+  // transcript. While they are, new tokens auto-scroll the view; the
+  // moment they scroll up to read something earlier we stop yanking
+  // them back down and surface the small "Jump to latest" pill.
+  // 96px threshold is roughly 4–5 lines of body text — generous
+  // enough that small layout shifts (image loads, code blocks) don't
+  // accidentally unpin the view.
   useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const atBottom = distance < 96;
+      pinnedRef.current = atBottom;
+      setShowJumpToLatest((prev) => {
+        const next = !atBottom && isStreaming;
+        return prev === next ? prev : next;
+      });
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    return () => el.removeEventListener("scroll", update);
+  }, [isStreaming]);
+
+  // When a new message lands (user just sent, or assistant turn just
+  // finished and got persisted) jump unconditionally — the user
+  // expects to see their freshly-submitted message and the start of
+  // the reply. Re-pin in the process.
+  useEffect(() => {
+    if (messages.length > messagesCountRef.current) {
+      pinnedRef.current = true;
+      setShowJumpToLatest(false);
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    messagesCountRef.current = messages.length;
+  }, [messages.length]);
+
+  // Mid-stream updates (token deltas, tool calls) only follow the
+  // tail when the user is still parked at the bottom. Otherwise the
+  // viewport stays exactly where they put it — they can read older
+  // turns without the page constantly snapping back down.
+  useEffect(() => {
+    if (!pinnedRef.current) return;
+    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [streamingContent, isStreaming, toolInvocations.length]);
+
+  // When streaming stops we no longer need to advertise the jump
+  // affordance — clear it even if the user is still scrolled away.
+  useEffect(() => {
+    if (!isStreaming) setShowJumpToLatest(false);
+  }, [isStreaming]);
+
+  const jumpToLatest = () => {
+    pinnedRef.current = true;
+    setShowJumpToLatest(false);
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, streamingContent, isStreaming, toolInvocations.length]);
+  };
 
   // Show the live streaming bubble whenever a stream is in flight AND
   // we have something to show — partial text, an attachment a tool just
@@ -86,7 +148,7 @@ export function ChatWindow({
   })();
 
   return (
-    <div className="promptly-scroll flex-1 overflow-y-auto">
+    <div ref={scrollRef} className="promptly-scroll relative flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl">
         {messages.map((m) => (
           <MessageBubble
@@ -142,6 +204,23 @@ export function ChatWindow({
 
         <div ref={endRef} className="h-6" />
       </div>
+
+      {showJumpToLatest && (
+        <button
+          type="button"
+          onClick={jumpToLatest}
+          className={cn(
+            "sticky bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5",
+            "rounded-full border border-[var(--border)] bg-[var(--surface)]/95 px-3 py-1.5",
+            "text-xs font-medium text-[var(--text)] shadow-lg backdrop-blur",
+            "transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          )}
+          aria-label="Jump to latest message"
+        >
+          <ArrowDown className="h-3.5 w-3.5" />
+          Jump to latest
+        </button>
+      )}
     </div>
   );
 }
