@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, Eye, X } from "lucide-react";
 
 import { useAuthStore } from "@/store/authStore";
@@ -41,68 +41,77 @@ export function ChatWindow({
   const streamError = useChatStore((s) => s.streamError);
   const endRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // ``pinnedToBottom`` controls auto-follow during streaming. We keep
-  // it in a ref so the high-frequency streamingContent effect doesn't
-  // re-render the tree on every token, and mirror it into state only
-  // for the "Jump to latest" affordance below.
-  const pinnedRef = useRef(true);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messagesCountRef = useRef(messages.length);
 
-  // Track whether the user is parked at (or near) the bottom of the
-  // transcript. While they are, new tokens auto-scroll the view; the
-  // moment they scroll up to read something earlier we stop yanking
-  // them back down and surface the small "Jump to latest" pill.
-  // 96px threshold is roughly 4–5 lines of body text — generous
-  // enough that small layout shifts (image loads, code blocks) don't
-  // accidentally unpin the view.
+  // Distance in px from the bottom under which we consider the user
+  // "parked at the latest". Used purely to decide pill visibility —
+  // we deliberately do NOT auto-follow the streaming tail (the user
+  // explicitly wants the viewport to stay static while tokens land
+  // so they can read at their own pace).
+  const atBottomThreshold = 96;
+
+  const isAtBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < atBottomThreshold;
+  }, []);
+
+  // Refresh the "Jump to latest" pill on real scroll events from the
+  // user. The pill is only ever surfaced while a stream is in flight
+  // — outside of streaming there's nothing new to jump to.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const update = () => {
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const atBottom = distance < 96;
-      pinnedRef.current = atBottom;
       setShowJumpToLatest((prev) => {
-        const next = !atBottom && isStreaming;
+        const next = !isAtBottom() && isStreaming;
         return prev === next ? prev : next;
       });
     };
     update();
     el.addEventListener("scroll", update, { passive: true });
     return () => el.removeEventListener("scroll", update);
-  }, [isStreaming]);
+  }, [isStreaming, isAtBottom]);
 
-  // When a new message lands (user just sent, or assistant turn just
-  // finished and got persisted) jump unconditionally — the user
-  // expects to see their freshly-submitted message and the start of
-  // the reply. Re-pin in the process.
+  // When the user submits a message, scroll their fresh bubble to the
+  // top of the viewport rather than to the bottom. That way the AI
+  // reply has visible room below it to render into, and we never have
+  // to auto-follow the tail. (ChatGPT uses this same pattern.)
+  // Assistant message persistence — i.e. the turn finalizing — is
+  // intentionally a no-op: the user has been reading at their own
+  // pace and we won't yank them around.
   useEffect(() => {
-    if (messages.length > messagesCountRef.current) {
-      pinnedRef.current = true;
-      setShowJumpToLatest(false);
-      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (messages.length <= messagesCountRef.current) {
+      messagesCountRef.current = messages.length;
+      return;
     }
+    const last = messages[messages.length - 1];
     messagesCountRef.current = messages.length;
-  }, [messages.length]);
+    if (last?.role !== "user") return;
+    // One frame of grace so the new bubble is mounted before we ask
+    // the browser to scroll to it.
+    requestAnimationFrame(() => {
+      const node = document.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(last.id)}"]`
+      );
+      if (node) {
+        node.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }
+      setShowJumpToLatest(false);
+    });
+  }, [messages]);
 
-  // Mid-stream updates (token deltas, tool calls) only follow the
-  // tail when the user is still parked at the bottom. Otherwise the
-  // viewport stays exactly where they put it — they can read older
-  // turns without the page constantly snapping back down.
+  // Tokens streaming in grow scrollHeight underneath the viewport
+  // without firing a scroll event, so the pill state needs an explicit
+  // nudge whenever the streaming buffer changes. NO auto-scroll here.
   useEffect(() => {
-    if (!pinnedRef.current) return;
-    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [streamingContent, isStreaming, toolInvocations.length]);
-
-  // When streaming stops we no longer need to advertise the jump
-  // affordance — clear it even if the user is still scrolled away.
-  useEffect(() => {
-    if (!isStreaming) setShowJumpToLatest(false);
-  }, [isStreaming]);
+    setShowJumpToLatest(!isAtBottom() && isStreaming);
+  }, [streamingContent, toolInvocations.length, isStreaming, isAtBottom]);
 
   const jumpToLatest = () => {
-    pinnedRef.current = true;
     setShowJumpToLatest(false);
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   };
