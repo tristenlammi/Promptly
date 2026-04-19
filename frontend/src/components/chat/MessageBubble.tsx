@@ -224,9 +224,31 @@ function MessageBubbleImpl({
       totalMs != null ||
       (costUsd != null && costUsd > 0));
   const canEdit = isUser && !!onEdit;
+  // Copy action shows on every persisted assistant reply with text.
+  // Skipped while streaming (content keeps changing) and on user
+  // turns (they already have the source via the Edit affordance).
+  const canCopy = !isUser && !streaming && !!content && content.trim().length > 0;
 
   const [editing, setEditing] = useState(false);
   const [copiedFlash, setCopiedFlash] = useState(false);
+  const [copyClicked, setCopyClicked] = useState(false);
+
+  const handleCopyMessage = async () => {
+    if (!content) return;
+    try {
+      // Copy what the user actually sees — stripped of the bracketed
+      // [1]/[2] inline citation markers we hide from the rendered prose.
+      await navigator.clipboard.writeText(stripInlineCitations(content));
+      setCopyClicked(true);
+      setCopiedFlash(true);
+      window.setTimeout(() => setCopyClicked(false), 1500);
+      window.setTimeout(() => setCopiedFlash(false), 1500);
+    } catch {
+      // Clipboard API can throw on insecure origins / locked-down
+      // browsers. Fail quietly — the long-press fallback (mobile) and
+      // text-selection (desktop) still work.
+    }
+  };
 
   // Phase 5 — long-press to copy on touch devices. ~500ms hold copies
   // the message text via the Clipboard API and shows a transient
@@ -374,8 +396,30 @@ function MessageBubbleImpl({
             showDownload={!isUser}
           />
         )}
-        {((canEdit && !editing) || (onBranch && !streaming)) && (
+        {((canEdit && !editing) || (onBranch && !streaming) || canCopy) && (
           <div className="mt-1.5 flex items-center gap-1">
+            {canCopy && (
+              <button
+                type="button"
+                onClick={() => void handleCopyMessage()}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+                  "text-[var(--text-muted)] transition",
+                  "hover:bg-black/[0.04] hover:text-[var(--text)]",
+                  "dark:hover:bg-white/[0.06]",
+                  copyClicked && "text-emerald-600 dark:text-emerald-400"
+                )}
+                title={copyClicked ? "Copied" : "Copy reply to clipboard"}
+                aria-label={copyClicked ? "Copied" : "Copy reply"}
+              >
+                {copyClicked ? (
+                  <Check className="h-3 w-3" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+                <span>{copyClicked ? "Copied" : "Copy"}</span>
+              </button>
+            )}
             {canEdit && !editing && (
               <button
                 type="button"
