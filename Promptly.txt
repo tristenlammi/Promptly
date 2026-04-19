@@ -1,0 +1,1302 @@
+# AI Chat Interface — Project Overview
+> A self-hosted, Dockerised AI chat interface modelled after Claude.ai with extended features: multi-provider model management, an AI-powered Study mode with interactive whiteboard, and web search via SearXNG.
+
+---
+
+## Table of Contents
+
+1. [Project Summary](#1-project-summary)
+2. [Tech Stack](#2-tech-stack)
+3. [Repository Structure](#3-repository-structure)
+4. [Docker Architecture](#4-docker-architecture)
+5. [Environment Variables](#5-environment-variables)
+6. [Backend — API Design](#6-backend--api-design)
+7. [Frontend — UI & Feature Spec](#7-frontend--ui--feature-spec)
+   - 7.1 [Global Layout (Claude.ai Clone)](#71-global-layout-claudeai-clone)
+   - 7.2 [Chat Interface](#72-chat-interface)
+   - 7.3 [Models Tab](#73-models-tab)
+   - 7.4 [Study Tab](#74-study-tab)
+   - 7.5 [Web Search (Globe Button)](#75-web-search-globe-button)
+8. [Whiteboard Engine Spec](#8-whiteboard-engine-spec)
+9. [AI Agent Integration](#9-ai-agent-integration)
+10. [Search Provider Integration](#10-search-provider-integration)
+11. [Database Schema](#11-database-schema)
+12. [Authentication](#12-authentication)
+13. [Cursor Development Instructions](#13-cursor-development-instructions)
+
+---
+
+## 1. Project Summary
+
+Build a **self-hosted web application** (Docker Compose stack) that replicates the Claude.ai user experience with three custom additions:
+
+| Addition | Description |
+|---|---|
+| **Models Tab** | Admin panel to add, configure, and test AI model providers (OpenRouter, Anthropic, OpenAI, Ollama, any OpenAI-compatible endpoint) |
+| **Study Tab** | AI-guided study sessions with a split-pane layout: chat on the left, interactive whiteboard on the right. The AI places quizzes, diagrams, and exam content directly onto the whiteboard. |
+| **Web Search** | Per-session toggle button (globe icon) in the chat input bar. Supports SearXNG (self-hosted), Brave Search API, Tavily API, and any compatible search API. When enabled, the AI automatically queries the web before responding. |
+
+All other UI, behaviour, and UX should be as close to Claude.ai as possible — clean, minimal, dark/light mode, sidebar with conversation history, star/pin/delete chats, etc.
+
+---
+
+## 2. Tech Stack
+
+### Frontend
+- **Framework:** React 18 + TypeScript
+- **Build Tool:** Vite
+- **Styling:** Tailwind CSS (with a custom design token layer mirroring Claude's aesthetic — soft neutrals, clean typography)
+- **State Management:** Zustand
+- **Routing:** React Router v6
+- **Whiteboard:** Excalidraw (embedded, headless) — provides drawing, shapes, text, image paste, and sticky notes out of the box
+- **Exercise Renderer:** Sandboxed `<iframe srcdoc>` — AI-generated HTML/JS exercises run in an isolated iframe with `postMessage` back-channel for answer submission. No third-party sandbox dependency required.
+- **Markdown Rendering:** react-markdown + remark-gfm + rehype-highlight
+- **Icons:** Lucide React
+- **HTTP Client:** Axios + React Query (TanStack Query v5)
+
+### Backend
+- **Runtime:** Python 3.11
+- **Framework:** FastAPI
+- **ASGI Server:** Uvicorn
+- **Database ORM:** SQLAlchemy 2.0 (async) + Alembic migrations
+- **Database:** PostgreSQL 15
+- **Cache / Session Store:** Redis 7
+- **Auth:** JWT (python-jose) + bcrypt password hashing
+- **WebSockets:** FastAPI native WebSocket for streaming AI responses
+- **Task Queue (optional, for async study session analysis):** ARQ (async Redis job queue)
+
+### AI / LLM
+- **Provider abstraction layer:** Custom `ModelRouter` class — wraps any OpenAI-compatible API
+- **OpenRouter:** via `openai` Python SDK pointed at `https://openrouter.ai/api/v1`
+- **Anthropic:** via `anthropic` Python SDK (native streaming)
+- **Ollama:** via OpenAI-compatible endpoint at `http://ollama:11434/v1`
+- **Streaming:** Server-Sent Events (SSE) for all chat completions
+
+### Search
+- **SearXNG:** Docker sidecar, queried via internal HTTP
+- **Brave / Tavily / Google PSE:** via HTTP API calls from backend
+- **RAG injection:** Search results are injected into the system prompt as context before the AI response
+
+### Infrastructure
+- **Containerisation:** Docker + Docker Compose
+- **Reverse Proxy:** Nginx (handles SSL termination, static files, WebSocket proxying)
+- **Volume mounts:** PostgreSQL data, Redis data, SearXNG config, uploaded assets, whiteboard snapshots
+
+---
+
+## 3. Repository Structure
+
+```
+ai-chat/
+├── docker-compose.yml
+├── docker-compose.dev.yml
+├── .env.example
+├── nginx/
+│   ├── nginx.conf
+│   └── ssl/                    # Place certs here or use Let's Encrypt
+├── backend/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── alembic/
+│   │   └── versions/
+│   ├── app/
+│   │   ├── main.py             # FastAPI app entrypoint
+│   │   ├── config.py           # Settings from env vars
+│   │   ├── database.py         # Async SQLAlchemy engine
+│   │   ├── auth/
+│   │   │   ├── router.py       # /api/auth/*
+│   │   │   ├── models.py
+│   │   │   └── utils.py        # JWT, bcrypt
+│   │   ├── chat/
+│   │   │   ├── router.py       # /api/chat/*
+│   │   │   ├── models.py
+│   │   │   └── service.py      # Message handling, streaming
+│   │   ├── models_config/
+│   │   │   ├── router.py       # /api/models/*
+│   │   │   ├── models.py
+│   │   │   └── provider.py     # ModelRouter abstraction
+│   │   ├── study/
+│   │   │   ├── router.py       # /api/study/*
+│   │   │   ├── models.py
+│   │   │   ├── service.py      # Study session AI logic
+│   │   │   └── whiteboard.py   # Whiteboard state + submission handling
+│   │   ├── search/
+│   │   │   ├── router.py       # /api/search/*
+│   │   │   └── providers.py    # SearXNG, Brave, Tavily adapters
+│   │   └── files/
+│   │       └── router.py       # /api/files/* (uploads for whiteboard)
+├── frontend/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tailwind.config.ts
+│   ├── src/
+│   │   ├── main.tsx
+│   │   ├── App.tsx
+│   │   ├── store/              # Zustand stores
+│   │   │   ├── authStore.ts
+│   │   │   ├── chatStore.ts
+│   │   │   ├── modelStore.ts
+│   │   │   ├── studyStore.ts
+│   │   │   └── searchStore.ts
+│   │   ├── api/                # Axios API clients
+│   │   │   ├── client.ts
+│   │   │   ├── chat.ts
+│   │   │   ├── models.ts
+│   │   │   ├── study.ts
+│   │   │   └── search.ts
+│   │   ├── components/
+│   │   │   ├── layout/
+│   │   │   │   ├── Sidebar.tsx
+│   │   │   │   ├── TopNav.tsx
+│   │   │   │   └── MainContent.tsx
+│   │   │   ├── chat/
+│   │   │   │   ├── ChatWindow.tsx
+│   │   │   │   ├── MessageBubble.tsx
+│   │   │   │   ├── InputBar.tsx
+│   │   │   │   ├── WebSearchToggle.tsx
+│   │   │   │   └── ModelSelector.tsx
+│   │   │   ├── models/
+│   │   │   │   ├── ModelsPage.tsx
+│   │   │   │   ├── ProviderCard.tsx
+│   │   │   │   └── AddProviderModal.tsx
+│   │   │   ├── study/
+│   │   │   │   ├── StudyPage.tsx
+│   │   │   │   ├── StudyProjectList.tsx
+│   │   │   │   ├── NewStudyWizard.tsx
+│   │   │   │   ├── StudySession.tsx
+│   │   │   │   ├── StudyChat.tsx
+│   │   │   │   └── Whiteboard/
+│   │   │   │       ├── WhiteboardPanel.tsx       # Split-pane container
+│   │   │   │       ├── ExerciseRenderer.tsx      # Sandboxed iframe host
+│   │   │   │       ├── ExerciseToolbar.tsx       # Reset / fullscreen / submit bar
+│   │   │   │       ├── ExerciseHistory.tsx       # Past exercises in session
+│   │   │   │       └── SubmitBar.tsx             # Sticky submit button + status
+│   │   │   └── shared/
+│   │   │       ├── Modal.tsx
+│   │   │       ├── Button.tsx
+│   │   │       ├── Tooltip.tsx
+│   │   │       └── ThemeToggle.tsx
+│   │   ├── pages/
+│   │   │   ├── LoginPage.tsx
+│   │   │   ├── ChatPage.tsx
+│   │   │   ├── ModelsPage.tsx
+│   │   │   └── StudyPage.tsx
+│   │   ├── hooks/
+│   │   │   ├── useStreamingChat.ts
+│   │   │   ├── useWebSearch.ts
+│   │   │   └── useStudySession.ts
+│   │   └── utils/
+│   │       ├── markdown.ts
+│   │       └── whiteboard.ts
+└── searxng/
+    ├── settings.yml            # SearXNG config (JSON format enabled)
+    └── uwsgi.ini
+```
+
+---
+
+## 4. Docker Architecture
+
+### `docker-compose.yml` (Production)
+
+```yaml
+version: "3.9"
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - static_files:/app/static:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      - VITE_API_BASE_URL=/api
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://aichat:${POSTGRES_PASSWORD}@postgres:5432/aichat
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - SEARXNG_URL=http://searxng:8080
+      - ALLOWED_ORIGINS=http://localhost,https://${DOMAIN}
+    volumes:
+      - uploads:/app/uploads
+      - whiteboard_snapshots:/app/whiteboard
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=aichat
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=aichat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
+      - INSTANCE_NAME=ai-chat-search
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    restart: unless-stopped
+    # NOTE: On first run, remove cap_drop: ALL temporarily to allow
+    # SearXNG to create /etc/searxng/uwsgi.ini, then restore it.
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  whiteboard_snapshots:
+  static_files:
+```
+
+### SearXNG `settings.yml` Required Changes
+
+The SearXNG `settings.yml` must have JSON format enabled or Open WebUI-style clients will get 403 errors:
+
+```yaml
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: ""
+  formats:
+    - html
+    - json   # REQUIRED — enables JSON API responses
+```
+
+---
+
+## 5. Environment Variables
+
+Create a `.env` file from `.env.example`:
+
+```env
+# App
+SECRET_KEY=<generate with: openssl rand -hex 32>
+DOMAIN=yourdomain.com
+
+# Database
+POSTGRES_PASSWORD=<strong-password>
+
+# SearXNG
+SEARXNG_SECRET=<generate with: openssl rand -hex 32>
+
+# Default model provider keys (users can also add their own via the Models tab)
+OPENROUTER_API_KEY=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+
+# Optional search providers
+BRAVE_SEARCH_API_KEY=
+TAVILY_API_KEY=
+
+# Search config
+DEFAULT_SEARCH_PROVIDER=searxng        # searxng | brave | tavily
+SEARCH_RESULT_COUNT=5
+SEARCH_CONCURRENT_REQUESTS=3
+```
+
+---
+
+## 6. Backend — API Design
+
+### Auth (`/api/auth`)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/auth/register` | Create account |
+| POST | `/api/auth/login` | Return JWT access + refresh tokens |
+| POST | `/api/auth/refresh` | Rotate access token |
+| GET | `/api/auth/me` | Current user profile |
+
+### Chat (`/api/chat`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/chat/conversations` | List all conversations (paginated) |
+| POST | `/api/chat/conversations` | Create new conversation |
+| GET | `/api/chat/conversations/{id}` | Get conversation + messages |
+| DELETE | `/api/chat/conversations/{id}` | Delete conversation |
+| PATCH | `/api/chat/conversations/{id}` | Rename / pin / star |
+| POST | `/api/chat/conversations/{id}/messages` | Send message (triggers streaming) |
+| GET | `/api/chat/stream/{stream_id}` | SSE stream for AI response |
+
+**Streaming Flow:**
+1. Client POSTs a message.
+2. Backend creates a `stream_id`, enqueues the LLM call, returns `{stream_id}` immediately.
+3. Client opens SSE connection to `/api/chat/stream/{stream_id}`.
+4. Backend streams tokens as `data: {"delta": "..."}` events.
+5. On completion, sends `data: {"done": true}` and saves the full message to DB.
+
+**Web Search Injection:**
+If the request payload includes `"web_search": true`, the backend:
+1. Extracts a search query from the user's message (via a fast prompt to the LLM or keyword extraction).
+2. Calls the configured search provider.
+3. Injects results as a `<search_results>` block into the system prompt before forwarding to the LLM.
+4. Annotates the AI response message with `sources: [...]` for citation display.
+
+### Models Config (`/api/models`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/models` | List all configured model providers + models |
+| POST | `/api/models/providers` | Add a new provider |
+| PATCH | `/api/models/providers/{id}` | Edit provider (key, base URL, etc.) |
+| DELETE | `/api/models/providers/{id}` | Remove provider |
+| POST | `/api/models/providers/{id}/test` | Test API key / connectivity |
+| GET | `/api/models/available` | Flat list of all usable models (for dropdowns) |
+
+**Provider Object:**
+```json
+{
+  "id": "uuid",
+  "name": "My OpenRouter",
+  "type": "openrouter",         
+  "base_url": "https://openrouter.ai/api/v1",
+  "api_key": "sk-or-...",       
+  "enabled": true,
+  "models": [
+    { "id": "anthropic/claude-3.5-sonnet", "display_name": "Claude 3.5 Sonnet", "context_window": 200000 }
+  ]
+}
+```
+
+Provider `type` options: `openrouter`, `anthropic`, `openai`, `ollama`, `openai_compatible`.
+
+For `openrouter`, the backend can call `/models` on the OpenRouter API to auto-populate the model list.
+
+### Study (`/api/study`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/study/projects` | List study projects |
+| POST | `/api/study/projects` | Create new study project |
+| GET | `/api/study/projects/{id}` | Get project + sessions |
+| DELETE | `/api/study/projects/{id}` | Delete project |
+| GET | `/api/study/sessions/{id}` | Get session (chat history + whiteboard state) |
+| POST | `/api/study/sessions/{id}/messages` | Send message to study AI |
+| GET | `/api/study/sessions/{id}/stream/{sid}` | SSE stream for study AI response |
+| POST | `/api/study/sessions/{id}/whiteboard/update` | Save current whiteboard state (JSON snapshot) |
+| POST | `/api/study/sessions/{id}/whiteboard/submit` | Submit whiteboard answers for AI evaluation |
+| GET | `/api/study/sessions/{id}/whiteboard/widgets` | Get current AI-placed widgets |
+
+### Search (`/api/search`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/search/providers` | List configured search providers |
+| POST | `/api/search/providers` | Add / configure a provider |
+| DELETE | `/api/search/providers/{id}` | Remove a provider |
+| POST | `/api/search/query` | Manual search (for testing) |
+
+---
+
+## 7. Frontend — UI & Feature Spec
+
+### 7.1 Global Layout (Claude.ai Clone)
+
+Replicate the Claude.ai layout as closely as possible:
+
+**Sidebar (left, collapsible):**
+- App logo / name at top
+- Navigation items: `Chat` (default), `Study`, `Models`
+- Below nav: conversation list with section groupings (Today, Yesterday, Previous 7 Days, Older)
+- Each conversation shows title + timestamp; hover reveals rename, pin, delete
+- Pinned conversations appear at top of list
+- Bottom: user avatar, settings gear icon, theme toggle (dark/light)
+- Sidebar can be collapsed to icon-only mode
+
+**Main content area:** Switches based on active nav item.
+
+**Design tokens (mimic Claude):**
+- Font: `"Söhne"` or fallback `"ui-sans-serif"` — use Google Fonts `"DM Sans"` as a close substitute
+- Background light: `#FAF9F7`
+- Background dark: `#1C1917` (warm off-black)
+- Surface light: `#FFFFFF`
+- Surface dark: `#27231E`
+- Border: `rgba(0,0,0,0.08)` / `rgba(255,255,255,0.08)`
+- Accent/brand: `#D97757` (Claude's copper-orange)
+- Text primary: `#1A1A19` / `#F5F5F4`
+- Text secondary: `#6B7280` / `#A8A29E`
+- Border radius: `0.75rem` on cards, `1.5rem` on input
+
+### 7.2 Chat Interface
+
+**Conversation view:**
+- Messages alternate user (right-aligned with subtle bg) / AI (left-aligned, no bg)
+- AI messages render full Markdown: headers, code blocks with syntax highlight + copy button, tables, bold, italic, lists
+- Code blocks have a language label and one-click copy
+- Citations/sources (when web search is active) appear as numbered footnote-style links below the AI response
+- Thinking/streaming state: animated ellipsis or token-by-token reveal
+- Regenerate last response button appears on hover of last AI message
+- Edit last user message button on hover
+
+**Input bar (bottom, fixed):**
+- Grows vertically as user types (max ~6 lines then scrolls)
+- Left side icons (left to right):
+  - `📎` Attach file
+  - `🌐` Web Search toggle (globe icon) — see §7.5
+- Right side: Send button (arrow icon), disabled until text entered
+- Model selector dropdown above or inline with input (shows current model, click to change)
+- Below input: subtle text showing active model name + "Web" badge if search is on
+
+**New chat:** Clicking `+` or the app name starts a fresh conversation. Until the first message is sent, show a centred welcome screen (mimic Claude's "How can I help you today?").
+
+### 7.3 Models Tab
+
+Accessible from the sidebar nav. This is an admin-style settings page.
+
+**Layout:**
+- Page title: "Models"
+- Left: list of configured providers as cards (name, type badge, enabled/disabled toggle, edit/delete icons)
+- Right (or modal): Edit/Add provider form
+
+**Add Provider Flow:**
+1. Click "Add Provider" button
+2. Modal appears with fields:
+   - Provider Name (free text label)
+   - Provider Type (select: OpenRouter / Anthropic / OpenAI / Ollama / Custom OpenAI-Compatible)
+   - API Base URL (auto-filled for known types, editable for Custom)
+   - API Key (password input)
+   - "Test Connection" button — calls backend test endpoint, shows success/failure inline
+3. On success, optionally "Fetch Available Models" — queries the provider's `/models` endpoint and populates a checklist of models to enable
+4. Save
+
+**Provider card (list view):**
+- Provider name + type badge (coloured: e.g., orange for OpenRouter, purple for Anthropic)
+- Number of active models
+- Enabled/disabled toggle
+- Edit button (opens same modal pre-filled)
+- Delete button (with confirmation)
+
+**Global model selector:**
+- At the top of the Models page, a "Default Model" dropdown lets the user pick which model is used when starting new chats
+- This is persisted in user settings
+
+### 7.4 Study Tab
+
+#### A. Study Project List (Entry Screen)
+
+When the user clicks "Study" in the sidebar, they see the Study home screen:
+
+- Page title: "Study"
+- Subtitle: "AI-powered study sessions with interactive exercises"
+- Grid of existing Study Project cards:
+  - Title
+  - Topics summary (short list of tags)
+  - Last active date
+  - Progress indicator (optional, percentage of AI's study plan complete)
+  - Click to open, hover shows delete / rename options
+- Prominent "New Study Session" button (top right)
+
+#### B. New Study Wizard (Modal, 2 steps)
+
+**Step 1 — Setup:**
+- Field: "Session Title" (e.g., "CCNA Subnetting")
+- Field: "Topics to Study" — tag-input style, user types topics and presses Enter to add each (e.g., `VLSM`, `CIDR`, `Subnetting math`)
+- Field: "What are you trying to achieve?" — freetext area (e.g., "Pass my CCNA exam next month, I understand the basics but need to improve speed on subnetting calculations")
+- Field: "Study Model" — dropdown to pick which AI model this session uses
+- Button: "Next →"
+
+**Step 2 — Session opens (no more wizard screens)**
+
+On "Next", the wizard closes and the Study Session view opens immediately.
+
+#### C. Study Session View (Split Pane)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  ← Back to Study   "CCNA Subnetting"      [Model badge]    │
+├──────────────────────────┬─────────────────────────────────┤
+│                          │                                  │
+│   STUDY CHAT (left)      │   WHITEBOARD (right)             │
+│   ~40% width             │   ~60% width                     │
+│                          │                                  │
+│   AI messages + user     │   Excalidraw canvas              │
+│   messages               │   AI-placed widgets              │
+│                          │   Draw / write / paste images    │
+│   [Input bar at bottom]  │   [Submit Bar at bottom]         │
+│                          │                                  │
+└──────────────────────────┴─────────────────────────────────┘
+```
+
+The split pane is resizable (drag handle in the middle).
+
+**Left — Study Chat:**
+- Same message rendering as the main chat
+- On session creation, the AI sends an opening message: greets the user, summarises the study plan it has generated, and immediately places the first exercise/question on the whiteboard
+- The user can chat freely with the AI to ask questions, request explanations, ask to skip ahead, etc.
+- The AI's responses reference the whiteboard ("I've placed a diagram on the whiteboard", "Check the quiz on the right", "Your answer to question 3 was incorrect — see my notes on the whiteboard")
+
+**Right — Whiteboard Panel:**
+
+The whiteboard panel has two layers that coexist:
+
+**Layer 1 — Excalidraw Canvas (always present)**
+
+The background layer is always an [Excalidraw](https://github.com/excalidraw/excalidraw) freehand canvas. The user can draw, annotate, paste images, write notes, sketch diagrams, or work through problems on paper-style. This layer is visible at all times and the AI receives a snapshot of it on every submission.
+
+**Layer 2 — AI-Generated Interactive Exercise (when active)**
+
+This is the critical new architecture. When the AI decides to place an exercise, it generates a **complete, self-contained HTML document** that is rendered inside a sandboxed `<iframe srcdoc="...">`. This approach gives the AI unlimited creative freedom — it is not constrained to a fixed set of widget types.
+
+The AI can generate any interactive experience that HTML, CSS, and JavaScript support, including but not limited to:
+
+- **Standard quizzes** — multiple choice, short answer, true/false, multi-select
+- **Drag-and-drop exercises** — e.g. drag OSI model layers into the correct order, drag IP addresses into correct subnet groups
+- **Network topology builders** — a canvas where users place routers, switches, and PCs and draw connections between them (using a library like vis.js or jsPlumb loaded from CDN)
+- **Click-to-label diagrams** — an image with blank labels that the user clicks to fill in
+- **Interactive calculators / simulators** — e.g. a subnetting calculator where the user inputs values and the result is checked
+- **Sorting / ranking exercises** — put these steps in the correct order
+- **Match-the-pairs exercises** — connect items on the left to items on the right
+- **Fill-in-the-blank** — structured passages with inline input fields
+- **Hotspot / image map exercises** — click the correct part of a diagram
+- **Flashcard decks** — flip through cards, self-rate recall
+- **Timed challenge modes** — countdown timer shown in the exercise itself
+
+The exercise HTML document must follow one contract: when the user clicks **Submit** inside the exercise (or when the parent calls `requestSubmit()`), the iframe calls:
+
+```javascript
+window.parent.postMessage({
+  type: 'EXERCISE_SUBMIT',
+  payload: { /* structured answer data, free-form JSON */ }
+}, '*');
+```
+
+The parent (`ExerciseRenderer.tsx`) listens for this message, captures the payload, and sends it to the backend along with the current Excalidraw snapshot.
+
+**Exercise Renderer (`ExerciseRenderer.tsx`):**
+
+```tsx
+<iframe
+  srcDoc={exerciseHtml}
+  sandbox="allow-scripts"   // allow-same-origin intentionally omitted for security
+  style={{ width: '100%', height: '100%', border: 'none' }}
+  onLoad={handleIframeLoad}
+/>
+```
+
+Key implementation notes:
+- `sandbox="allow-scripts"` without `allow-same-origin` means the iframe cannot access `localStorage`, cookies, or the parent DOM — it is fully isolated
+- The iframe can load libraries from CDNs (e.g. `https://cdnjs.cloudflare.com`) because external network access is allowed by the sandbox
+- The parent registers a `window.addEventListener('message', handler)` to receive `EXERCISE_SUBMIT` events
+- The parent validates that the message origin is the expected iframe before processing
+
+**Exercise Lifecycle:**
+
+1. AI streams a response in the chat containing a `<whiteboard_action>` block with `type: "exercise"` and the full HTML string
+2. Backend strips the block, stores the HTML, and sends the exercise metadata to the frontend via SSE
+3. Frontend renders the HTML in the sandboxed iframe; the Excalidraw canvas dims slightly to indicate an active exercise
+4. User completes the exercise and clicks Submit (inside the iframe)
+5. `postMessage` fires; `ExerciseRenderer` captures the payload
+6. Frontend POSTs `{ exercise_id, excalidraw_snapshot, answers: payload }` to `/api/study/sessions/{id}/whiteboard/submit`
+7. Backend forwards answers + excalidraw snapshot to the AI with instruction to evaluate and continue
+8. AI responds in chat with feedback; optionally places a new exercise
+
+**Exercise History:**
+
+Past exercises in the session are listed in a collapsible sidebar within the whiteboard panel. The user can review them (rendered read-only) but cannot re-submit. Each shows whether it was passed/failed based on AI evaluation.
+
+**Submit Bar (bottom of whiteboard panel):**
+- Sticky bar shown only when an active exercise is loaded
+- Shows exercise title and a "Submit Answers" button
+- Calls `requestSubmit()` on the iframe (which triggers the iframe's own submit handler, which fires `postMessage`)
+- After submission, the exercise iframe is replaced with a read-only "submitted" state and AI feedback appears in the chat
+
+**Whiteboard State Persistence:**
+- The Excalidraw scene JSON is auto-saved every 30 seconds and on every submit
+- The current active exercise HTML is stored in the database so it survives page reload
+- Submitted exercise answer payloads are stored alongside the study message record
+
+#### D. Study AI System Prompt
+
+When a study session is created, the backend constructs a system prompt like:
+
+```
+You are an expert study tutor. The student wants to study the following topics: {topics}.
+Their goal is: {goal}.
+
+You have two output channels:
+1. CHAT: Use this for explanations, encouragement, feedback summaries, and conversational guidance.
+2. WHITEBOARD EXERCISE: Use this to deliver interactive exercises, quizzes, puzzles, and simulations.
+   The whiteboard renders a sandboxed HTML page you write. You have full creative freedom.
+
+## Whiteboard Exercise Rules
+- Do NOT put quiz questions or interactive exercises in the chat. Always put them on the whiteboard.
+- After placing an exercise, wait for the student to submit before continuing.
+- Vary exercise types widely. Do not repeat the same format consecutively.
+- Adapt difficulty based on submitted answer quality.
+- The student can also draw/annotate on a freehand canvas layer behind your exercise. You will receive
+  a base64 image of their canvas annotations with every submission — consider these as additional context.
+
+## How to Place a Whiteboard Exercise
+Output a <whiteboard_action> block anywhere in your response:
+
+<whiteboard_action>
+{
+  "type": "exercise",
+  "title": "Subnetting Drag & Drop",
+  "html": "<!DOCTYPE html><html>...</html>"
+}
+</whiteboard_action>
+
+The "html" value must be a complete, self-contained HTML document.
+
+## Exercise HTML Contract
+Your HTML document MUST:
+1. Include a visible Submit button for the user to submit answers.
+2. When submitted, call:
+   window.parent.postMessage({ type: 'EXERCISE_SUBMIT', payload: { /* answers */ } }, '*');
+3. The payload can be any JSON structure — design it to make evaluation easy.
+4. Be fully self-contained. You may load libraries from https://cdnjs.cloudflare.com CDN.
+5. Use inline CSS. Match the app's aesthetic: background #1C1917 (dark) or #FAF9F7 (light),
+   accent colour #D97757, clean sans-serif font. Make it look polished.
+
+## Exercise Examples You Can Build
+- Multiple choice / multi-select quizzes
+- Drag-and-drop (OSI layers, subnets, sequence ordering)
+- Network topology builder (place devices, draw connections using vis.js from CDN)
+- Click-to-label image diagrams
+- Fill-in-the-blank passages
+- Match-the-pairs
+- Timed challenge (embed a countdown timer)
+- Interactive subnet calculator that checks the student's working
+- Hotspot / click-on-the-correct-region exercises
+- Flashcard decks with self-rated recall
+- Sorting / ranking tasks
+- Anything else that helps the student learn the topic
+
+## After Submission
+You will receive the student's answer payload and a snapshot of their freehand canvas.
+Evaluate their answers in the chat. Be specific — identify correct answers, explain mistakes,
+and suggest what to focus on next. Then place the next exercise when appropriate.
+```
+
+The backend strips `<whiteboard_action>` blocks from the chat stream before display, parses them, stores the exercise HTML in the database, and pushes an `exercise_ready` SSE event to the frontend.
+
+### 7.5 Web Search (Globe Button)
+
+**Behaviour (matches Open WebUI's approach):**
+- The globe/search icon sits to the left of the send button in the input bar
+- It is a **toggle** — off by default, click to enable (icon turns accent colour, "Web" badge appears)
+- The toggle is **per-session**: it resets to off when the user opens a new chat or navigates away (same as Open WebUI)
+- The user can also set their **user preference** to have web search on by default in Settings
+- When enabled, every message sent will trigger a web search before the AI responds
+- The AI's response includes source citations rendered as inline footnote numbers `[1]`, `[2]` etc., with a collapsible sources section below the response
+
+**Search flow (backend):**
+1. User sends message with `web_search: true`
+2. Backend calls the LLM (fast, small model or direct extraction) to generate an optimised search query from the user's message
+3. Backend queries the configured search provider (SearXNG by default) with the generated query
+4. Top N results (title, URL, snippet) are formatted as XML/markdown and injected into the system prompt:
+   ```
+   <search_results>
+   [1] Title: ...
+       URL: https://...
+       Snippet: ...
+   [2] ...
+   </search_results>
+   Use these results to answer the user's question. Cite sources using [1], [2] etc.
+   ```
+5. Full LLM call proceeds with injected context
+6. Response is streamed back; source metadata is attached to the message record
+
+**Settings (Admin → Search Providers):**
+- Admins can configure multiple search providers
+- Users can select their preferred provider in user settings
+- SearXNG URL is configured via environment variable and settings UI
+- Brave/Tavily require API keys entered through the Models/Search settings UI
+
+---
+
+## 8. Whiteboard Engine Spec
+
+### Overview
+
+The whiteboard panel is a two-layer system:
+
+```
+┌────────────────────────────────────────────┐
+│  Layer 2: AI Exercise (sandboxed iframe)    │  ← Active when exercise is loaded
+│  sits on top, full panel width/height       │
+├────────────────────────────────────────────┤
+│  Layer 1: Excalidraw freehand canvas        │  ← Always present underneath
+│  user can draw/annotate at any time         │
+└────────────────────────────────────────────┘
+```
+
+When an exercise is active, the Excalidraw layer is still accessible — the user can flip between "Exercise" and "Notes" modes using a tab toggle at the top of the whiteboard panel. Both layers' states are captured on submission.
+
+---
+
+### Layer 1 — Excalidraw (Freehand Canvas)
+
+```tsx
+import { Excalidraw } from "@excalidraw/excalidraw";
+
+<Excalidraw
+  ref={excalidrawRef}
+  initialData={savedSceneData}
+  onChange={debounce(handleAutoSave, 30_000)}
+  UIOptions={{
+    canvasActions: { export: false, loadScene: false, saveAsImage: true }
+  }}
+/>
+```
+
+On every whiteboard submission, the frontend exports the Excalidraw scene as a base64 PNG using `excalidrawRef.current.exportToBlob()` and includes it in the submission payload. This gives the AI a visual snapshot of any annotations, working-out, or notes the student drew.
+
+---
+
+### Layer 2 — AI-Generated Interactive Exercise (Sandboxed iframe)
+
+#### Architecture
+
+The AI generates a **complete HTML document string** as part of its whiteboard action. The frontend renders it in a sandboxed iframe:
+
+```tsx
+// ExerciseRenderer.tsx
+export function ExerciseRenderer({ html, onSubmit }: Props) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'EXERCISE_SUBMIT') {
+        onSubmit(event.data.payload);
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [onSubmit]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      srcDoc={html}
+      sandbox="allow-scripts"
+      style={{ width: '100%', height: '100%', border: 'none', borderRadius: '0.75rem' }}
+      title="Study Exercise"
+    />
+  );
+}
+```
+
+**Security notes:**
+- `sandbox="allow-scripts"` without `allow-same-origin`: the iframe has no access to parent DOM, cookies, localStorage, or IndexedDB. It is fully isolated.
+- The iframe CAN make network requests to CDN URLs (e.g. `cdnjs.cloudflare.com`, `unpkg.com`) to load libraries — this is intentional and allows the AI to use vis.js, d3, anime.js, etc.
+- The parent validates `event.data.type === 'EXERCISE_SUBMIT'` before processing any message.
+- The AI-generated HTML is stored in the database but is never executed server-side — it only ever runs in the sandboxed client iframe.
+
+#### Exercise HTML Template (provided to AI as reference in system prompt)
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exercise</title>
+  <!-- Load libraries from CDN as needed, e.g.: -->
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script> -->
+  <style>
+    :root {
+      --bg: #1C1917;
+      --surface: #27231E;
+      --accent: #D97757;
+      --text: #F5F5F4;
+      --border: rgba(255,255,255,0.08);
+      --radius: 0.75rem;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+      padding: 1.5rem;
+      min-height: 100vh;
+    }
+    .submit-btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.75rem 2rem;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 1.5rem;
+    }
+    .submit-btn:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+
+  <!-- Exercise content here -->
+  <h2>Exercise Title</h2>
+  <!-- ... interactive content ... -->
+
+  <button class="submit-btn" onclick="submitAnswers()">Submit Answers</button>
+
+  <script>
+    function submitAnswers() {
+      const payload = {
+        // Collect answers here — structure is free-form
+        // Examples:
+        // answers: { q1: 'selected_option', q2: 'typed_text' }
+        // topology: { nodes: [...], edges: [...] }
+        // order: ['item3', 'item1', 'item2']
+      };
+      window.parent.postMessage({ type: 'EXERCISE_SUBMIT', payload }, '*');
+    }
+  </script>
+</body>
+</html>
+```
+
+#### Example: Drag-and-Drop Exercise (AI-generated)
+
+The AI might generate a drag-and-drop OSI model exercise using HTML5 drag events:
+
+```html
+<!DOCTYPE html>
+<html>
+<!-- ... styles ... -->
+<body>
+  <h2>OSI Model — Drag layers into the correct order</h2>
+  <div id="layers">
+    <!-- shuffled draggable items -->
+    <div draggable="true" data-layer="3" class="layer-chip">Network</div>
+    <div draggable="true" data-layer="7" class="layer-chip">Application</div>
+    <!-- etc -->
+  </div>
+  <div id="slots">
+    <div class="slot" data-position="1">Layer 1</div>
+    <!-- etc -->
+  </div>
+  <button onclick="submit()">Submit</button>
+  <script>
+    // drag-and-drop logic
+    function submit() {
+      const result = Array.from(document.querySelectorAll('.slot'))
+        .map(slot => ({ position: slot.dataset.position, layer: slot.dataset.placed }));
+      window.parent.postMessage({ type: 'EXERCISE_SUBMIT', payload: { result } }, '*');
+    }
+  </script>
+</body>
+</html>
+```
+
+#### Example: Network Topology Builder (AI-generated)
+
+For networking topics, the AI can generate a topology exercise using vis.js from CDN:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css">
+</head>
+<body>
+  <p>Connect the devices to form a valid /24 network topology. 
+     Drag to add edges. Right-click to remove.</p>
+  <div id="network-canvas" style="height: 400px; border: 1px solid #333;"></div>
+  <div id="device-palette">
+    <!-- buttons to add router, switch, PC nodes -->
+  </div>
+  <button onclick="submitTopology()">Submit Topology</button>
+  <script>
+    const nodes = new vis.DataSet([ /* pre-placed devices */ ]);
+    const edges = new vis.DataSet([]);
+    const network = new vis.Network(
+      document.getElementById('network-canvas'),
+      { nodes, edges },
+      { manipulation: { enabled: true } }
+    );
+    function submitTopology() {
+      window.parent.postMessage({
+        type: 'EXERCISE_SUBMIT',
+        payload: {
+          nodes: nodes.get(),
+          edges: edges.get()
+        }
+      }, '*');
+    }
+  </script>
+</body>
+</html>
+```
+
+---
+
+### Submission Payload Format
+
+When the user submits, the frontend sends:
+
+```json
+{
+  "session_id": "uuid",
+  "exercise_id": "uuid",
+  "excalidraw_snapshot_b64": "data:image/png;base64,...",
+  "exercise_answers": {
+    // Free-form JSON from the iframe's postMessage payload
+    // Examples vary by exercise type:
+    // Quiz:     { "q1": "A", "q2": "True", "q3": "192.168.1.0" }
+    // Topology: { "nodes": [...], "edges": [...] }
+    // Order:    { "sequence": ["Layer 7", "Layer 6", ...] }
+    // Hotspot:  { "clicked": { "x": 142, "y": 87 } }
+  }
+}
+```
+
+The backend passes the exercise answers + the excalidraw snapshot image + the original exercise HTML (so the AI knows what was asked) to the study AI for evaluation.
+
+---
+
+### Exercise Storage in Database
+
+Each exercise is stored as a record in `whiteboard_exercises` (new table — see §11). This allows:
+- Reloading the active exercise on page refresh
+- Reviewing past exercises in the session history panel
+- Including the original exercise context when asking the AI to evaluate answers
+
+---
+
+## 9. AI Agent Integration
+
+### ModelRouter (Backend)
+
+```python
+class ModelRouter:
+    """
+    Abstracts all LLM providers behind a common streaming interface.
+    """
+    async def stream_chat(
+        self,
+        provider_config: ProviderConfig,
+        messages: list[dict],
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> AsyncGenerator[str, None]:
+        ...
+```
+
+Implementation dispatches based on `provider_config.type`:
+
+- `openrouter` / `openai` / `openai_compatible`: use `openai` Python SDK with custom `base_url`
+- `anthropic`: use `anthropic` Python SDK with native message streaming
+- `ollama`: use `openai` SDK pointed at `http://ollama:11434/v1`
+
+All providers are normalised to yield string token deltas.
+
+### OpenRouter Specifics
+
+OpenRouter requires the `HTTP-Referer` and `X-Title` headers:
+```python
+client = openai.AsyncOpenAI(
+    api_key=provider_config.api_key,
+    base_url="https://openrouter.ai/api/v1",
+    default_headers={
+        "HTTP-Referer": "https://your-app-domain.com",
+        "X-Title": "AI Chat Interface",
+    }
+)
+```
+
+Model IDs on OpenRouter follow the format `provider/model-name` (e.g., `anthropic/claude-3.5-sonnet`). The Models Tab fetches the list from `https://openrouter.ai/api/v1/models`.
+
+---
+
+## 10. Search Provider Integration
+
+### SearXNG (Primary / Self-Hosted)
+
+SearXNG runs as a Docker sidecar. The backend queries it:
+
+```python
+async def search_searxng(query: str, count: int = 5) -> list[SearchResult]:
+    url = f"{settings.SEARXNG_URL}/search"
+    params = {"q": query, "format": "json", "num_results": count}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params, timeout=10)
+        data = resp.json()
+    return [
+        SearchResult(title=r["title"], url=r["url"], snippet=r.get("content", ""))
+        for r in data.get("results", [])[:count]
+    ]
+```
+
+**Critical:** SearXNG `settings.yml` must include `json` in the `formats` list (see §4).
+
+### Brave Search API
+
+```python
+async def search_brave(query: str, count: int = 5) -> list[SearchResult]:
+    headers = {"Accept": "application/json", "X-Subscription-Token": settings.BRAVE_API_KEY}
+    url = "https://api.search.brave.com/res/v1/web/search"
+    params = {"q": query, "count": count}
+    ...
+```
+
+### Tavily API
+
+```python
+async def search_tavily(query: str, count: int = 5) -> list[SearchResult]:
+    payload = {"api_key": settings.TAVILY_API_KEY, "query": query, "max_results": count}
+    url = "https://api.tavily.com/search"
+    ...
+```
+
+### Search Result Normalisation
+
+All providers return `list[SearchResult]`:
+
+```python
+@dataclass
+class SearchResult:
+    title: str
+    url: str
+    snippet: str
+```
+
+These are injected as a structured context block into the LLM system prompt.
+
+---
+
+## 11. Database Schema
+
+### `users`
+```sql
+id            UUID PRIMARY KEY
+email         TEXT UNIQUE NOT NULL
+username      TEXT UNIQUE NOT NULL
+password_hash TEXT NOT NULL
+created_at    TIMESTAMP
+settings      JSONB  -- { default_model, default_search_on, preferred_search_provider, theme }
+```
+
+### `conversations`
+```sql
+id            UUID PRIMARY KEY
+user_id       UUID REFERENCES users(id)
+title         TEXT
+model_id      TEXT  -- e.g. "anthropic/claude-3.5-sonnet"
+provider_id   UUID REFERENCES model_providers(id)
+pinned        BOOLEAN DEFAULT false
+starred       BOOLEAN DEFAULT false
+web_search    BOOLEAN DEFAULT false
+created_at    TIMESTAMP
+updated_at    TIMESTAMP
+```
+
+### `messages`
+```sql
+id              UUID PRIMARY KEY
+conversation_id UUID REFERENCES conversations(id)
+role            TEXT  -- 'user' | 'assistant' | 'system'
+content         TEXT
+sources         JSONB  -- [{title, url, snippet}] if web search was used
+whiteboard_actions JSONB  -- array of whiteboard action payloads (study sessions)
+created_at      TIMESTAMP
+```
+
+### `model_providers`
+```sql
+id          UUID PRIMARY KEY
+user_id     UUID REFERENCES users(id)  -- NULL = system-wide (admin-added)
+name        TEXT
+type        TEXT  -- openrouter | anthropic | openai | ollama | openai_compatible
+base_url    TEXT
+api_key     TEXT  -- encrypted at rest
+enabled     BOOLEAN DEFAULT true
+models      JSONB  -- [{id, display_name, context_window, ...}]
+created_at  TIMESTAMP
+```
+
+### `study_projects`
+```sql
+id          UUID PRIMARY KEY
+user_id     UUID REFERENCES users(id)
+title       TEXT
+topics      TEXT[]
+goal        TEXT
+model_id    TEXT
+created_at  TIMESTAMP
+updated_at  TIMESTAMP
+```
+
+### `study_sessions`
+```sql
+id                  UUID PRIMARY KEY
+project_id          UUID REFERENCES study_projects(id)
+excalidraw_snapshot JSONB   -- Excalidraw scene JSON (auto-saved)
+created_at          TIMESTAMP
+updated_at          TIMESTAMP
+```
+
+### `whiteboard_exercises`
+```sql
+id              UUID PRIMARY KEY
+session_id      UUID REFERENCES study_sessions(id)
+message_id      UUID REFERENCES study_messages(id)  -- The AI message that created this exercise
+title           TEXT
+html            TEXT    -- Full AI-generated HTML document string
+status          TEXT    -- 'active' | 'submitted' | 'reviewed'
+answer_payload  JSONB   -- Student's submitted answers (postMessage payload)
+excalidraw_snap TEXT    -- Base64 PNG of freehand canvas at time of submission
+ai_feedback     TEXT    -- AI's evaluation feedback (stored after review)
+created_at      TIMESTAMP
+submitted_at    TIMESTAMP
+```
+
+### `study_messages`
+```sql
+id                UUID PRIMARY KEY
+session_id        UUID REFERENCES study_sessions(id)
+role              TEXT
+content           TEXT    -- Chat text (whiteboard_action blocks stripped out)
+exercise_id       UUID REFERENCES whiteboard_exercises(id)  -- set if this message spawned an exercise
+created_at        TIMESTAMP
+```
+
+### `search_providers`
+```sql
+id          UUID PRIMARY KEY
+user_id     UUID  -- NULL = system default
+name        TEXT
+type        TEXT  -- searxng | brave | tavily | google_pse
+config      JSONB  -- {url, api_key, result_count, ...}
+is_default  BOOLEAN DEFAULT false
+enabled     BOOLEAN DEFAULT true
+```
+
+---
+
+## 12. Authentication
+
+- **Registration/Login:** Email + password. JWT access token (15 min expiry) + refresh token (7 days, stored in HttpOnly cookie).
+- **JWT validation:** FastAPI dependency `get_current_user` applied to all protected routes.
+- **Single-user mode:** The app supports a `SINGLE_USER_MODE=true` env var that skips auth and uses a fixed local user — useful for personal self-hosted deployment.
+- **Future:** OIDC/OAuth2 support (Google, GitHub) is a stretch goal — design the auth module to accommodate this.
+
+---
+
+## 13. Cursor Development Instructions
+
+Feed these instructions to Cursor at the start of development:
+
+---
+
+### Phase 1 — Project Scaffold & Docker
+
+1. Initialise the monorepo structure as described in §3.
+2. Set up `docker-compose.yml` as in §4 (all services defined, but backends can use placeholder images initially).
+3. Set up `.env.example` with all variables from §5.
+4. Configure Nginx to:
+   - Serve the Vite-built frontend at `/`
+   - Proxy `/api/*` to the backend container
+   - Proxy WebSocket connections at `/api/chat/stream/*`
+5. Confirm `docker compose up` starts all containers without errors.
+
+### Phase 2 — Backend Foundation
+
+1. Set up FastAPI app with `app/main.py`, register all routers.
+2. Implement async SQLAlchemy + Alembic. Create all tables from §11.
+3. Implement auth module (register, login, JWT, `get_current_user` dependency).
+4. Write the `ModelRouter` class (§9) — start with OpenAI/OpenRouter support only.
+5. Implement `/api/chat` endpoints with SSE streaming working end-to-end.
+6. Implement `/api/models` CRUD endpoints.
+
+### Phase 3 — Frontend Foundation
+
+1. Set up Vite + React + TypeScript + Tailwind.
+2. Apply design tokens from §7.1 (CSS variables, font, colours).
+3. Build `Sidebar`, `TopNav`, and routing shell.
+4. Build the Chat page: conversation list, message rendering (Markdown), streaming input bar.
+5. Wire up to the backend — confirm a full streaming chat works.
+6. Build the Models Tab UI and wire to `/api/models`.
+
+### Phase 4 — Web Search Feature
+
+1. Implement `search/providers.py` — SearXNG adapter first.
+2. Add search injection to the chat message handler.
+3. Add the globe toggle button to the frontend input bar.
+4. Render source citations below AI messages.
+5. Add search provider settings to the Models/Settings UI.
+
+### Phase 5 — Study Tab
+
+1. Build Study Project List and New Study Wizard.
+2. Build the split-pane Study Session view.
+3. Embed Excalidraw in the whiteboard panel (Layer 1). Implement auto-save and PNG export on submit.
+4. Implement `ExerciseRenderer.tsx` — the sandboxed iframe host with `postMessage` listener.
+5. Implement `<whiteboard_action>` parsing in the backend stream handler. Store exercise HTML in `whiteboard_exercises` table.
+6. Implement the Submit Bar and full submission flow: collect iframe answers + Excalidraw PNG → POST to backend → forward to AI.
+7. Implement Exercise History panel — list past exercises in session, render read-only.
+8. Wire the study AI system prompt construction, including the HTML exercise template and contract.
+9. Test a full study session end-to-end: wizard → AI opens session → AI generates drag-drop exercise → student submits → AI evaluates → AI generates next exercise.
+10. Test with a network topology exercise using vis.js loaded from CDN inside the iframe.
+
+### Phase 6 — Polish
+
+1. Dark/light mode toggle (Tailwind `dark:` classes, system preference detection).
+2. Conversation rename, pin, star, delete.
+3. Sidebar collapse.
+4. User settings page (default model, search defaults, theme).
+5. Responsive design (tablet/mobile layout).
+6. Error states, loading skeletons, empty states for all pages.
+7. Accessibility audit (ARIA labels, keyboard navigation).
+
+---
+
+### Key Technical Decisions for Cursor
+
+- **Do not use Next.js.** Use Vite + React Router. This is a SPA deployed behind Nginx, not a server-rendered app.
+- **All AI responses must stream.** Do not wait for full completion before rendering. Use SSE on the backend, and progressively render tokens in the frontend.
+- **Whiteboard exercises are AI-generated HTML documents rendered in sandboxed iframes.** Do NOT build a fixed widget system. The iframe uses `sandbox="allow-scripts"` (without `allow-same-origin`) for isolation. Communication back to the parent is exclusively via `window.parent.postMessage({ type: 'EXERCISE_SUBMIT', payload }, '*')`. This architecture gives the AI unlimited creative freedom to generate any interactive exercise type.
+- **The Excalidraw canvas is always present** as a background layer. It is exported as a PNG on every submission so the AI can see the student's freehand annotations. Do not remove or hide the canvas when an exercise is active — provide a tab toggle instead.
+- **AI-generated exercise HTML is stored in the database** in the `whiteboard_exercises` table. It is never executed server-side. It only ever runs in the sandboxed client iframe.
+- **API keys are stored encrypted** in the database (`model_providers.api_key`). Use `cryptography.fernet` symmetric encryption with a key derived from `SECRET_KEY`.
+- **SearXNG JSON format must be enabled** in `searxng/settings.yml` before web search will work. The first-run Docker setup note in §4 must be followed.
+- **OpenRouter model list** should be fetched fresh from the OpenRouter API when a user adds an OpenRouter provider, not hardcoded.
+- **Study whiteboard state** is auto-saved every 30 seconds using a debounced `onChange` handler on the Excalidraw component. Do not save on every keystroke.
+
+---
+
+*End of Project Overview*

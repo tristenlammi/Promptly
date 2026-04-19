@@ -1,0 +1,48 @@
+# Development overlay.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# - Frontend runs the Vite dev server with hot module reload
+# - Backend runs uvicorn with --reload and mounts source for live changes
+# - Postgres exposed on host for inspection (e.g. via psql / TablePlus)
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts
+      - ./frontend/postcss.config.js:/app/postcss.config.js
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+    environment:
+      - VITE_API_BASE_URL=/api
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: dev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+
+  # Host port bindings for local dev — chosen to avoid clashing with other
+  # projects that may hold the standard ports. Nginx ports are overridden via
+  # env vars (see docker-compose.yml) since Compose merges `ports` additively.
+  postgres:
+    ports:
+      - "5433:5432"
+
+  redis:
+    ports:
+      - "6380:6379"
+
+  searxng:
+    ports:
+      - "8092:8080"

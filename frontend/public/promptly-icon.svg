@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Brand-colored background. The PNG generation script renders this
+       SVG into multiple sizes (192/512/maskable). We avoid any text
+       elements so rendering doesn't depend on a system font being
+       installed in the build container (alpine has no DM Sans). -->
+  <rect width="512" height="512" fill="#D97757"/>
+
+  <!-- "P" mark, drawn with a single path so it rasterises identically
+       in every environment. The bowl is a stroked half-circle (open
+       on the left, closed against the stem); the stem is a thick
+       rounded rectangle. Geometry tuned to feel like the original
+       DM Sans 'P' shape at 70% canvas height.
+  -->
+  <g fill="#FFFFFF">
+    <!-- Stem: vertical rounded bar on the left side of the glyph. -->
+    <rect x="158" y="112" width="64" height="288" rx="20" ry="20"/>
+    <!-- Bowl: outer ring of the P, made by the difference of two
+         circles via fill-rule:evenodd. Outer radius 90, inner radius
+         42, both vertically centered on the upper half of the glyph.
+    -->
+    <path
+      fill-rule="evenodd"
+      d="
+        M 222 124
+        h 50
+        a 90 90 0 0 1 0 180
+        h -50
+        v -36
+        h 50
+        a 54 54 0 0 0 0 -108
+        h -50
+        z
+      "/>
+  </g>
+</svg>

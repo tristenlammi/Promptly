@@ -1,0 +1,87 @@
+# ---- Web framework ----
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# ---- Database ----
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.2
+
+# ---- Cache / queue ----
+redis==5.0.8
+arq==0.26.1
+
+# ---- Rate limiting (Redis-backed) ----
+# We use ``limits`` directly (the underlying lib that slowapi wraps)
+# rather than slowapi's decorator, because slowapi's ``functools.wraps``
+# wrapper trips FastAPI's ``from __future__ import annotations`` forward-
+# ref resolution. Calling the limiter from a regular FastAPI dependency
+# keeps the introspection surface clean.
+limits==3.13.0
+# ``limits`` uses ``coredis`` (not redis-py) for its async Redis backend.
+coredis==4.17.0
+
+# ---- Auth ----
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.0
+cryptography==43.0.1
+
+# ---- Settings / validation ----
+pydantic==2.9.2
+pydantic-settings==2.5.2
+email-validator==2.2.0
+
+# ---- HTTP client (search providers, OpenRouter model list, etc.) ----
+httpx==0.27.2
+
+# ---- Web page extraction (Phase D1 ``fetch_url`` chat tool) ----
+# trafilatura strips boilerplate (nav, ads, script tags) from a fetched
+# HTML page and returns just the readable main-content text. This is
+# what the AI actually wants when it follows up a search hit with a
+# "now let me read that page" tool call. Pure-Python with no system
+# dependencies, so it slots into the slim base image cleanly.
+trafilatura==1.12.2
+
+# ---- LLM providers ----
+openai==1.51.0
+anthropic==0.34.2
+
+# ---- Document parsing (attachments) ----
+pypdf==6.10.2
+# Markdown -> HTML for the ``generate_pdf`` chat tool. Stdlib-only at
+# runtime; the ``extra``/``tables``/``fenced_code`` extensions are part
+# of the package itself, no extra wheels required.
+markdown==3.7
+# HTML -> PDF renderer used by ``generate_pdf``. Pure-Python via
+# reportlab (no wkhtmltopdf or weasyprint system libs needed) so the
+# slim base image stays slim. CSS support is limited but adequate for
+# the document-style output the assistant produces; we can swap to
+# WeasyPrint in a later phase if quality demands it.
+#
+# Pinned to 0.2.11 — newer 0.2.16 pulls pyHanko (PDF signing) which
+# drags pycairo into the dep tree, and pycairo needs system cairo
+# headers we deliberately don't install in the slim base. We don't use
+# the PDF-signing feature, so the older release is functionally
+# identical for our purposes.
+xhtml2pdf==0.2.11
+# Magic-byte sniffing for upload safety. Pure-python (no system
+# libmagic dependency), so it runs identically in the slim container
+# image. Used to refuse a ``.exe`` renamed to ``.png`` and to recover
+# a sane MIME when the browser sends ``application/octet-stream``.
+filetype==1.2.0
+# Pillow ships with ``qrcode[pil]`` already, but we depend on it
+# directly here for EXIF/GPS stripping on uploaded images, so it gets
+# its own line in case the qrcode pin ever loosens.
+Pillow==10.4.0
+
+# ---- MFA (Phase 2) ----
+# TOTP / HOTP shared-secret arithmetic.
+pyotp==2.9.0
+# Renders the TOTP enrollment QR as a PNG we embed as a data URI in the
+# enrollment payload — no extra round trip to fetch an image asset.
+qrcode[pil]==7.4.2
+# Async SMTP client for delivering email OTPs and (later) other
+# transactional mail.
+aiosmtplib==3.0.2

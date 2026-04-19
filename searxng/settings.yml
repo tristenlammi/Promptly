@@ -1,0 +1,60 @@
+# SearXNG configuration for Promptly.
+# IMPORTANT: the `json` format MUST be enabled under `search.formats` so the
+# backend can query SearXNG as an API. Without it, clients get HTTP 403.
+#
+# On first container start, SearXNG will generate/adjust uwsgi.ini in this
+# directory. If the container fails with a permission error, temporarily
+# remove `cap_drop: ALL` from docker-compose.yml, start once, then restore it.
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "Promptly Search"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json   # REQUIRED — enables JSON API responses consumed by the backend.
+
+server:
+  # The SEARXNG_SECRET env var supplied by docker-compose will override this.
+  secret_key: "ultrasecretkey-replace-via-env"
+  base_url: false
+  image_proxy: true
+  http_protocol_version: "1.0"
+  method: "GET"
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+ui:
+  static_use_hash: true
+  default_locale: "en"
+  query_in_title: false
+  infinite_scroll: false
+
+# Reasonable defaults for server-side consumers (the Promptly backend).
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+
+# Allow the backend container to reach SearXNG without being rate-limited
+# as if it were a browser client.
+botdetection:
+  ip_limit:
+    link_token: false

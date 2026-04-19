@@ -1,0 +1,243 @@
+/* Code-block syntax highlighting theme for react-markdown + rehype-highlight.
+   @import must precede all other statements per CSS spec. */
+@import "highlight.js/styles/github-dark.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --------------------------------------------------------------
+   Design tokens — Claude-inspired.
+   These drive both Tailwind colours (via config) and raw CSS.
+   -------------------------------------------------------------- */
+:root {
+  --bg: #FAF9F7;
+  --surface: #FFFFFF;
+  --border: rgba(0, 0, 0, 0.08);
+  --text: #1A1A19;
+  --text-muted: #6B7280;
+  --accent: #D97757;
+  --radius-card: 0.75rem;
+  --radius-input: 1.5rem;
+}
+
+html.dark {
+  --bg: #1C1917;
+  --surface: #27231E;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #F5F5F4;
+  --text-muted: #A8A29E;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* --------------------------------------------------------------
+   Phase 5 — Mobile / PWA polish.
+   Safe-area utility classes used throughout the layout shell so
+   notched iPhones and Android gesture-bars don't clip the top
+   bar / input bar / bottom nav. ``env(safe-area-inset-*)``
+   resolves to ``0`` on platforms that don't expose it, so these
+   are zero-cost on desktop.
+   -------------------------------------------------------------- */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0);
+}
+/* Combined helper for fixed-bottom toolbars (input bar, bottom nav)
+   that need to clear the home indicator without becoming awkwardly
+   tall on devices without one. */
+.pb-safe-toolbar {
+  padding-bottom: max(env(safe-area-inset-bottom, 0), 0.5rem);
+}
+/* Hide the page from horizontal swipe gestures stealing focus on
+   iOS Safari. The chat scroll already manages its own overflow. */
+@supports (-webkit-touch-callout: none) {
+  body {
+    overscroll-behavior-y: contain;
+  }
+}
+
+/* Phase 5 — touch-target sweep. Elevates icon-only buttons to
+   the WCAG-recommended 40x40 minimum on touch primary devices
+   (i.e. devices without hover capability). Desktop sits unchanged
+   because dense affordances are part of the visual identity there. */
+@media (hover: none) and (pointer: coarse) {
+  button[aria-label],
+  a[aria-label] {
+    min-height: 40px;
+    min-width: 40px;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ------------------------------------------------------------------
+   Thinking indicator.
+   Three staggered dots that bounce vertically while fading — used while
+   we're waiting for the assistant's first token. Delay is applied via
+   Tailwind `[animation-delay:*]` on each <span>.
+   ------------------------------------------------------------------ */
+@keyframes promptly-thinking-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+.promptly-thinking-dot {
+  animation: promptly-thinking-bounce 1.1s infinite ease-in-out both;
+  display: inline-block;
+}
+
+/* Respect users' motion preferences for all animated UI. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Soften scrollbars to match the surface. */
+.promptly-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.promptly-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.promptly-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.promptly-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.4);
+  background-clip: padding-box;
+}
+
+/* Sidebar search "jump to message" highlight pulse — applied for ~2s
+   after the user clicks a search hit so they can spot the bubble in
+   a long thread. Transition lives on the bubble itself; this just
+   sets the highlighted background. */
+.promptly-message-flash {
+  background-color: rgba(247, 184, 1, 0.18);
+}
+
+/* Snippet ``<mark>`` styling for sidebar search results. The backend
+   already wraps matched terms in ``<mark>``; the rest is a thin pill
+   that survives both light and dark themes. */
+.promptly-search-snippet mark {
+  background-color: rgba(247, 184, 1, 0.35);
+  color: inherit;
+  padding: 0 0.15em;
+  border-radius: 3px;
+}
+
+/* Prose defaults for rendered markdown in assistant messages. */
+.promptly-prose {
+  line-height: 1.65;
+}
+.promptly-prose p {
+  margin: 0 0 0.75rem 0;
+}
+.promptly-prose p:last-child {
+  margin-bottom: 0;
+}
+.promptly-prose h1,
+.promptly-prose h2,
+.promptly-prose h3,
+.promptly-prose h4 {
+  font-weight: 600;
+  margin: 1.25rem 0 0.5rem 0;
+  line-height: 1.3;
+}
+.promptly-prose h1 { font-size: 1.375rem; }
+.promptly-prose h2 { font-size: 1.2rem; }
+.promptly-prose h3 { font-size: 1.05rem; }
+.promptly-prose ul,
+.promptly-prose ol {
+  margin: 0 0 0.75rem 1.25rem;
+  padding: 0;
+}
+.promptly-prose ul { list-style: disc; }
+.promptly-prose ol { list-style: decimal; }
+.promptly-prose li { margin: 0.25rem 0; }
+.promptly-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.promptly-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.25rem 0.75rem;
+  margin: 0.5rem 0 0.75rem 0;
+  color: var(--text-muted);
+}
+.promptly-prose code {
+  background: rgba(128, 128, 128, 0.15);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.promptly-prose pre {
+  background: #0b0f14;
+  color: #e6e6e6;
+  padding: 0.9rem 1rem;
+  border-radius: 0.625rem;
+  overflow-x: auto;
+  margin: 0.5rem 0 0.75rem 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+.promptly-prose pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+.promptly-prose table {
+  border-collapse: collapse;
+  margin: 0.5rem 0 0.75rem 0;
+  width: 100%;
+  font-size: 0.9em;
+}
+.promptly-prose th,
+.promptly-prose td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+.promptly-prose th {
+  background: rgba(128, 128, 128, 0.08);
+  font-weight: 600;
+}

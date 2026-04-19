@@ -1,0 +1,166 @@
+# Compose project name — drives the prefix on the auto-generated network
+# and volumes so `docker volume ls` etc. read e.g. `Promptly_postgres_data`.
+name: Promptly
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: Promptly-Nginx
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      # nginx:alpine ships wget. We hit a static path the SPA serves to
+      # confirm both nginx and the upstream frontend container are alive.
+      test: ["CMD", "wget", "-qO-", "--tries=1", "--timeout=2", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - promptly
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: Promptly-Frontend
+    environment:
+      - VITE_API_BASE_URL=/api
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - promptly
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: Promptly-Backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://promptly:${POSTGRES_PASSWORD}@postgres:5432/promptly
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - SINGLE_USER_MODE=${SINGLE_USER_MODE:-false}
+      - SEARXNG_URL=http://searxng:8080
+      - ALLOWED_ORIGINS=http://localhost,https://${DOMAIN}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - DEFAULT_SEARCH_PROVIDER=${DEFAULT_SEARCH_PROVIDER:-searxng}
+      - SEARCH_RESULT_COUNT=${SEARCH_RESULT_COUNT:-5}
+      - SEARCH_CONCURRENT_REQUESTS=${SEARCH_CONCURRENT_REQUESTS:-3}
+    volumes:
+      - uploads:/app/uploads
+      - whiteboard_snapshots:/app/whiteboard
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # The /api/health endpoint pings Postgres, Redis, and SearXNG and
+      # returns 503 if any of them is unreachable, so this single probe
+      # also surfaces upstream-dependency failures via `docker compose ps`.
+      # Long start_period because Alembic migrations run on first boot.
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - promptly
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: Promptly-Postgres
+    environment:
+      - POSTGRES_USER=promptly
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=promptly
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promptly -d promptly"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - promptly
+
+  redis:
+    image: redis:7-alpine
+    container_name: Promptly-Redis
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - promptly
+
+  searxng:
+    # Pinned to a specific dated build so a `docker compose pull` can't
+    # silently break web search. Bump the tag deliberately when you want
+    # to upgrade. Tag list: https://hub.docker.com/r/searxng/searxng/tags
+    image: searxng/searxng:2026.4.17-e8299a4c3
+    container_name: Promptly-SearXNG
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
+      - INSTANCE_NAME=promptly-search
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    expose:
+      - "8080"
+    restart: unless-stopped
+    networks:
+      - promptly
+    # NOTE: On first run, you may need to temporarily remove `cap_drop: ALL`
+    # to allow SearXNG to create /etc/searxng/uwsgi.ini, then restore it.
+
+# Network and volumes keep their original lowercase names so existing
+# data (postgres + uploads) survives the rename to project=Promptly.
+# Container names are the only thing the user actually sees in
+# `docker ps` / Docker Desktop, so that's where the friendlier
+# "Promptly - X" scheme matters most.
+networks:
+  promptly:
+    name: promptly
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: promptly_postgres_data
+  redis_data:
+    name: promptly_redis_data
+  uploads:
+    name: promptly_uploads
+  whiteboard_snapshots:
+    name: promptly_whiteboard_snapshots

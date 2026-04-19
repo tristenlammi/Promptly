@@ -1,0 +1,249 @@
+"""Markdown -> styled HTML -> PDF rendering for the ``generate_pdf`` tool.
+
+Pipeline:
+
+1. ``markdown.markdown(...)`` parses the source with the ``extra``,
+   ``tables``, ``fenced_code``, and ``sane_lists`` extensions enabled
+   so the assistant can hand us GitHub-flavoured Markdown and we render
+   tables, code blocks, and ordered/unordered lists faithfully.
+2. The HTML body is wrapped in a small CSS shell tuned for xhtml2pdf's
+   limited subset (no flexbox, no @font-face, no media queries) — see
+   ``DEFAULT_CSS`` for the exact rules. It deliberately uses serif body
+   text + monospace code blocks so the output looks like a *document*,
+   not a webpage.
+3. ``xhtml2pdf.pisa.CreatePDF`` (sync, CPU-bound) writes the PDF bytes
+   into a ``BytesIO``. Callers in async code should wrap ``render_markdown_to_pdf``
+   in :func:`asyncio.to_thread` so the event loop isn't blocked while a
+   large doc is being typeset.
+
+We chose xhtml2pdf over WeasyPrint for Phase A2 because it's pure
+Python — no Pango/Cairo/gdk-pixbuf system libs to add to the slim
+container image. The trade-off is CSS fidelity: anything beyond the
+basics here will be ignored or rendered awkwardly. If a future phase
+wants pixel-perfect docs (custom fonts, page headers, cover pages) we
+can swap to WeasyPrint behind this same function signature.
+"""
+from __future__ import annotations
+
+import logging
+from io import BytesIO
+
+import markdown
+from xhtml2pdf import pisa
+
+logger = logging.getLogger("promptly.pdf_render")
+
+
+class PdfRenderError(Exception):
+    """Raised when a Markdown->PDF render produces no usable output.
+
+    Wrapped into a :class:`app.chat.tools.base.ToolError` by the
+    ``generate_pdf`` tool so the model sees a controlled failure
+    rather than a hard 500.
+    """
+
+
+# Conservative CSS that xhtml2pdf actually understands. Resist the urge
+# to add modern selectors (``:has``, ``flex``, etc.) — they get silently
+# dropped and the document just looks worse. Page size + margins are
+# set in @page; everything else mirrors a typical "report" stylesheet.
+DEFAULT_CSS = """
+@page {
+    size: letter;
+    margin: 1.0in 0.85in 1.1in 0.85in;
+    @frame footer {
+        -pdf-frame-content: footerContent;
+        bottom: 0.4in;
+        margin-left: 0.85in;
+        margin-right: 0.85in;
+        height: 0.3in;
+    }
+}
+
+body {
+    font-family: "Helvetica", "Arial", sans-serif;
+    font-size: 11pt;
+    color: #1f2937;
+    line-height: 1.45;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Helvetica", "Arial", sans-serif;
+    color: #111827;
+    margin-top: 18pt;
+    margin-bottom: 6pt;
+    font-weight: bold;
+}
+
+h1 { font-size: 22pt; border-bottom: 1pt solid #d1d5db; padding-bottom: 4pt; }
+h2 { font-size: 17pt; }
+h3 { font-size: 14pt; }
+h4 { font-size: 12pt; }
+h5, h6 { font-size: 11pt; color: #374151; }
+
+p { margin: 0 0 8pt 0; }
+
+a { color: #2563eb; text-decoration: underline; }
+
+ul, ol { margin: 4pt 0 8pt 0; padding-left: 22pt; }
+li { margin-bottom: 3pt; }
+
+blockquote {
+    margin: 8pt 0 8pt 0;
+    padding: 6pt 12pt;
+    border-left: 3pt solid #9ca3af;
+    background-color: #f3f4f6;
+    color: #374151;
+    font-style: italic;
+}
+
+hr {
+    border: 0;
+    border-top: 1pt solid #d1d5db;
+    margin: 12pt 0;
+}
+
+code {
+    font-family: "Courier New", monospace;
+    font-size: 10pt;
+    background-color: #f3f4f6;
+    padding: 1pt 3pt;
+    color: #111827;
+}
+
+pre {
+    font-family: "Courier New", monospace;
+    font-size: 9.5pt;
+    background-color: #f3f4f6;
+    color: #111827;
+    padding: 8pt 10pt;
+    border: 1pt solid #e5e7eb;
+    margin: 8pt 0;
+    white-space: pre-wrap;
+}
+
+pre code { background-color: transparent; padding: 0; font-size: 9.5pt; }
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8pt 0;
+}
+
+th, td {
+    border: 1pt solid #d1d5db;
+    padding: 5pt 7pt;
+    text-align: left;
+    vertical-align: top;
+    font-size: 10.5pt;
+}
+
+th {
+    background-color: #f3f4f6;
+    font-weight: bold;
+}
+
+img { max-width: 100%; }
+
+.doc-title {
+    font-size: 26pt;
+    font-weight: bold;
+    color: #111827;
+    margin-bottom: 4pt;
+}
+
+.doc-subtitle {
+    font-size: 11pt;
+    color: #6b7280;
+    margin-bottom: 18pt;
+}
+
+#footerContent {
+    font-size: 8.5pt;
+    color: #9ca3af;
+    text-align: center;
+}
+"""
+
+# Markdown extensions we trust the assistant to use. ``extra`` rolls in
+# tables / fenced_code / footnotes / abbreviations etc., but we list the
+# big two explicitly anyway so a future ``extra`` deprecation doesn't
+# silently drop them. ``sane_lists`` keeps numbering tight.
+_MD_EXTENSIONS = ["extra", "tables", "fenced_code", "sane_lists"]
+
+
+def render_markdown_to_pdf(
+    md_source: str, title: str | None = None
+) -> bytes:
+    """Render ``md_source`` Markdown text to PDF bytes.
+
+    ``title`` is an optional document title rendered above the body in
+    a bigger weight; if ``None`` we render the body straight. Footer
+    is always the literal "Generated by Promptly" line — the page
+    number variant is held for a later phase since pisa's page-counter
+    syntax is fiddly enough to warrant its own change.
+
+    Synchronous and CPU-bound. Callers in async contexts should use::
+
+        await asyncio.to_thread(render_markdown_to_pdf, md, title)
+    """
+    if not md_source or not md_source.strip():
+        raise PdfRenderError("Markdown source is empty")
+
+    body_html = markdown.markdown(md_source, extensions=_MD_EXTENSIONS)
+
+    # Compose the title block, body, and footer. ``footerContent`` is
+    # referenced by the @page rule so xhtml2pdf knows where to put it.
+    title_block = ""
+    if title and title.strip():
+        # Escape via markdown's HTML escaping by going through the same
+        # pipeline — keeps the same character handling rules for the
+        # title as for the body text.
+        safe_title = (
+            title.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        title_block = f'<div class="doc-title">{safe_title}</div>'
+
+    full_html = (
+        f"<!DOCTYPE html><html><head>"
+        f'<meta charset="utf-8" />'
+        f"<style>{DEFAULT_CSS}</style>"
+        f"</head><body>"
+        f"{title_block}"
+        f"{body_html}"
+        f'<div id="footerContent">Generated by Promptly</div>'
+        f"</body></html>"
+    )
+
+    out = BytesIO()
+    # ``encoding`` set explicitly so unicode characters in the source
+    # round-trip cleanly — pisa otherwise falls back to the platform
+    # default and mangles non-ASCII on some Linux containers.
+    result = pisa.CreatePDF(
+        src=full_html,
+        dest=out,
+        encoding="utf-8",
+    )
+    if result.err:
+        # ``result.err`` is a *count*, not a message. Pisa already logs
+        # the actual parser warnings to stderr; we surface a concise
+        # error here and rely on the chat router's ToolError plumbing
+        # to feed something useful back to the model.
+        logger.warning(
+            "xhtml2pdf reported %d errors rendering %d-char markdown",
+            result.err,
+            len(md_source),
+        )
+        raise PdfRenderError(
+            f"Renderer reported {result.err} fatal error(s) — "
+            "the document may use unsupported markup"
+        )
+    pdf_bytes = out.getvalue()
+    if not pdf_bytes:
+        raise PdfRenderError("Renderer produced an empty PDF")
+    return pdf_bytes
+
+
+__all__ = ["PdfRenderError", "render_markdown_to_pdf"]
