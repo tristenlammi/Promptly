@@ -1,0 +1,54 @@
+# ============================================================
+# Promptly — Unraid overlay
+#
+# Usage (from the project directory, typically
+# /mnt/user/appdata/promptly):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
+#
+# What this overlay changes versus the base compose:
+#
+#   * Replaces the named Docker volumes with bind mounts under
+#     /mnt/user/appdata/promptly/, so Unraid's appdata backup
+#     plugin and Krusader can see the files directly.
+#   * Picks Unraid-safe default ports (8181 HTTP / 8443 HTTPS)
+#     because the Unraid web UI usually owns 80 and 443.
+#     Override with NGINX_HTTP_PORT / NGINX_HTTPS_PORT in .env
+#     if you've already moved the Unraid UI elsewhere.
+#
+# The base docker-compose.yml is untouched, so the standard
+# Linux-server install (`docker compose up -d`) still works on
+# any other host.
+# ============================================================
+
+services:
+  nginx:
+    ports:
+      - "${NGINX_HTTP_PORT:-8181}:80"
+      - "${NGINX_HTTPS_PORT:-8443}:443"
+
+  postgres:
+    volumes:
+      - /mnt/user/appdata/promptly/postgres:/var/lib/postgresql/data
+
+  redis:
+    volumes:
+      - /mnt/user/appdata/promptly/redis:/data
+
+  backend:
+    volumes:
+      - /mnt/user/appdata/promptly/uploads:/app/uploads
+      - /mnt/user/appdata/promptly/whiteboard:/app/whiteboard
+
+  searxng:
+    # The base compose bind-mounts ./searxng (relative to the
+    # project dir). On Unraid we keep config under appdata
+    # explicitly so the whole stack lives in one place.
+    volumes:
+      - /mnt/user/appdata/promptly/searxng:/etc/searxng:rw
+
+# Note: the base compose declares postgres_data / redis_data /
+# uploads / whiteboard_snapshots as named volumes. With this
+# overlay no service references them, so Docker just leaves
+# them as empty unused volumes. They're a few KB each — not
+# worth fighting compose over.
