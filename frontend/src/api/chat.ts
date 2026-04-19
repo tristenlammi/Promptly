@@ -117,6 +117,17 @@ export const chatApi = {
     // nginx in prod and through vite proxy in dev.
     return `/api/chat/stream/${streamId}`;
   },
+  /** Ask the backend whether a generation is still running for this
+   *  conversation. Returns the active stream id (or null). Used when
+   *  the conversation page mounts after the user navigated away mid-
+   *  reply — if a stream is found we re-attach to its live tail
+   *  instead of leaving them watching a frozen "thinking" state. */
+  async activeStream(conversationId: string): Promise<string | null> {
+    const { data } = await apiClient.get<{ stream_id: string | null }>(
+      `/chat/conversations/${conversationId}/active-stream`
+    );
+    return data.stream_id;
+  },
   async search(q: string, limit = 20): Promise<ConversationSearchHit[]> {
     const { data } = await apiClient.get<ConversationSearchHit[]>(
       "/chat/conversations/search",

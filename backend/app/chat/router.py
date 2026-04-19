@@ -47,6 +47,13 @@ from app.chat.service import (
     StreamContext,
     consume_stream,
     enqueue_stream,
+    peek_stream,
+)
+from app.chat.stream_runner import (
+    StreamSession,
+    find_active_for_conversation,
+    get_or_create_session,
+    get_session,
 )
 from app.chat.personal_context import build_personal_context_prompt
 from app.chat.titler import fallback_title, generate_conversation_title
@@ -1618,12 +1625,12 @@ async def _stream_generator(
                     tools=tools_payload,
                     include_usage=True,
                 ):
-                    if await request.is_disconnected():
-                        logger.info(
-                            "SSE client disconnected mid-stream: %s", stream_id
-                        )
-                        return
-
+                    # Note: we used to bail on ``request.is_disconnected``
+                    # here, which meant closing the tab dropped the reply
+                    # on the floor. Generation now runs in a background
+                    # task (see stream_runner.py) so the user can navigate
+                    # away and the assistant message still lands in the
+                    # DB. Cancellation only happens on process shutdown.
                     if isinstance(ev, TextDelta):
                         if first_token_at is None:
                             first_token_at = time.monotonic()
@@ -1853,14 +1860,95 @@ async def _stream_generator(
         )
 
 
+async def _bridge_generator_to_session(
+    stream_id: uuid.UUID,
+    user: User,
+    request: Request,
+    session: StreamSession,
+) -> None:
+    """Pump every chunk from the SSE generator into the session buffer.
+
+    The session is what subscribers (the HTTP handler) read from, so the
+    HTTP connection going away no longer aborts generation. Runs once
+    per stream; ``get_or_create_session`` enforces the singleton.
+    """
+    async for chunk in _stream_generator(stream_id, user, request):
+        session.push(chunk)
+
+
+async def _subscribe_session_to_response(
+    session: StreamSession, request: Request
+) -> AsyncGenerator[str, None]:
+    """Forward buffered + future events to one HTTP client.
+
+    Cancellation here (client disconnect) is intentional — we just stop
+    forwarding. The background task keeps running in the session and
+    will persist the assistant message regardless. A reconnect within
+    ``COMPLETED_SESSION_TTL_SECONDS`` replays the full transcript from
+    index 0 because we can't depend on the client preserving cursors
+    across navigations.
+    """
+    try:
+        async for _idx, chunk in session.subscribe(from_index=0):
+            yield chunk
+            # Cooperative disconnect check — if the client is gone we
+            # stop forwarding immediately rather than queueing chunks
+            # the ASGI server can't deliver. The runner doesn't care.
+            if await request.is_disconnected():
+                logger.debug(
+                    "SSE subscriber disconnected for stream %s; runner continues",
+                    session.stream_id,
+                )
+                return
+    except asyncio.CancelledError:
+        # The starlette/ASGI layer cancels us when the client drops.
+        # Swallow it — the underlying generation lives in its own task.
+        return
+
+
 @router.get("/stream/{stream_id}")
 async def stream_response(
     stream_id: uuid.UUID,
     request: Request,
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
+    # First call: peek at the queued context so we can index the session
+    # by conversation id (needed for ``find_active_for_conversation``).
+    # Reconnects skip the peek — the in-memory session already has it.
+    existing = get_session(stream_id)
+    if existing is None:
+        ctx = await peek_stream(stream_id)
+        if ctx is None:
+            # Either the context expired (client took >60s to attach) or
+            # this id was already consumed and the session has been
+            # evicted. Surface a one-shot SSE error so the frontend
+            # shows a message instead of hanging.
+            async def _missing() -> AsyncGenerator[str, None]:
+                yield _sse({"error": "Stream not found or expired"})
+                yield _sse({"done": True})
+
+            return StreamingResponse(
+                _missing(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        conversation_id = uuid.UUID(ctx["conversation_id"])
+    else:
+        conversation_id = existing.conversation_id
+
+    session = await get_or_create_session(
+        stream_id=stream_id,
+        user_id=user.id,
+        conversation_id=conversation_id,
+        runner=lambda s: _bridge_generator_to_session(stream_id, user, request, s),
+    )
+
     return StreamingResponse(
-        _stream_generator(stream_id, user, request),
+        _subscribe_session_to_response(session, request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1871,6 +1959,27 @@ async def stream_response(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/conversations/{conversation_id}/active-stream")
+async def get_active_stream(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, str | None]:
+    """Tell the client whether a generation is in flight for this convo.
+
+    Called when the conversation page mounts. If a stream is found, the
+    frontend reattaches to it (replays buffered tokens + tails the live
+    feed) instead of leaving the user staring at the persisted-but-stale
+    transcript while the AI is still talking in the background.
+    """
+    # Membership check piggy-backs on the existing share helper so the
+    # caller can see streams for shared conversations they have access
+    # to, not just their own. Raises 404 itself if the user can't see it.
+    await get_accessible_conversation(conversation_id, user, db)
+    session = find_active_for_conversation(conversation_id=conversation_id)
+    return {"stream_id": str(session.stream_id) if session else None}
 
 
 # Keep the scaffold ping for sanity checks.

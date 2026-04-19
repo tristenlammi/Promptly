@@ -108,6 +108,12 @@ interface UseStreamingChatResult {
     messageId: string,
     payload: EditMessagePayload
   ) => Promise<void>;
+  /** Re-attach to a generation that's still running on the backend (the
+   *  user navigated away mid-reply and came back). Replays the buffered
+   *  transcript from the start, then tails the live token stream. The
+   *  user-message is assumed to already be in the conversation history
+   *  (the caller's GET /conversations/<id> populated it). */
+  reattach: (conversationId: string, streamId: string) => Promise<void>;
   cancel: () => void;
 }
 
@@ -368,5 +374,40 @@ export function useStreamingChat(): UseStreamingChatResult {
     [cancel, drainStream, qc]
   );
 
-  return { sendMessage, editAndResend, cancel };
+  const reattach = useCallback(
+    async (conversationId: string, streamId: string) => {
+      const store = useChatStore.getState();
+      cancel();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      // Drop any stale streaming state from a previous turn — the
+      // backend will replay this stream's events from index 0 so we
+      // start from a known-clean slate.
+      store.resetStream();
+      store.setStreaming(true);
+
+      try {
+        await drainStream(conversationId, streamId, ac);
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        store.setStreamError(msg);
+      } finally {
+        abortRef.current = null;
+        useChatStore.getState().setStreaming(false);
+        qc.invalidateQueries({ queryKey: ["conversations"] });
+        qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        useChatStore.setState({
+          streamingContent: "",
+          streamingSources: null,
+          streamingAttachments: null,
+          toolInvocations: [],
+        });
+      }
+    },
+    [cancel, drainStream, qc]
+  );
+
+  return { sendMessage, editAndResend, reattach, cancel };
 }

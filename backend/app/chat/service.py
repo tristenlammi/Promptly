@@ -51,3 +51,16 @@ async def consume_stream(stream_id: uuid.UUID) -> StreamContext | None:
     if raw is None:
         return None
     return json.loads(raw)
+
+
+async def peek_stream(stream_id: uuid.UUID) -> StreamContext | None:
+    """Read a stream context without consuming it.
+
+    Used by the SSE handler to learn the conversation id (so the
+    in-process session table can index by it) before handing the
+    context off to the background runner that performs the GETDEL.
+    """
+    raw: Any = await redis.get(_key(stream_id))
+    if raw is None:
+        return None
+    return json.loads(raw)

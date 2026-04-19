@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { GitBranch, Share2 } from "lucide-react";
 
@@ -17,11 +17,13 @@ import {
   useConversationQuery,
 } from "@/hooks/useConversations";
 import type { AttachedFile } from "@/components/chat/AttachmentPickerModal";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { useSelectedModel } from "@/store/modelStore";
 import type { ChatMessage, WebSearchMode } from "@/api/types";
+import { cn } from "@/utils/cn";
 
 // Defaults applied when the user has never touched the toggles.
 //   * Tools defaults ON so the AI can invoke artefact tools (PDF,
@@ -44,8 +46,9 @@ export function ChatPage() {
   // responded). Keeping this a primitive selector avoids re-renders when
   // unrelated chat state changes.
   const storeMessageCount = useChatStore((s) => s.messages.length);
-  const { sendMessage, editAndResend, cancel } = useStreamingChat();
+  const { sendMessage, editAndResend, reattach, cancel } = useStreamingChat();
   const selectedModel = useSelectedModel();
+  const isMobile = useIsMobile();
 
   // Both toggles seed from the user's persisted preferences (server-side
   // ``users.settings``) and write back whenever the user flips them. The
@@ -185,6 +188,53 @@ export function ChatPage() {
     if (useChatStore.getState().isStreaming) return;
     setMessages(conversation.messages);
   }, [id, conversation, setMessages]);
+
+  // Reattach to in-flight generation. The user navigated away while the
+  // model was thinking; the backend kept generating in a background task.
+  // When they come back to this conversation, ask the server if a stream
+  // is still running and, if so, subscribe to it so the response keeps
+  // streaming into view from the buffered transcript onwards.
+  //
+  // Guarded by a per-conversation ref so a refetch of the same chat
+  // doesn't fire a fresh subscribe loop on top of the existing one.
+  const reattachedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !conversation) return;
+    if (reattachedRef.current === id) return;
+    if (useChatStore.getState().isStreaming) {
+      // Already streaming locally (the user just sent a message and
+      // we're showing the live tokens) — nothing to reattach to.
+      reattachedRef.current = id;
+      return;
+    }
+    reattachedRef.current = id;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const streamId = await chatApi.activeStream(id);
+        if (cancelled || !streamId) return;
+        // Re-check isStreaming in case the user kicked off a fresh
+        // turn between the check above and the network round-trip.
+        if (useChatStore.getState().isStreaming) return;
+        await reattach(id, streamId);
+      } catch (err) {
+        // Non-fatal — just means we won't tail. The persisted reply
+        // will appear once generation finishes and the user reloads.
+        console.warn("Reattach to in-flight stream failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, conversation, reattach]);
+
+  // Reset the reattach guard when the active conversation switches so
+  // the new chat gets its own one-shot reattach attempt.
+  useEffect(() => {
+    if (reattachedRef.current && reattachedRef.current !== id) {
+      reattachedRef.current = null;
+    }
+  }, [id]);
 
   // Deep-link hash handler: ``#m-<message_id>`` (set by sidebar search
   // jump-to-message). We wait until the conversation messages have been
@@ -344,15 +394,24 @@ export function ChatPage() {
               <button
                 type="button"
                 onClick={() => setShareOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]",
+                  // Icon-only on mobile to free up header real estate
+                  // for the title — same target size as the hamburger
+                  // and ModelSelector trigger so the action row reads
+                  // as a single visual unit.
+                  isMobile
+                    ? "h-9 w-9 justify-center"
+                    : "px-2.5 py-1.5 text-xs"
+                )}
                 title="Share this conversation"
                 aria-label="Share this conversation"
               >
-                <Share2 className="h-3.5 w-3.5" />
-                Share
+                <Share2 className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+                {!isMobile && "Share"}
               </button>
             )}
-            <ModelSelector />
+            <ModelSelector compact={isMobile} />
           </div>
         }
       />
