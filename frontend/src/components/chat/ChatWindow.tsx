@@ -32,6 +32,7 @@ export function ChatWindow({
   onBranchFrom,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
+  const activeId = useChatStore((s) => s.activeId);
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const streamingContent = useChatStore((s) => s.streamingContent);
   const streamingSources = useChatStore((s) => s.streamingSources);
@@ -43,6 +44,11 @@ export function ChatWindow({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messagesCountRef = useRef(messages.length);
+  // Tracks which conversation we've already snapped to the bottom for.
+  // ``null`` means "no conversation initialised yet" — set to the
+  // active id once we've performed the on-open scroll so it doesn't
+  // re-fire on every subsequent message append.
+  const initialScrolledForRef = useRef<string | null>(null);
 
   // Distance in px from the bottom under which we consider the user
   // "parked at the latest". Used purely to decide pill visibility —
@@ -73,6 +79,31 @@ export function ChatWindow({
     el.addEventListener("scroll", update, { passive: true });
     return () => el.removeEventListener("scroll", update);
   }, [isStreaming, isAtBottom]);
+
+  // When the user opens (or switches to) a conversation, snap the
+  // viewport to the bottom so the latest exchange is visible. We
+  // gate on activeId so we only do this once per conversation —
+  // appending new messages later in the same chat is handled by the
+  // separate user-submit effect below. The messages.length check
+  // covers the async load: activeId flips first, then messages arrive
+  // a tick later. We wait for the second event before scrolling so
+  // the DOM actually has the bubbles to scroll past.
+  useEffect(() => {
+    if (!activeId) {
+      initialScrolledForRef.current = null;
+      return;
+    }
+    if (initialScrolledForRef.current === activeId) return;
+    if (messages.length === 0) return;
+    initialScrolledForRef.current = activeId;
+    // Sync snap to avoid a visible scroll animation on chat open;
+    // messages.length is "right" by this point so set the count ref
+    // accordingly so the user-submit effect doesn't double-scroll.
+    messagesCountRef.current = messages.length;
+    requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    });
+  }, [activeId, messages.length]);
 
   // When the user submits a message, scroll their fresh bubble to the
   // top of the viewport rather than to the bottom. That way the AI
