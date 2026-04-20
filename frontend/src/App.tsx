@@ -9,7 +9,6 @@ import { FilesPage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
-import { ModelsPage } from "@/pages/ModelsPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { StudyPage } from "@/pages/StudyPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
@@ -87,9 +86,18 @@ export default function App() {
         <Route path="/chat/:id" element={<ChatPage />} />
         <Route path="/study" element={<StudyPage />} />
         <Route path="/study/sessions/:id" element={<StudySessionPage />} />
+        {/* Models management lives inside the Settings (admin) tabs
+            now. Keep the legacy ``/models`` URL working by redirecting
+            straight to the relevant tab so old bookmarks don't 404. */}
         <Route
           path="/models"
-          element={isAdmin ? <ModelsPage /> : <Navigate to="/chat" replace />}
+          element={
+            isAdmin ? (
+              <Navigate to="/admin?tab=models" replace />
+            ) : (
+              <Navigate to="/chat" replace />
+            )
+          }
         />
         <Route path="/files" element={<FilesPage />} />
         <Route path="/account/security" element={<AccountSecurityPage />} />

@@ -1,15 +1,23 @@
-import { useState } from "react";
-import { BarChart3, ScrollText, Settings, Terminal, Users } from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { BarChart3, ScrollText, Settings, Settings2, Terminal, Users } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
+import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
 import { cn } from "@/utils/cn";
 
-type TabId = "users" | "analytics" | "console" | "audit" | "settings";
+type TabId =
+  | "users"
+  | "analytics"
+  | "console"
+  | "audit"
+  | "settings"
+  | "models";
 
 interface TabDef {
   id: TabId;
@@ -24,6 +32,13 @@ const TABS: TabDef[] = [
     label: "Users",
     icon: <Users className="h-3.5 w-3.5" />,
     subtitle: "Manage accounts, model access and per-user security state.",
+  },
+  {
+    id: "models",
+    label: "Models",
+    icon: <Settings2 className="h-3.5 w-3.5" />,
+    subtitle:
+      "Connect LLM providers and pick which models are available in Chat and Study.",
   },
   {
     id: "analytics",
@@ -51,19 +66,42 @@ const TABS: TabDef[] = [
   },
 ];
 
+const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
+
 export function AdminPage() {
-  const [tab, setTab] = useState<TabId>("users");
+  // Drive the active tab from ``?tab=...`` so deep links land on the
+  // right surface (e.g. the ``/models`` legacy route now redirects to
+  // ``/admin?tab=models``) and the back button steps through tabs the
+  // user actually visited.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: TabId = useMemo(() => {
+    const raw = searchParams.get("tab");
+    return raw && VALID_TAB_IDS.has(raw as TabId) ? (raw as TabId) : "users";
+  }, [searchParams]);
+  const setTab = useCallback(
+    (next: TabId) => {
+      const params = new URLSearchParams(searchParams);
+      if (next === "users") {
+        params.delete("tab");
+      } else {
+        params.set("tab", next);
+      }
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
   const active = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   return (
     <>
-      <TopNav title="Admin" subtitle={active.subtitle} />
+      <TopNav title="Settings" subtitle={active.subtitle} />
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-5 md:px-6 md:py-6">
           <Tabs current={tab} onChange={setTab} />
           <div className="mt-5">
             {tab === "users" && <UsersPanel />}
+            {tab === "models" && <ModelsPanel />}
             {tab === "analytics" && <AnalyticsPanel />}
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}

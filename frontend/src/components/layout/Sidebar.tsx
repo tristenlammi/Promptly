@@ -10,7 +10,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  Settings2,
   ShieldCheck,
   Star,
   Trash2,
@@ -84,12 +83,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <nav className="flex flex-col items-center gap-1">
           <SideIcon to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" />
           <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
-          {isAdmin && (
-            <SideIcon to="/models" icon={<Settings2 className="h-4 w-4" />} label="Models" />
-          )}
           <SideIcon to="/files" icon={<FolderOpen className="h-4 w-4" />} label="Files" />
           {isAdmin && (
-            <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Admin" />
+            <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
           )}
         </nav>
       </aside>
@@ -128,13 +124,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <NewChatButton />
       </div>
 
-      {/* Nav */}
+      {/* Nav — Models management lives inside Settings now (admin-only
+          tab); keeping the top-level nav focused on the day-to-day
+          surfaces (Chat / Study / Files) reduces visual clutter. */}
       <nav className="mt-4 flex flex-col gap-0.5 px-2">
         <NavItem to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" end />
         <NavItem to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
-        {isAdmin && (
-          <NavItem to="/models" icon={<Settings2 className="h-4 w-4" />} label="Models" />
-        )}
         <NavItem to="/files" icon={<FolderOpen className="h-4 w-4" />} label="Files" />
         {/* Phase 4b: invites entry. Always rendered so the badge has a
             stable place to sit; click opens a modal listing pending
