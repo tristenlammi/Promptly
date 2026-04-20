@@ -6,26 +6,72 @@ import { Button } from "@/components/shared/Button";
 import { useCreateProvider } from "@/hooks/useProviders";
 import type { ProviderType } from "@/api/types";
 
-// Only OpenRouter is wired end-to-end today. The other types are listed for
-// visibility but disabled so users don't hit a 400 from the backend. They'll
-// be enabled as the ModelRouter gains per-provider adapters.
-const PROVIDER_TYPES: Array<{
+/**
+ * Per-type metadata driving the add-provider form. ``defaultName`` /
+ * ``baseUrlHint`` / ``apiKeyPlaceholder`` land in the form when a tile
+ * is selected; ``keyless`` toggles whether the API-key field is
+ * required and labels it accordingly.
+ */
+interface ProviderSpec {
   value: ProviderType;
   label: string;
-  enabled: boolean;
+  defaultName: string;
+  baseUrlHint: string;
+  apiKeyPlaceholder: string;
+  keyless?: boolean;
   hint?: string;
-}> = [
-  { value: "openrouter", label: "OpenRouter", enabled: true },
-  { value: "openai", label: "OpenAI", enabled: false, hint: "Coming soon" },
-  { value: "anthropic", label: "Anthropic", enabled: false, hint: "Coming soon" },
-  { value: "ollama", label: "Ollama (local)", enabled: false, hint: "Coming soon" },
+}
+
+const PROVIDER_SPECS: ProviderSpec[] = [
+  {
+    value: "openrouter",
+    label: "OpenRouter",
+    defaultName: "OpenRouter",
+    baseUrlHint: "https://openrouter.ai/api/v1",
+    apiKeyPlaceholder: "sk-or-...",
+  },
+  {
+    value: "openai",
+    label: "OpenAI",
+    defaultName: "OpenAI",
+    baseUrlHint: "https://api.openai.com/v1",
+    apiKeyPlaceholder: "sk-...",
+  },
+  {
+    value: "anthropic",
+    label: "Anthropic",
+    defaultName: "Anthropic",
+    baseUrlHint: "https://api.anthropic.com/v1",
+    apiKeyPlaceholder: "sk-ant-...",
+  },
+  {
+    value: "gemini",
+    label: "Google Gemini",
+    defaultName: "Gemini",
+    baseUrlHint: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKeyPlaceholder: "AIza...",
+  },
+  {
+    value: "ollama",
+    label: "Ollama (local)",
+    defaultName: "Ollama",
+    baseUrlHint: "http://localhost:11434/v1",
+    apiKeyPlaceholder: "Not required",
+    keyless: true,
+    hint: "No API key required",
+  },
   {
     value: "openai_compatible",
     label: "OpenAI-compatible",
-    enabled: false,
-    hint: "Coming soon",
+    defaultName: "Custom",
+    baseUrlHint: "https://…/v1",
+    apiKeyPlaceholder: "Bearer token",
   },
 ];
+
+function specFor(type: ProviderType): ProviderSpec {
+  return PROVIDER_SPECS.find((s) => s.value === type) ?? PROVIDER_SPECS[0];
+}
 
 interface AddProviderModalProps {
   open: boolean;
@@ -34,15 +80,22 @@ interface AddProviderModalProps {
 
 export function AddProviderModal({ open, onClose }: AddProviderModalProps) {
   const create = useCreateProvider();
-  const [name, setName] = useState("OpenRouter");
   const [type, setType] = useState<ProviderType>("openrouter");
+  const [name, setName] = useState(specFor("openrouter").defaultName);
+  // Track whether the admin has typed a custom name so switching
+  // provider types doesn't clobber it; only auto-fill when the field
+  // still holds the previous type's default.
+  const [nameTouched, setNameTouched] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const spec = specFor(type);
+
   const reset = () => {
-    setName("OpenRouter");
     setType("openrouter");
+    setName(specFor("openrouter").defaultName);
+    setNameTouched(false);
     setBaseUrl("");
     setApiKey("");
     setError(null);
@@ -53,15 +106,30 @@ export function AddProviderModal({ open, onClose }: AddProviderModalProps) {
     onClose();
   };
 
+  const handleTypeChange = (next: ProviderType) => {
+    setType(next);
+    // Auto-fill a sensible display name when the user hasn't edited it
+    // themselves. We wipe the api-key field on type change so a key
+    // pasted for one provider isn't accidentally submitted for another.
+    if (!nameTouched) setName(specFor(next).defaultName);
+    setApiKey("");
+    setError(null);
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const trimmedKey = apiKey.trim();
+    if (!spec.keyless && !trimmedKey) {
+      setError(`${spec.label} requires an API key.`);
+      return;
+    }
     try {
       await create.mutateAsync({
-        name: name.trim() || type,
+        name: name.trim() || spec.defaultName,
         type,
         base_url: baseUrl.trim() || null,
-        api_key: apiKey,
+        api_key: trimmedKey || null,
         enabled: true,
       });
       handleClose();
@@ -102,17 +170,16 @@ export function AddProviderModal({ open, onClose }: AddProviderModalProps) {
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Provider type">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {PROVIDER_TYPES.map((opt) => (
+            {PROVIDER_SPECS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
-                disabled={!opt.enabled}
-                onClick={() => setType(opt.value)}
+                onClick={() => handleTypeChange(opt.value)}
                 className={`rounded-card border px-3 py-2 text-left text-xs transition ${
                   type === opt.value
                     ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]"
                     : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--accent)]/40"
-                } disabled:cursor-not-allowed disabled:opacity-50`}
+                }`}
               >
                 <div className="font-medium">{opt.label}</div>
                 {opt.hint && <div className="mt-0.5 text-[10px]">{opt.hint}</div>}
@@ -122,27 +189,46 @@ export function AddProviderModal({ open, onClose }: AddProviderModalProps) {
         </Field>
 
         <Field label="Display name">
-          <TextInput value={name} onChange={setName} placeholder="My OpenRouter" />
+          <TextInput
+            value={name}
+            onChange={(v) => {
+              setName(v);
+              setNameTouched(true);
+            }}
+            placeholder={`My ${spec.defaultName}`}
+          />
         </Field>
 
-        <Field label="API key">
+        <Field
+          label={spec.keyless ? "API key (optional)" : "API key"}
+          hint={
+            spec.keyless
+              ? "Ollama doesn't require authentication. Leave this blank."
+              : undefined
+          }
+        >
           <TextInput
             value={apiKey}
             onChange={setApiKey}
             type="password"
-            placeholder="sk-or-..."
-            required
+            placeholder={spec.apiKeyPlaceholder}
+            required={!spec.keyless}
+            disabled={spec.keyless}
           />
         </Field>
 
         <Field
           label="Base URL"
-          hint="Optional — leave blank to use the provider's default."
+          hint={
+            type === "openai_compatible"
+              ? "Required for OpenAI-compatible providers (e.g. vLLM, LocalAI)."
+              : "Optional — leave blank to use the provider's default."
+          }
         >
           <TextInput
             value={baseUrl}
             onChange={setBaseUrl}
-            placeholder="https://openrouter.ai/api/v1"
+            placeholder={spec.baseUrlHint}
           />
         </Field>
 
@@ -195,7 +281,7 @@ function TextInput({
       {...rest}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
+      className="w-full rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60 disabled:opacity-60"
     />
   );
 }

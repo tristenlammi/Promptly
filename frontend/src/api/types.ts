@@ -295,6 +295,7 @@ export type ProviderType =
   | "openrouter"
   | "openai"
   | "anthropic"
+  | "gemini"
   | "ollama"
   | "openai_compatible";
 

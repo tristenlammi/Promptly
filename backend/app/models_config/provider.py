@@ -1,8 +1,26 @@
 """Provider abstraction layer.
 
-Phase 2b scope (per product decision): OpenRouter only. The abstraction is
-still generic so Anthropic native / Ollama / openai_compatible can plug in
-later without touching callers.
+Supported provider types
+------------------------
+``openrouter``        Aggregator with the richest model metadata; also the
+                      only type that can drive ``generate_image`` today
+                      because OpenRouter exposes image output via its
+                      OpenAI-shaped ``/chat/completions`` endpoint.
+``openai``            Native OpenAI.
+``anthropic``         Anthropic's OpenAI-compatibility layer for chat
+                      (Bearer auth); the native ``/v1/models`` endpoint
+                      for catalog fetches (``x-api-key`` auth).
+``gemini``            Google AI Studio's OpenAI-compatibility layer.
+``ollama``            Local Ollama server's OpenAI-compatibility layer.
+                      No API key required.
+``openai_compatible`` Generic catch-all for self-hosted OpenAI-shaped
+                      endpoints (vLLM, LocalAI, LM Studio, …).
+
+All five non-openrouter types are driven through the OpenAI SDK because
+they all expose an OpenAI-shaped ``/v1/chat/completions`` endpoint.
+Only the catalog (``list_models``) and credential check
+(``test_connection``) branches need per-type logic — the streaming and
+tool-calling path is identical.
 
 Multimodal content (Phase 2 of the file-attachment plan)
 --------------------------------------------------------
@@ -53,6 +71,32 @@ OPENROUTER_HEADERS = {
     "HTTP-Referer": "https://promptly.local",
     "X-Title": "Promptly",
 }
+
+# Per-type defaults for ``base_url``. ``None`` means the type requires
+# the admin to supply one at provider-create time (``openai_compatible``
+# is intentionally generic and has no single canonical host).
+DEFAULT_BASE_URLS: dict[str, str | None] = {
+    "openrouter": OPENROUTER_BASE_URL,
+    "openai": "https://api.openai.com/v1",
+    # Anthropic's OpenAI-compat endpoint for chat. List models still
+    # uses the native API path with ``x-api-key`` — see list_models.
+    "anthropic": "https://api.anthropic.com/v1",
+    # Google AI Studio's OpenAI-compat endpoint. The trailing ``openai``
+    # segment is required; the upstream also serves a non-compat shape
+    # without it which the OpenAI SDK can't talk to.
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    # Local dev default. ``host.docker.internal`` would also be valid
+    # when Promptly itself runs in Docker; admins override via base_url.
+    "ollama": "http://localhost:11434/v1",
+    "openai_compatible": None,
+}
+
+SUPPORTED_PROVIDER_TYPES: frozenset[str] = frozenset(DEFAULT_BASE_URLS)
+
+# Provider types that don't require an API key. Ollama's OpenAI-compat
+# endpoint accepts any placeholder token (including an empty string),
+# so the admin can save an Ollama provider without entering one.
+KEYLESS_PROVIDER_TYPES: frozenset[str] = frozenset({"ollama"})
 
 
 class ProviderError(Exception):
@@ -301,12 +345,40 @@ class GeneratedImage:
 
 
 def _api_key_for(provider: ModelProvider) -> str:
+    """Decrypt and return the provider's API key.
+
+    ``ollama`` doesn't actually authenticate, so we fabricate a
+    placeholder token when no key is stored — the OpenAI SDK requires
+    *something* in the ``Authorization`` header and Ollama cheerfully
+    ignores it.
+    """
     if not provider.api_key:
+        if provider.type in KEYLESS_PROVIDER_TYPES:
+            return "ollama"
         raise ProviderError(f"Provider {provider.name!r} has no API key configured")
     try:
         return decrypt_secret(provider.api_key)
     except ValueError as e:
         raise ProviderError(f"Unable to decrypt API key for {provider.name!r}: {e}") from e
+
+
+def _resolve_base_url(provider: ModelProvider) -> str:
+    """Return the effective base URL for a provider, no trailing slash."""
+    if provider.base_url:
+        return provider.base_url.rstrip("/")
+    default = DEFAULT_BASE_URLS.get(provider.type)
+    if not default:
+        raise ProviderError(
+            f"Provider type {provider.type!r} requires an explicit base_url"
+        )
+    return default.rstrip("/")
+
+
+def _headers_for(provider: ModelProvider) -> dict[str, str]:
+    """Per-type extra HTTP headers. Only OpenRouter needs any today."""
+    if provider.type == "openrouter":
+        return dict(OPENROUTER_HEADERS)
+    return {}
 
 
 def _detect_vision(raw_model: dict[str, Any]) -> bool:
@@ -365,16 +437,64 @@ def _detect_image_output(raw_model: dict[str, Any]) -> bool:
     return False
 
 
+def _detect_vision_by_id(provider_type: str, model_id: str) -> bool:
+    """Cheap per-type heuristic for whether a model can read images.
+
+    Non-openrouter providers don't return structured modality info on
+    their ``/models`` endpoint, so we match known vision families by
+    id. Err on the side of ``False`` for unknown entries — a wrong
+    ``True`` would let the user attach an image the model silently
+    drops, whereas a wrong ``False`` is just a missing "Vision" badge.
+    """
+    mid = model_id.lower()
+    if provider_type == "openai":
+        # gpt-4o*, gpt-4.1*, gpt-4-turbo*, gpt-4-vision*, o1*, o3*, o4*
+        if mid.startswith(("gpt-4o", "gpt-4.1", "gpt-4-turbo", "gpt-4-vision")):
+            return True
+        if mid.startswith(("o1", "o3", "o4", "chatgpt-4o")):
+            return True
+        return False
+    if provider_type == "anthropic":
+        # Every Claude 3+ model supports image input.
+        return "claude-3" in mid or "claude-4" in mid or "claude-sonnet" in mid or "claude-opus" in mid or "claude-haiku" in mid
+    if provider_type == "gemini":
+        # Every Gemini 1.5+ (and the ``*-pro-vision`` legacy) reads images.
+        return (
+            mid.startswith("gemini-1.5")
+            or mid.startswith("gemini-2")
+            or mid.startswith("gemini-3")
+            or "vision" in mid
+        )
+    if provider_type == "ollama":
+        # Known vision-capable open model families.
+        keywords = (
+            "llava", "bakllava", "moondream", "qwen2-vl", "qwen-vl",
+            "minicpm-v", "vision", "llama3.2-vision", "llama-3.2-vision",
+        )
+        return any(k in mid for k in keywords)
+    # openrouter / openai_compatible / anything else → let the richer
+    # catalog logic decide (openrouter) or default off.
+    return False
+
+
 def _client_for(provider: ModelProvider) -> AsyncOpenAI:
-    if provider.type != "openrouter":
+    """Build an AsyncOpenAI client aimed at ``provider``.
+
+    All supported providers expose an OpenAI-shaped
+    ``/chat/completions`` endpoint — the only thing that varies is the
+    ``base_url``, auth key, and a small set of per-type headers
+    (OpenRouter wants ``HTTP-Referer`` / ``X-Title``; everyone else
+    wants nothing).
+    """
+    if provider.type not in SUPPORTED_PROVIDER_TYPES:
         raise ProviderError(
-            f"Provider type {provider.type!r} is not supported yet "
-            "(Phase 2b: openrouter only)"
+            f"Unsupported provider type: {provider.type!r}. "
+            f"Supported: {sorted(SUPPORTED_PROVIDER_TYPES)}"
         )
     return AsyncOpenAI(
         api_key=_api_key_for(provider),
-        base_url=provider.base_url or OPENROUTER_BASE_URL,
-        default_headers=OPENROUTER_HEADERS,
+        base_url=_resolve_base_url(provider),
+        default_headers=_headers_for(provider),
     )
 
 
@@ -602,11 +722,13 @@ class ModelRouter:
         """
         if provider.type != "openrouter":
             raise ProviderError(
-                f"generate_image not implemented for {provider.type!r}"
+                "Image generation is only available through OpenRouter "
+                "today. Switch to an OpenRouter-backed model to use the "
+                "generate_image tool."
             )
 
         api_key = _api_key_for(provider)
-        base = (provider.base_url or OPENROUTER_BASE_URL).rstrip("/")
+        base = _resolve_base_url(provider)
         url = f"{base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -705,17 +827,27 @@ class ModelRouter:
     async def list_models(self, provider: ModelProvider) -> list[dict[str, Any]]:
         """Fetch the live model catalog for a provider.
 
-        For OpenRouter we hit `/models` directly (the OpenAI SDK also exposes
-        `client.models.list()` but we want the richer metadata OpenRouter adds
-        — context length, pricing, modality — which the SDK strips).
+        Dispatches per-type: OpenRouter keeps its bespoke endpoint for
+        the rich modality / pricing metadata; Anthropic uses its native
+        ``/v1/models`` with ``x-api-key`` auth; everyone else fetches
+        the OpenAI-compat ``/models`` list (works for OpenAI, Gemini,
+        Ollama, and any generic ``openai_compatible`` server).
         """
-        if provider.type != "openrouter":
-            raise ProviderError(
-                f"list_models not implemented for {provider.type!r}"
-            )
+        if provider.type == "openrouter":
+            return await self._list_models_openrouter(provider)
+        if provider.type == "anthropic":
+            return await self._list_models_anthropic(provider)
+        if provider.type in {"openai", "gemini", "ollama", "openai_compatible"}:
+            return await self._list_models_openai_compat(provider)
+        raise ProviderError(
+            f"list_models not implemented for {provider.type!r}"
+        )
 
+    async def _list_models_openrouter(
+        self, provider: ModelProvider
+    ) -> list[dict[str, Any]]:
         api_key = _api_key_for(provider)
-        url = f"{(provider.base_url or OPENROUTER_BASE_URL).rstrip('/')}/models"
+        url = f"{_resolve_base_url(provider)}/models"
         headers = {"Authorization": f"Bearer {api_key}", **OPENROUTER_HEADERS}
 
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -740,23 +872,159 @@ class ModelRouter:
             if isinstance(m, dict) and "id" in m
         ]
 
+    async def _list_models_openai_compat(
+        self, provider: ModelProvider
+    ) -> list[dict[str, Any]]:
+        """Fetch ``/models`` from any OpenAI-compatible endpoint.
+
+        Used for OpenAI, Gemini, Ollama, and the generic
+        ``openai_compatible`` type. Context window + pricing aren't
+        exposed in the shared shape, so we fall back to id-based
+        heuristics for vision detection and leave the numeric fields
+        blank.
+        """
+        api_key = _api_key_for(provider)
+        url = f"{_resolve_base_url(provider)}/models"
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+            except httpx.HTTPError as e:
+                raise ProviderError(f"Failed to fetch model list: {e}") from e
+
+        try:
+            body = resp.json()
+        except ValueError as e:
+            raise ProviderError(f"Model list returned non-JSON: {e}") from e
+
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list):
+            raise ProviderError("Model list response missing 'data' array")
+
+        out: list[dict[str, Any]] = []
+        for m in data:
+            if not isinstance(m, dict):
+                continue
+            model_id = m.get("id")
+            if not isinstance(model_id, str):
+                continue
+            out.append(
+                {
+                    "id": model_id,
+                    "display_name": (
+                        m.get("display_name")
+                        or m.get("name")
+                        or model_id
+                    ),
+                    "context_window": m.get("context_length")
+                    or m.get("context_window"),
+                    "pricing": m.get("pricing"),
+                    "description": m.get("description"),
+                    "supports_vision": _detect_vision_by_id(
+                        provider.type, model_id
+                    ),
+                    # Image *output* only wires up via OpenRouter today.
+                    "supports_image_output": False,
+                }
+            )
+        # Ollama hasn't historically sorted its catalog; sort by id for
+        # a deterministic display order in the admin UI.
+        if provider.type == "ollama":
+            out.sort(key=lambda r: r["id"])
+        return out
+
+    async def _list_models_anthropic(
+        self, provider: ModelProvider
+    ) -> list[dict[str, Any]]:
+        """Fetch Anthropic's catalog via its native API.
+
+        The OpenAI-compat layer doesn't mirror ``/models``, so we hit
+        ``/v1/models`` directly with ``x-api-key`` + ``anthropic-version``
+        headers. Response shape:
+        ``{"data": [{"type": "model", "id": "...", "display_name": "..."}]}``.
+        """
+        api_key = _api_key_for(provider)
+        base = _resolve_base_url(provider)
+        url = f"{base}/models"
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            try:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+            except httpx.HTTPError as e:
+                raise ProviderError(f"Failed to fetch model list: {e}") from e
+
+        try:
+            body = resp.json()
+        except ValueError as e:
+            raise ProviderError(f"Model list returned non-JSON: {e}") from e
+
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, list):
+            raise ProviderError("Model list response missing 'data' array")
+
+        out: list[dict[str, Any]] = []
+        for m in data:
+            if not isinstance(m, dict):
+                continue
+            model_id = m.get("id")
+            if not isinstance(model_id, str):
+                continue
+            out.append(
+                {
+                    "id": model_id,
+                    "display_name": m.get("display_name") or model_id,
+                    "context_window": None,
+                    "pricing": None,
+                    "description": None,
+                    "supports_vision": _detect_vision_by_id(
+                        "anthropic", model_id
+                    ),
+                    "supports_image_output": False,
+                }
+            )
+        return out
+
     async def test_connection(self, provider: ModelProvider) -> dict[str, Any]:
         """Validate the provider's credentials.
 
-        For OpenRouter we call `/auth/key` which is an authenticated endpoint
-        — a 401 here definitively means the key is bad. We deliberately avoid
-        `/models` because that endpoint is public and would report OK for
-        any key (even garbage).
+        * OpenRouter uses its authenticated ``/auth/key`` probe so an
+          invalid key returns a definitive 401 (the public ``/models``
+          endpoint would cheerfully accept garbage).
+        * Every other provider is validated by fetching the model list,
+          since that endpoint requires auth across OpenAI / Anthropic /
+          Gemini and is the cheapest read Ollama answers for.
         """
-        if provider.type != "openrouter":
-            return {"ok": False, "error": f"Test not implemented for {provider.type!r}"}
-
         try:
-            api_key = _api_key_for(provider)
+            _api_key_for(provider)  # surface key/decrypt errors up-front
         except ProviderError as e:
             return {"ok": False, "error": str(e)}
 
-        url = f"{(provider.base_url or OPENROUTER_BASE_URL).rstrip('/')}/auth/key"
+        if provider.type == "openrouter":
+            return await self._test_connection_openrouter(provider)
+
+        try:
+            models = await self.list_models(provider)
+        except ProviderError as e:
+            msg = str(e)
+            # Map common 401s to a nicer message so the admin card
+            # shows "Invalid API key" instead of a raw HTTPError dump.
+            if "401" in msg or "Unauthorized" in msg:
+                return {"ok": False, "error": "Invalid API key"}
+            return {"ok": False, "error": msg}
+        return {"ok": True, "model_count": len(models)}
+
+    async def _test_connection_openrouter(
+        self, provider: ModelProvider
+    ) -> dict[str, Any]:
+        api_key = _api_key_for(provider)
+        url = f"{_resolve_base_url(provider)}/auth/key"
         headers = {"Authorization": f"Bearer {api_key}", **OPENROUTER_HEADERS}
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -770,7 +1038,6 @@ class ModelRouter:
         if resp.status_code >= 400:
             return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
 
-        # Also report the live model count since the UI shows it on the card.
         try:
             models = await self.list_models(provider)
             return {"ok": True, "model_count": len(models)}

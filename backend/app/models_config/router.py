@@ -20,7 +20,12 @@ from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
 from app.database import get_db
 from app.models_config.models import ModelProvider
-from app.models_config.provider import ProviderError, model_router
+from app.models_config.provider import (
+    KEYLESS_PROVIDER_TYPES,
+    SUPPORTED_PROVIDER_TYPES,
+    ProviderError,
+    model_router,
+)
 from app.models_config.schemas import (
     AvailableModel,
     ProviderCreate,
@@ -31,9 +36,6 @@ from app.models_config.schemas import (
 from app.models_config.service import encrypt_api_key, provider_to_response
 
 router = APIRouter()
-
-# Phase 2b constraint: only OpenRouter is wired up end-to-end.
-SUPPORTED_TYPES_PHASE_2B = {"openrouter"}
 
 
 async def _get_owned_provider(
@@ -74,11 +76,23 @@ async def create_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> ProviderResponse:
-    if payload.type not in SUPPORTED_TYPES_PHASE_2B:
+    if payload.type not in SUPPORTED_PROVIDER_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Provider type {payload.type!r} is not supported yet. "
-                   f"Currently supported: {sorted(SUPPORTED_TYPES_PHASE_2B)}",
+            detail=(
+                f"Provider type {payload.type!r} is not supported. "
+                f"Supported: {sorted(SUPPORTED_PROVIDER_TYPES)}"
+            ),
+        )
+
+    # Keyless providers (Ollama) may omit ``api_key``; everyone else
+    # must supply one. We enforce it here rather than in the Pydantic
+    # schema so the error message is type-aware.
+    api_key_plain = (payload.api_key or "").strip()
+    if not api_key_plain and payload.type not in KEYLESS_PROVIDER_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Provider type {payload.type!r} requires an api_key",
         )
 
     provider = ModelProvider(
@@ -86,7 +100,7 @@ async def create_provider(
         name=payload.name,
         type=payload.type,
         base_url=str(payload.base_url) if payload.base_url else None,
-        api_key=encrypt_api_key(payload.api_key),
+        api_key=encrypt_api_key(api_key_plain) if api_key_plain else None,
         enabled=payload.enabled,
         models=[m.model_dump() for m in payload.models],
     )

@@ -7,9 +7,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl  # noqa: F401
 
-# Phase 2b ships OpenRouter only. Keep the Literal open-ended for forward
-# compatibility — the service layer is what enforces "openrouter only" today.
-ProviderType = Literal["openrouter", "openai", "anthropic", "ollama", "openai_compatible"]
+ProviderType = Literal[
+    "openrouter",
+    "openai",
+    "anthropic",
+    "gemini",
+    "ollama",
+    "openai_compatible",
+]
 
 
 class ModelInfo(BaseModel):
@@ -33,7 +38,9 @@ class ProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     type: ProviderType
     base_url: HttpUrl | None = None
-    api_key: str = Field(min_length=1, max_length=1024)
+    # Optional because keyless providers (Ollama) don't need one; the
+    # router rejects an empty key for every other type.
+    api_key: str | None = Field(default=None, max_length=1024)
     enabled: bool = True
     # Optional client-curated subset of models. If empty, every model from
     # list_models() will be used.

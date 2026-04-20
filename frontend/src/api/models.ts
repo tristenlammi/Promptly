@@ -11,7 +11,8 @@ export interface CreateProviderPayload {
   name: string;
   type: ProviderType;
   base_url?: string | null;
-  api_key: string;
+  /** Optional — keyless types (e.g. Ollama) may omit the key. */
+  api_key?: string | null;
   enabled?: boolean;
   models?: ModelInfo[];
 }
