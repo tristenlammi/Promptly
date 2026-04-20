@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { History, Pencil, Puzzle } from "lucide-react";
+import { History, NotebookPen, Puzzle } from "lucide-react";
 
 import { studyApi } from "@/api/study";
 import { useExerciseHistoryQuery } from "@/hooks/useStudy";
 import { useStudyStore } from "@/store/studyStore";
-import type {
-  ExcalidrawSnapshot,
-  WhiteboardExerciseDetail,
-} from "@/api/types";
+import type { WhiteboardExerciseDetail } from "@/api/types";
 import { cn } from "@/utils/cn";
 
 import { ExerciseHistory } from "./ExerciseHistory";
@@ -15,21 +12,17 @@ import {
   ExerciseRenderer,
   type ExerciseRendererHandle,
 } from "./ExerciseRenderer";
-import { NotesCanvas, type NotesCanvasHandle } from "./NotesCanvas";
 import { SubmitBar } from "./SubmitBar";
+import { UnitNotes } from "./UnitNotes";
 
 type Tab = "exercise" | "notes" | "history";
 
 interface WhiteboardPanelProps {
   sessionId: string;
-  initialSnapshot: ExcalidrawSnapshot | null;
-  /** Called when the student submits. Receives the answer payload from the
-   *  iframe and a (possibly-null) PNG of the current Excalidraw scene. */
-  onSubmit: (args: {
-    exerciseId: string;
-    answers: unknown;
-    snapshotPngBase64: string | null;
-  }) => void;
+  initialNotes: string | null;
+  /** Called when the student submits. Receives the answer payload from
+   *  the exercise iframe. */
+  onSubmit: (args: { exerciseId: string; answers: unknown }) => void;
 }
 
 export interface WhiteboardPanelHandle {
@@ -40,16 +33,17 @@ export interface WhiteboardPanelHandle {
 
 /**
  * Split-pane right side. Owns three sub-views in a single panel:
- *   - Exercise: the sandboxed iframe rendering AI-authored HTML.
- *   - Notes: the Excalidraw freehand canvas.
+ *   - Exercise: the sandboxed iframe rendering AI-authored HTML
+ *     (quizzes, drag-and-drop puzzles, short-answer prompts).
+ *   - Notes: a plain-text scratchpad for the student's own notes.
  *   - History: list of past exercises for quick re-entry.
  *
- * Also owns the sticky SubmitBar that dispatches ``REQUEST_SUBMIT`` to the
- * active iframe.
+ * Also owns the sticky SubmitBar that dispatches ``REQUEST_SUBMIT`` to
+ * the active iframe.
  */
 export function WhiteboardPanel({
   sessionId,
-  initialSnapshot,
+  initialNotes,
   onSubmit,
 }: WhiteboardPanelProps) {
   const activeExercise = useStudyStore((s) => s.activeExercise);
@@ -60,7 +54,6 @@ export function WhiteboardPanel({
 
   const [tab, setTab] = useState<Tab>("notes");
   const rendererRef = useRef<ExerciseRendererHandle | null>(null);
-  const notesRef = useRef<NotesCanvasHandle | null>(null);
 
   const exercisesQuery = useExerciseHistoryQuery(sessionId);
 
@@ -91,14 +84,13 @@ export function WhiteboardPanel({
     }
   };
 
-  const handleIframeSubmit = async (answers: unknown) => {
+  const handleIframeSubmit = (answers: unknown) => {
     console.log("[promptly] handleIframeSubmit", {
       activeExerciseId: activeExercise?.id ?? null,
       answers,
     });
     if (!activeExercise) return;
-    const pngBase64 = (await notesRef.current?.exportPngBase64()) ?? null;
-    onSubmit({ exerciseId: activeExercise.id, answers, snapshotPngBase64: pngBase64 });
+    onSubmit({ exerciseId: activeExercise.id, answers });
   };
 
   const requestSubmitViaBar = () => {
@@ -110,10 +102,6 @@ export function WhiteboardPanel({
       console.warn("[promptly] requestSubmitViaBar aborted — no active exercise");
       return;
     }
-    // Auto-switch to the Exercise tab if the student somehow clicked the
-    // submit bar while on Notes / History. The bar is only visible on the
-    // Exercise tab today, but this guards against future layouts that
-    // keep it always-visible.
     if (tab !== "exercise") {
       console.warn("[promptly] requestSubmitViaBar: switching tab to exercise first");
       setTab("exercise");
@@ -154,7 +142,7 @@ export function WhiteboardPanel({
           )}
         </div>
 
-        {/* Notes/Excalidraw — ALWAYS mounted so scene state survives tab flips. */}
+        {/* Notes — ALWAYS mounted so unsaved edits never get dropped on tab flip. */}
         <div
           className={cn(
             "absolute inset-0",
@@ -162,10 +150,9 @@ export function WhiteboardPanel({
           )}
           aria-hidden={tab !== "notes"}
         >
-          <NotesCanvas
-            ref={notesRef}
+          <UnitNotes
             sessionId={sessionId}
-            initialSnapshot={initialSnapshot}
+            initialNotes={initialNotes}
             visible={tab === "notes"}
           />
         </div>
@@ -236,7 +223,7 @@ function TabBar({ tab, setTab, hasExercise }: TabBarProps) {
         "Exercise",
         !hasExercise
       )}
-      {btn("notes", <Pencil className="h-3.5 w-3.5" />, "Notes")}
+      {btn("notes", <NotebookPen className="h-3.5 w-3.5" />, "Notes")}
       {btn("history", <History className="h-3.5 w-3.5" />, "History")}
     </div>
   );
@@ -251,12 +238,12 @@ function EmptyExerciseState() {
         </div>
         <p className="mt-2">
           Ask the tutor for a quiz or a practice problem and it will appear
-          here. Meanwhile, you can sketch in the Notes tab.
+          here. Meanwhile, you can jot things down in the Notes tab.
         </p>
       </div>
     </div>
   );
 }
 
-// Re-export for convenience — some callers import NotesCanvas directly.
+// Re-export for convenience — some callers import the detail type from here.
 export type { WhiteboardExerciseDetail };

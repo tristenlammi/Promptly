@@ -244,11 +244,7 @@ export function StudySessionPage() {
   );
 
   const handleExerciseSubmit = useCallback(
-    async (args: {
-      exerciseId: string;
-      answers: unknown;
-      snapshotPngBase64: string | null;
-    }) => {
+    async (args: { exerciseId: string; answers: unknown }) => {
       if (!sessionId) return;
       setSubmissionError(null);
       setSubmissionStatus("submitting");
@@ -256,7 +252,6 @@ export function StudySessionPage() {
         const resp = await studyApi.submitExercise(sessionId, {
           exercise_id: args.exerciseId,
           answers: args.answers,
-          excalidraw_snapshot_b64: args.snapshotPngBase64,
         });
         appendStudyMessage(resp.user_message);
         setSubmissionStatus("awaiting_review");
@@ -450,7 +445,7 @@ export function StudySessionPage() {
               {showWhiteboard && session ? (
                 <WhiteboardPanel
                   sessionId={session.id}
-                  initialSnapshot={session.excalidraw_snapshot}
+                  initialNotes={session.notes_md}
                   onSubmit={handleExerciseSubmit}
                 />
               ) : kind === "unit" && unit && project ? (

@@ -70,12 +70,12 @@ from app.study.schemas import (
     StudySessionSummary,
     StudyUnitSummary,
     UnitEnterResponse,
+    NotesState,
+    NotesUpdate,
     WhiteboardExerciseDetail,
     WhiteboardExerciseSummary,
-    WhiteboardState,
     WhiteboardSubmitRequest,
     WhiteboardSubmitResponse,
-    WhiteboardUpdate,
 )
 from app.study.service import (
     StudyStreamContext,
@@ -946,7 +946,7 @@ async def get_session(
             "exam_id": session.exam_id,
             "created_at": session.created_at,
             "updated_at": session.updated_at,
-            "excalidraw_snapshot": session.excalidraw_snapshot,
+            "notes_md": session.notes_md,
             "messages": messages,
         }
     )
@@ -1407,41 +1407,41 @@ async def stream_response(
 
 
 # ====================================================================
-# Whiteboard snapshot persistence
+# Unit notes (plain-text scratchpad)
 # ====================================================================
 @router.get(
-    "/sessions/{session_id}/whiteboard",
-    response_model=WhiteboardState,
+    "/sessions/{session_id}/notes",
+    response_model=NotesState,
 )
-async def get_whiteboard(
+async def get_notes(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> WhiteboardState:
+) -> NotesState:
     session, _ = await _get_owned_session(session_id, user, db)
-    return WhiteboardState(
-        snapshot=session.excalidraw_snapshot,
+    return NotesState(
+        notes=session.notes_md,
         updated_at=session.updated_at,
     )
 
 
 @router.post(
-    "/sessions/{session_id}/whiteboard/update",
-    response_model=WhiteboardState,
+    "/sessions/{session_id}/notes/update",
+    response_model=NotesState,
 )
-async def update_whiteboard(
+async def update_notes(
     session_id: uuid.UUID,
-    payload: WhiteboardUpdate,
+    payload: NotesUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> WhiteboardState:
+) -> NotesState:
     session, _ = await _get_owned_session(session_id, user, db)
-    session.excalidraw_snapshot = payload.snapshot
+    session.notes_md = payload.notes
     session.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(session)
-    return WhiteboardState(
-        snapshot=session.excalidraw_snapshot,
+    return NotesState(
+        notes=session.notes_md,
         updated_at=session.updated_at,
     )
 
@@ -1612,7 +1612,6 @@ async def submit_exercise(
     now = datetime.now(timezone.utc)
     exercise.status = "submitted"
     exercise.answer_payload = payload.answers
-    exercise.excalidraw_snap = payload.excalidraw_snapshot_b64
     exercise.submitted_at = now
 
     user_msg = StudyMessage(

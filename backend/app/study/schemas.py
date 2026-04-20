@@ -44,7 +44,7 @@ class StudySessionSummary(BaseModel):
 
 
 class StudySessionDetail(StudySessionSummary):
-    excalidraw_snapshot: dict[str, Any] | None = None
+    notes_md: str | None = None
     messages: list[StudyMessageResponse] = Field(default_factory=list)
 
 
@@ -216,13 +216,13 @@ class StudySendMessageResponse(BaseModel):
     user_message: StudyMessageResponse
 
 
-# ---- Whiteboard snapshot ----
-class WhiteboardUpdate(BaseModel):
-    snapshot: dict[str, Any] | None = None
+# ---- Unit notes (plain text scratchpad) ----
+class NotesUpdate(BaseModel):
+    notes: str | None = None
 
 
-class WhiteboardState(BaseModel):
-    snapshot: dict[str, Any] | None = None
+class NotesState(BaseModel):
+    notes: str | None = None
     updated_at: datetime
 
 
@@ -246,13 +246,11 @@ class WhiteboardExerciseDetail(WhiteboardExerciseSummary):
     html: str
     answer_payload: Any = None
     ai_feedback: str | None = None
-    excalidraw_snap: str | None = None
 
 
 class WhiteboardSubmitRequest(BaseModel):
     exercise_id: uuid.UUID
     answers: Any = None
-    excalidraw_snapshot_b64: str | None = None
 
 
 class WhiteboardSubmitResponse(BaseModel):

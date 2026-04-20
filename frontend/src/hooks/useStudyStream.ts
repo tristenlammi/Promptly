@@ -199,7 +199,6 @@ export function useStudyStream(): UseStudyStreamResult {
             html: ex.html,
             answer_payload: null,
             ai_feedback: null,
-            excalidraw_snap: null,
           };
           const summary: WhiteboardExerciseSummary = {
             id: ex.id,

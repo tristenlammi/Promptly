@@ -66,8 +66,6 @@ export default defineConfig({
         // Precache the built app shell. Vite emits hashed filenames, so
         // Workbox can cache them indefinitely and bust on rebuilds.
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        // Bumped from the 2 MB default so larger chunks (Excalidraw)
-        // get precached instead of falling back to the network.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
 
         // SPA routing fallback — every URL without a static match
@@ -107,13 +105,6 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  // Excalidraw 0.17 ships a CJS entry that branches on `process.env.IS_PREACT`.
-  // Vite never defines that at build time so the runtime reads `undefined` and
-  // proceeds to the non-preact branch — but only if the symbol is actually
-  // substituted. Define it explicitly to be safe.
-  define: {
-    "process.env.IS_PREACT": JSON.stringify("false"),
-  },
   build: {
     // Bumped from Vite's default 500 KB so the chart / editor chunks
     // below don't trip the warning. They're intentionally large; the
@@ -122,17 +113,15 @@ export default defineConfig({
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
-        // Hand-rolled chunk groups. We split by feature surface so a
-        // user who never opens an Excalidraw whiteboard never pays for
-        // the ~700 KB Excalidraw bundle, and admin-only pages (charts)
-        // stay out of the regular user's main chunk.
+        // Hand-rolled chunk groups. We split by feature surface so
+        // admin-only pages (charts) stay out of the regular user's
+        // main chunk.
         //
         // The function form is preferred over the object form because
         // it lets us match by substring across both flat and nested
         // dependency paths (Vite hands us absolute module IDs).
         manualChunks(id: string): string | undefined {
           if (!id.includes("node_modules")) return undefined;
-          if (id.includes("excalidraw")) return "excalidraw";
           if (id.includes("@tiptap") || id.includes("prosemirror")) {
             return "tiptap";
           }

@@ -230,8 +230,10 @@ class StudySession(UUIDPKMixin, TimestampMixin, Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("study_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # Full Excalidraw scene JSON, debounced auto-save every ~30s.
-    excalidraw_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Free-form student notes for this unit session. Plain text (the
+    # frontend renders it as a simple textarea), debounced auto-save
+    # every few seconds. Replaced the old Excalidraw scene JSON in 0026.
+    notes_md: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Discriminator: ``unit`` for unit-tutor sessions, ``exam`` for a
     # final-exam session, ``legacy`` for free-form sessions created
@@ -276,7 +278,6 @@ class WhiteboardExercise(UUIDPKMixin, CreatedAtMixin, Base):
     )
 
     answer_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    excalidraw_snap: Mapped[str | None] = mapped_column(Text, nullable=True)  # base64 PNG
     ai_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -116,8 +116,7 @@ Everything stateful lives under the project directory in a single `data/` folder
 ├── data/
 │   ├── postgres/      # database (back this up)
 │   ├── redis/         # cache + rate-limit counters
-│   ├── uploads/       # user files + AI-generated artefacts (back this up)
-│   └── whiteboard/    # Excalidraw snapshots
+│   └── uploads/       # user files + AI-generated artefacts (back this up)
 ├── searxng/           # search engine config (in git)
 └── docker-compose.yml
 ```

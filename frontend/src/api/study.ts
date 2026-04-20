@@ -1,6 +1,6 @@
 import { apiClient } from "./client";
 import type {
-  ExcalidrawSnapshot,
+  NotesState,
   StartExamResponse,
   StudyExamSummary,
   StudyProjectDetail,
@@ -11,7 +11,6 @@ import type {
   UnitEnterResponse,
   WhiteboardExerciseDetail,
   WhiteboardExerciseSummary,
-  WhiteboardState,
   WhiteboardSubmitResponse,
 } from "./types";
 
@@ -190,19 +189,19 @@ export const studyApi = {
     return `/api/study/sessions/${sessionId}/stream/${streamId}`;
   },
 
-  async getWhiteboard(sessionId: string): Promise<WhiteboardState> {
-    const { data } = await apiClient.get<WhiteboardState>(
-      `/study/sessions/${sessionId}/whiteboard`
+  async getNotes(sessionId: string): Promise<NotesState> {
+    const { data } = await apiClient.get<NotesState>(
+      `/study/sessions/${sessionId}/notes`
     );
     return data;
   },
-  async updateWhiteboard(
+  async updateNotes(
     sessionId: string,
-    snapshot: ExcalidrawSnapshot | null
-  ): Promise<WhiteboardState> {
-    const { data } = await apiClient.post<WhiteboardState>(
-      `/study/sessions/${sessionId}/whiteboard/update`,
-      { snapshot }
+    notes: string | null
+  ): Promise<NotesState> {
+    const { data } = await apiClient.post<NotesState>(
+      `/study/sessions/${sessionId}/notes/update`,
+      { notes }
     );
     return data;
   },
@@ -241,7 +240,6 @@ export const studyApi = {
     payload: {
       exercise_id: string;
       answers: unknown;
-      excalidraw_snapshot_b64?: string | null;
     }
   ): Promise<WhiteboardSubmitResponse> {
     const { data } = await apiClient.post<WhiteboardSubmitResponse>(

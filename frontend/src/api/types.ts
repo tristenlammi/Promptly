@@ -546,11 +546,8 @@ export interface StudySessionSummary {
   updated_at: string;
 }
 
-/** Raw Excalidraw scene JSON (elements, appState, files). */
-export type ExcalidrawSnapshot = Record<string, unknown>;
-
 export interface StudySessionDetail extends StudySessionSummary {
-  excalidraw_snapshot: ExcalidrawSnapshot | null;
+  notes_md: string | null;
   messages: StudyMessage[];
 }
 
@@ -686,8 +683,8 @@ export interface StudySendMessageResponse {
   user_message: StudyMessage;
 }
 
-export interface WhiteboardState {
-  snapshot: ExcalidrawSnapshot | null;
+export interface NotesState {
+  notes: string | null;
   updated_at: string;
 }
 
@@ -707,7 +704,6 @@ export interface WhiteboardExerciseDetail extends WhiteboardExerciseSummary {
   html: string;
   answer_payload: unknown;
   ai_feedback: string | null;
-  excalidraw_snap: string | null;
 }
 
 export interface WhiteboardSubmitResponse {
