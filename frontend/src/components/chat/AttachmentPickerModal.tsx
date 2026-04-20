@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import {
+  ArrowLeft,
+  Camera,
   ChevronRight,
   File as FileIcon,
   FileText,
@@ -15,6 +17,7 @@ import type { FileItem, FileScope, FolderItem } from "@/api/files";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useBrowseFiles, useUploadFile } from "@/hooks/useFiles";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
@@ -34,6 +37,7 @@ interface Props {
 }
 
 type Tab = "pick" | "upload";
+type MobileView = "home" | "browse";
 
 export function AttachmentPickerModal({
   open,
@@ -41,11 +45,17 @@ export function AttachmentPickerModal({
   onAttach,
   alreadyAttached,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("pick");
+  const isMobile = useIsMobile();
+  // Desktop: default to the upload flow — users almost always arrive
+  // here wanting to attach a fresh file, and the previous "From Files"
+  // default was an extra click for the common case.
+  const [tab, setTab] = useState<Tab>(isMobile ? "pick" : "upload");
+  const [mobileView, setMobileView] = useState<MobileView>("home");
   const [selected, setSelected] = useState<Record<string, AttachedFile>>({});
 
   const reset = () => {
-    setTab("pick");
+    setTab(isMobile ? "pick" : "upload");
+    setMobileView("home");
     setSelected({});
   };
 
@@ -59,6 +69,22 @@ export function AttachmentPickerModal({
     if (toAttach.length === 0) return;
     onAttach(toAttach);
     reset();
+  };
+
+  const onUploaded = (f: FileItem) => {
+    setSelected((prev) => ({
+      ...prev,
+      [f.id]: {
+        id: f.id,
+        filename: f.filename,
+        mime_type: f.mime_type,
+        size_bytes: f.size_bytes,
+      },
+    }));
+    // Desktop: flip back to the pick tab so the new upload sits
+    // alongside anything already selected. Mobile: stay on the home
+    // screen — the selection count in the footer is enough feedback.
+    if (!isMobile) setTab("pick");
   };
 
   const alreadyAttachedIds = new Set(alreadyAttached.map((a) => a.id));
@@ -85,15 +111,61 @@ export function AttachmentPickerModal({
         </>
       }
     >
+      {isMobile ? (
+        <MobileBody
+          view={mobileView}
+          onViewChange={setMobileView}
+          onUploaded={onUploaded}
+          alreadyAttachedIds={alreadyAttachedIds}
+          selected={selected}
+          setSelected={setSelected}
+        />
+      ) : (
+        <DesktopBody
+          tab={tab}
+          onTabChange={setTab}
+          onUploaded={onUploaded}
+          alreadyAttachedIds={alreadyAttachedIds}
+          selected={selected}
+          setSelected={setSelected}
+        />
+      )}
+    </Modal>
+  );
+}
+
+// --------------------------------------------------------------------
+// Desktop body — two-tab segmented control.
+// --------------------------------------------------------------------
+function DesktopBody({
+  tab,
+  onTabChange,
+  onUploaded,
+  alreadyAttachedIds,
+  selected,
+  setSelected,
+}: {
+  tab: Tab;
+  onTabChange: (t: Tab) => void;
+  onUploaded: (f: FileItem) => void;
+  alreadyAttachedIds: Set<string>;
+  selected: Record<string, AttachedFile>;
+  setSelected: React.Dispatch<React.SetStateAction<Record<string, AttachedFile>>>;
+}) {
+  return (
+    <>
+      {/* Segmented tabs — parent radius is ``rounded-input`` (1.5rem
+          pill) so the inner active pill uses ``rounded-full`` to match
+          the outer shape cleanly. */}
       <div className="mb-3 flex items-center gap-1 rounded-input border border-[var(--border)] bg-[var(--bg)] p-1">
         <TabButton
           active={tab === "pick"}
-          onClick={() => setTab("pick")}
+          onClick={() => onTabChange("pick")}
           label="From Files"
         />
         <TabButton
           active={tab === "upload"}
-          onClick={() => setTab("upload")}
+          onClick={() => onTabChange("upload")}
           label="Upload new"
         />
       </div>
@@ -105,24 +177,56 @@ export function AttachmentPickerModal({
           setSelected={setSelected}
         />
       ) : (
-        <UploadTab
-          onUploaded={(f) => {
-            setSelected((prev) => ({
-              ...prev,
-              [f.id]: {
-                id: f.id,
-                filename: f.filename,
-                mime_type: f.mime_type,
-                size_bytes: f.size_bytes,
-              },
-            }));
-            // Flip back to the pick tab so the user sees their new selection
-            // in context with anything else they picked before.
-            setTab("pick");
-          }}
-        />
+        <UploadTab onUploaded={onUploaded} />
       )}
-    </Modal>
+    </>
+  );
+}
+
+// --------------------------------------------------------------------
+// Mobile body — share-sheet-style landing with Camera / Upload / Browse,
+// flipping into the file browser on demand. No tab switcher so the UI
+// stays thumb-friendly and focused.
+// --------------------------------------------------------------------
+function MobileBody({
+  view,
+  onViewChange,
+  onUploaded,
+  alreadyAttachedIds,
+  selected,
+  setSelected,
+}: {
+  view: MobileView;
+  onViewChange: (v: MobileView) => void;
+  onUploaded: (f: FileItem) => void;
+  alreadyAttachedIds: Set<string>;
+  selected: Record<string, AttachedFile>;
+  setSelected: React.Dispatch<React.SetStateAction<Record<string, AttachedFile>>>;
+}) {
+  if (view === "browse") {
+    return (
+      <div className="space-y-3">
+        <button
+          onClick={() => onViewChange("home")}
+          className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)]"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back
+        </button>
+        <PickFromFilesTab
+          alreadyAttachedIds={alreadyAttachedIds}
+          selected={selected}
+          setSelected={setSelected}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <MobileHomeActions
+      onUploaded={onUploaded}
+      onBrowse={() => onViewChange("browse")}
+    />
   );
 }
 
@@ -139,7 +243,10 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1.5 text-sm transition",
+        // ``rounded-full`` keeps the active pill's curvature in sync
+        // with the outer ``rounded-input`` container so the highlight
+        // doesn't look clipped at the edges.
+        "inline-flex flex-1 items-center justify-center rounded-full px-3 py-1.5 text-sm transition",
         active
           ? "bg-[var(--surface)] text-[var(--text)] shadow-sm"
           : "text-[var(--text-muted)] hover:text-[var(--text)]"
@@ -411,6 +518,136 @@ function FileTypeIconCompact({ mime }: { mime: string }) {
   )
     return <FileText className="h-4 w-4 shrink-0 text-sky-500" />;
   return <FileIcon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />;
+}
+
+// --------------------------------------------------------------------
+// Mobile home — three stacked share-sheet actions.
+// --------------------------------------------------------------------
+function MobileHomeActions({
+  onUploaded,
+  onBrowse,
+}: {
+  onUploaded: (f: FileItem) => void;
+  onBrowse: () => void;
+}) {
+  const cameraRef = useRef<HTMLInputElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const upload = useUploadFile();
+  const [err, setErr] = useState<string | null>(null);
+
+  const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset so picking the same file twice in a row still fires change.
+    e.target.value = "";
+    if (!file) return;
+    setErr(null);
+    try {
+      const result = await upload.mutateAsync({
+        scope: "mine",
+        file,
+        folderId: null,
+        route: "chat",
+      });
+      onUploaded(result);
+    } catch (e) {
+      setErr(extractError(e));
+    }
+  };
+
+  const busy = upload.isPending;
+
+  return (
+    <div className="space-y-2">
+      <MobileActionRow
+        icon={<Camera className="h-5 w-5" />}
+        label="Take photo"
+        hint="Use your camera"
+        onClick={() => cameraRef.current?.click()}
+        disabled={busy}
+        busy={busy}
+      />
+      <MobileActionRow
+        icon={<Upload className="h-5 w-5" />}
+        label="Upload from device"
+        hint="Photos, documents, anything up to 40 MB"
+        onClick={() => fileRef.current?.click()}
+        disabled={busy}
+      />
+      <MobileActionRow
+        icon={<FolderIcon className="h-5 w-5" />}
+        label="Choose from Files"
+        hint="Browse your saved files and shared pool"
+        onClick={onBrowse}
+        disabled={busy}
+      />
+
+      {/* ``capture="environment"`` hints to iOS / Android to open the
+          rear camera directly; desktop browsers ignore it and fall
+          back to a normal file picker (harmless — this component only
+          renders on mobile viewports). */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handlePick}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        className="hidden"
+        onChange={handlePick}
+      />
+
+      {err && (
+        <p className="pt-1 text-sm text-red-600 dark:text-red-400">{err}</p>
+      )}
+    </div>
+  );
+}
+
+function MobileActionRow({
+  icon,
+  label,
+  hint,
+  onClick,
+  disabled,
+  busy,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+  onClick: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-card border px-4 py-3 text-left transition",
+        "border-[var(--border)] bg-[var(--bg)]",
+        "active:bg-black/[0.04] dark:active:bg-white/[0.06]",
+        "hover:border-[var(--accent)]/60",
+        "disabled:cursor-not-allowed disabled:opacity-60"
+      )}
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[var(--accent)]">
+        {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-[var(--text)]">
+          {label}
+        </span>
+        <span className="block truncate text-xs text-[var(--text-muted)]">
+          {hint}
+        </span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+    </button>
+  );
 }
 
 // --------------------------------------------------------------------
