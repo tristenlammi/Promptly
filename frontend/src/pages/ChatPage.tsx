@@ -524,6 +524,7 @@ export function ChatPage() {
           toolsEnabled={toolsEnabled}
           onToolsChange={handleToolsChange}
           footer={footerText}
+          autoFocus
           placeholder={
             selectedModel
               ? "Message Promptly..."

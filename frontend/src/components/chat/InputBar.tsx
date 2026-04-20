@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
 } from "react";
 import {
@@ -51,6 +52,14 @@ interface InputBarProps {
    * session view where attachments don't apply yet).
    */
   allowAttachments?: boolean;
+  /**
+   * Focus the textarea on mount. Use on surfaces where the student's
+   * primary intent is to type — chat / study pages — so the user can
+   * start typing immediately without having to click into the field.
+   * Uses ``preventScroll`` so we don't jerk the page when focus lands
+   * on a long chat history.
+   */
+  autoFocus?: boolean;
 }
 
 /** Pending in-flight upload tracked alongside finished attachments. */
@@ -75,6 +84,7 @@ export function InputBar({
   onToolsChange,
   footer,
   allowAttachments = true,
+  autoFocus = false,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
@@ -111,6 +121,26 @@ export function InputBar({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [value]);
+
+  // One-shot focus on mount so new chats / study sessions land the
+  // cursor in the composer without the user having to click first.
+  // ``preventScroll`` keeps long chat histories from jumping to the
+  // bottom when focus lands.
+  useEffect(() => {
+    if (!autoFocus) return;
+    if (disabled) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+    } catch {
+      el.focus();
+    }
+    // Only run on mount — re-focusing on every render would steal
+    // focus away from other inputs (model picker, settings popovers)
+    // as soon as the user opens them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ----------------------------------------------------------------
   // Upload helper — dropped files & paste-uploads share this path so the
@@ -160,6 +190,68 @@ export function InputBar({
       }
     },
     [invalidateFiles]
+  );
+
+  // ----------------------------------------------------------------
+  // Clipboard paste — lets the user Ctrl/Cmd+V a screenshot (or any
+  // image they copied from a browser / editor) straight into the
+  // composer. We reuse ``uploadDroppedFile`` so pasted images flow
+  // through the exact same pending → attached chip lifecycle as
+  // drag-drop and the file picker.
+  //
+  // Plain text pastes are left untouched: we only call
+  // ``preventDefault`` when at least one image was actually handled,
+  // otherwise the browser's default paste behaviour (inserting the
+  // clipboard text into the textarea) still works.
+  // ----------------------------------------------------------------
+  const handlePaste = useCallback(
+    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!allowAttachments || disabled || streaming) return;
+      const data = event.clipboardData;
+      if (!data) return;
+
+      const images: File[] = [];
+      // ``items`` is the richer API (gives us screenshots that
+      // browsers expose as ``image/png`` entries with no filename);
+      // fall back to ``files`` for older surfaces.
+      if (data.items && data.items.length > 0) {
+        for (let i = 0; i < data.items.length; i++) {
+          const item = data.items[i];
+          if (item.kind === "file" && item.type.startsWith("image/")) {
+            const file = item.getAsFile();
+            if (file) images.push(file);
+          }
+        }
+      }
+      if (images.length === 0 && data.files && data.files.length > 0) {
+        for (let i = 0; i < data.files.length; i++) {
+          const file = data.files[i];
+          if (file.type.startsWith("image/")) images.push(file);
+        }
+      }
+
+      if (images.length === 0) return;
+      event.preventDefault();
+      for (const file of images) {
+        // Screenshots often come through with a generic ``image.png``
+        // name (or none at all). Stamp them with a timestamp so the
+        // chip label and the Files page entry are distinguishable.
+        const named =
+          file.name && file.name !== "image.png"
+            ? file
+            : new File(
+                [file],
+                `pasted-${new Date()
+                  .toISOString()
+                  .replace(/[:.]/g, "-")}.${
+                  (file.type.split("/")[1] || "png").toLowerCase()
+                }`,
+                { type: file.type || "image/png" }
+              );
+        void uploadDroppedFile(named);
+      }
+    },
+    [allowAttachments, disabled, streaming, uploadDroppedFile]
   );
 
   // ----------------------------------------------------------------
@@ -319,6 +411,7 @@ export function InputBar({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKey}
+            onPaste={handlePaste}
             placeholder={placeholder}
             rows={1}
             disabled={disabled}

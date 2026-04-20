@@ -60,6 +60,7 @@ export function ToolStatusBlock({ invocation }: ToolStatusBlockProps) {
         aria-hidden
       />
       <span className="truncate font-medium">{label}</span>
+      <ToolQueryBadge name={invocation.name} meta={invocation.meta} />
       {invocation.status === "ok" && (
         <ToolMetaBadges meta={invocation.meta} />
       )}
@@ -129,6 +130,43 @@ const DEFAULT_PRESENTATION: ToolPresentation = {
   done: "Tool complete",
   failed: "Tool failed",
 };
+
+/** Inline, truncated rendering of the argument the tool ran with.
+ *
+ * The model is allowed up to three ``web_search`` calls per turn so it
+ * can refine a query, but with only the generic "Searched the web" pill
+ * on each, two chips back-to-back look like a duplicate bug. Surfacing
+ * the ``query`` (and the ``url`` for ``fetch_url``) makes it obvious
+ * that the second call is a refinement, not a repeat. Unknown tools
+ * get no badge so new tools don't need a rendering update here. */
+function ToolQueryBadge({
+  name,
+  meta,
+}: {
+  name: string;
+  meta?: Record<string, unknown> | null;
+}) {
+  if (!meta) return null;
+  let text: string | null = null;
+  if (name === "web_search" && typeof meta.query === "string") {
+    text = meta.query;
+  } else if (name === "fetch_url" && typeof meta.url === "string") {
+    try {
+      text = new URL(meta.url).hostname;
+    } catch {
+      text = meta.url;
+    }
+  }
+  if (!text) return null;
+  return (
+    <span
+      className="max-w-[22ch] truncate text-[var(--text-muted)]"
+      title={text}
+    >
+      · {text}
+    </span>
+  );
+}
 
 /** Inline model / hit-count badges rendered next to a successful tool call.
  *

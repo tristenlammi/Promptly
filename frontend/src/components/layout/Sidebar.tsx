@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import {
@@ -45,6 +46,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { id: activeId } = useParams<{ id?: string }>();
   const conversations = useChatStore((s) => s.conversations);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // Study is desktop/tablet only — the chat/whiteboard split and the
+  // interactive exercises are too cramped below the md breakpoint (<768px).
+  const isMobile = useIsMobile();
   useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
@@ -82,7 +86,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
         <nav className="flex flex-col items-center gap-1">
           <SideIcon to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" />
-          <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
+          {!isMobile && (
+            <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
+          )}
           <SideIcon to="/files" icon={<FolderOpen className="h-4 w-4" />} label="Files" />
           {isAdmin && (
             <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
@@ -129,7 +135,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           surfaces (Chat / Study / Files) reduces visual clutter. */}
       <nav className="mt-4 flex flex-col gap-0.5 px-2">
         <NavItem to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" end />
-        <NavItem to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
+        {!isMobile && (
+          <NavItem to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
+        )}
         <NavItem to="/files" icon={<FolderOpen className="h-4 w-4" />} label="Files" />
         {/* Phase 4b: invites entry. Always rendered so the badge has a
             stable place to sit; click opens a modal listing pending

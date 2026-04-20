@@ -10,8 +10,10 @@ import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
 import { SetupPage } from "@/pages/SetupPage";
+import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
 import { StudyPage } from "@/pages/StudyPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
+import { StudyTopicPage } from "@/pages/StudyTopicPage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useAuthStore } from "@/store/authStore";
 import { applyTheme } from "@/store/themeStore";
@@ -84,8 +86,30 @@ export default function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/new" element={<Navigate to="/chat" replace />} />
         <Route path="/chat/:id" element={<ChatPage />} />
-        <Route path="/study" element={<StudyPage />} />
-        <Route path="/study/sessions/:id" element={<StudySessionPage />} />
+        <Route
+          path="/study"
+          element={
+            <StudyDesktopOnly>
+              <StudyPage />
+            </StudyDesktopOnly>
+          }
+        />
+        <Route
+          path="/study/topics/:id"
+          element={
+            <StudyDesktopOnly>
+              <StudyTopicPage />
+            </StudyDesktopOnly>
+          }
+        />
+        <Route
+          path="/study/sessions/:id"
+          element={
+            <StudyDesktopOnly>
+              <StudySessionPage />
+            </StudyDesktopOnly>
+          }
+        />
         {/* Models management lives inside the Settings (admin) tabs
             now. Keep the legacy ``/models`` URL working by redirecting
             straight to the relevant tab so old bookmarks don't 404. */}

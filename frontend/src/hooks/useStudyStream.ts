@@ -1,7 +1,22 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { studyApi, type StudySendMessagePayload } from "@/api/study";
+
+/** After any stream finishes, refresh all query surfaces that could
+ *  have changed — the session detail, the full project list, both
+ *  the active and archived project lists, exercise history, plus
+ *  every project-detail and unit query currently mounted. Over-
+ *  invalidating is cheap and keeps the UI honest. */
+function invalidateStudy(qc: QueryClient, sessionId: string): void {
+  qc.invalidateQueries({ queryKey: ["study", "session", sessionId] });
+  qc.invalidateQueries({ queryKey: ["study", "projects"] });
+  qc.invalidateQueries({ queryKey: ["study", "exercises", sessionId] });
+  // Project detail + unit + exam queries share the ["study", ...] prefix.
+  qc.invalidateQueries({ queryKey: ["study", "project"] });
+  qc.invalidateQueries({ queryKey: ["study", "unit"] });
+  qc.invalidateQueries({ queryKey: ["study", "exam"] });
+}
 import { authHeader } from "@/api/client";
 import { useStudyStore } from "@/store/studyStore";
 import type {
@@ -55,6 +70,36 @@ interface ExerciseReadyPayload {
   created_at: string;
 }
 
+interface UnitCompletedPayload {
+  id: string;
+  status: string;
+  mastery_score: number | null;
+  mastery_summary: string | null;
+  completed_at: string | null;
+}
+
+interface UnitsInsertedPayload {
+  units: Array<{
+    id: string;
+    title: string;
+    order_index: number;
+    inserted_as_prereq: boolean;
+  }>;
+  reason: string | null;
+  before_unit_id: string | null;
+}
+
+interface ExamGradedPayload {
+  id: string;
+  status: "pending" | "in_progress" | "passed" | "failed";
+  passed: boolean | null;
+  score: number | null;
+  summary: string | null;
+  weak_unit_ids: string[];
+  strong_unit_ids: string[];
+  ended_at: string | null;
+}
+
 interface SSEPayload {
   event?: string;
   delta?: string;
@@ -66,6 +111,13 @@ interface SSEPayload {
   exercise?: ExerciseReadyPayload;
   exercise_id?: string;
   kind?: string;
+  unit?: UnitCompletedPayload;
+  exam?: ExamGradedPayload;
+  units?: UnitsInsertedPayload["units"];
+  reason?: string | null;
+  before_unit_id?: string | null;
+  project_id?: string;
+  batch_id?: string | null;
 }
 
 interface SendMessageOptions {
@@ -168,6 +220,65 @@ export function useStudyStream(): UseStudyStreamResult {
           continue;
         }
 
+        if (data.event === "project_calibrated") {
+          // The tutor just closed the Unit-1 diagnostic. Invalidate
+          // the project-detail query so the skip banner reads the
+          // fresh ``calibrated`` flag on its next render.
+          qc.invalidateQueries({ queryKey: ["study", "project"] });
+          continue;
+        }
+
+        if (data.event === "calibration_warning" && data.project_id) {
+          // Honesty nudge: the student skipped the warm-up and the
+          // tutor has now found a gap that would have been caught.
+          // Store once; the session page pops a toast on next render.
+          store.setLastCalibrationWarning({
+            project_id: data.project_id,
+            reason: data.reason ?? null,
+            batch_id: data.batch_id ?? null,
+          });
+          continue;
+        }
+
+        if (data.event === "units_inserted" && data.units) {
+          store.setLastUnitsInserted({
+            units: data.units,
+            reason: data.reason ?? null,
+            before_unit_id: data.before_unit_id ?? null,
+          });
+          // Eagerly invalidate the project-detail query so the topic
+          // page picks up the new rows the next time the student
+          // steps back — and so any "already open in another tab"
+          // instance refreshes. The final ``invalidateStudy`` in the
+          // finally block will run again at stream end.
+          qc.invalidateQueries({ queryKey: ["study", "project"] });
+          continue;
+        }
+
+        if (data.event === "unit_completed" && data.unit) {
+          store.setLastUnitCompleted({
+            id: data.unit.id,
+            mastery_score: data.unit.mastery_score,
+            mastery_summary: data.unit.mastery_summary,
+            completed_at: data.unit.completed_at,
+          });
+          continue;
+        }
+
+        if (data.event === "exam_graded" && data.exam) {
+          store.setLastExamGraded({
+            id: data.exam.id,
+            status: data.exam.status,
+            passed: data.exam.passed,
+            score: data.exam.score,
+            summary: data.exam.summary,
+            weak_unit_ids: data.exam.weak_unit_ids,
+            strong_unit_ids: data.exam.strong_unit_ids,
+            ended_at: data.exam.ended_at,
+          });
+          continue;
+        }
+
         if (data.delta) {
           store.appendStreamingDelta(data.delta);
         }
@@ -188,7 +299,7 @@ export function useStudyStream(): UseStudyStreamResult {
 
       if (finalMessage) store.appendMessage(finalMessage);
     },
-    []
+    [qc]
   );
 
   const sendMessage = useCallback(
@@ -223,9 +334,7 @@ export function useStudyStream(): UseStudyStreamResult {
       } finally {
         abortRef.current = null;
         useStudyStore.getState().setStreaming(false);
-        qc.invalidateQueries({ queryKey: ["study", "session", sessionId] });
-        qc.invalidateQueries({ queryKey: ["study", "projects"] });
-        qc.invalidateQueries({ queryKey: ["study", "exercises", sessionId] });
+        invalidateStudy(qc, sessionId);
         useStudyStore.setState({ streamingContent: "" });
       }
     },
@@ -251,9 +360,7 @@ export function useStudyStream(): UseStudyStreamResult {
       } finally {
         abortRef.current = null;
         useStudyStore.getState().setStreaming(false);
-        qc.invalidateQueries({ queryKey: ["study", "session", sessionId] });
-        qc.invalidateQueries({ queryKey: ["study", "projects"] });
-        qc.invalidateQueries({ queryKey: ["study", "exercises", sessionId] });
+        invalidateStudy(qc, sessionId);
         useStudyStore.setState({ streamingContent: "" });
       }
     },

@@ -533,9 +533,14 @@ export interface StudyMessage {
   created_at: string;
 }
 
+export type StudySessionKind = "unit" | "exam" | "legacy";
+
 export interface StudySessionSummary {
   id: string;
   project_id: string;
+  kind: StudySessionKind;
+  unit_id: string | null;
+  exam_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -548,18 +553,131 @@ export interface StudySessionDetail extends StudySessionSummary {
   messages: StudyMessage[];
 }
 
+export type StudyProjectStatus =
+  | "planning"
+  | "active"
+  | "completed"
+  | "archived";
+
+export type StudyUnitStatus =
+  | "not_started"
+  | "in_progress"
+  | "completed";
+
+export type StudyExamStatus =
+  | "pending"
+  | "in_progress"
+  | "passed"
+  | "failed";
+
+export interface StudyUnitSummary {
+  id: string;
+  project_id: string;
+  order_index: number;
+  title: string;
+  description: string;
+  learning_objectives: string[];
+  status: StudyUnitStatus;
+  mastery_score: number | null;
+  mastery_summary: string | null;
+  exam_focus: string | null;
+  /** True for units the tutor inserted mid-plan as prerequisite
+   *  foundations (Phase 2 / 3). UI shows them with an "Added by tutor"
+   *  label so the student can tell fill-in units from the original
+   *  plan. Defaults to false on legacy rows. */
+  inserted_as_prereq: boolean;
+  /** Tutor-provided reason for inserting this unit as a prerequisite
+   *  (written when emitting ``insert_prerequisites``). Only populated
+   *  for tutor-inserted units; shown once in the topic-page
+   *  "Added by tutor" banner grouped by ``prereq_batch_id``. */
+  prereq_reason: string | null;
+  /** Shared UUID for every unit inserted by the same tutor reply, so
+   *  the UI can group them into a single dismissible banner. Keyed
+   *  in localStorage for per-batch dismissal. */
+  prereq_batch_id: string | null;
+  /** Days since this unit was last studied (or last completed, as a
+   *  fallback). Null when the unit has never been studied. Used by the
+   *  UI to surface staleness tiers on completed units. */
+  days_since_studied: number | null;
+  completed_at: string | null;
+  last_studied_at: string | null;
+  session_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudyExamSummary {
+  id: string;
+  project_id: string;
+  session_id: string | null;
+  attempt_number: number;
+  status: StudyExamStatus;
+  time_limit_seconds: number;
+  started_at: string | null;
+  ended_at: string | null;
+  score: number | null;
+  passed: boolean | null;
+  weak_unit_ids: string[] | null;
+  strong_unit_ids: string[] | null;
+  summary: string | null;
+  /** Grader notes keyed by unit id → short note, emitted by the final
+   *  exam's ``grade`` action. Null for exams graded before this field
+   *  landed. Surfaced in the topic-page ExamBreakdown section. */
+  unit_notes: Record<string, string> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type StudyCurrentLevel = "beginner" | "some_exposure" | "refresher";
+
 export interface StudyProjectSummary {
   id: string;
   title: string;
   topics: string[];
   goal: string | null;
+  learning_request: string | null;
+  difficulty: string | null;
+  /** Student's self-reported starting level, chosen in the New Study
+   *  wizard. Null if they skipped the field. Surfaced in the UI as a
+   *  small badge and read by the planner / tutor to pace content. */
+  current_level: StudyCurrentLevel | null;
+  /** Whether the Unit 1 forced diagnostic has run. Phase 3 flips this
+   *  true via the tutor's ``calibration_complete`` action. Phase 1 just
+   *  exposes it so the UI can show a "Calibration pending" chip later. */
+  calibrated: boolean;
+  /** How calibration flipped on — ``"skipped"`` | ``"tutor_set"`` |
+   *  ``"tutor_insert"`` | null. Null while the project is still
+   *  uncalibrated. Used mainly as diagnostic context; the actual
+   *  honesty-nudge firing is driven by the ``calibration_warning``
+   *  SSE event so the toast shows up live in the tutor session. */
+  calibration_source: "skipped" | "tutor_set" | "tutor_insert" | null;
+  status: StudyProjectStatus;
   model_id: string | null;
+  archived_at: string | null;
+  planning_error: string | null;
+  total_units: number;
+  completed_units: number;
   created_at: string;
   updated_at: string;
 }
 
 export interface StudyProjectDetail extends StudyProjectSummary {
+  units: StudyUnitSummary[];
   sessions: StudySessionSummary[];
+  exams: StudyExamSummary[];
+  final_exam_unlocked: boolean;
+  active_exam_id: string | null;
+}
+
+export interface UnitEnterResponse {
+  unit: StudyUnitSummary;
+  session: StudySessionSummary;
+}
+
+export interface StartExamResponse {
+  exam: StudyExamSummary;
+  session: StudySessionSummary;
+  stream_id: string | null;
 }
 
 export interface StudySendMessageResponse {

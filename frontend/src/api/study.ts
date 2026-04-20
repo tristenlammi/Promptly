@@ -1,11 +1,14 @@
 import { apiClient } from "./client";
 import type {
   ExcalidrawSnapshot,
+  StartExamResponse,
+  StudyExamSummary,
   StudyProjectDetail,
   StudyProjectSummary,
   StudySendMessageResponse,
   StudySessionDetail,
-  StudySessionSummary,
+  StudyUnitSummary,
+  UnitEnterResponse,
   WhiteboardExerciseDetail,
   WhiteboardExerciseSummary,
   WhiteboardState,
@@ -16,10 +19,13 @@ export interface CreateStudyProjectPayload {
   title: string;
   topics?: string[];
   goal?: string | null;
-  model_id?: string | null;
-  provider_id?: string | null;
-  /** When true (default) the server also creates an initial session. */
-  create_session?: boolean;
+  learning_request: string;
+  /** Optional self-reported starting level. Controls how aggressively
+   *  the planner front-loads foundation units and the default register
+   *  the unit tutor pitches at. */
+  current_level?: "beginner" | "some_exposure" | "refresher" | null;
+  model_id: string;
+  provider_id: string;
 }
 
 export interface UpdateStudyProjectPayload {
@@ -27,6 +33,17 @@ export interface UpdateStudyProjectPayload {
   topics?: string[];
   goal?: string | null;
   model_id?: string | null;
+}
+
+export interface RegeneratePlanPayload {
+  model_id?: string | null;
+  provider_id?: string | null;
+}
+
+export interface StartExamPayload {
+  model_id?: string | null;
+  provider_id?: string | null;
+  time_limit_seconds?: number | null;
 }
 
 export interface StudySendMessagePayload {
@@ -37,9 +54,19 @@ export interface StudySendMessagePayload {
   max_tokens?: number | null;
 }
 
+export interface ListProjectsParams {
+  status?: "planning" | "active" | "completed" | "archived";
+  include_archived?: boolean;
+}
+
 export const studyApi = {
-  async listProjects(): Promise<StudyProjectSummary[]> {
-    const { data } = await apiClient.get<StudyProjectSummary[]>("/study/projects");
+  async listProjects(
+    params: ListProjectsParams = {}
+  ): Promise<StudyProjectSummary[]> {
+    const { data } = await apiClient.get<StudyProjectSummary[]>(
+      "/study/projects",
+      { params }
+    );
     return data;
   },
   async getProject(id: string): Promise<StudyProjectDetail> {
@@ -53,7 +80,10 @@ export const studyApi = {
   ): Promise<StudyProjectDetail> {
     const { data } = await apiClient.post<StudyProjectDetail>(
       "/study/projects",
-      payload
+      payload,
+      // Plan generation runs inline with the create — allow plenty of
+      // time for longer models to settle before the client bails.
+      { timeout: 120_000 }
     );
     return data;
   },
@@ -70,13 +100,72 @@ export const studyApi = {
   async deleteProject(id: string): Promise<void> {
     await apiClient.delete(`/study/projects/${id}`);
   },
-
-  async createSession(projectId: string): Promise<StudySessionSummary> {
-    const { data } = await apiClient.post<StudySessionSummary>(
-      `/study/projects/${projectId}/sessions`
+  async calibrateProject(id: string): Promise<StudyProjectSummary> {
+    const { data } = await apiClient.post<StudyProjectSummary>(
+      `/study/projects/${id}/calibrate`
     );
     return data;
   },
+  async archiveProject(id: string): Promise<StudyProjectSummary> {
+    const { data } = await apiClient.post<StudyProjectSummary>(
+      `/study/projects/${id}/archive`
+    );
+    return data;
+  },
+  async unarchiveProject(id: string): Promise<StudyProjectSummary> {
+    const { data } = await apiClient.post<StudyProjectSummary>(
+      `/study/projects/${id}/unarchive`
+    );
+    return data;
+  },
+  async regeneratePlan(
+    id: string,
+    payload: RegeneratePlanPayload = {}
+  ): Promise<StudyProjectDetail> {
+    const { data } = await apiClient.post<StudyProjectDetail>(
+      `/study/projects/${id}/regenerate-plan`,
+      payload,
+      { timeout: 120_000 }
+    );
+    return data;
+  },
+
+  async enterUnit(unitId: string): Promise<UnitEnterResponse> {
+    const { data } = await apiClient.post<UnitEnterResponse>(
+      `/study/units/${unitId}/enter`
+    );
+    return data;
+  },
+  async getUnit(unitId: string): Promise<StudyUnitSummary> {
+    const { data } = await apiClient.get<StudyUnitSummary>(
+      `/study/units/${unitId}`
+    );
+    return data;
+  },
+
+  async startFinalExam(
+    projectId: string,
+    payload: StartExamPayload = {}
+  ): Promise<StartExamResponse> {
+    const { data } = await apiClient.post<StartExamResponse>(
+      `/study/projects/${projectId}/final-exam`,
+      payload
+    );
+    return data;
+  },
+  async getExam(examId: string): Promise<StudyExamSummary> {
+    const { data } = await apiClient.get<StudyExamSummary>(
+      `/study/exams/${examId}`
+    );
+    return data;
+  },
+  async timeoutExam(examId: string): Promise<StudyExamSummary> {
+    const { data } = await apiClient.post<StudyExamSummary>(
+      `/study/exams/${examId}/timeout`
+    );
+    return data;
+  },
+
   async getSession(id: string): Promise<StudySessionDetail> {
     const { data } = await apiClient.get<StudySessionDetail>(
       `/study/sessions/${id}`
@@ -132,6 +221,20 @@ export const studyApi = {
       `/study/sessions/${sessionId}/exercises/${exerciseId}`
     );
     return data;
+  },
+  /**
+   * Mint a short-lived signed URL the browser can use as an
+   * ``<iframe src>`` to render the exercise HTML. The iframe itself
+   * can't attach the Bearer token (browsers don't let you set headers
+   * on iframe navigations), so the backend issues a URL-embeddable
+   * HMAC token while we're still authenticated here. See
+   * ``backend/app/study/frame_auth.py`` for the full rationale.
+   */
+  async createExerciseFrameUrl(exerciseId: string): Promise<string> {
+    const { data } = await apiClient.post<{ url: string; token: string }>(
+      `/study/exercises/${exerciseId}/frame-token`
+    );
+    return data.url;
   },
   async submitExercise(
     sessionId: string,

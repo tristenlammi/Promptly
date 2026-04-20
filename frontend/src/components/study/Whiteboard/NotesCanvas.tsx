@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -54,7 +55,35 @@ export const NotesCanvas = forwardRef<NotesCanvasHandle, NotesCanvasProps>(
     const isDirtyRef = useRef(false);
     const apiRef = useRef<unknown>(null);
 
-    const initialData = initialSnapshot ?? undefined;
+    // Excalidraw calls `.forEach` on `initialData.elements` on mount
+    // and crashes hard if it's anything other than a real array
+    // (``TypeError: I.forEach is not a function``). Older saved sessions
+    // can have a snapshot with a missing/null/object-shaped ``elements``
+    // field, and we've also seen the backend return ``{}`` when the
+    // student never drew anything — so we normalise here instead of
+    // passing the raw blob through.
+    const initialData = useMemo(() => {
+      if (!initialSnapshot || typeof initialSnapshot !== "object") {
+        return undefined;
+      }
+      const raw = initialSnapshot as {
+        elements?: unknown;
+        appState?: unknown;
+        files?: unknown;
+      };
+      const elements = Array.isArray(raw.elements) ? raw.elements : [];
+      const appState =
+        raw.appState && typeof raw.appState === "object" ? raw.appState : {};
+      const files =
+        raw.files && typeof raw.files === "object" ? raw.files : {};
+      // Excalidraw treats an undefined initialData the same as empty,
+      // so when the normalised scene is empty we return undefined to
+      // skip one mount-time pass through its scene importer.
+      if (elements.length === 0 && Object.keys(files).length === 0) {
+        return undefined;
+      }
+      return { elements, appState, files } as ExcalidrawSnapshot;
+    }, [initialSnapshot]);
 
     const persist = useCallback(
       async (snapshot: ExcalidrawSnapshot) => {

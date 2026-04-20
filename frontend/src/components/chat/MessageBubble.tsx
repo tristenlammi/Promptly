@@ -13,6 +13,7 @@ import {
   GitBranch,
   Image as ImageIcon,
   Pencil,
+  Puzzle,
   User as UserIcon,
   Sparkles,
 } from "lucide-react";
@@ -74,6 +75,17 @@ interface MessageBubbleProps {
    *  resolve once the new stream has been kicked off; the bubble exits
    *  edit mode as soon as it does. */
   onEdit?: (newText: string) => Promise<void>;
+  /** Study module — when this assistant turn produced a whiteboard
+   *  exercise, the parent passes a handler that re-opens it in the
+   *  right-hand pane. Renders a "Open exercise" action below the reply
+   *  so the student always has an escape hatch if the auto-route
+   *  didn't flip them to the whiteboard. Undefined for non-study
+   *  messages and for assistant turns with no exercise. */
+  onOpenExercise?: () => void | Promise<void>;
+  /** Whether the exercise has already been submitted and graded. Used
+   *  to relabel the action button ("Revisit exercise" vs "Open
+   *  exercise") so the student knows they're re-opening an old one. */
+  exerciseReviewed?: boolean;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -208,6 +220,8 @@ function MessageBubbleImpl({
   currentUserId,
   onEdit,
   onBranch,
+  onOpenExercise,
+  exerciseReviewed,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const hasSources = !isUser && sources && sources.length > 0;
@@ -396,8 +410,35 @@ function MessageBubbleImpl({
             showDownload={!isUser}
           />
         )}
-        {((canEdit && !editing) || (onBranch && !streaming) || canCopy) && (
+        {((canEdit && !editing) ||
+          (onBranch && !streaming) ||
+          canCopy ||
+          (onOpenExercise && !streaming)) && (
           <div className="mt-1.5 flex items-center gap-1">
+            {onOpenExercise && !streaming && (
+              <button
+                type="button"
+                onClick={() => void onOpenExercise()}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+                  "text-[var(--accent)] transition",
+                  "hover:bg-[var(--accent)]/[0.08]"
+                )}
+                title={
+                  exerciseReviewed
+                    ? "Re-open this exercise in the whiteboard"
+                    : "Open this exercise in the whiteboard"
+                }
+                aria-label={
+                  exerciseReviewed ? "Revisit exercise" : "Open exercise"
+                }
+              >
+                <Puzzle className="h-3 w-3" />
+                <span>
+                  {exerciseReviewed ? "Revisit exercise" : "Open exercise"}
+                </span>
+              </button>
+            )}
             {canCopy && (
               <button
                 type="button"

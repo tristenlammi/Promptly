@@ -20,8 +20,10 @@ from app.mfa.models import (  # noqa: F401
 from app.models_config.models import ModelProvider  # noqa: F401
 from app.search.models import SearchProvider  # noqa: F401
 from app.study.models import (  # noqa: F401
+    StudyExam,
     StudyMessage,
     StudyProject,
     StudySession,
+    StudyUnit,
     WhiteboardExercise,
 )

@@ -1,4 +1,21 @@
-"""Study API — projects, sessions, streaming chat, whiteboard snapshot."""
+"""Study API — topics (projects), units, exams, sessions, streaming chat.
+
+The Study module is a structured learning path:
+
+1. The student creates a topic by describing what they want to learn +
+   the goal. An AI planner turns the brief into 5–20 ordered units
+   with learning objectives.
+2. The student opens a unit — that creates (or returns) a tutor
+   ``StudySession`` bound to the unit. The tutor assesses, teaches,
+   and emits a ``<unit_action>`` when it's confident the unit has
+   been mastered.
+3. Once every unit is ``completed`` the final exam unlocks. The exam
+   runs as its own ``exam`` session with a server-enforced timer; the
+   AI examiner emits an ``<exam_action>`` at the end to grade it. A
+   failed exam re-opens the weak units with extra context; a passed
+   exam transitions the project to ``completed`` (and the student
+   can archive it from the UI).
+"""
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +27,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from fastapi.responses import HTMLResponse, StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -19,18 +36,40 @@ from app.auth.models import User
 from app.database import SessionLocal, get_db
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, ProviderError, model_router
-from app.study.models import StudyMessage, StudyProject, StudySession, WhiteboardExercise
-from app.study.parser import WhiteboardActionParser
+from app.study.models import (
+    StudyExam,
+    StudyMessage,
+    StudyProject,
+    StudySession,
+    StudyUnit,
+    WhiteboardExercise,
+)
+from app.study.frame_auth import (
+    inject_submit_shim,
+    sign_exercise_frame_token,
+    verify_exercise_frame_token,
+)
+from app.study.parser import TaggedActionParser
+from app.study.planner import (
+    PlanGenerationError,
+    generate_and_apply_plan,
+)
 from app.study.schemas import (
+    StudyExamStartRequest,
+    StudyExamStartResponse,
+    StudyExamSummary,
     StudyMessageResponse,
     StudyProjectCreate,
     StudyProjectDetail,
+    StudyProjectRegeneratePlan,
     StudyProjectSummary,
     StudyProjectUpdate,
     StudySendMessageRequest,
     StudySendMessageResponse,
     StudySessionDetail,
     StudySessionSummary,
+    StudyUnitSummary,
+    UnitEnterResponse,
     WhiteboardExerciseDetail,
     WhiteboardExerciseSummary,
     WhiteboardState,
@@ -40,16 +79,26 @@ from app.study.schemas import (
 )
 from app.study.service import (
     StudyStreamContext,
+    apply_captures,
+    build_exam_system_prompt,
     build_history_for_llm,
-    build_tutor_system_prompt,
+    build_legacy_system_prompt,
+    build_unit_system_prompt,
     consume_stream,
     enqueue_stream,
     format_submission_user_message,
     parse_action_payload,
+    parse_whiteboard_payload,
+)
+from app.study.staleness import (
+    apply_staleness_to_project,
+    days_since_studied,
 )
 
 logger = logging.getLogger("promptly.study")
 router = APIRouter()
+
+EXAM_DEFAULT_TIME_LIMIT_SECONDS = 1200  # 20 minutes
 
 
 # ====================================================================
@@ -78,6 +127,30 @@ async def _get_owned_session(
     return session, project
 
 
+async def _get_owned_unit(
+    unit_id: uuid.UUID, user: User, db: AsyncSession
+) -> tuple[StudyUnit, StudyProject]:
+    unit = await db.get(StudyUnit, unit_id)
+    if unit is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found"
+        )
+    project = await _get_owned_project(unit.project_id, user, db)
+    return unit, project
+
+
+async def _get_owned_exam(
+    exam_id: uuid.UUID, user: User, db: AsyncSession
+) -> tuple[StudyExam, StudyProject]:
+    exam = await db.get(StudyExam, exam_id)
+    if exam is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found"
+        )
+    project = await _get_owned_project(exam.project_id, user, db)
+    return exam, project
+
+
 async def _resolve_provider(
     provider: ModelProvider | None,
     user: User,
@@ -85,13 +158,7 @@ async def _resolve_provider(
     *,
     model_id: str | None = None,
 ) -> ModelProvider:
-    """Validate provider ownership + per-user model allowlist.
-
-    Non-admins may route through providers owned by any admin (shared pool)
-    or system-wide providers (``user_id IS NULL``). Admins use their own.
-    When ``model_id`` is supplied we additionally check it is in the user's
-    ``allowed_models`` (admins are unrestricted).
-    """
+    """Validate provider ownership + per-user model allowlist."""
     if provider is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
@@ -123,24 +190,192 @@ async def _resolve_provider(
     return provider
 
 
+async def _pick_provider_for_model(
+    model_id: str, user: User, db: AsyncSession
+) -> ModelProvider:
+    """Find an enabled provider owned by the user (or global) that can serve
+    ``model_id`` based on its catalog + enabled_models whitelist."""
+    result = await db.execute(
+        select(ModelProvider).where(
+            (ModelProvider.user_id == user.id) | (ModelProvider.user_id.is_(None)),
+            ModelProvider.enabled.is_(True),
+        )
+    )
+    for provider in result.scalars().all():
+        catalog_ids = {m["id"] for m in (provider.models or []) if isinstance(m, dict)}
+        if model_id not in catalog_ids:
+            continue
+        allow = provider.enabled_models
+        if allow is not None and model_id not in allow:
+            continue
+        return provider
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"No enabled provider serves model {model_id!r}",
+    )
+
+
+# ====================================================================
+# Project DTO helpers
+# ====================================================================
+async def _project_unit_counts(
+    project_id: uuid.UUID, db: AsyncSession
+) -> tuple[int, int]:
+    """Return ``(total_units, completed_units)``."""
+    total_res = await db.execute(
+        select(func.count(StudyUnit.id)).where(StudyUnit.project_id == project_id)
+    )
+    total = int(total_res.scalar() or 0)
+    done_res = await db.execute(
+        select(func.count(StudyUnit.id)).where(
+            StudyUnit.project_id == project_id,
+            StudyUnit.status == "completed",
+        )
+    )
+    done = int(done_res.scalar() or 0)
+    return total, done
+
+
+def _unit_summary(unit: StudyUnit) -> StudyUnitSummary:
+    """Build a ``StudyUnitSummary`` with the derived ``days_since_studied``
+    field filled in. Pulled out so the detail endpoint and the unit
+    ``enter`` endpoint share the same computation."""
+    payload = {
+        col.name: getattr(unit, col.name) for col in unit.__table__.columns
+    }
+    payload["days_since_studied"] = days_since_studied(unit)
+    return StudyUnitSummary.model_validate(payload)
+
+
+async def _project_summary(
+    project: StudyProject, db: AsyncSession
+) -> StudyProjectSummary:
+    # Load units so staleness can act on them BEFORE we count "completed"
+    # — a stale-flipped unit should vanish from the progress ratio
+    # instantly, not only when the detail page re-renders.
+    units_res = await db.execute(
+        select(StudyUnit)
+        .where(StudyUnit.project_id == project.id)
+        .order_by(StudyUnit.order_index.asc())
+    )
+    units = list(units_res.scalars().all())
+
+    changed = await apply_staleness_to_project(db, project, units)
+    if changed:
+        await db.commit()
+
+    total = len(units)
+    done = sum(1 for u in units if u.status == "completed")
+    return StudyProjectSummary.model_validate(
+        {**_project_fields(project), "total_units": total, "completed_units": done}
+    )
+
+
+async def _project_detail(
+    project: StudyProject, db: AsyncSession
+) -> StudyProjectDetail:
+    units_res = await db.execute(
+        select(StudyUnit)
+        .where(StudyUnit.project_id == project.id)
+        .order_by(StudyUnit.order_index.asc())
+    )
+    units = list(units_res.scalars().all())
+
+    # Lazy staleness evaluation: runs on every detail load so students
+    # always see current verdicts without any background cron.
+    changed = await apply_staleness_to_project(db, project, units)
+    if changed:
+        await db.commit()
+
+    sessions_res = await db.execute(
+        select(StudySession)
+        .where(StudySession.project_id == project.id)
+        .order_by(StudySession.created_at.asc())
+    )
+    sessions = list(sessions_res.scalars().all())
+
+    exams_res = await db.execute(
+        select(StudyExam)
+        .where(StudyExam.project_id == project.id)
+        .order_by(StudyExam.attempt_number.asc())
+    )
+    exams = list(exams_res.scalars().all())
+
+    total_units = len(units)
+    completed_units = sum(1 for u in units if u.status == "completed")
+    has_in_progress_exam = any(e.status == "in_progress" for e in exams)
+    already_passed = any(e.status == "passed" for e in exams)
+    final_exam_unlocked = (
+        total_units > 0
+        and completed_units == total_units
+        and not has_in_progress_exam
+        and project.status != "archived"
+        and not already_passed
+    )
+    active_exam = next((e for e in exams if e.status == "in_progress"), None)
+
+    return StudyProjectDetail.model_validate(
+        {
+            **_project_fields(project),
+            "total_units": total_units,
+            "completed_units": completed_units,
+            "units": [_unit_summary(u) for u in units],
+            "sessions": [StudySessionSummary.model_validate(s) for s in sessions],
+            "exams": [StudyExamSummary.model_validate(e) for e in exams],
+            "final_exam_unlocked": final_exam_unlocked,
+            "active_exam_id": active_exam.id if active_exam else None,
+        }
+    )
+
+
+def _project_fields(project: StudyProject) -> dict[str, Any]:
+    """Extract the raw project columns as a dict for model_validate."""
+    return {
+        "id": project.id,
+        "title": project.title,
+        "topics": project.topics,
+        "goal": project.goal,
+        "learning_request": project.learning_request,
+        "difficulty": project.difficulty,
+        "current_level": project.current_level,
+        "calibrated": project.calibrated,
+        "calibration_source": project.calibration_source,
+        "status": project.status,
+        "model_id": project.model_id,
+        "archived_at": project.archived_at,
+        "planning_error": project.planning_error,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+    }
+
+
 # ====================================================================
 # Projects CRUD
 # ====================================================================
 @router.get("/projects", response_model=list[StudyProjectSummary])
 async def list_projects(
+    status_filter: str | None = Query(default=None, alias="status"),
+    include_archived: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[StudyProjectSummary]:
-    result = await db.execute(
-        select(StudyProject)
-        .where(StudyProject.user_id == user.id)
-        .order_by(StudyProject.updated_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    return [StudyProjectSummary.model_validate(p) for p in result.scalars().all()]
+    """List the user's study topics.
+
+    By default returns everything *except* archived projects — callers
+    can flip ``include_archived=true`` to see only archived ones, or
+    pass ``status=archived`` explicitly when rendering the archive tab.
+    """
+    query = select(StudyProject).where(StudyProject.user_id == user.id)
+    if status_filter:
+        query = query.where(StudyProject.status == status_filter)
+    elif not include_archived:
+        query = query.where(StudyProject.status != "archived")
+    query = query.order_by(StudyProject.updated_at.desc()).limit(limit).offset(offset)
+
+    rows = (await db.execute(query)).scalars().all()
+    return [await _project_summary(p, db) for p in rows]
 
 
 @router.post(
@@ -153,39 +388,81 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StudyProjectDetail:
-    # Validate provider if a model was chosen. We don't require one at create
-    # time — the user can pick later in the session UI.
-    if payload.provider_id is not None:
-        provider = await db.get(ModelProvider, payload.provider_id)
-        await _resolve_provider(provider, user, db, model_id=payload.model_id)
+    """Create a study topic and generate its unit plan inline.
+
+    We generate the plan synchronously because doing it on a background
+    task means the frontend has to poll, which adds a sharp edge to
+    what should be a single "create → show units" gesture. The planner
+    takes anywhere from 5–25 seconds on a typical model; the client
+    renders a dedicated "Designing your study plan..." screen for the
+    duration.
+
+    If plan generation fails we still persist the project in
+    ``planning`` status with the error text so the user can retry
+    via ``POST /projects/{id}/regenerate-plan`` instead of losing
+    their brief.
+    """
+    provider = await db.get(ModelProvider, payload.provider_id)
+    await _resolve_provider(provider, user, db, model_id=payload.model_id)
+    assert provider is not None  # Appeases the type-checker; _resolve_provider raises otherwise.
 
     project = StudyProject(
         user_id=user.id,
         title=payload.title.strip(),
         topics=[t.strip() for t in payload.topics if t.strip()],
         goal=(payload.goal or "").strip() or None,
+        learning_request=payload.learning_request.strip(),
+        current_level=payload.current_level,
         model_id=payload.model_id,
+        planning_provider_id=provider.id,
+        status="planning",
     )
     db.add(project)
     await db.flush()
 
-    sessions: list[StudySession] = []
-    if payload.create_session:
-        session = StudySession(project_id=project.id)
-        db.add(session)
-        sessions.append(session)
+    try:
+        await generate_and_apply_plan(
+            db=db,
+            project=project,
+            provider=provider,
+            model_id=payload.model_id,
+        )
+    except PlanGenerationError as exc:
+        # The planner already recorded the error on the project and
+        # flushed. Commit so the student has something to retry against.
+        await db.commit()
+        await db.refresh(project)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Plan generation failed: {exc}",
+        )
+    except ProviderError as exc:
+        await db.rollback()
+        # Persist a minimal error-ed project so the user doesn't lose
+        # their brief on network blips.
+        project = StudyProject(
+            user_id=user.id,
+            title=payload.title.strip(),
+            topics=[t.strip() for t in payload.topics if t.strip()],
+            goal=(payload.goal or "").strip() or None,
+            learning_request=payload.learning_request.strip(),
+            current_level=payload.current_level,
+            model_id=payload.model_id,
+            planning_provider_id=provider.id,
+            status="planning",
+            planning_error=str(exc)[:500],
+        )
+        db.add(project)
+        await db.commit()
+        await db.refresh(project)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Provider error while generating plan: {exc}",
+        )
 
     await db.commit()
     await db.refresh(project)
-    for s in sessions:
-        await db.refresh(s)
-
-    return StudyProjectDetail.model_validate(
-        {
-            **project.__dict__,
-            "sessions": [StudySessionSummary.model_validate(s) for s in sessions],
-        }
-    )
+    return await _project_detail(project, db)
 
 
 @router.get("/projects/{project_id}", response_model=StudyProjectDetail)
@@ -195,15 +472,7 @@ async def get_project(
     user: User = Depends(get_current_user),
 ) -> StudyProjectDetail:
     project = await _get_owned_project(project_id, user, db)
-    sessions_res = await db.execute(
-        select(StudySession)
-        .where(StudySession.project_id == project.id)
-        .order_by(StudySession.created_at.asc())
-    )
-    sessions = [StudySessionSummary.model_validate(s) for s in sessions_res.scalars().all()]
-    return StudyProjectDetail.model_validate(
-        {**project.__dict__, "sessions": sessions}
-    )
+    return await _project_detail(project, db)
 
 
 @router.patch("/projects/{project_id}", response_model=StudyProjectSummary)
@@ -226,7 +495,7 @@ async def update_project(
 
     await db.commit()
     await db.refresh(project)
-    return StudyProjectSummary.model_validate(project)
+    return await _project_summary(project, db)
 
 
 @router.delete(
@@ -245,27 +514,416 @@ async def delete_project(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ====================================================================
-# Sessions
-# ====================================================================
 @router.post(
-    "/projects/{project_id}/sessions",
-    response_model=StudySessionSummary,
-    status_code=status.HTTP_201_CREATED,
+    "/projects/{project_id}/calibrate", response_model=StudyProjectSummary
 )
-async def create_session(
+async def calibrate_project(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> StudySessionSummary:
+) -> StudyProjectSummary:
+    """Skip / short-circuit the Phase-3 Unit-1 diagnostic.
+
+    Flips ``calibrated`` to true on the project so the tutor stops
+    running the warm-up diagnostic on new Unit-1 sessions. Safe to
+    call repeatedly — it's idempotent.
+    """
     project = await _get_owned_project(project_id, user, db)
-    session = StudySession(project_id=project.id)
-    db.add(session)
+    if not project.calibrated:
+        project.calibrated = True
+        # Record that THIS calibration came from the skip button so
+        # the later honesty nudge has something to trip on. Don't
+        # overwrite if somehow already set — keeps the column
+        # write-once.
+        if project.calibration_source is None:
+            project.calibration_source = "skipped"
+        project.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(project)
+    return await _project_summary(project, db)
+
+
+@router.post(
+    "/projects/{project_id}/archive", response_model=StudyProjectSummary
+)
+async def archive_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyProjectSummary:
+    project = await _get_owned_project(project_id, user, db)
+    project.status = "archived"
+    project.archived_at = datetime.now(timezone.utc)
     await db.commit()
+    await db.refresh(project)
+    return await _project_summary(project, db)
+
+
+@router.post(
+    "/projects/{project_id}/unarchive", response_model=StudyProjectSummary
+)
+async def unarchive_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyProjectSummary:
+    """Pull a project back out of the archive.
+
+    Restores the project to whichever status is most useful right now:
+    ``completed`` if the final exam was passed, otherwise ``active``
+    if there are units, otherwise ``planning`` (the planner needs
+    to run again).
+    """
+    project = await _get_owned_project(project_id, user, db)
+    total, _ = await _project_unit_counts(project.id, db)
+    passed_res = await db.execute(
+        select(func.count(StudyExam.id)).where(
+            StudyExam.project_id == project.id,
+            StudyExam.status == "passed",
+        )
+    )
+    passed = int(passed_res.scalar() or 0) > 0
+    if passed:
+        project.status = "completed"
+    elif total > 0:
+        project.status = "active"
+    else:
+        project.status = "planning"
+    project.archived_at = None
+    await db.commit()
+    await db.refresh(project)
+    return await _project_summary(project, db)
+
+
+@router.post(
+    "/projects/{project_id}/regenerate-plan",
+    response_model=StudyProjectDetail,
+)
+async def regenerate_plan(
+    project_id: uuid.UUID,
+    payload: StudyProjectRegeneratePlan,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyProjectDetail:
+    project = await _get_owned_project(project_id, user, db)
+
+    if project.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic has already been passed — regenerating would wipe progress.",
+        )
+
+    model_id = payload.model_id or project.model_id
+    provider_id = payload.provider_id or project.planning_provider_id
+    if not model_id or not provider_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provider and model must be set before regenerating a plan.",
+        )
+    provider = await db.get(ModelProvider, provider_id)
+    await _resolve_provider(provider, user, db, model_id=model_id)
+    assert provider is not None
+
+    project.model_id = model_id
+    project.planning_provider_id = provider.id
+    project.status = "planning"
+
+    try:
+        await generate_and_apply_plan(
+            db=db, project=project, provider=provider, model_id=model_id
+        )
+    except PlanGenerationError as exc:
+        await db.commit()
+        await db.refresh(project)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Plan generation failed: {exc}",
+        )
+    except ProviderError as exc:
+        project.planning_error = str(exc)[:500]
+        await db.commit()
+        await db.refresh(project)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Provider error while generating plan: {exc}",
+        )
+
+    await db.commit()
+    await db.refresh(project)
+    return await _project_detail(project, db)
+
+
+# ====================================================================
+# Units
+# ====================================================================
+@router.post("/units/{unit_id}/enter", response_model=UnitEnterResponse)
+async def enter_unit(
+    unit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> UnitEnterResponse:
+    """Open (or reopen) a tutor session bound to this unit.
+
+    A unit has at most one tutor session. If none exists yet we create
+    one; if the stored session was hard-deleted out from under us we
+    transparently regenerate it. Entering a ``not_started`` unit
+    transitions it to ``in_progress``.
+    """
+    unit, project = await _get_owned_unit(unit_id, user, db)
+
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic is archived — unarchive it to keep studying.",
+        )
+
+    session: StudySession | None = None
+    if unit.session_id:
+        session = await db.get(StudySession, unit.session_id)
+    if session is None:
+        session = StudySession(
+            project_id=project.id,
+            kind="unit",
+            unit_id=unit.id,
+        )
+        db.add(session)
+        await db.flush()
+        unit.session_id = session.id
+
+    now = datetime.now(timezone.utc)
+    if unit.status == "not_started":
+        unit.status = "in_progress"
+    unit.last_studied_at = now
+    unit.updated_at = now
+    project.updated_at = now
+
+    await db.commit()
+    await db.refresh(unit)
     await db.refresh(session)
-    return StudySessionSummary.model_validate(session)
+
+    return UnitEnterResponse(
+        unit=_unit_summary(unit),
+        session=StudySessionSummary.model_validate(session),
+    )
 
 
+@router.get("/units/{unit_id}", response_model=StudyUnitSummary)
+async def get_unit(
+    unit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyUnitSummary:
+    unit, _ = await _get_owned_unit(unit_id, user, db)
+    return _unit_summary(unit)
+
+
+# ====================================================================
+# Final Exam
+# ====================================================================
+@router.post(
+    "/projects/{project_id}/final-exam",
+    response_model=StudyExamStartResponse,
+)
+async def start_final_exam(
+    project_id: uuid.UUID,
+    payload: StudyExamStartRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyExamStartResponse:
+    """Start (or resume) the final exam for this project.
+
+    Idempotent — if there's an in-progress exam, returns its session
+    rather than creating a second one. Verifies that every unit has
+    been completed before letting a new attempt begin.
+    """
+    project = await _get_owned_project(project_id, user, db)
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic is archived — unarchive it first.",
+        )
+
+    units_res = await db.execute(
+        select(StudyUnit)
+        .where(StudyUnit.project_id == project.id)
+        .order_by(StudyUnit.order_index.asc())
+    )
+    units = list(units_res.scalars().all())
+    if not units:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No units on this project — generate a plan first.",
+        )
+
+    # If there's already an in-progress exam, return it directly.
+    active_res = await db.execute(
+        select(StudyExam).where(
+            StudyExam.project_id == project.id,
+            StudyExam.status == "in_progress",
+        )
+    )
+    active = active_res.scalars().first()
+    if active is not None:
+        session = await db.get(StudySession, active.session_id) if active.session_id else None
+        if session is None:
+            # Session was deleted out from under us — recreate.
+            session = StudySession(
+                project_id=project.id, kind="exam", exam_id=active.id
+            )
+            db.add(session)
+            await db.flush()
+            active.session_id = session.id
+            await db.commit()
+            await db.refresh(active)
+            await db.refresh(session)
+        return StudyExamStartResponse(
+            exam=StudyExamSummary.model_validate(active),
+            session=StudySessionSummary.model_validate(session),
+            stream_id=None,
+        )
+
+    # All units must be completed before a fresh attempt.
+    incomplete = [u for u in units if u.status != "completed"]
+    if incomplete:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{len(incomplete)} unit(s) are still incomplete.",
+        )
+    # And there must not be a passed exam (they should archive instead).
+    passed_res = await db.execute(
+        select(func.count(StudyExam.id)).where(
+            StudyExam.project_id == project.id,
+            StudyExam.status == "passed",
+        )
+    )
+    if int(passed_res.scalar() or 0) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic has already been passed — archive it instead.",
+        )
+
+    model_id = payload.model_id or project.model_id
+    if not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No model configured for this topic — set one and retry.",
+        )
+    provider_id = payload.provider_id or project.planning_provider_id
+    if provider_id is None:
+        provider = await _pick_provider_for_model(model_id, user, db)
+    else:
+        provider = await db.get(ModelProvider, provider_id)
+        await _resolve_provider(provider, user, db, model_id=model_id)
+        assert provider is not None
+
+    # Determine the next attempt number.
+    prior_res = await db.execute(
+        select(func.count(StudyExam.id)).where(StudyExam.project_id == project.id)
+    )
+    next_attempt = int(prior_res.scalar() or 0) + 1
+
+    time_limit = payload.time_limit_seconds or EXAM_DEFAULT_TIME_LIMIT_SECONDS
+    now = datetime.now(timezone.utc)
+
+    exam = StudyExam(
+        project_id=project.id,
+        attempt_number=next_attempt,
+        status="in_progress",
+        time_limit_seconds=time_limit,
+        started_at=now,
+    )
+    db.add(exam)
+    await db.flush()
+
+    session = StudySession(
+        project_id=project.id,
+        kind="exam",
+        exam_id=exam.id,
+    )
+    db.add(session)
+    await db.flush()
+    exam.session_id = session.id
+
+    # Kick off the exam with a synthetic "start the exam" user message
+    # so the AI examiner can deliver item #1 without needing the
+    # student to say anything first.
+    kickoff = StudyMessage(
+        session_id=session.id,
+        role="user",
+        content="Please start the final exam now. I'm ready.",
+    )
+    db.add(kickoff)
+    project.updated_at = now
+    session.updated_at = now
+    await db.commit()
+    await db.refresh(exam)
+    await db.refresh(session)
+    await db.refresh(kickoff)
+
+    stream_id = uuid.uuid4()
+    ctx: StudyStreamContext = {
+        "session_id": str(session.id),
+        "project_id": str(project.id),
+        "user_message_id": str(kickoff.id),
+        "provider_id": str(provider.id),
+        "model_id": model_id,
+        "temperature": 0.5,
+        "max_tokens": 8000,
+        "reviewing_exercise_id": None,
+        "session_kind": "exam",
+        "unit_id": None,
+        "exam_id": str(exam.id),
+    }
+    await enqueue_stream(stream_id, ctx)
+
+    return StudyExamStartResponse(
+        exam=StudyExamSummary.model_validate(exam),
+        session=StudySessionSummary.model_validate(session),
+        stream_id=stream_id,
+    )
+
+
+@router.get("/exams/{exam_id}", response_model=StudyExamSummary)
+async def get_exam(
+    exam_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyExamSummary:
+    exam, _ = await _get_owned_exam(exam_id, user, db)
+    return StudyExamSummary.model_validate(exam)
+
+
+@router.post("/exams/{exam_id}/timeout", response_model=StudyExamSummary)
+async def timeout_exam(
+    exam_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyExamSummary:
+    """Mark the current exam attempt as ended due to time running out.
+
+    Called by the frontend when the local timer hits zero. The AI
+    examiner will still be given one final chance (through a synthetic
+    system-style user message) to emit a ``<exam_action>`` grade, but
+    that happens as a follow-up send from the client — this endpoint
+    just seals the timer server-side so further answers don't count.
+    """
+    exam, project = await _get_owned_exam(exam_id, user, db)
+    if exam.status != "in_progress":
+        return StudyExamSummary.model_validate(exam)
+
+    # Don't auto-fail here; let the AI grade what it got. We just
+    # record the end time and wait for the grading action to land.
+    exam.ended_at = datetime.now(timezone.utc)
+    exam.updated_at = exam.ended_at
+    project.updated_at = exam.ended_at
+    await db.commit()
+    await db.refresh(exam)
+    return StudyExamSummary.model_validate(exam)
+
+
+# ====================================================================
+# Sessions (read only; creation is implicit via enter_unit / start_final_exam)
+# ====================================================================
 @router.get("/sessions/{session_id}", response_model=StudySessionDetail)
 async def get_session(
     session_id: uuid.UUID,
@@ -280,7 +938,17 @@ async def get_session(
     )
     messages = [StudyMessageResponse.model_validate(m) for m in messages_res.scalars().all()]
     return StudySessionDetail.model_validate(
-        {**session.__dict__, "messages": messages}
+        {
+            "id": session.id,
+            "project_id": session.project_id,
+            "kind": session.kind,
+            "unit_id": session.unit_id,
+            "exam_id": session.exam_id,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "excalidraw_snapshot": session.excalidraw_snapshot,
+            "messages": messages,
+        }
     )
 
 
@@ -316,7 +984,12 @@ async def send_message(
 ) -> StudySendMessageResponse:
     session, project = await _get_owned_session(session_id, user, db)
 
-    # Resolve provider + model: request > project default.
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic is archived — unarchive it to keep studying.",
+        )
+
     provider_id = payload.provider_id
     model_id = payload.model_id or project.model_id
     if provider_id is None or not model_id:
@@ -327,11 +1000,10 @@ async def send_message(
                 "Send provider_id + model_id in the request."
             ),
         )
-
     provider = await db.get(ModelProvider, provider_id)
     await _resolve_provider(provider, user, db, model_id=model_id)
+    assert provider is not None
 
-    # Persist user message immediately so the client can optimistic-render.
     user_msg = StudyMessage(
         session_id=session.id,
         role="user",
@@ -339,11 +1011,15 @@ async def send_message(
     )
     db.add(user_msg)
 
-    # Remember last-used model on the project so subsequent sends work without
-    # re-specifying.
     project.model_id = model_id
-    project.updated_at = datetime.now(timezone.utc)
-    session.updated_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    project.updated_at = now
+    session.updated_at = now
+    if session.kind == "unit" and session.unit_id:
+        unit = await db.get(StudyUnit, session.unit_id)
+        if unit is not None:
+            unit.last_studied_at = now
+            unit.updated_at = now
 
     await db.commit()
     await db.refresh(user_msg)
@@ -358,6 +1034,9 @@ async def send_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "reviewing_exercise_id": None,
+        "session_kind": session.kind or "legacy",
+        "unit_id": str(session.unit_id) if session.unit_id else None,
+        "exam_id": str(session.exam_id) if session.exam_id else None,
     }
     await enqueue_stream(stream_id, ctx)
 
@@ -390,6 +1069,9 @@ async def _stream_generator(
         if ctx.get("reviewing_exercise_id")
         else None
     )
+    session_kind = ctx.get("session_kind") or "legacy"
+    unit_id = uuid.UUID(ctx["unit_id"]) if ctx.get("unit_id") else None
+    exam_id = uuid.UUID(ctx["exam_id"]) if ctx.get("exam_id") else None
 
     async with SessionLocal() as db:
         session = await db.get(StudySession, session_id)
@@ -410,9 +1092,43 @@ async def _stream_generator(
             yield _sse({"done": True})
             return
 
-        # Rehydrate history — any assistant message linked to an exercise
-        # gets its original `<whiteboard_action>` block re-injected so the
-        # LLM can reason about what it previously placed.
+        # Load unit / exam context up front so the prompt builders can
+        # be called without extra round-trips.
+        unit: StudyUnit | None = None
+        all_units: list[StudyUnit] = []
+        if session_kind == "unit" and unit_id is not None:
+            unit = await db.get(StudyUnit, unit_id)
+            all_units_res = await db.execute(
+                select(StudyUnit)
+                .where(StudyUnit.project_id == project.id)
+                .order_by(StudyUnit.order_index.asc())
+            )
+            all_units = list(all_units_res.scalars().all())
+
+        exam: StudyExam | None = None
+        exam_units: list[StudyUnit] = []
+        prior_exams: list[StudyExam] = []
+        if session_kind == "exam" and exam_id is not None:
+            exam = await db.get(StudyExam, exam_id)
+            exam_units_res = await db.execute(
+                select(StudyUnit)
+                .where(StudyUnit.project_id == project.id)
+                .order_by(StudyUnit.order_index.asc())
+            )
+            exam_units = list(exam_units_res.scalars().all())
+            prior_res = await db.execute(
+                select(StudyExam)
+                .where(
+                    StudyExam.project_id == project.id,
+                    StudyExam.id != (exam.id if exam else None),
+                )
+                .order_by(StudyExam.attempt_number.asc())
+            )
+            prior_exams = [
+                e for e in prior_res.scalars().all() if e.status in ("passed", "failed")
+            ]
+
+        # Rehydrate history.
         messages_res = await db.execute(
             select(StudyMessage)
             .where(StudyMessage.session_id == session.id)
@@ -433,13 +1149,30 @@ async def _stream_generator(
             history_rows, exercises_by_msg
         )
 
-        system_prompt = build_tutor_system_prompt(project)
+        # Pick the right system prompt + tag set for this session kind.
+        if session_kind == "unit" and unit is not None:
+            system_prompt = build_unit_system_prompt(
+                project=project, unit=unit, all_units=all_units
+            )
+            allowed_tags = ["whiteboard_action", "unit_action"]
+        elif session_kind == "exam" and exam is not None:
+            system_prompt = build_exam_system_prompt(
+                project=project,
+                exam=exam,
+                units=exam_units,
+                prior_exams=prior_exams,
+            )
+            allowed_tags = ["whiteboard_action", "exam_action"]
+        else:
+            system_prompt = build_legacy_system_prompt(project)
+            allowed_tags = ["whiteboard_action"]
 
         yield _sse({"event": "start", "stream_id": str(stream_id)})
 
-        parser = WhiteboardActionParser()
+        parser = TaggedActionParser(tags=allowed_tags)
         chat_parts: list[str] = []
-        pending_action_payloads: list[dict[str, Any]] = []
+        pending_whiteboard: list[dict[str, Any]] = []
+        pending_side_actions: list[Any] = []  # Capture objects for unit/exam
 
         try:
             async for token in model_router.stream_chat(
@@ -457,16 +1190,29 @@ async def _stream_generator(
                 if safe_text:
                     chat_parts.append(safe_text)
                     yield _sse({"delta": safe_text})
-                for raw in captures:
-                    payload = parse_action_payload(raw)
-                    if payload is None:
-                        logger.warning(
-                            "Discarding malformed whiteboard_action JSON (%d chars)",
-                            len(raw),
+                for cap in captures:
+                    if cap.tag == "whiteboard_action":
+                        payload_obj = parse_whiteboard_payload(cap.body)
+                        if payload_obj is None:
+                            logger.warning(
+                                "Discarding malformed whiteboard_action (%d chars) - "
+                                "head=%r",
+                                len(cap.body),
+                                cap.body[:120],
+                            )
+                            continue
+                        pending_whiteboard.append(payload_obj)
+                        yield _sse(
+                            {
+                                "event": "action_detected",
+                                "kind": payload_obj.get("type"),
+                            }
                         )
-                        continue
-                    pending_action_payloads.append(payload)
-                    yield _sse({"event": "action_detected", "kind": payload.get("type")})
+                    else:
+                        pending_side_actions.append(cap)
+                        yield _sse(
+                            {"event": "action_detected", "kind": cap.tag}
+                        )
         except ProviderError as e:
             logger.warning("Study provider error on stream %s: %s", stream_id, e)
             yield _sse({"error": str(e)})
@@ -476,8 +1222,6 @@ async def _stream_generator(
             logger.info("Study stream %s cancelled", stream_id)
             raise
 
-        # Anything the parser was holding back (partial tag prefix that never
-        # resolved to a tag) is now known-safe.
         tail = parser.flush()
         if tail:
             chat_parts.append(tail)
@@ -492,22 +1236,18 @@ async def _stream_generator(
         db.add(assistant)
         await db.flush()
 
-        # Persist each captured exercise. We only link the first exercise
-        # back onto the assistant message — subsequent exercises in the same
-        # reply are rare in practice and the UI will pick up the latest.
+        # Persist any whiteboard exercises.
         emitted_exercises: list[WhiteboardExercise] = []
-        for idx, payload in enumerate(pending_action_payloads):
-            kind = str(payload.get("type", "")).lower()
+        for idx, wp in enumerate(pending_whiteboard):
+            kind = str(wp.get("type", "")).lower()
             if kind != "exercise":
-                logger.info(
-                    "Ignoring unsupported whiteboard action type=%r", payload.get("type")
-                )
+                logger.info("Ignoring unsupported whiteboard action type=%r", wp.get("type"))
                 continue
-            html = payload.get("html")
+            html = wp.get("html")
             if not isinstance(html, str) or not html.strip():
                 logger.warning("Skipping whiteboard exercise with empty html")
                 continue
-            title = payload.get("title")
+            title = wp.get("title")
             exercise = WhiteboardExercise(
                 session_id=session.id,
                 message_id=assistant.id,
@@ -521,7 +1261,16 @@ async def _stream_generator(
             if idx == 0:
                 assistant.exercise_id = exercise.id
 
-        # Mark the exercise being reviewed as 'reviewed' and stash the
+        # Apply unit/exam side-channel captures.
+        capture_result = await apply_captures(
+            db=db,
+            captures=pending_side_actions,
+            project=project,
+            unit=unit,
+            exam=exam,
+        )
+
+        # Mark the exercise being reviewed as 'reviewed' and stash
         # feedback (the full assistant reply).
         if reviewing_exercise_id is not None:
             reviewed = await db.get(WhiteboardExercise, reviewing_exercise_id)
@@ -530,14 +1279,16 @@ async def _stream_generator(
                 reviewed.ai_feedback = full_chat
 
         session.updated_at = datetime.now(timezone.utc)
-        project.updated_at = datetime.now(timezone.utc)
+        project.updated_at = session.updated_at
         await db.commit()
         await db.refresh(assistant)
         for ex in emitted_exercises:
             await db.refresh(ex)
+        if unit is not None:
+            await db.refresh(unit)
+        if exam is not None:
+            await db.refresh(exam)
 
-        # Announce each freshly-created exercise so the client can load it
-        # into the whiteboard iframe.
         for ex in emitted_exercises:
             yield _sse(
                 {
@@ -562,6 +1313,71 @@ async def _stream_generator(
                 }
             )
 
+        inserted_units = capture_result.get("units_inserted") or []
+        if inserted_units:
+            yield _sse(
+                {
+                    "event": "units_inserted",
+                    "units": inserted_units,
+                    "reason": capture_result.get("reason"),
+                    "before_unit_id": str(unit.id) if unit is not None else None,
+                }
+            )
+
+        if capture_result.get("project_calibrated"):
+            yield _sse(
+                {
+                    "event": "project_calibrated",
+                    "project_id": str(project.id),
+                }
+            )
+
+        calibration_warning = capture_result.get("calibration_warning")
+        if calibration_warning:
+            yield _sse(
+                {
+                    "event": "calibration_warning",
+                    "project_id": str(project.id),
+                    "reason": calibration_warning.get("reason"),
+                    "batch_id": calibration_warning.get("batch_id"),
+                }
+            )
+
+        if capture_result.get("unit_completed") and unit is not None:
+            yield _sse(
+                {
+                    "event": "unit_completed",
+                    "unit": {
+                        "id": str(unit.id),
+                        "status": unit.status,
+                        "mastery_score": unit.mastery_score,
+                        "mastery_summary": unit.mastery_summary,
+                        "completed_at": unit.completed_at.isoformat()
+                        if unit.completed_at
+                        else None,
+                    },
+                }
+            )
+
+        if capture_result.get("exam_applied") and exam is not None:
+            yield _sse(
+                {
+                    "event": "exam_graded",
+                    "exam": {
+                        "id": str(exam.id),
+                        "status": exam.status,
+                        "passed": exam.passed,
+                        "score": exam.score,
+                        "summary": exam.summary,
+                        "weak_unit_ids": [str(x) for x in (exam.weak_unit_ids or [])],
+                        "strong_unit_ids": [
+                            str(x) for x in (exam.strong_unit_ids or [])
+                        ],
+                        "ended_at": exam.ended_at.isoformat() if exam.ended_at else None,
+                    },
+                }
+            )
+
         yield _sse(
             {
                 "done": True,
@@ -578,8 +1394,6 @@ async def stream_response(
     request: Request,
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    # `session_id` is path-only for RESTful-shape; actual ownership check
-    # happens inside the generator using the redis context.
     _ = session_id
     return StreamingResponse(
         _stream_generator(stream_id, user, request),
@@ -672,6 +1486,93 @@ async def get_exercise(
     return WhiteboardExerciseDetail.model_validate(exercise)
 
 
+# --- Sandboxed iframe delivery -------------------------------------
+# AI-authored exercise HTML can't be rendered via ``srcDoc`` because
+# the SPA's strict CSP (``script-src 'self'``) is inherited by srcdoc
+# iframes and would block every inline ``<script>`` block the AI
+# generates — including the glue code that wires Sortable to the DOM
+# and defines ``window.collectAnswers``. These two endpoints serve the
+# HTML from a dedicated URL whose response CSP allows inline scripts
+# (see ``location /api/study/exercise-frame/`` in ``nginx.conf``),
+# while the signed-token indirection keeps the frame endpoint
+# auth-free so the browser's iframe loader (which can't attach a
+# Bearer header) can still reach it.
+
+
+async def _require_owned_exercise(
+    exercise_id: uuid.UUID, user: User, db: AsyncSession
+) -> WhiteboardExercise:
+    """Verify the current user owns ``exercise_id`` — 404 otherwise."""
+    exercise = await db.get(WhiteboardExercise, exercise_id)
+    if exercise is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
+        )
+    session = await db.get(StudySession, exercise.session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
+        )
+    project = await db.get(StudyProject, session.project_id)
+    if project is None or project.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
+        )
+    return exercise
+
+
+@router.post("/exercises/{exercise_id}/frame-token")
+async def create_exercise_frame_token(
+    exercise_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Return a signed, short-lived URL the SPA can use as an iframe ``src``.
+
+    Proof of ownership happens here, while we have the authenticated
+    user. The token binds the user, the exercise, and a 2-minute
+    expiry together with HMAC-SHA256 over ``SECRET_KEY``.
+    """
+    await _require_owned_exercise(exercise_id, user, db)
+    token = sign_exercise_frame_token(user_id=user.id, exercise_id=exercise_id)
+    return {
+        "token": token,
+        "url": f"/api/study/exercise-frame/{exercise_id}?t={token}",
+    }
+
+
+@router.get("/exercise-frame/{exercise_id}")
+async def serve_exercise_frame(
+    exercise_id: uuid.UUID,
+    t: str = Query(..., description="Signed token from /frame-token"),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Serve exercise HTML for in-iframe rendering.
+
+    This endpoint is intentionally unauthenticated (no
+    ``get_current_user`` dependency) because the browser's iframe
+    loader cannot attach an ``Authorization`` header. Authorisation
+    comes from the HMAC-signed ``t`` query parameter; a mismatch
+    between the token's exercise id and the URL's returns 403.
+
+    The response CSP is loosened by nginx for this path — see the
+    ``location /api/study/exercise-frame/`` block in ``nginx.conf``.
+    """
+    claims = verify_exercise_frame_token(t)
+    if claims is None or claims.exercise_id != exercise_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or expired exercise token",
+        )
+    exercise = await db.get(WhiteboardExercise, exercise_id)
+    if exercise is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
+        )
+    html = inject_submit_shim(exercise.html or "")
+    return HTMLResponse(content=html)
+
+
 @router.post(
     "/sessions/{session_id}/whiteboard/submit",
     response_model=WhiteboardSubmitResponse,
@@ -685,18 +1586,18 @@ async def submit_exercise(
 ) -> WhiteboardSubmitResponse:
     session, project = await _get_owned_session(session_id, user, db)
 
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic is archived — unarchive it first.",
+        )
+
     exercise = await db.get(WhiteboardExercise, payload.exercise_id)
     if exercise is None or exercise.session_id != session.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
         )
-    if exercise.status == "reviewed":
-        # Allow re-submission (student tweaks and tries again) — reset to
-        # 'submitted' and let the stream promote back to 'reviewed'.
-        pass
 
-    # Resolve provider + model for the eval reply. Project.model_id is always
-    # populated once the student has sent at least one message; guard anyway.
     model_id = project.model_id
     if not model_id:
         raise HTTPException(
@@ -706,20 +1607,14 @@ async def submit_exercise(
                 "send a chat message first."
             ),
         )
-    # Provider must be owned (or global) + enabled; pick the first enabled
-    # provider that exposes this model_id in its enabled_models (or any if
-    # enabled_models is null).
     provider = await _pick_provider_for_model(model_id, user, db)
 
-    # Record submission + freehand snapshot.
     now = datetime.now(timezone.utc)
     exercise.status = "submitted"
     exercise.answer_payload = payload.answers
     exercise.excalidraw_snap = payload.excalidraw_snapshot_b64
     exercise.submitted_at = now
 
-    # Synthetic user chat message so the AI receives the submission as a
-    # normal turn. Formatting includes the exercise title + answers JSON.
     user_msg = StudyMessage(
         session_id=session.id,
         role="user",
@@ -742,6 +1637,9 @@ async def submit_exercise(
         "temperature": 0.7,
         "max_tokens": 4096,
         "reviewing_exercise_id": str(exercise.id),
+        "session_kind": session.kind or "legacy",
+        "unit_id": str(session.unit_id) if session.unit_id else None,
+        "exam_id": str(session.exam_id) if session.exam_id else None,
     }
     await enqueue_stream(stream_id, ctx)
 
@@ -749,31 +1647,6 @@ async def submit_exercise(
         stream_id=stream_id,
         user_message=StudyMessageResponse.model_validate(user_msg),
         exercise=WhiteboardExerciseSummary.model_validate(exercise),
-    )
-
-
-async def _pick_provider_for_model(
-    model_id: str, user: User, db: AsyncSession
-) -> ModelProvider:
-    """Find an enabled provider owned by the user (or global) that can serve
-    ``model_id`` based on its catalog + enabled_models whitelist."""
-    result = await db.execute(
-        select(ModelProvider).where(
-            (ModelProvider.user_id == user.id) | (ModelProvider.user_id.is_(None)),
-            ModelProvider.enabled.is_(True),
-        )
-    )
-    for provider in result.scalars().all():
-        catalog_ids = {m["id"] for m in (provider.models or []) if isinstance(m, dict)}
-        if model_id not in catalog_ids:
-            continue
-        allow = provider.enabled_models
-        if allow is not None and model_id not in allow:
-            continue
-        return provider
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"No enabled provider serves model {model_id!r}",
     )
 
 

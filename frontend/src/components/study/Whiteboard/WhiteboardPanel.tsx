@@ -92,14 +92,32 @@ export function WhiteboardPanel({
   };
 
   const handleIframeSubmit = async (answers: unknown) => {
+    console.log("[promptly] handleIframeSubmit", {
+      activeExerciseId: activeExercise?.id ?? null,
+      answers,
+    });
     if (!activeExercise) return;
     const pngBase64 = (await notesRef.current?.exportPngBase64()) ?? null;
     onSubmit({ exerciseId: activeExercise.id, answers, snapshotPngBase64: pngBase64 });
   };
 
   const requestSubmitViaBar = () => {
-    // No iframe → nothing to do.
-    if (!activeExercise || tab !== "exercise") return;
+    console.log("[promptly] SubmitBar clicked", {
+      hasActiveExercise: Boolean(activeExercise),
+      tab,
+    });
+    if (!activeExercise) {
+      console.warn("[promptly] requestSubmitViaBar aborted — no active exercise");
+      return;
+    }
+    // Auto-switch to the Exercise tab if the student somehow clicked the
+    // submit bar while on Notes / History. The bar is only visible on the
+    // Exercise tab today, but this guards against future layouts that
+    // keep it always-visible.
+    if (tab !== "exercise") {
+      console.warn("[promptly] requestSubmitViaBar: switching tab to exercise first");
+      setTab("exercise");
+    }
     rendererRef.current?.requestSubmit();
   };
 

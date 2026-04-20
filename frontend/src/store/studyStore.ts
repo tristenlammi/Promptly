@@ -1,10 +1,58 @@
 import { create } from "zustand";
 
 import type {
+  StudyExamSummary,
   StudyMessage,
+  StudyUnitSummary,
   WhiteboardExerciseDetail,
   WhiteboardExerciseSummary,
 } from "@/api/types";
+
+/** Lightweight snapshot of a unit-completion event the stream handler
+ *  surfaces so the UI can pop a "Unit complete!" celebration toast. */
+export interface UnitCompletedEvent {
+  id: string;
+  mastery_score: number | null;
+  mastery_summary: string | null;
+  completed_at: string | null;
+}
+
+/** Snapshot of an ``insert_prerequisites`` action — the tutor just
+ *  spliced new bridge units into the plan ahead of the current one.
+ *  The UnitSession page shows a non-blocking banner so the student
+ *  knows what happened but is free to keep chatting. */
+export interface UnitsInsertedEvent {
+  units: Array<{
+    id: string;
+    title: string;
+    order_index: number;
+    inserted_as_prereq: boolean;
+  }>;
+  reason: string | null;
+  before_unit_id: string | null;
+}
+
+/** Snapshot of the one-shot ``calibration_warning`` SSE event — fires
+ *  when the tutor inserts prerequisites on a project whose calibration
+ *  came from a skip. The backend guarantees only ONE firing per
+ *  project, so this slot is effectively write-once until the project
+ *  is regenerated. */
+export interface CalibrationWarningEvent {
+  project_id: string;
+  reason: string | null;
+  batch_id: string | null;
+}
+
+export interface ExamGradedEvent {
+  id: string;
+  status: StudyExamSummary["status"];
+  passed: boolean | null;
+  score: number | null;
+  summary: string | null;
+  weak_unit_ids: string[];
+  strong_unit_ids: string[];
+  ended_at: string | null;
+}
 
 interface StudyState {
   /** The session currently open in the split-pane view. */
@@ -14,21 +62,29 @@ interface StudyState {
   isStreaming: boolean;
   streamError: string | null;
 
-  /** Exercise currently shown on the whiteboard — set from the `exercise_ready`
-   *  SSE event or when the user picks one from the history panel. */
+  /** Exercise currently shown on the whiteboard. */
   activeExercise: WhiteboardExerciseDetail | null;
-  /** Latest summary list for the History tab. Kept separate so we don't have
-   *  to refetch the heavy `html` body every time a new one lands. */
   exerciseHistory: WhiteboardExerciseSummary[];
-  /** Submission lifecycle state for the sticky SubmitBar. */
   submissionStatus: "idle" | "submitting" | "awaiting_review" | "error";
   submissionError: string | null;
+
+  /** Live unit snapshot so the UnitSession page can react to
+   *  `unit_completed` SSE events without re-fetching. */
+  activeUnit: StudyUnitSummary | null;
+  lastUnitCompleted: UnitCompletedEvent | null;
+  lastUnitsInserted: UnitsInsertedEvent | null;
+  /** One-shot honesty nudge fired by the stream when the tutor finds
+   *  a gap on a project the student skipped calibration for. The
+   *  session page reads this and pops a ``CalibrationWarningToast``. */
+  lastCalibrationWarning: CalibrationWarningEvent | null;
+
+  /** Live exam snapshot for the Exam page. */
+  activeExam: StudyExamSummary | null;
+  lastExamGraded: ExamGradedEvent | null;
 
   setActiveSession: (id: string | null) => void;
   setMessages: (messages: StudyMessage[]) => void;
   appendMessage: (message: StudyMessage) => void;
-  /** Swap a message (matched by id) for a new one. Used to reconcile an
-   *  optimistic client-side user message with the server-persisted copy. */
   replaceMessage: (id: string, message: StudyMessage) => void;
   setStreaming: (streaming: boolean) => void;
   appendStreamingDelta: (delta: string) => void;
@@ -41,6 +97,14 @@ interface StudyState {
   markExerciseReviewed: (exerciseId: string) => void;
   setSubmissionStatus: (status: StudyState["submissionStatus"]) => void;
   setSubmissionError: (err: string | null) => void;
+
+  setActiveUnit: (unit: StudyUnitSummary | null) => void;
+  setLastUnitCompleted: (event: UnitCompletedEvent | null) => void;
+  setLastUnitsInserted: (event: UnitsInsertedEvent | null) => void;
+  setLastCalibrationWarning: (event: CalibrationWarningEvent | null) => void;
+
+  setActiveExam: (exam: StudyExamSummary | null) => void;
+  setLastExamGraded: (event: ExamGradedEvent | null) => void;
 }
 
 export const useStudyStore = create<StudyState>((set) => ({
@@ -54,6 +118,14 @@ export const useStudyStore = create<StudyState>((set) => ({
   exerciseHistory: [],
   submissionStatus: "idle",
   submissionError: null,
+
+  activeUnit: null,
+  lastUnitCompleted: null,
+  lastUnitsInserted: null,
+  lastCalibrationWarning: null,
+
+  activeExam: null,
+  lastExamGraded: null,
 
   setActiveSession: (activeSessionId) => set({ activeSessionId }),
   setMessages: (messages) => set({ messages }),
@@ -94,4 +166,13 @@ export const useStudyStore = create<StudyState>((set) => ({
     })),
   setSubmissionStatus: (submissionStatus) => set({ submissionStatus }),
   setSubmissionError: (submissionError) => set({ submissionError }),
+
+  setActiveUnit: (activeUnit) => set({ activeUnit }),
+  setLastUnitCompleted: (lastUnitCompleted) => set({ lastUnitCompleted }),
+  setLastUnitsInserted: (lastUnitsInserted) => set({ lastUnitsInserted }),
+  setLastCalibrationWarning: (lastCalibrationWarning) =>
+    set({ lastCalibrationWarning }),
+
+  setActiveExam: (activeExam) => set({ activeExam }),
+  setLastExamGraded: (lastExamGraded) => set({ lastExamGraded }),
 }));
