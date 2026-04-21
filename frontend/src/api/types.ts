@@ -299,6 +299,21 @@ export type ProviderType =
   | "ollama"
   | "openai_compatible";
 
+/**
+ * Compact summary of the model's upstream endpoint data policies.
+ * Currently only populated for OpenRouter providers (via the
+ * `/models/{id}/endpoints` API). `null`/undefined means we don't
+ * have privacy info for this model — the UI shows nothing, rather
+ * than guessing.
+ */
+export interface ModelPrivacy {
+  endpoints_count: number;
+  training_endpoints: number;
+  retains_prompts_endpoints: number;
+  zdr_endpoints: number;
+  max_retention_days: number | null;
+}
+
 export interface ModelInfo {
   id: string;
   display_name: string;
@@ -312,6 +327,7 @@ export interface ModelInfo {
    * in chat (Phase 4).
    */
   supports_vision?: boolean;
+  privacy?: ModelPrivacy | null;
 }
 
 export interface Provider {
@@ -432,6 +448,9 @@ export interface ConversationSummary {
    *  the live deadline so the UI can render a countdown. */
   temporary_mode?: TemporaryMode | null;
   expires_at?: string | null;
+  /** Phase P1 — Chat Projects. Non-null when this chat lives inside a
+   *  :class:`ChatProject`. Drives the sidebar grouping + breadcrumb. */
+  project_id?: string | null;
 }
 
 /** Phase Z1 — short-lived conversation modes. See ConversationSummary
@@ -492,6 +511,9 @@ export interface ConversationSearchHit {
   snippet: string;
   rank: number;
   created_at: string;
+  /** Whether the match lives in a conversation the caller owns or
+   *  one that was shared to them. Powers the two palette sections. */
+  access: "owner" | "collaborator";
 }
 
 export interface SendMessageResponse {

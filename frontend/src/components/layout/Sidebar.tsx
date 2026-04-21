@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   BookOpen,
   Clock,
+  FolderKanban,
   FolderOpen,
   LogOut,
   MessagesSquare,
@@ -11,6 +12,7 @@ import {
   PanelLeftOpen,
   Settings,
   ShieldCheck,
+  Split,
   Star,
   Trash2,
 } from "lucide-react";
@@ -86,6 +88,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
         <nav className="flex flex-col items-center gap-1">
           <SideIcon to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" />
+          {/* Compare is desktop-only — the 2–4 column layout is
+              unusable below the md breakpoint. Match the Study rule
+              so both "big layout" features share the same visibility
+              story on phones. */}
+          {!isMobile && (
+            <SideIcon
+              to="/chat/compare/archive"
+              icon={<Split className="h-4 w-4" />}
+              label="Compare"
+            />
+          )}
+          <SideIcon to="/projects" icon={<FolderKanban className="h-4 w-4" />} label="Projects" />
           {!isMobile && (
             <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
           )}
@@ -135,6 +149,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           surfaces (Chat / Study / Files) reduces visual clutter. */}
       <nav className="mt-4 flex flex-col gap-0.5 px-2">
         <NavItem to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" end />
+        {!isMobile && (
+          <NavItem
+            to="/chat/compare/archive"
+            icon={<Split className="h-4 w-4" />}
+            label="Compare"
+          />
+        )}
+        <NavItem to="/projects" icon={<FolderKanban className="h-4 w-4" />} label="Projects" />
         {!isMobile && (
           <NavItem to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
         )}

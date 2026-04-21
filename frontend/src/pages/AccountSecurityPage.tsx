@@ -1,6 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
+import { NotificationsPanel } from "@/components/account/NotificationsPanel";
 import { PersonalContextPanel } from "@/components/account/PersonalContextPanel";
 import { MfaSettingsPanel } from "@/components/mfa/MfaSettingsPanel";
 import { useAuthStore } from "@/store/authStore";
@@ -42,6 +43,7 @@ export function AccountSecurityPage() {
         <div className="mx-auto flex max-w-2xl flex-col gap-6">
           <PersonalContextPanel />
           <ChatPreferencesPanel />
+          <NotificationsPanel />
           <MfaSettingsPanel defaultEmail={user?.email} />
         </div>
       </div>

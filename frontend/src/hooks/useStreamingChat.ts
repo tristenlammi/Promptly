@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   chatApi,
   type EditMessagePayload,
+  type RegenerateMessagePayload,
   type SendMessagePayload,
 } from "@/api/chat";
 import { authHeader } from "@/api/client";
@@ -60,6 +61,18 @@ interface SSEPayload {
   delta?: string;
   done?: boolean;
   error?: string;
+  /** Structured classification for known upstream failure modes
+   *  (e.g. ``"openrouter_privacy_blocked"``). Set alongside ``error``
+   *  by the backend when the raw message matches a recognised
+   *  pattern; the UI uses it to pick a richer error card. */
+  error_code?: string;
+  /** Short human-readable title for the classified error — used as
+   *  the card heading when ``error_code`` is set. */
+  error_title?: string;
+  /** Optional external URL a user can click through to resolve the
+   *  underlying account/config issue. Rendered as a button in the
+   *  classified error card. */
+  error_help_url?: string;
   message_id?: string;
   created_at?: string;
   stream_id?: string;
@@ -107,6 +120,14 @@ interface UseStreamingChatResult {
     conversationId: string,
     messageId: string,
     payload: EditMessagePayload
+  ) => Promise<void>;
+  /** Re-stream an assistant reply (optionally with a different model /
+   *  provider). The hook truncates any messages after ``messageId``
+   *  server-side and delivers a fresh stream for the replaced turn. */
+  regenerate: (
+    conversationId: string,
+    messageId: string,
+    payload?: RegenerateMessagePayload
   ) => Promise<void>;
   /** Re-attach to a generation that's still running on the backend (the
    *  user navigated away mid-reply and came back). Replays the buffered
@@ -174,7 +195,18 @@ export function useStreamingChat(): UseStreamingChatResult {
         }
 
         if (data.error && !data.event) {
-          store.setStreamError(data.error);
+          // When the backend classified the error we pass structured
+          // metadata so the chat error card can render buttons/links
+          // instead of the raw provider dump. Unknown errors fall
+          // through with ``meta=null`` and render as a plain banner.
+          const meta = data.error_code
+            ? {
+                code: data.error_code,
+                title: data.error_title ?? null,
+                helpUrl: data.error_help_url ?? null,
+              }
+            : null;
+          store.setStreamError(data.error, meta);
           continue;
         }
 
@@ -409,5 +441,58 @@ export function useStreamingChat(): UseStreamingChatResult {
     [cancel, drainStream, qc]
   );
 
-  return { sendMessage, editAndResend, reattach, cancel };
+  const regenerate = useCallback(
+    async (
+      conversationId: string,
+      assistantMessageId: string,
+      payload: RegenerateMessagePayload = {}
+    ) => {
+      const store = useChatStore.getState();
+      cancel();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      store.resetStream();
+      store.setStreaming(true);
+
+      try {
+        // Kicks off the fresh stream on the server. The returned
+        // ``user_message`` is the unchanged prompt that triggered the
+        // reply — we don't need to splice it in, but we do need to
+        // drop the stale assistant turn(s) locally so the UI matches
+        // the server's "clean tail" state before streaming resumes.
+        const { stream_id, user_message } = await chatApi.regenerateMessage(
+          conversationId,
+          assistantMessageId,
+          payload
+        );
+
+        // Everything from the prompt's id forward stays, but the
+        // assistant reply (and any trailing tool-sidecar rows) must
+        // go — drainStream will replace them with the new content
+        // as it arrives.
+        store.truncateAfter(user_message.id);
+
+        await drainStream(conversationId, stream_id, ac);
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        store.setStreamError(msg);
+      } finally {
+        abortRef.current = null;
+        useChatStore.getState().setStreaming(false);
+        qc.invalidateQueries({ queryKey: ["conversations"] });
+        qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        useChatStore.setState({
+          streamingContent: "",
+          streamingSources: null,
+          streamingAttachments: null,
+          toolInvocations: [],
+        });
+      }
+    },
+    [cancel, drainStream, qc]
+  );
+
+  return { sendMessage, editAndResend, regenerate, reattach, cancel };
 }

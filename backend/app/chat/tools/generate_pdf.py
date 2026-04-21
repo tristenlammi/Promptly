@@ -211,6 +211,24 @@ class GeneratePdfTool(Tool):
             pdf_row.size_bytes,
         )
 
+        # PDFs can take a few seconds on a long document — long
+        # enough for the user to tab away. A push when it lands
+        # matches the "notify me on completion" contract we set
+        # with the user on the Notifications panel.
+        try:
+            from app.notifications import notify_user
+
+            await notify_user(
+                user_id=ctx.user.id,
+                category="export_ready",
+                title="PDF ready",
+                body=f"'{pdf_row.filename}' is ready in Generated Files.",
+                url="/files",
+                tag=f"promptly-pdf-{pdf_row.id}",
+            )
+        except Exception:  # pragma: no cover — push is never critical
+            logger.warning("generate_pdf: push dispatch failed", exc_info=True)
+
         return ToolResult(
             content=(
                 f"Generated '{pdf_row.filename}' "

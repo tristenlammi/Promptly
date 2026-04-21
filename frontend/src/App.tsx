@@ -5,10 +5,14 @@ import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatPage } from "@/pages/ChatPage";
+import { ComparePage } from "@/pages/ComparePage";
+import { CompareArchivePage } from "@/pages/CompareArchivePage";
 import { FilesPage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
+import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
+import { ProjectsPage } from "@/pages/ProjectsPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
 import { StudyPage } from "@/pages/StudyPage";
@@ -85,7 +89,21 @@ export default function App() {
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/new" element={<Navigate to="/chat" replace />} />
+        {/* Compare routes live under /chat/compare so they slot into
+            the chat sidebar's "section" hierarchy without needing a
+            new top-level nav item. The bare ``/chat/compare`` entry
+            redirects to the archive so a click on the sidebar entry
+            always lands on a useful listing. */}
+        <Route
+          path="/chat/compare"
+          element={<Navigate to="/chat/compare/archive" replace />}
+        />
+        <Route path="/chat/compare/archive" element={<CompareArchivePage />} />
+        <Route path="/chat/compare/new" element={<ComparePage />} />
+        <Route path="/chat/compare/:id" element={<ComparePage />} />
         <Route path="/chat/:id" element={<ChatPage />} />
+        <Route path="/projects" element={<ProjectsPage />} />
+        <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route
           path="/study"
           element={

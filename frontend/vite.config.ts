@@ -7,10 +7,15 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // Autogenerate the service worker via Workbox at build time and
-      // self-register it in the client. The SW silently activates on
-      // the next reload after a deploy — no popup, no skip-waiting
-      // dance for the user to manage.
+      // We need a handwritten service worker for the Web Push hooks
+      // (``push`` + ``notificationclick`` events) — Workbox's
+      // generateSW mode doesn't expose those, so we switch to
+      // ``injectManifest`` and provide ``src/sw.ts`` ourselves. The
+      // precache manifest is still injected automatically so the
+      // offline-shell behaviour is preserved.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       injectRegister: "auto",
 
@@ -62,34 +67,14 @@ export default defineConfig({
         ],
       },
 
-      workbox: {
-        // Precache the built app shell. Vite emits hashed filenames, so
-        // Workbox can cache them indefinitely and bust on rebuilds.
+      // ``injectManifest`` mode: the plugin bakes the precache
+      // manifest into ``src/sw.ts`` and leaves the runtime behaviour
+      // (caching strategies, navigate fallback, push handling) to
+      // our code. The patterns below just govern what ends up in the
+      // precache list the SW consumes via ``self.__WB_MANIFEST``.
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-
-        // SPA routing fallback — every URL without a static match
-        // returns index.html. CRITICALLY we exclude the API surface
-        // and the file-upload directory so XHR / SSE / file downloads
-        // hit the real backend instead of getting the HTML shell.
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [
-          /^\/api\//,
-          /^\/uploads\//,
-          /^\/openapi\.json$/,
-          /^\/docs/,
-          /^\/redoc/,
-        ],
-
-        // Don't intercept non-GET, API, or streaming requests at all.
-        // Chat completions are SSE, which Workbox isn't great at.
-        navigationPreload: false,
-        runtimeCaching: [],
-
-        // Take control of open tabs immediately on activation so users
-        // don't keep an old SW indefinitely.
-        clientsClaim: true,
-        skipWaiting: true,
       },
 
       devOptions: {

@@ -30,6 +30,7 @@ import {
 } from "@/hooks/useAdminUsers";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
+import { USD_TO_AUD, formatAud } from "@/utils/currency";
 import type {
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
@@ -42,7 +43,7 @@ type RangeDays = (typeof RANGE_OPTIONS)[number];
 type Metric = "cost" | "tokens" | "messages";
 
 const METRIC_LABELS: Record<Metric, string> = {
-  cost: "Cost (USD)",
+  cost: "Cost (AUD)",
   tokens: "Tokens",
   messages: "Messages",
 };
@@ -66,8 +67,9 @@ export function AnalyticsPanel() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-[var(--text-muted)]">
-          Showing the last <strong>{days}</strong> days. Cost is reported as
-          <span className="font-mono"> USD</span>.
+          Showing the last <strong>{days}</strong> days. Costs shown in
+          <span className="font-mono"> AUD</span> (converted from provider USD
+          at ~A${USD_TO_AUD.toFixed(2)}/USD).
         </div>
         <RangePicker value={days} onChange={setDays} />
       </div>
@@ -126,11 +128,11 @@ export function AnalyticsPanel() {
           icon={<CircleDollarSign className="h-4 w-4" />}
           loading={summary.isLoading}
           value={
-            summary.data ? formatUsd(summary.data.cost_usd_window) : "—"
+            summary.data ? formatAud(summary.data.cost_usd_window) : "—"
           }
           hint={
             summary.data
-              ? `${formatUsd(summary.data.cost_usd_today)} today`
+              ? `${formatAud(summary.data.cost_usd_today)} today`
               : undefined
           }
           sparklineSeries={filledSeries}
@@ -171,7 +173,7 @@ export function AnalyticsPanel() {
                   tick={{ fontSize: 11, fill: "var(--text-muted)" }}
                   stroke="var(--border)"
                   tickFormatter={(v: number) =>
-                    metric === "cost" ? formatUsd(v) : formatInt(v)
+                    metric === "cost" ? formatAud(v) : formatInt(v)
                   }
                   width={60}
                 />
@@ -181,7 +183,7 @@ export function AnalyticsPanel() {
                   formatter={(value) => {
                     const n = Number(value ?? 0);
                     return metric === "cost"
-                      ? [formatUsd(n), "Cost"]
+                      ? [formatAud(n), "Cost"]
                       : [formatInt(n), METRIC_LABELS[metric]];
                   }}
                 />
@@ -234,12 +236,12 @@ export function AnalyticsPanel() {
                     <YAxis
                       tick={{ fontSize: 11, fill: "var(--text-muted)" }}
                       stroke="var(--border)"
-                      tickFormatter={(v: number) => formatUsd(v)}
+                      tickFormatter={(v: number) => formatAud(v)}
                       width={60}
                     />
                     <Tooltip
                       contentStyle={tooltipStyle}
-                      formatter={(value) => [formatUsd(Number(value ?? 0)), "Cost"]}
+                      formatter={(value) => [formatAud(Number(value ?? 0)), "Cost"]}
                     />
                     <Bar dataKey="cost_usd_window" radius={[4, 4, 0, 0]}>
                       {(users.data ?? []).slice(0, 10).map((row, i) => (
@@ -299,7 +301,7 @@ export function AnalyticsPanel() {
                         )}
                       </td>
                       <td className="px-2 py-1.5 text-right tabular-nums font-medium text-[var(--text)]">
-                        {formatUsd(row.cost_usd_window)}
+                        {formatAud(row.cost_usd_window)}
                       </td>
                     </tr>
                   ))}
@@ -399,7 +401,7 @@ function UserDrillDialog({
                 <YAxis
                   tick={{ fontSize: 11, fill: "var(--text-muted)" }}
                   stroke="var(--border)"
-                  tickFormatter={(v: number) => formatUsd(v)}
+                  tickFormatter={(v: number) => formatAud(v)}
                   width={60}
                 />
                 <Tooltip
@@ -407,7 +409,7 @@ function UserDrillDialog({
                   labelFormatter={(label) => formatDayLong(label as string)}
                   formatter={(value, name) => {
                     const n = Number(value ?? 0);
-                    if (name === "Cost") return [formatUsd(n), "Cost"];
+                    if (name === "Cost") return [formatAud(n), "Cost"];
                     return [formatInt(n), String(name)];
                   }}
                 />
@@ -572,7 +574,7 @@ function UserTable({
                 )}
               </td>
               <td className="px-3 py-2 text-right tabular-nums font-medium">
-                {formatUsd(r.cost_usd_window)}
+                {formatAud(r.cost_usd_window)}
               </td>
               <td className="px-3 py-2 text-[var(--text-muted)]">
                 {r.last_active_at
@@ -832,13 +834,6 @@ function metricKey(m: Metric): keyof AnalyticsTimeseriesPoint {
 
 function formatInt(n: number): string {
   return Math.round(n).toLocaleString();
-}
-
-function formatUsd(n: number): string {
-  if (!n) return "$0";
-  if (Math.abs(n) >= 1) return `$${n.toFixed(2)}`;
-  if (Math.abs(n) >= 0.01) return `$${n.toFixed(3)}`;
-  return `$${n.toFixed(4)}`;
 }
 
 function formatDayShort(iso: string): string {

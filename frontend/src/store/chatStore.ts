@@ -35,6 +35,12 @@ interface ChatState {
   /** True while an outbound send or an open SSE stream is in flight. */
   isStreaming: boolean;
   streamError: string | null;
+  /** Structured metadata about a classified upstream error. Populated
+   *  alongside ``streamError`` when the backend recognises the failure
+   *  mode (e.g. OpenRouter privacy filter); used by the chat error
+   *  card to render a richer actionable message instead of the raw
+   *  red banner. ``null`` means "just a plain error — no extra UX". */
+  streamErrorMeta: StreamErrorMeta | null;
 
   setConversations: (items: ConversationSummary[]) => void;
   upsertConversation: (c: ConversationSummary) => void;
@@ -83,7 +89,23 @@ interface ChatState {
     attachments: MessageAttachmentSnapshot[]
   ) => void;
   resetStream: () => void;
-  setStreamError: (err: string | null) => void;
+  setStreamError: (err: string | null, meta?: StreamErrorMeta | null) => void;
+}
+
+/** Classified upstream error metadata — backend sets these fields on
+ *  the SSE ``error`` payload for known failure modes, and the chat
+ *  error card uses them to render a richer card (help link, title,
+ *  tone) instead of the default red banner. Extending this type is
+ *  the hook for adding new classified error cards in the future. */
+export interface StreamErrorMeta {
+  /** Stable code matching the backend's classification (e.g.
+   *  ``"openrouter_privacy_blocked"``). */
+  code: string;
+  /** Short, human-readable summary shown as the card title. */
+  title?: string | null;
+  /** Optional external URL the user can click through to resolve
+   *  the issue (e.g. the OpenRouter privacy settings page). */
+  helpUrl?: string | null;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -97,6 +119,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingAttachments: null,
   isStreaming: false,
   streamError: null,
+  streamErrorMeta: null,
 
   setConversations: (conversations) => set({ conversations }),
   upsertConversation: (c) =>
@@ -199,6 +222,8 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingAttachments: null,
       isStreaming: false,
       streamError: null,
+      streamErrorMeta: null,
     }),
-  setStreamError: (streamError) => set({ streamError }),
+  setStreamError: (streamError, streamErrorMeta = null) =>
+    set({ streamError, streamErrorMeta }),
 }));

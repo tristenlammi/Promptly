@@ -160,6 +160,26 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
 
+    # ---- Web Push (VAPID) ----
+    # Generated once per deployment with ``scripts/generate_vapid_keys.py``
+    # and rotated only when absolutely necessary (rotating invalidates
+    # every existing browser subscription). Both keys are PEM-encoded
+    # so they round-trip cleanly through .env files without base64
+    # gymnastics. ``pywebpush`` accepts them verbatim.
+    #
+    # When either value is blank, the notifications router returns a
+    # graceful 503 to the frontend's ``/account/push/public-key``
+    # call; the UI then hides the subscribe button and shows a hint
+    # directing the operator at the setup docs.
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY: str = ""
+    # Contact URI included in the VAPID header — push services (FCM,
+    # Mozilla's autopush, Apple's) require this so they know who to
+    # reach if a subscription misbehaves. ``mailto:`` or ``https://``
+    # both valid; we default to a placeholder so local dev doesn't
+    # 401 against a picky push endpoint.
+    VAPID_CONTACT: str = "mailto:admin@localhost"
+
     @property
     def allowed_origins_list(self) -> list[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]

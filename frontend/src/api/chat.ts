@@ -19,6 +19,9 @@ export interface CreateConversationPayload {
    *  a normal permanent chat. The server computes ``expires_at`` from
    *  the chosen mode; the client only picks the policy. */
   temporary_mode?: TemporaryMode | null;
+  /** Phase P1 — create under a chat project. Temporary chats can't
+   *  belong to a project (enforced server-side). */
+  project_id?: string | null;
 }
 
 export interface UpdateConversationPayload {
@@ -28,6 +31,9 @@ export interface UpdateConversationPayload {
   web_search_mode?: WebSearchMode;
   model_id?: string | null;
   provider_id?: string | null;
+  /** Phase P1 — move this chat into / out of a project. Pass a project
+   *  id to move; pass ``null`` to detach. Omit to leave unchanged. */
+  project_id?: string | null;
 }
 
 export interface SendMessagePayload {
@@ -60,6 +66,31 @@ export interface EditMessagePayload {
   temperature?: number | null;
   max_tokens?: number | null;
   tools_enabled?: boolean;
+}
+
+/** Regenerate-assistant-reply payload. All fields optional: omitting
+ *  everything is a plain "try again"; passing ``provider_id`` +
+ *  ``model_id`` powers the "try a different model" affordance. The
+ *  preceding user message is left untouched on the server side. */
+export interface RegenerateMessagePayload {
+  provider_id?: string | null;
+  model_id?: string | null;
+  web_search_mode?: WebSearchMode | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  tools_enabled?: boolean;
+}
+
+export interface ImportConversationsResponse {
+  imported: number;
+  skipped: number;
+  total_messages: number;
+  conversations: Array<{
+    id: string;
+    title: string;
+    message_count: number;
+    source: string;
+  }>;
 }
 
 export const chatApi = {
@@ -117,6 +148,58 @@ export const chatApi = {
     );
     return data;
   },
+  async regenerateMessage(
+    conversationId: string,
+    messageId: string,
+    payload: RegenerateMessagePayload = {}
+  ): Promise<SendMessageResponse> {
+    const { data } = await apiClient.post<SendMessageResponse>(
+      `/chat/conversations/${conversationId}/messages/${messageId}/regenerate`,
+      payload
+    );
+    return data;
+  },
+  /** Download a conversation in the requested format. Returns the
+   *  axios response so the caller has access to headers (we pull the
+   *  filename out of ``Content-Disposition`` rather than re-deriving
+   *  it client-side — keeps title handling identical to other
+   *  authenticated downloads like file attachments). */
+  async exportConversation(
+    conversationId: string,
+    format: "markdown" | "json" | "pdf"
+  ): Promise<{ blob: Blob; filename: string }> {
+    const res = await apiClient.get<Blob>(
+      `/chat/conversations/${conversationId}/export`,
+      {
+        params: { fmt: format },
+        responseType: "blob",
+      }
+    );
+    const filename = extractFilename(res.headers?.["content-disposition"]) ??
+      `conversation.${format === "markdown" ? "md" : format}`;
+    return { blob: res.data, filename };
+  },
+  /** Upload one or more conversations parsed from a Promptly /
+   *  ChatGPT / Claude / Markdown export. Bulk-capable: a ChatGPT
+   *  ``conversations.json`` usually contains hundreds of chats at
+   *  once. Pass ``projectId`` to drop every imported chat into a
+   *  project in one go. */
+  async importConversations(
+    file: File,
+    projectId?: string | null
+  ): Promise<ImportConversationsResponse> {
+    const body = new FormData();
+    body.append("file", file);
+    if (projectId) body.append("project_id", projectId);
+    const { data } = await apiClient.post<ImportConversationsResponse>(
+      "/chat/conversations/import",
+      body,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+      }
+    );
+    return data;
+  },
   streamUrl(streamId: string): string {
     // Used by useStreamingChat — must be absolute-ish since it flows through
     // nginx in prod and through vite proxy in dev.
@@ -138,6 +221,19 @@ export const chatApi = {
       "/chat/conversations/search",
       { params: { q, limit } }
     );
+    return data;
+  },
+
+  /** Compact the middle of a long conversation. Keeps the start and
+   *  end verbatim and replaces the middle with a single system-role
+   *  summary produced by the conversation's current model. */
+  async compact(
+    conversationId: string
+  ): Promise<{ messages_removed: number; summary_message_id: string }> {
+    const { data } = await apiClient.post<{
+      messages_removed: number;
+      summary_message_id: string;
+    }>(`/chat/conversations/${conversationId}/compact`);
     return data;
   },
 
@@ -194,3 +290,25 @@ export const chatApi = {
     await apiClient.post(`/chat/share-invites/${shareId}/decline`);
   },
 };
+
+/** Pull the download filename out of a ``Content-Disposition`` header.
+ *  Prefers the RFC 5987 ``filename*`` parameter (UTF-8 aware) and falls
+ *  back to the plain ``filename``. Returns ``null`` if neither is
+ *  present so the caller can pick a sensible default. */
+function extractFilename(header: unknown): string | null {
+  if (typeof header !== "string" || header.length === 0) return null;
+  // filename*=UTF-8''<percent-encoded>
+  const starMatch = /filename\*\s*=\s*([^']*)''([^;]+)/i.exec(header);
+  if (starMatch) {
+    try {
+      return decodeURIComponent(starMatch[2].trim());
+    } catch {
+      // fall through to plain filename
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  if (plain) {
+    return plain[1].trim();
+  }
+  return null;
+}

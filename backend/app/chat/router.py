@@ -10,7 +10,18 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,9 +36,17 @@ from app.auth.audit import (
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.billing.usage import check_budget, maybe_alert_admins, record_usage
-from app.chat.models import Conversation, ConversationShare, Message
+from app.chat.models import (
+    ChatProject,
+    ChatProjectFile,
+    CompareGroup,
+    Conversation,
+    ConversationShare,
+    Message,
+)
 from app.chat.schemas import (
     BranchConversationRequest,
+    CompactionResponse,
     ConversationCreate,
     ConversationDetail,
     ConversationSearchHit,
@@ -35,9 +54,11 @@ from app.chat.schemas import (
     ConversationUpdate,
     EditMessageRequest,
     MessageResponse,
+    RegenerateMessageRequest,
     SendMessageRequest,
     SendMessageResponse,
 )
+from app.chat.compaction import CompactionError, compact_conversation
 from app.chat.shares import (
     get_accessible_conversation,
     list_accessible_conversation_ids,
@@ -171,7 +192,11 @@ async def search_conversations(
                 ' ShortWord=3, MaxFragments=2, FragmentDelimiter=" … "'
             )                            AS snippet,
             ts_rank(m.content_tsv, websearch_to_tsquery('english', :q)) AS rank,
-            m.created_at                 AS created_at
+            m.created_at                 AS created_at,
+            CASE
+                WHEN c.user_id = :user_id THEN 'owner'
+                ELSE 'collaborator'
+            END                          AS access
         FROM messages m
         JOIN conversations c ON c.id = m.conversation_id
         WHERE m.conversation_id = ANY(:conv_ids)
@@ -187,6 +212,7 @@ async def search_conversations(
                 "q": cleaned,
                 "conv_ids": accessible_ids,
                 "limit": limit,
+                "user_id": user.id,
             },
         )
     ).mappings().all()
@@ -200,6 +226,7 @@ async def search_conversations(
             snippet=str(r["snippet"] or ""),
             rank=float(r["rank"] or 0.0),
             created_at=r["created_at"],
+            access=r["access"],
         )
         for r in rows
     ]
@@ -235,7 +262,28 @@ async def list_conversations(
     #   * Any expired chat (ephemeral or one_hour) is filtered out
     #     even if the sweeper hasn't reaped it yet, so the user never
     #     sees a stale row in the sidebar.
+    # Compare mode (0029): non-crowned compare columns are hidden
+    # from the main sidebar — they're only accessible via the
+    # Compare view / archive. Once the user crowns a column it
+    # becomes a first-class conversation and surfaces normally.
     now = datetime.now(timezone.utc)
+
+    # Subquery of conversation ids that are part of an un-crowned
+    # compare group (either still active or where the crown landed
+    # on a *different* column). The main list excludes these.
+    non_crowned_compare = (
+        select(Conversation.id)
+        .join(
+            CompareGroup,
+            Conversation.compare_group_id == CompareGroup.id,
+        )
+        .where(
+            (CompareGroup.crowned_conversation_id.is_(None))
+            | (CompareGroup.crowned_conversation_id != Conversation.id)
+        )
+        .subquery()
+    )
+
     result = await db.execute(
         select(Conversation)
         .outerjoin(
@@ -254,6 +302,7 @@ async def list_conversations(
             (Conversation.expires_at.is_(None))
             | (Conversation.expires_at > now)
         )
+        .where(Conversation.id.not_in(select(non_crowned_compare)))
         .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
         .limit(limit)
         .offset(offset)
@@ -288,6 +337,37 @@ async def create_conversation(
         # mid-stream) the sweeper still cleans up eventually.
         expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
 
+    # Phase P1 — validate the requested project (if any). Ownership
+    # is enforced here (not just on the projects endpoints) so a user
+    # can't drop a chat into someone else's project via the create
+    # payload; temporary + project is rejected because the sweeper
+    # would otherwise need to think about cascading behaviour.
+    project_id: uuid.UUID | None = None
+    if payload.project_id is not None:
+        if payload.temporary_mode is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Temporary chats can't belong to a project.",
+            )
+        project = await db.get(ChatProject, payload.project_id)
+        if project is None or project.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown project",
+            )
+        project_id = project.id
+        # If the conversation didn't pick a model explicitly, inherit
+        # the project's defaults — matches ChatGPT's behaviour where
+        # opening a project-new-chat uses the project-level model.
+        if payload.model_id is None and project.default_model_id:
+            payload = payload.model_copy(
+                update={"model_id": project.default_model_id}
+            )
+        if payload.provider_id is None and project.default_provider_id:
+            payload = payload.model_copy(
+                update={"provider_id": project.default_provider_id}
+            )
+
     conv = Conversation(
         user_id=user.id,
         title=payload.title,
@@ -296,6 +376,7 @@ async def create_conversation(
         web_search_mode=payload.web_search_mode,
         temporary_mode=payload.temporary_mode,
         expires_at=expires_at,
+        project_id=project_id,
     )
     db.add(conv)
     await db.commit()
@@ -369,6 +450,27 @@ async def update_conversation(
         conv.model_id = payload.model_id
     if payload.provider_id is not None:
         conv.provider_id = payload.provider_id
+    # Phase P1 — project reassignment. Only honour the field when the
+    # client explicitly sent it (``model_fields_set`` check) so this
+    # PATCH stays idempotent for the common "just toggle pinned"
+    # case. Temporary chats can't be projectised — same reasoning as
+    # in :func:`create_conversation`.
+    if "project_id" in payload.model_fields_set:
+        if payload.project_id is None:
+            conv.project_id = None
+        else:
+            if conv.temporary_mode is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Temporary chats can't belong to a project.",
+                )
+            project = await db.get(ChatProject, payload.project_id)
+            if project is None or project.user_id != user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unknown project",
+                )
+            conv.project_id = project.id
 
     await db.commit()
     await db.refresh(conv)
@@ -672,6 +774,30 @@ async def send_message(
     await db.commit()
     await db.refresh(user_msg)
 
+    # Collaborator activity on a shared chat → ping the owner so
+    # they don't miss the new turn while they're elsewhere in the
+    # app. Owner sends nothing to themselves. Kept best-effort; a
+    # push failure never blocks the stream kicking off.
+    if conv.user_id != user.id:
+        try:
+            from app.notifications import notify_user
+
+            preview = (payload.content or "").strip().replace("\n", " ")
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+            await notify_user(
+                user_id=conv.user_id,
+                category="shared_message",
+                title=f"New message from {user.username}",
+                body=preview or "(empty message)",
+                url=f"/chat/{conv.id}",
+                tag=f"promptly-shared-{conv.id}",
+            )
+        except Exception:  # pragma: no cover — push is never critical
+            logging.getLogger("promptly.chat.push").warning(
+                "push-dispatch-failed", exc_info=True
+            )
+
     effective_mode = (
         payload.web_search_mode
         if payload.web_search_mode is not None
@@ -874,12 +1000,309 @@ async def edit_and_resend_message(
     )
 
 
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/regenerate",
+    response_model=SendMessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def regenerate_assistant_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    payload: RegenerateMessageRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SendMessageResponse:
+    """Re-stream an assistant reply without rewriting the user message.
+
+    Constraints (returned as 4xx):
+
+    * ``message_id`` must be an *assistant* message in this conversation.
+    * It must be the *most recent* assistant message. Regenerating an
+      older assistant turn would orphan every reply that followed — same
+      reason :func:`edit_and_resend_message` pins to the last user turn.
+    * A preceding user message must exist; regenerating an assistant
+      message with no prompt would just re-emit the system preamble.
+
+    Side effects on success:
+
+    * The target assistant message (and anything strictly newer, e.g.
+      tool-invocation sidecars produced mid-stream) is hard-deleted.
+    * The preceding user message is left untouched.
+    * A fresh stream is enqueued against the same user message. Callers
+      may override ``provider_id`` / ``model_id`` to power the "try a
+      different model" button; omitting them regenerates with the
+      conversation's existing defaults.
+
+    The response shape matches ``send_message`` and ``edit_and_resend``
+    so the frontend streaming hook stays unchanged — we just hand back
+    the *preceding user message* in ``user_message`` because that's what
+    the stream is being driven from.
+    """
+    # Same quota treatment as edit — otherwise "regenerate" becomes a
+    # budget escape hatch.
+    await _enforce_send_quotas(request, user, db)
+    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+
+    target = await db.get(Message, message_id)
+    if target is None or target.conversation_id != conv.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+    if target.role != "assistant":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only assistant messages can be regenerated.",
+        )
+
+    # Confirm it's the latest assistant turn. Regenerating mid-history
+    # would contradict / orphan everything that followed.
+    last_assistant_q = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conv.id,
+            Message.role == "assistant",
+        )
+        .order_by(Message.created_at.desc())
+        .limit(1)
+    )
+    last_assistant = last_assistant_q.scalars().first()
+    if last_assistant is None or last_assistant.id != target.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Only the most recent assistant reply can be regenerated. "
+                "Branch the conversation if you want to retry earlier."
+            ),
+        )
+
+    # Find the user message that prompted this reply. With our current
+    # schema that's simply "the newest user message older than target";
+    # branching guarantees each assistant reply has exactly one ancestor.
+    prompt_q = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conv.id,
+            Message.role == "user",
+            Message.created_at < target.created_at,
+        )
+        .order_by(Message.created_at.desc())
+        .limit(1)
+    )
+    prompt = prompt_q.scalars().first()
+    if prompt is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No user prompt precedes this assistant message.",
+        )
+
+    # Resolve model/provider — identical rules to edit_and_resend_message.
+    # The common case is "no body at all, reuse defaults", so the happy
+    # path doesn't even touch the provider lookup branch.
+    provider_id = payload.provider_id or conv.provider_id
+    model_id = payload.model_id or conv.model_id
+    if provider_id is None or not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No model configured for this conversation. Pick one from "
+                "the model selector before retrying."
+            ),
+        )
+
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+        )
+    owner_ok = provider.user_id is None or provider.user_id == user.id
+    if not owner_ok:
+        owner = await db.get(User, provider.user_id)
+        owner_ok = (
+            owner is not None and owner.role == "admin" and user.role != "admin"
+        )
+        if not owner_ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+            )
+    if not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
+        )
+    if user.role != "admin" and user.allowed_models is not None:
+        if model_id not in set(user.allowed_models):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to that model. Ask an admin to grant it.",
+            )
+
+    # Wipe the target assistant reply plus any newer rows (tool sidecars,
+    # interrupted-stream scraps). The preceding user turn is preserved
+    # verbatim so re-streaming is bit-for-bit identical on the prompt
+    # side.
+    delete_after_q = await db.execute(
+        select(Message)
+        .where(
+            Message.conversation_id == conv.id,
+            Message.created_at >= target.created_at,
+        )
+    )
+    for stale in delete_after_q.scalars().all():
+        await db.delete(stale)
+
+    # Persist any model override onto the conversation so the next plain
+    # send picks up the choice, mirroring send_message/edit semantics.
+    conv.model_id = model_id
+    conv.provider_id = provider_id
+    if payload.web_search_mode is not None:
+        conv.web_search_mode = payload.web_search_mode
+    conv.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(prompt)
+
+    effective_mode = (
+        payload.web_search_mode
+        if payload.web_search_mode is not None
+        else (conv.web_search_mode or "off")
+    )
+    stream_id = uuid.uuid4()
+    ctx: StreamContext = {
+        "conversation_id": str(conv.id),
+        "user_message_id": str(prompt.id),
+        "provider_id": str(provider_id),
+        "model_id": model_id,
+        "web_search_mode": effective_mode,
+        "temperature": payload.temperature,
+        "max_tokens": payload.max_tokens,
+        "tools_enabled": bool(payload.tools_enabled),
+    }
+    await enqueue_stream(stream_id, ctx)
+
+    return SendMessageResponse(
+        stream_id=stream_id,
+        user_message=MessageResponse.model_validate(prompt),
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/compact",
+    response_model=CompactionResponse,
+)
+async def compact_conversation_endpoint(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CompactionResponse:
+    """Compact the middle of a conversation to reclaim context space.
+
+    Keeps the first few and last several messages intact, asks the
+    conversation's current model to summarise everything in between,
+    and replaces those middle rows with a single ``role='system'``
+    summary tagged so the UI renders it as a "Compacted summary"
+    chip.
+
+    Only the conversation owner may compact — collaborators working
+    on a shared chat shouldn't be able to destructively reshape
+    history the owner didn't request.
+
+    Returns 4xx when there's nothing to compact (chat is too short),
+    502 when the provider call fails (no rows are touched in that
+    case — a half-applied compaction would corrupt the timeline).
+    """
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the conversation owner can compact this chat.",
+        )
+
+    if not conv.provider_id or not conv.model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No model configured for this conversation. Send at "
+                "least one message first so a default is persisted."
+            ),
+        )
+
+    provider = await db.get(ModelProvider, conv.provider_id)
+    if provider is None or not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This conversation's provider is unavailable.",
+        )
+
+    try:
+        result = await compact_conversation(
+            conversation=conv,
+            llm_provider=provider,
+            llm_model_id=conv.model_id,
+            db=db,
+        )
+    except CompactionError as e:
+        # Domain errors — too-short history, empty summary, provider
+        # failure that we caught upstream. Return 400 for "can't
+        # compact yet", 502 for "tried and the provider refused".
+        msg = str(e)
+        if "enough history" in msg or "too short" in msg or "no textual" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=msg
+            )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=msg
+        )
+
+    return CompactionResponse(
+        messages_removed=result.messages_removed,
+        summary_message_id=uuid.UUID(result.summary_message_id),
+    )
+
+
 # ====================================================================
 # SSE stream
 # ====================================================================
 def _sse(data: dict) -> str:
     """Format a dict as a single SSE `data:` event."""
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _classify_upstream_error(
+    message: str, *, provider_type: str
+) -> dict[str, Any] | None:
+    """Classify a ``ProviderError`` message into a structured error.
+
+    Returns ``None`` for unclassified errors (caller renders the raw
+    message as before). A non-None return is a dict of extra SSE
+    fields — ``error_code`` + optional ``error_help_url`` +
+    ``error_title`` — that the frontend uses to pick a richer error
+    card (links, buttons, tone) instead of the default red banner.
+
+    Kept in the chat router rather than in ``provider.py`` because
+    the classification is a *UX* concern (how do we want to talk to
+    the user about this?), not a provider-abstraction concern. If we
+    ever add more providers with their own distinctive auth/policy
+    errors, new branches land here.
+    """
+    lowered = message.lower()
+
+    # OpenRouter's guardrail / privacy filter — fires when every
+    # endpoint for the requested model is excluded by the account's
+    # privacy settings (no-training, ZDR, etc). The exact phrase
+    # OR returns has been stable for a while but we match on the
+    # distinctive fragments in case the suffix changes.
+    if provider_type == "openrouter" and (
+        "no endpoints available matching your guardrail" in lowered
+        or ("privacy" in lowered and "no endpoints" in lowered)
+        or ("data policy" in lowered and "no endpoints" in lowered)
+    ):
+        return {
+            "error_code": "openrouter_privacy_blocked",
+            "error_title": "This model isn't allowed by your OpenRouter privacy settings",
+            "error_help_url": "https://openrouter.ai/settings/privacy",
+        }
+
+    return None
 
 
 def _dedupe_sources(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1405,6 +1828,57 @@ async def _stream_generator(
             db, history_rows, user
         )
 
+        # Phase P1 — Chat Projects. When the conversation belongs to a
+        # project, fold its pinned files into the *triggering* turn's
+        # attachment list so they flow through the existing
+        # ``build_attachment_preamble`` / vision pipeline without any
+        # duplicate plumbing. The project's ``system_prompt`` is
+        # handled later (see ``project_system_prompt`` below) where it
+        # slots in alongside the tools-aware and personal-context
+        # prompts.
+        project_system_prompt: str | None = None
+        if conv.project_id is not None:
+            project_row = await db.get(ChatProject, conv.project_id)
+            if project_row is not None and project_row.user_id == user.id:
+                project_system_prompt = (
+                    project_row.system_prompt.strip()
+                    if project_row.system_prompt
+                    else None
+                ) or None
+
+                pin_rows = await db.execute(
+                    select(UserFile)
+                    .join(
+                        ChatProjectFile,
+                        ChatProjectFile.file_id == UserFile.id,
+                    )
+                    .where(ChatProjectFile.project_id == project_row.id)
+                    .order_by(ChatProjectFile.pinned_at.asc())
+                )
+                pinned_files = list(pin_rows.scalars().all())
+                # ACL: only honour files the caller still owns. Files
+                # shared with them via the admin pool are fair game
+                # too (``user_id is None``) — same rule as
+                # ``_load_message_attachments``.
+                pinned_files = [
+                    f for f in pinned_files
+                    if f.user_id is None or f.user_id == user.id
+                ]
+                if pinned_files:
+                    existing = per_message_attachments.get(
+                        triggering_user_msg_id, []
+                    )
+                    existing_ids = {f.id for f in existing}
+                    # Prepend so project pins render first in the
+                    # preamble ("Project files: ..." reads naturally
+                    # before "this turn's attachments: ..."). Skip
+                    # any file the user *also* attached to this very
+                    # turn to avoid duplicated text blobs.
+                    merged = [
+                        f for f in pinned_files if f.id not in existing_ids
+                    ] + list(existing)
+                    per_message_attachments[triggering_user_msg_id] = merged
+
         # Surface vision warnings to the client. We only warn for the
         # *triggering* turn — older turns with images already produced
         # a reply, the user has long since seen the consequence.
@@ -1510,7 +1984,11 @@ async def _stream_generator(
             list_openai_tools(enabled_categories) if enabled_categories else None
         )
 
-        system_prompt: str | None = None
+        # Phase P1 — project-level instructions are the baseline
+        # system prompt. Tool-aware + personal-context prompts are
+        # merged on top below, each taking precedence (since
+        # ``merge_system_prompt`` puts the first argument first).
+        system_prompt: str | None = project_system_prompt
         # Sources accumulator (Phase D1). Drained from any web_search /
         # fetch_url tool call this turn (whether forced via "always" or
         # initiated by the model in "auto" mode). Persisted onto
@@ -1776,7 +2254,16 @@ async def _stream_generator(
                 )
         except ProviderError as e:
             logger.warning("Provider error on stream %s: %s", stream_id, e)
-            yield _sse({"error": str(e)})
+            # Classify the error so the frontend can render an
+            # actionable card (link to the upstream settings page,
+            # "Pick another model" button, etc.) instead of the raw
+            # upstream dump. Fallthrough is unclassified — renders as
+            # a plain red banner exactly like before.
+            classified = _classify_upstream_error(str(e), provider_type=provider.type)
+            if classified is not None:
+                yield _sse({"error": str(e), **classified})
+            else:
+                yield _sse({"error": str(e)})
             yield _sse({"done": True})
             return
         except asyncio.CancelledError:
@@ -1993,6 +2480,350 @@ async def stream_response(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+_ALLOWED_EXPORT_FORMATS = {"markdown", "json", "pdf"}
+
+
+def _content_disposition(filename: str) -> str:
+    """Build a ``Content-Disposition: attachment`` header value that
+    survives non-ASCII titles by emitting both a plain ASCII fallback
+    and an RFC 5987 ``filename*`` parameter. Matches the approach the
+    files router uses for user uploads."""
+    from urllib.parse import quote as _urlquote
+
+    # Replace any non-ASCII/unsafe char in the fallback with ``_`` so
+    # ancient clients still save the file with *some* name.
+    ascii_name = "".join(
+        c if (32 <= ord(c) < 127 and c != '"') else "_" for c in filename
+    )
+    utf8_name = _urlquote(filename, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
+
+
+@router.get("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: uuid.UUID,
+    request: Request,
+    fmt: str = Query(
+        "markdown",
+        pattern="^(markdown|json|pdf)$",
+        description="Export format: markdown (default), json, or pdf.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Download a persisted conversation in the requested format.
+
+    Access control is the same as :func:`get_conversation` — owners and
+    accepted collaborators can export; everyone else gets a 404. System
+    rows are excluded from the Markdown/PDF transcripts (they're
+    implementation detail) but preserved in the JSON payload for
+    round-trip fidelity with the importer.
+
+    The endpoint returns a streaming :class:`Response` directly rather
+    than a Pydantic model because the three formats need three
+    different ``Content-Type`` + ``Content-Disposition`` pairs. Large
+    PDFs are rendered off-thread via :func:`asyncio.to_thread` so the
+    event loop keeps serving other requests while xhtml2pdf typesets.
+    """
+    if fmt not in _ALLOWED_EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown export format: {fmt}",
+        )
+
+    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+
+    # Pull every persisted message in chronological order. No pagination:
+    # the largest conversations we support still comfortably fit in
+    # memory, and a partial export would produce a confusing artifact.
+    msgs_q = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conv.id)
+        .order_by(Message.created_at.asc(), Message.id.asc())
+    )
+    messages = list(msgs_q.scalars().all())
+
+    # Audit: lets admins see export activity in the same timeline as
+    # other sensitive actions (budget bumps, MFA changes). Kept
+    # best-effort — the export itself succeeds even if the audit
+    # write hiccups.
+    try:
+        await record_event(
+            db,
+            request=request,
+            user_id=user.id,
+            event_type="conversation.exported",
+            identifier=user.username,
+            detail=safe_dict(
+                {
+                    "conversation_id": str(conv.id),
+                    "format": fmt,
+                    "message_count": len(messages),
+                }
+            ),
+        )
+    except Exception:  # pragma: no cover — audit is never critical path
+        logging.getLogger("promptly.chat.export").warning(
+            "audit-write-failed", exc_info=True
+        )
+
+    from app.chat.export import (
+        render_conversation_json_bytes,
+        render_conversation_markdown,
+        render_conversation_pdf,
+        safe_export_filename,
+    )
+
+    filename = safe_export_filename(conv, fmt)
+    headers = {"Content-Disposition": _content_disposition(filename)}
+
+    if fmt == "markdown":
+        body = render_conversation_markdown(conv, messages).encode("utf-8")
+        return Response(
+            content=body,
+            media_type="text/markdown; charset=utf-8",
+            headers=headers,
+        )
+    if fmt == "json":
+        body = render_conversation_json_bytes(conv, messages)
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers=headers,
+        )
+    # fmt == "pdf"
+    try:
+        body = await asyncio.to_thread(
+            render_conversation_pdf, conv, messages
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"PDF rendering failed: {exc}",
+        ) from exc
+    return Response(
+        content=body,
+        media_type="application/pdf",
+        headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------
+# Import — accept an upload, parse it into ParsedConversation records,
+# materialise each as a Conversation + Messages pair under the caller.
+# ---------------------------------------------------------------------
+
+
+# Hard cap on a single import payload. Prevents a runaway file from
+# DoSing the JSON parser / zip walker; comfortably large enough for a
+# full ChatGPT account export, which usually tops out around 50 MB.
+_IMPORT_MAX_BYTES = 100 * 1024 * 1024  # 100 MB
+
+# Hard cap on number of messages we'll materialise from a single
+# imported conversation. Guards against pathological exports; real
+# chats very rarely exceed a few hundred turns.
+_IMPORT_MAX_MESSAGES_PER_CONV = 5000
+
+
+@router.post("/conversations/import", status_code=status.HTTP_201_CREATED)
+async def import_conversations(
+    file: UploadFile = File(...),
+    project_id: uuid.UUID | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Import chats from a Promptly / ChatGPT / Claude / Markdown file.
+
+    Accepts bulk uploads (ChatGPT exports commonly contain hundreds of
+    conversations in a single ``conversations.json``). Each parsed
+    conversation becomes a fresh :class:`Conversation` row owned by
+    the caller; the original message timestamps are preserved when
+    the source provided them so imported chats land in the right
+    history buckets on the sidebar.
+
+    Optional ``project_id`` form field drops every imported
+    conversation into the named project — a shortcut for "migrate
+    everything from ChatGPT into this one project". Rejected if the
+    project belongs to someone else or doesn't exist.
+    """
+    from app.chat import import_ as importer
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+    if len(data) > _IMPORT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Uploaded file is too large "
+                f"(max {_IMPORT_MAX_BYTES // (1024 * 1024)} MB)."
+            ),
+        )
+
+    # Optional project target.
+    project_row: ChatProject | None = None
+    if project_id is not None:
+        project_row = await db.get(ChatProject, project_id)
+        if project_row is None or project_row.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown project",
+            )
+
+    try:
+        parsed_list = importer.parse_upload(
+            filename=file.filename or "",
+            content_type=file.content_type,
+            data=data,
+        )
+    except importer.ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    if not parsed_list:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No conversations could be parsed from the upload.",
+        )
+
+    created: list[dict[str, Any]] = []
+    skipped: int = 0
+    total_messages: int = 0
+    now = datetime.now(timezone.utc)
+
+    for parsed in parsed_list:
+        # Skip empty shells — importing a chat with zero turns would
+        # create a stub row the user has to go clean up later.
+        if not parsed.messages:
+            skipped += 1
+            continue
+
+        title = importer.synthesise_title(parsed)
+
+        conv = Conversation(
+            user_id=user.id,
+            title=title,
+            # We *don't* carry over the source's model/provider — those
+            # IDs wouldn't be valid on this install. Leaving them NULL
+            # makes the imported chat inherit the user's current
+            # selection on the next send.
+            model_id=None,
+            provider_id=None,
+            web_search_mode="off",
+            project_id=project_row.id if project_row else None,
+        )
+        # Preserve original created_at when the parser surfaced one —
+        # keeps date-group bucketing ("Last week", "April 2025", ...)
+        # accurate on the sidebar instead of dumping everything under
+        # "Today".
+        if parsed.created_at is not None:
+            conv.created_at = parsed.created_at
+            conv.updated_at = parsed.created_at
+        db.add(conv)
+        # Flush so ``conv.id`` is populated before we start attaching
+        # messages; a single explicit flush per conversation is cheap
+        # and avoids relying on SQLAlchemy's autoflush heuristics.
+        await db.flush()
+
+        count = 0
+        for msg in parsed.messages[:_IMPORT_MAX_MESSAGES_PER_CONV]:
+            m = Message(
+                conversation_id=conv.id,
+                role=msg.role,
+                content=msg.content,
+                sources=msg.sources,
+                # Attachments carried on the imported rows are
+                # *snapshots* from a different install — the file
+                # ids inside won't resolve to anything in this
+                # user's library. We keep them for archival
+                # purposes so the original filenames still show
+                # up as chips, but the backend won't try to
+                # re-feed their bytes on the next send.
+                attachments=msg.attachments,
+            )
+            if msg.created_at is not None:
+                m.created_at = msg.created_at
+            db.add(m)
+            count += 1
+        total_messages += count
+
+        # Tag latest activity so history-grouping sorts correctly.
+        if parsed.messages and parsed.messages[-1].created_at:
+            conv.updated_at = parsed.messages[-1].created_at
+        elif parsed.created_at is None:
+            conv.updated_at = now
+
+        created.append(
+            {
+                "id": str(conv.id),
+                "title": title,
+                "message_count": count,
+                "source": parsed.source_format,
+            }
+        )
+
+    await db.commit()
+
+    try:
+        await record_event(
+            db=db,
+            event_type="conversations.imported",
+            identifier=user.username,
+            detail=safe_dict(
+                {
+                    "count": len(created),
+                    "skipped": skipped,
+                    "total_messages": total_messages,
+                    "project_id": str(project_row.id) if project_row else None,
+                    "filename": file.filename,
+                }
+            ),
+        )
+    except Exception:  # pragma: no cover — audit is never critical path
+        logging.getLogger("promptly.chat.import").warning(
+            "audit-write-failed", exc_info=True
+        )
+
+    # Fire-and-forget push so a big ChatGPT account export can be
+    # kicked off, the user can switch tabs, and they get a ping when
+    # it's done. Skipped silently when VAPID isn't configured.
+    if created:
+        try:
+            from app.notifications import notify_user
+
+            target_url = (
+                f"/projects/{project_row.id}" if project_row else "/chat"
+            )
+            await notify_user(
+                user_id=user.id,
+                category="import_done",
+                title="Import complete",
+                body=(
+                    f"{len(created)} conversation"
+                    f"{'s' if len(created) != 1 else ''} imported "
+                    f"({total_messages} message"
+                    f"{'s' if total_messages != 1 else ''})."
+                ),
+                url=target_url,
+                tag="promptly-import",
+            )
+        except Exception:  # pragma: no cover — push is never critical
+            logging.getLogger("promptly.chat.import").warning(
+                "push-dispatch-failed", exc_info=True
+            )
+
+    return {
+        "imported": len(created),
+        "skipped": skipped,
+        "total_messages": total_messages,
+        "conversations": created,
+    }
 
 
 @router.get("/conversations/{conversation_id}/active-stream")

@@ -6,6 +6,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useUpdateProvider } from "@/hooks/useProviders";
 import type { Provider } from "@/api/types";
 import { cn } from "@/utils/cn";
+import { PrivacyBadge } from "./PrivacyBadge";
 
 interface SelectModelsModalProps {
   provider: Provider;
@@ -216,6 +217,14 @@ export function SelectModelsModal({
                           {m.id}
                         </span>
                       </span>
+                      {/* Privacy badge only renders when we have
+                          upstream endpoint metadata — currently that
+                          means OpenRouter only. Hovering the badge
+                          shows the full detail; the label itself is
+                          kept short so long model rows still fit. */}
+                      {provider.type === "openrouter" && (
+                        <PrivacyBadge privacy={m.privacy} />
+                      )}
                       {ctx && (
                         <span className="shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[10px] text-[var(--text-muted)] dark:bg-white/[0.08]">
                           {ctx}

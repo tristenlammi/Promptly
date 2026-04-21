@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import {
   Check,
+  ChevronDown,
   Copy,
   Download,
   Eye,
@@ -14,6 +15,7 @@ import {
   Image as ImageIcon,
   Pencil,
   Puzzle,
+  RefreshCw,
   User as UserIcon,
   Sparkles,
 } from "lucide-react";
@@ -27,7 +29,17 @@ import type {
   ToolInvocation,
 } from "@/api/types";
 import { useEditorStore } from "@/store/editorStore";
+import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
+
+/** Override passed to a regenerate handler. ``null`` regenerates with
+ *  the currently-selected global model (same as clicking the primary
+ *  regen button). An explicit pair forces a different model — powers
+ *  the "try with Claude instead" submenu. */
+export interface RegenerateOverride {
+  provider_id: string;
+  model_id: string;
+}
 
 import { MessageStats } from "./MessageStats";
 import { ToolStatusBlock } from "./ToolStatusBlock";
@@ -75,6 +87,13 @@ interface MessageBubbleProps {
    *  resolve once the new stream has been kicked off; the bubble exits
    *  edit mode as soon as it does. */
   onEdit?: (newText: string) => Promise<void>;
+  /** Regenerate-this-reply hook. Only passed for the most recent
+   *  persisted assistant message. Called with ``null`` when the user
+   *  clicks the primary "Regenerate" button (reuses the currently
+   *  selected global model) or with an explicit override when they
+   *  pick "Try a different model" → <model> from the chevron submenu.
+   *  Resolves once the new stream has been kicked off. */
+  onRegenerate?: (override: RegenerateOverride | null) => Promise<void> | void;
   /** Study module — when this assistant turn produced a whiteboard
    *  exercise, the parent passes a handler that re-opens it in the
    *  right-hand pane. Renders a "Open exercise" action below the reply
@@ -220,6 +239,7 @@ function MessageBubbleImpl({
   currentUserId,
   onEdit,
   onBranch,
+  onRegenerate,
   onOpenExercise,
   exerciseReviewed,
 }: MessageBubbleProps) {
@@ -412,6 +432,7 @@ function MessageBubbleImpl({
         )}
         {((canEdit && !editing) ||
           (onBranch && !streaming) ||
+          (onRegenerate && !streaming) ||
           canCopy ||
           (onOpenExercise && !streaming)) && (
           <div className="mt-1.5 flex items-center gap-1">
@@ -477,6 +498,9 @@ function MessageBubbleImpl({
                 <Pencil className="h-3 w-3" />
                 <span>Edit</span>
               </button>
+            )}
+            {onRegenerate && !streaming && (
+              <RegenerateControl onRegenerate={onRegenerate} />
             )}
             {onBranch && !streaming && (
               <button
@@ -940,6 +964,195 @@ async function downloadAttachment(
     // Best-effort — the chip stays visible so the user can retry.
     // A toast system would slot in here once we add one.
   }
+}
+
+/** Split-button regenerate control.
+ *
+ *  Left half: primary click → re-run the reply with whatever model is
+ *    currently selected in the global picker. This is the 90% path —
+ *    most regenerations are "same model, try harder".
+ *  Right half (chevron): opens a popover listing every available model
+ *    so the user can re-run against a different provider/model
+ *    combination without first touching the top-nav model selector.
+ *
+ *  The popover flips to align above the button when there's more
+ *  room above than below — matters on the long conversations where
+ *  the last assistant turn is near the bottom of the viewport and
+ *  the popover would otherwise clip under the input bar.
+ */
+function RegenerateControl({
+  onRegenerate,
+}: {
+  onRegenerate: (override: RegenerateOverride | null) => Promise<void> | void;
+}) {
+  const available = useModelStore((s) => s.available);
+  const selectedProviderId = useModelStore((s) => s.selectedProviderId);
+  const selectedModelId = useModelStore((s) => s.selectedModelId);
+  const setSelection = useModelStore((s) => s.setSelection);
+
+  const [open, setOpen] = useState(false);
+  const [flipUp, setFlipUp] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const chevronRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (wrapRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Decide flip direction based on viewport geometry *at open time*.
+  // Done once per open rather than reactively on scroll; the popover
+  // is short-lived so we don't need to re-measure.
+  useEffect(() => {
+    if (!open) return;
+    const anchor = chevronRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    setFlipUp(spaceBelow < 240 && spaceAbove > spaceBelow);
+  }, [open]);
+
+  const doRegenerate = async (override: RegenerateOverride | null) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onRegenerate(override);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const hasChoices = available.length > 1;
+
+  return (
+    <div ref={wrapRef} className="relative inline-flex items-stretch">
+      <button
+        type="button"
+        onClick={() => void doRegenerate(null)}
+        disabled={busy}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+          "text-[var(--text-muted)] transition",
+          "hover:bg-black/[0.04] hover:text-[var(--text)]",
+          "dark:hover:bg-white/[0.06]",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          // Fuse visually with the chevron when it's present: square
+          // off the right edge so the two buttons read as one pill.
+          hasChoices && "rounded-r-none pr-1"
+        )}
+        title="Regenerate this reply with the current model"
+        aria-label="Regenerate reply"
+      >
+        <RefreshCw className={cn("h-3 w-3", busy && "animate-spin")} />
+        <span>Regenerate</span>
+      </button>
+      {hasChoices && (
+        <button
+          ref={chevronRef}
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          disabled={busy}
+          className={cn(
+            "inline-flex items-center rounded-md rounded-l-none border-l border-transparent px-1 py-1 text-xs",
+            "text-[var(--text-muted)] transition",
+            "hover:bg-black/[0.04] hover:text-[var(--text)]",
+            "dark:hover:bg-white/[0.06]",
+            open && "bg-black/[0.05] text-[var(--text)] dark:bg-white/[0.08]",
+            "disabled:cursor-not-allowed disabled:opacity-50"
+          )}
+          aria-label="Regenerate with a different model"
+          aria-expanded={open}
+          title="Regenerate with a different model"
+        >
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform",
+              open && !flipUp && "rotate-180",
+              open && flipUp && "-rotate-180"
+            )}
+          />
+        </button>
+      )}
+      {open && (
+        <div
+          role="menu"
+          className={cn(
+            "absolute left-0 z-20 min-w-[240px] max-w-[320px] overflow-hidden rounded-md border shadow-lg",
+            "border-[var(--border)] bg-[var(--surface)] py-1",
+            flipUp ? "bottom-full mb-1" : "top-full mt-1"
+          )}
+        >
+          <div
+            className={cn(
+              "px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide",
+              "text-[var(--text-muted)]"
+            )}
+          >
+            Try a different model
+          </div>
+          <ul className="max-h-60 overflow-y-auto">
+            {available.map((m) => {
+              const isCurrent =
+                m.provider_id === selectedProviderId &&
+                m.model_id === selectedModelId;
+              return (
+                <li key={`${m.provider_id}:${m.model_id}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Also update the global model selector so the
+                      // conversation's "active model" readout matches
+                      // the reply the user just forced — less confusing
+                      // than silently diverging.
+                      setSelection(m.provider_id, m.model_id);
+                      setOpen(false);
+                      void doRegenerate({
+                        provider_id: m.provider_id,
+                        model_id: m.model_id,
+                      });
+                    }}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs",
+                      "text-[var(--text)] transition",
+                      "hover:bg-[var(--accent)]/[0.08]"
+                    )}
+                    role="menuitem"
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate font-medium">
+                        {m.display_name}
+                      </span>
+                      <span className="truncate text-[10px] text-[var(--text-muted)]">
+                        {m.provider_name}
+                      </span>
+                    </span>
+                    {isCurrent && (
+                      <Check className="h-3 w-3 shrink-0 text-[var(--accent)]" />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export const MessageBubble = memo(MessageBubbleImpl);

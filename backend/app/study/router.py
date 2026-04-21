@@ -1377,6 +1377,31 @@ async def _stream_generator(
                     },
                 }
             )
+            # Push for users who stepped away during grading — the
+            # exam can take 15–30 s of model time on a long topic,
+            # plenty for the student to alt-tab. Tag so a re-grade
+            # replaces the previous notification.
+            try:
+                from app.notifications import notify_user
+
+                score_line = (
+                    f"{int(round(exam.score))}%"
+                    if exam.score is not None
+                    else "result in"
+                )
+                verdict = "Passed" if exam.passed else "Not yet"
+                await notify_user(
+                    user_id=project.user_id,
+                    category="study_graded",
+                    title=f"{verdict} — {project.title}",
+                    body=f"Final exam graded: {score_line}.",
+                    url=f"/study/{project.id}",
+                    tag=f"promptly-exam-{exam.id}",
+                )
+            except Exception:  # pragma: no cover — push is never critical
+                logging.getLogger("promptly.study.push").warning(
+                    "push-dispatch-failed", exc_info=True
+                )
 
         yield _sse(
             {

@@ -17,6 +17,31 @@ ProviderType = Literal[
 ]
 
 
+class ModelPrivacy(BaseModel):
+    """Compact summary of a model's upstream endpoint data policies.
+
+    Only populated for providers that expose per-endpoint privacy
+    metadata (currently: OpenRouter via ``/models/{id}/endpoints``).
+    The frontend derives a user-facing badge from the raw numbers —
+    keeping the phrasing out of the backend means we can tweak the
+    copy without shipping a new catalog refresh.
+
+    Fields are counts across all endpoints OpenRouter knows about
+    for this model *at the time of the last catalog refresh* — they
+    aren't authoritative, just informative.
+    """
+
+    endpoints_count: int = 0
+    # Endpoints where ``data_policy.training`` is true.
+    training_endpoints: int = 0
+    # Endpoints where ``retains_prompts`` or ``retention_days > 0``.
+    retains_prompts_endpoints: int = 0
+    # Endpoints that do neither of the above — closest thing to "ZDR".
+    zdr_endpoints: int = 0
+    # Worst-case retention window across endpoints, in days.
+    max_retention_days: int | None = None
+
+
 class ModelInfo(BaseModel):
     id: str
     display_name: str
@@ -32,6 +57,11 @@ class ModelInfo(BaseModel):
     # `generate_image` tool to pick a model the user has actually
     # enabled. Defaults False to match legacy rows.
     supports_image_output: bool = False
+    # Upstream data-policy summary — ``None`` means "we didn't fetch
+    # it for this model" (non-OpenRouter provider, or refresh was run
+    # before this field existed). The picker shows an "unknown" hint
+    # rather than assuming the worst.
+    privacy: ModelPrivacy | None = None
 
 
 class ProviderCreate(BaseModel):

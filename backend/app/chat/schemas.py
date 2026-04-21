@@ -129,6 +129,10 @@ class ConversationSummary(BaseModel):
     # ``expires_at`` ticks the countdown on the client.
     temporary_mode: TemporaryMode | None = None
     expires_at: datetime | None = None
+    # Phase P1 — Chat Projects. Non-NULL when this conversation lives
+    # under a :class:`ChatProject`; surfaced so the sidebar can group
+    # chats by project and the breadcrumb can render "Project → Chat".
+    project_id: uuid.UUID | None = None
 
 
 class ConversationParticipantBrief(BaseModel):
@@ -158,6 +162,11 @@ class ConversationCreate(BaseModel):
     # produces a normal permanent chat. The router computes ``expires_at``
     # itself; the client only picks the mode.
     temporary_mode: TemporaryMode | None = None
+    # Phase P1 — when set, the new conversation is created under the
+    # named :class:`ChatProject`. The project's system prompt + pinned
+    # files are included automatically on every send. Temporary chats
+    # cannot belong to a project (the two lifecycles are in tension).
+    project_id: uuid.UUID | None = None
 
 
 class ConversationUpdate(BaseModel):
@@ -169,6 +178,13 @@ class ConversationUpdate(BaseModel):
     web_search_mode: WebSearchMode | None = None
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
+    # Phase P1 — move this chat into / out of a project. ``None`` in
+    # the payload means "leave untouched" (consistent with every other
+    # field here); to detach from a project, send ``""`` or use the
+    # dedicated ``DELETE /chat/projects/{pid}/conversations/{cid}``
+    # endpoint. We accept strings here because JSON can't round-trip
+    # ``None`` vs "unset" cleanly.
+    project_id: uuid.UUID | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -217,10 +233,15 @@ class BranchConversationRequest(BaseModel):
 class ConversationSearchHit(BaseModel):
     """One match returned by ``GET /api/conversations/search``.
 
-    ``snippet`` is a ``ts_headline``-rendered string with HTML
-    ``<mark>`` tags around the matched terms; the frontend renders
-    it inside a sidebar card. ``conversation_id`` and ``message_id``
-    let the click-through deep-link straight to the message.
+    ``snippet`` is a ``ts_headline``-rendered string with highlight
+    markers (``[[HL]]…[[/HL]]``) around the matched terms; the
+    frontend converts them to safe ``<mark>`` tags. ``conversation_id``
+    and ``message_id`` let the click-through deep-link straight to
+    the message anchor (``#msg-<uuid>``).
+
+    ``access`` tells the UI whether this match came from a chat the
+    caller owns or one that was shared to them — used to render the
+    two sections of the command palette.
     """
 
     conversation_id: uuid.UUID
@@ -230,6 +251,21 @@ class ConversationSearchHit(BaseModel):
     snippet: str
     rank: float
     created_at: datetime
+    access: Literal["owner", "collaborator"] = "owner"
+
+
+class CompactionResponse(BaseModel):
+    """Result of ``POST /conversations/{id}/compact``.
+
+    ``messages_removed`` is the count of original turns that were
+    collapsed into the returned ``summary_message_id`` (a new
+    ``role='system'`` row the frontend should fetch + render with a
+    "Compacted summary" chip). The frontend typically refreshes the
+    conversation detail query after a 200 rather than trying to
+    diff the existing store state."""
+
+    messages_removed: int
+    summary_message_id: uuid.UUID
 
 
 class EditMessageRequest(BaseModel):
@@ -253,4 +289,28 @@ class EditMessageRequest(BaseModel):
     max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
     # Mirror of SendMessageRequest: edited turns may toggle tool calling
     # on the retry independently of how the original send went.
+    tools_enabled: bool = False
+
+
+class RegenerateMessageRequest(BaseModel):
+    """Regenerate-assistant-reply payload.
+
+    Targets an assistant message and re-runs the model against the
+    preceding user turn (which is left untouched — this is the big
+    difference from :class:`EditMessageRequest`). All fields are
+    optional; when omitted the conversation's existing defaults are
+    used, so a one-click "try again" costs the caller nothing.
+
+    Overriding ``model_id`` / ``provider_id`` is the primary reason
+    to pass a body at all: it powers the "try a different model"
+    affordance without needing a separate endpoint.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_id: str | None = Field(default=None, max_length=255)
+    provider_id: uuid.UUID | None = None
+    web_search_mode: WebSearchMode | None = None
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
     tools_enabled: bool = False

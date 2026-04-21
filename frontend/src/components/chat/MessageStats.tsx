@@ -1,6 +1,7 @@
 import { Clock, Coins, Cpu, Info, Zap } from "lucide-react";
 
 import { cn } from "@/utils/cn";
+import { USD_TO_AUD, formatAud } from "@/utils/currency";
 
 interface MessageStatsProps {
   promptTokens?: number | null;
@@ -9,28 +10,6 @@ interface MessageStatsProps {
   totalMs?: number | null;
   costUsd?: number | null;
   className?: string;
-}
-
-// Approximate USD → AUD conversion. Promptly is shipped to a small
-// circle of friends/family in Australia and we'd rather show prices
-// in their local currency than make them mentally convert every time.
-// Bump this when the rate moves materially — it's not worth wiring up
-// a live FX feed for sub-cent estimates next to a chat bubble.
-const USD_TO_AUD = 1.55;
-
-/** Render an AUD figure with appropriate precision.
- *
- *  Tiny figures (<A$0.01) get four decimals — typical model token costs
- *  land around $0.0001-$0.01, and rounding to two would just print
- *  "A$0.00" for almost every message. Larger figures collapse back to
- *  the conventional two decimals.
- */
-function formatCostAud(usd: number): string {
-  const aud = usd * USD_TO_AUD;
-  if (!Number.isFinite(aud) || aud <= 0) return "A$0.00";
-  if (aud < 0.01) return `A$${aud.toFixed(4)}`;
-  if (aud < 1) return `A$${aud.toFixed(3)}`;
-  return `A$${aud.toFixed(2)}`;
 }
 
 /** Format a millisecond duration as a compact human string. */
@@ -74,7 +53,7 @@ export function MessageStats({
   const completion = formatTokens(completionTokens);
   const cost =
     typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd > 0
-      ? formatCostAud(costUsd)
+      ? formatAud(costUsd)
       : null;
 
   // If we have literally nothing to show, skip the UI entirely.

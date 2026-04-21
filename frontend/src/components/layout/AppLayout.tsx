@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
+import { SearchPalette } from "@/components/chat/SearchPalette";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
@@ -17,12 +18,33 @@ export function AppLayout() {
 
   const mobileNavOpen = useUIStore((s) => s.mobileNavOpen);
   const closeMobileNav = useUIStore((s) => s.closeMobileNav);
+  const searchPaletteOpen = useUIStore((s) => s.searchPaletteOpen);
+  const openSearchPalette = useUIStore((s) => s.openSearchPalette);
+  const closeSearchPalette = useUIStore((s) => s.closeSearchPalette);
 
   // Auto-close the drawer whenever navigation actually happens, so
   // tapping a chat / nav item drops the user back into the content.
   useEffect(() => {
     if (isMobile) closeMobileNav();
   }, [location.pathname, location.search, isMobile, closeMobileNav]);
+
+  // Global Ctrl/Cmd+K to open the search palette. We intentionally
+  // *don't* suppress the shortcut while the user is typing in an
+  // input/textarea — Cmd+K inside the composer should still pop the
+  // palette the same way it does in ChatGPT / Linear, and we verify
+  // the key + modifier in one place rather than per-component.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        if (e.key === "k" || e.key === "K") {
+          e.preventDefault();
+          openSearchPalette();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openSearchPalette]);
 
   // Desktop path is byte-identical to the pre-mobile layout: static
   // sidebar with its own collapse toggle, sitting next to the outlet.
@@ -34,6 +56,10 @@ export function AppLayout() {
           <Outlet />
         </div>
         <NetworkStatusToast />
+        <SearchPalette
+          open={searchPaletteOpen}
+          onClose={closeSearchPalette}
+        />
       </div>
     );
   }
@@ -79,6 +105,7 @@ export function AppLayout() {
       </aside>
 
       <NetworkStatusToast />
+      <SearchPalette open={searchPaletteOpen} onClose={closeSearchPalette} />
     </div>
   );
 }

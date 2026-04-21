@@ -16,6 +16,13 @@ interface UIState {
   openMobileNav: () => void;
   closeMobileNav: () => void;
   toggleMobileNav: () => void;
+
+  /** Global full-text search palette (Ctrl/Cmd+K). Lives in the UI
+   *  store so the sidebar "Search" entry and the keyboard shortcut
+   *  can both flip it without prop-drilling through AppLayout. */
+  searchPaletteOpen: boolean;
+  openSearchPalette: () => void;
+  closeSearchPalette: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -24,4 +31,8 @@ export const useUIStore = create<UIState>((set) => ({
   closeMobileNav: () => set({ mobileNavOpen: false }),
   toggleMobileNav: () =>
     set((state) => ({ mobileNavOpen: !state.mobileNavOpen })),
+
+  searchPaletteOpen: false,
+  openSearchPalette: () => set({ searchPaletteOpen: true }),
+  closeSearchPalette: () => set({ searchPaletteOpen: false }),
 }));

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -89,8 +89,132 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Chat Projects (0027). When non-NULL, this conversation belongs
+    # to a project: the project's system prompt + pinned files are
+    # mixed into the context on every send, and the chat shows up
+    # under that project in the sidebar. NULL means "top-level chat"
+    # (today's default). ``ON DELETE SET NULL`` so deleting a project
+    # doesn't nuke chat history — the chats resurface at top level.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chat_projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Compare mode (0029). Non-NULL for every column of a side-by-
+    # side comparison; each column is a real conversation driven by
+    # the normal send/stream pipeline, just linked together into a
+    # group. The sidebar filters non-crowned compare columns out so
+    # the main conversation list isn't cluttered with pre-crown
+    # drafts. ``ON DELETE SET NULL`` so deleting the group detaches
+    # columns rather than cascade-deleting history.
+    compare_group_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("compare_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation id={self.id} title={self.title!r}>"
+
+
+class CompareGroup(UUIDPKMixin, TimestampMixin, Base):
+    """A side-by-side model-comparison session.
+
+    One group bundles N (2–4) real ``conversations`` rows — one per
+    column — and tracks which column the user ultimately "crowned".
+    Before crowning, columns are equal peers; after crowning, the
+    crowned conversation is treated as a normal chat in the sidebar
+    and the losers remain accessible through the Compare archive
+    view.
+    """
+
+    __tablename__ = "compare_groups"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # The original prompt the user typed into the shared composer.
+    # Kept for archive preview so the group doesn't need a messages
+    # join on listing.
+    seed_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    crowned_conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<CompareGroup id={self.id} title={self.title!r}>"
+
+
+class ChatProject(UUIDPKMixin, TimestampMixin, Base):
+    """A generic project bundle for non-Study conversations.
+
+    Holds the shared instructions + pinned files + default model used
+    by every chat inside it. Distinct from :class:`StudyProject` —
+    Study projects are learning paths with units/exams, chat projects
+    are ChatGPT/Claude-style bundles for arbitrary ongoing work.
+    """
+
+    __tablename__ = "chat_projects"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Shared "instructions" for every chat in the project. Rendered as
+    # a ``system`` role message at the top of each send's context so
+    # the model obeys them turn-to-turn.
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Optional per-project model override. When NULL we fall back to
+    # whatever the user's global picker says at send time.
+    default_model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    default_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="SET NULL"), nullable=True
+    )
+    # NULL = active. A non-NULL timestamp is the single source of
+    # truth for "in archive" — same pattern as study_projects.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatProject id={self.id} title={self.title!r}>"
+
+
+class ChatProjectFile(Base):
+    """Pinned-file join row — attaches a :class:`UserFile` to a
+    :class:`ChatProject` so every new conversation in the project
+    gets the file auto-attached to its send context.
+
+    Composite PK keeps (project, file) unique without a separate row
+    id. ``ON DELETE CASCADE`` on both FKs (see the migration) keeps
+    the join clean when either side goes away.
+    """
+
+    __tablename__ = "chat_project_files"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    pinned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class Message(UUIDPKMixin, CreatedAtMixin, Base):

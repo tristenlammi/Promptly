@@ -237,10 +237,13 @@ async def health() -> JSONResponse:
 from app.admin.router import router as admin_router  # noqa: E402
 from app.app_settings.router import router as app_settings_router  # noqa: E402
 from app.auth.router import router as auth_router  # noqa: E402
+from app.chat.compare_router import router as chat_compare_router  # noqa: E402
+from app.chat.projects_router import router as chat_projects_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
+from app.notifications.router import router as notifications_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
 
@@ -251,7 +254,18 @@ app.include_router(
     app_settings_router, prefix="/api/admin/app-settings", tags=["admin"]
 )
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(
+    chat_projects_router, prefix="/api/chat/projects", tags=["chat-projects"]
+)
+# Compare router already defines its own ``/api/chat/compare`` prefix
+# so it slots in without a double-prefix here.
+app.include_router(chat_compare_router)
 app.include_router(models_router, prefix="/api/models", tags=["models"])
 app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])
+app.include_router(
+    notifications_router,
+    prefix="/api/notifications",
+    tags=["notifications"],
+)

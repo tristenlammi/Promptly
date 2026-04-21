@@ -85,3 +85,9 @@ qrcode[pil]==7.4.2
 # Async SMTP client for delivering email OTPs and (later) other
 # transactional mail.
 aiosmtplib==3.0.2
+
+# ---- Web Push (PWA notifications) ----
+# Signs/encrypts VAPID pushes to the browser's push service. Pure-
+# Python and depends only on ``cryptography`` which is already pinned
+# above, so it doesn't add any system-library baggage to the image.
+pywebpush==2.0.0

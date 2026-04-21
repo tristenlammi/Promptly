@@ -50,6 +50,7 @@ exact wire shape they had before.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -437,6 +438,42 @@ def _detect_image_output(raw_model: dict[str, Any]) -> bool:
     return False
 
 
+def _known_context_window(provider_type: str, model_id: str) -> int | None:
+    """Best-effort context-window lookup for providers that don't
+    return ``context_length`` on their ``/models`` endpoint.
+
+    Anthropic's REST catalog (as of April 2026) still omits the
+    context-window field, so we hard-code the well-documented limits
+    for the Claude-3 and Claude-4 families — everything in those
+    families ships with a 200k window, so the map stays short.
+
+    Ollama runs locally and every installed model has its own
+    ``num_ctx`` configured at pull time; we can't know it without
+    probing the model file, so we return ``None`` and let the TopNav
+    pill hide itself rather than display a number we'd have to
+    guess at. Users with local stacks can set a default in
+    ``modelfile`` overrides later if we want to surface it.
+
+    Return ``None`` when we genuinely don't know — never fabricate a
+    number. The pill treats ``None`` as "no indicator"."""
+    mid = model_id.lower()
+    if provider_type == "anthropic":
+        # All Claude-3* and Claude-4* sizes (sonnet / opus / haiku)
+        # use a 200k window; older claude-2.x was 100k/200k but we
+        # don't surface those anymore.
+        if (
+            "claude-3" in mid
+            or "claude-4" in mid
+            or "claude-sonnet" in mid
+            or "claude-opus" in mid
+            or "claude-haiku" in mid
+        ):
+            return 200_000
+        return None
+    # Everyone else populates context_window from the API catalog.
+    return None
+
+
 def _detect_vision_by_id(provider_type: str, model_id: str) -> bool:
     """Cheap per-type heuristic for whether a model can read images.
 
@@ -475,6 +512,155 @@ def _detect_vision_by_id(provider_type: str, model_id: str) -> bool:
     # openrouter / openai_compatible / anything else → let the richer
     # catalog logic decide (openrouter) or default off.
     return False
+
+
+# --------------------------------------------------------------------
+# OpenRouter per-model endpoint privacy lookup
+# --------------------------------------------------------------------
+# OpenRouter's ``/api/v1/models`` listing doesn't include the
+# data-policy details that determine whether a model will actually
+# respond for a given account's privacy settings (ZDR toggles,
+# training opt-out, etc.). Those live on the per-model ``/endpoints``
+# resource, which is one request per model. We fan these out in
+# parallel with a capped semaphore so an OR outage can't hang the
+# refresh for a catalog of 300+ models, and summarise the endpoints
+# into a compact blob the frontend can render as badges.
+
+_OPENROUTER_ENDPOINTS_CONCURRENCY = 12
+_OPENROUTER_ENDPOINTS_TIMEOUT = 8.0
+
+
+async def _fetch_openrouter_privacy_bulk(
+    *,
+    client: httpx.AsyncClient,
+    base_url: str,
+    headers: dict[str, str],
+    model_ids: list[str],
+) -> dict[str, dict[str, Any] | None]:
+    """Fetch privacy/data-policy summaries for every OpenRouter model.
+
+    Returns a mapping of ``model_id`` → ``{endpoints_count, training_endpoints,
+    retains_prompts_endpoints, zdr_endpoints, max_retention_days}`` or
+    ``None`` when the lookup failed for that specific model. Never
+    raises — errors are swallowed per-model so one flaky lookup
+    doesn't black out the whole catalog refresh.
+    """
+    if not model_ids:
+        return {}
+
+    sem = asyncio.Semaphore(_OPENROUTER_ENDPOINTS_CONCURRENCY)
+
+    async def _one(model_id: str) -> tuple[str, dict[str, Any] | None]:
+        async with sem:
+            try:
+                resp = await client.get(
+                    f"{base_url}/models/{model_id}/endpoints",
+                    headers=headers,
+                    timeout=_OPENROUTER_ENDPOINTS_TIMEOUT,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPError as e:
+                # Soft failure — we just don't show a privacy badge for
+                # this model. Don't blow up the catalog refresh.
+                logger.debug(
+                    "OpenRouter /endpoints lookup failed for %s: %s",
+                    model_id,
+                    e,
+                )
+                return model_id, None
+
+            try:
+                body = resp.json()
+            except ValueError:
+                return model_id, None
+
+        data = body.get("data") if isinstance(body, dict) else None
+        endpoints = (
+            data.get("endpoints") if isinstance(data, dict) else None
+        ) or []
+        summary = _summarise_endpoint_privacy(endpoints)
+        return model_id, summary
+
+    results = await asyncio.gather(
+        *(_one(mid) for mid in model_ids),
+        return_exceptions=False,
+    )
+    return {mid: privacy for mid, privacy in results}
+
+
+def _summarise_endpoint_privacy(
+    endpoints: list[Any],
+) -> dict[str, Any] | None:
+    """Reduce a list of OpenRouter endpoint dicts to a compact summary.
+
+    We count, across all endpoints for a model, how many:
+
+    * allow training on user data (``data_policy.training == true``),
+    * retain prompts at all (``data_policy.retains_prompts`` or
+      ``retention_days > 0``),
+    * qualify as "zero data retention" (neither of the above).
+
+    Plus the worst-case retention window. The frontend derives a
+    human badge from these numbers — keeping the interpretation on
+    the frontend means we don't have to ship a backend change every
+    time we want to phrase a badge differently.
+    """
+    total = 0
+    training = 0
+    retains = 0
+    zdr = 0
+    max_retention: int | None = None
+
+    for e in endpoints:
+        if not isinstance(e, dict):
+            continue
+        total += 1
+        policy = e.get("data_policy") or {}
+        if not isinstance(policy, dict):
+            policy = {}
+
+        is_training = bool(policy.get("training"))
+        # Some OR endpoints omit ``retains_prompts`` and only set
+        # ``retention_days`` > 0; treat either signal as retention.
+        rd = policy.get("retention_days")
+        rd_int = int(rd) if isinstance(rd, (int, float)) else None
+        is_retaining = bool(
+            policy.get("retains_prompts")
+            or (rd_int is not None and rd_int > 0)
+        )
+
+        if is_training:
+            training += 1
+        if is_retaining:
+            retains += 1
+        if not is_training and not is_retaining:
+            zdr += 1
+
+        if rd_int is not None and rd_int > 0:
+            if max_retention is None or rd_int > max_retention:
+                max_retention = rd_int
+
+    if total == 0:
+        # ``/endpoints`` returned an empty list — means OR knows the
+        # model exists but can't route it to anyone. Distinct from
+        # "we didn't fetch" (``None``), so we preserve the zero-count
+        # summary and let the frontend render a "No endpoints
+        # available" note instead of a privacy badge.
+        return {
+            "endpoints_count": 0,
+            "training_endpoints": 0,
+            "retains_prompts_endpoints": 0,
+            "zdr_endpoints": 0,
+            "max_retention_days": None,
+        }
+
+    return {
+        "endpoints_count": total,
+        "training_endpoints": training,
+        "retains_prompts_endpoints": retains,
+        "zdr_endpoints": zdr,
+        "max_retention_days": max_retention,
+    }
 
 
 def _client_for(provider: ModelProvider) -> AsyncOpenAI:
@@ -847,19 +1033,39 @@ class ModelRouter:
         self, provider: ModelProvider
     ) -> list[dict[str, Any]]:
         api_key = _api_key_for(provider)
-        url = f"{_resolve_base_url(provider)}/models"
+        base = _resolve_base_url(provider)
+        list_url = f"{base}/models"
         headers = {"Authorization": f"Bearer {api_key}", **OPENROUTER_HEADERS}
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
-                resp = await client.get(url, headers=headers)
+                resp = await client.get(list_url, headers=headers)
                 resp.raise_for_status()
             except httpx.HTTPError as e:
                 raise ProviderError(f"Failed to fetch model list: {e}") from e
 
-        data = resp.json().get("data", []) or []
-        return [
-            {
+            raw_models = [
+                m
+                for m in (resp.json().get("data", []) or [])
+                if isinstance(m, dict) and "id" in m
+            ]
+
+            # Fan out per-model endpoint metadata in parallel so we can
+            # surface privacy/data-policy badges in the model picker.
+            # The ``/endpoints`` API is free (metadata only, no tokens)
+            # but it's one request per model — cap concurrency so an OR
+            # outage can't knock us over and a refresh stays snappy for
+            # catalogs of 300+ models.
+            privacy_by_id = await _fetch_openrouter_privacy_bulk(
+                client=client,
+                base_url=base,
+                headers=headers,
+                model_ids=[m["id"] for m in raw_models],
+            )
+
+        out: list[dict[str, Any]] = []
+        for m in raw_models:
+            entry: dict[str, Any] = {
                 "id": m["id"],
                 "display_name": m.get("name") or m["id"],
                 "context_window": m.get("context_length"),
@@ -868,9 +1074,14 @@ class ModelRouter:
                 "supports_vision": _detect_vision(m),
                 "supports_image_output": _detect_image_output(m),
             }
-            for m in data
-            if isinstance(m, dict) and "id" in m
-        ]
+            # Only include the privacy key when we actually fetched
+            # endpoint data — an explicit ``null`` would look like
+            # "fetch worked but no info", when really we never asked.
+            pv = privacy_by_id.get(m["id"])
+            if pv is not None:
+                entry["privacy"] = pv
+            out.append(entry)
+        return out
 
     async def _list_models_openai_compat(
         self, provider: ModelProvider
@@ -980,7 +1191,9 @@ class ModelRouter:
                 {
                     "id": model_id,
                     "display_name": m.get("display_name") or model_id,
-                    "context_window": None,
+                    "context_window": _known_context_window(
+                        "anthropic", model_id
+                    ),
                     "pricing": None,
                     "description": None,
                     "supports_vision": _detect_vision_by_id(

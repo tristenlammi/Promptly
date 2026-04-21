@@ -6,7 +6,12 @@ import { useChatStore } from "@/store/chatStore";
 import { cn } from "@/utils/cn";
 import type { ConversationParticipant } from "@/api/types";
 
-import { MessageBubble } from "./MessageBubble";
+import {
+  CompactedSummaryRow,
+  isCompactedSummary,
+} from "./CompactedSummaryRow";
+import { MessageBubble, type RegenerateOverride } from "./MessageBubble";
+import { StreamErrorCard } from "./StreamErrorCard";
 import { ThinkingBubble } from "./ThinkingBubble";
 
 interface ChatWindowProps {
@@ -24,12 +29,22 @@ interface ChatWindowProps {
    *  conversation up to and including that message. Omitted on new
    *  chats (no conversation id to branch from yet). */
   onBranchFrom?: (messageId: string) => Promise<void> | void;
+  /** Regenerate hook for the most recent persisted assistant message.
+   *  Only the last assistant turn is eligible — regenerating older
+   *  replies would orphan every turn that followed. Invoked with
+   *  ``null`` for "same model" and a concrete override for the
+   *  "try a different model" submenu. Omitted on new chats. */
+  onRegenerate?: (
+    messageId: string,
+    override: RegenerateOverride | null
+  ) => Promise<void> | void;
 }
 
 export function ChatWindow({
   onEditAndResend,
   participants,
   onBranchFrom,
+  onRegenerate,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
   const activeId = useChatStore((s) => s.activeId);
@@ -40,6 +55,8 @@ export function ChatWindow({
   const toolInvocations = useChatStore((s) => s.toolInvocations);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamError = useChatStore((s) => s.streamError);
+  const streamErrorMeta = useChatStore((s) => s.streamErrorMeta);
+  const setStreamError = useChatStore((s) => s.setStreamError);
   const endRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
@@ -176,6 +193,22 @@ export function ChatWindow({
     return null;
   }, [messages, isStreaming, onEditAndResend]);
 
+  // Same rule, mirrored for assistant turns: only the most recent
+  // assistant reply gets a Regenerate action. Optimistic rows (live
+  // streaming bubble) are out — the backend can't target them until
+  // they've been persisted with a real id.
+  const lastRegenerableAssistantId = useMemo<string | null>(() => {
+    if (isStreaming) return null;
+    if (!onRegenerate) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      if (m.id.startsWith("optimistic-")) return null;
+      return m.id;
+    }
+    return null;
+  }, [messages, isStreaming, onRegenerate]);
+
   // Build a quick id->username map so MessageBubble can render the
   // author chip without re-walking the participants array per row.
   // ``null`` when there are <=1 participants (solo chat) — that's
@@ -190,30 +223,43 @@ export function ChatWindow({
   return (
     <div ref={scrollRef} className="promptly-scroll relative flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl">
-        {messages.map((m) => (
-          <MessageBubble
-            key={m.id}
-            messageId={m.id}
-            role={m.role}
-            content={m.content}
-            sources={m.sources}
-            attachments={m.attachments}
-            promptTokens={m.prompt_tokens}
-            completionTokens={m.completion_tokens}
-            ttftMs={m.ttft_ms}
-            totalMs={m.total_ms}
-            costUsd={m.cost_usd}
-            authorUserId={m.author_user_id}
-            authorLookup={authorLookup}
-            currentUserId={currentUserId}
-            onEdit={
-              m.id === lastEditableUserId && onEditAndResend
-                ? (newText) => onEditAndResend(m.id, newText)
-                : undefined
-            }
-            onBranch={onBranchFrom ? () => onBranchFrom(m.id) : undefined}
-          />
-        ))}
+        {messages.map((m) => {
+          // Compaction-generated system rows render as a distinct
+          // collapsible summary strip rather than an avatar bubble
+          // (they're a meta-artifact, not a speaker turn).
+          if (isCompactedSummary(m.role, m.content)) {
+            return <CompactedSummaryRow key={m.id} content={m.content} />;
+          }
+          return (
+            <MessageBubble
+              key={m.id}
+              messageId={m.id}
+              role={m.role}
+              content={m.content}
+              sources={m.sources}
+              attachments={m.attachments}
+              promptTokens={m.prompt_tokens}
+              completionTokens={m.completion_tokens}
+              ttftMs={m.ttft_ms}
+              totalMs={m.total_ms}
+              costUsd={m.cost_usd}
+              authorUserId={m.author_user_id}
+              authorLookup={authorLookup}
+              currentUserId={currentUserId}
+              onEdit={
+                m.id === lastEditableUserId && onEditAndResend
+                  ? (newText) => onEditAndResend(m.id, newText)
+                  : undefined
+              }
+              onBranch={onBranchFrom ? () => onBranchFrom(m.id) : undefined}
+              onRegenerate={
+                m.id === lastRegenerableAssistantId && onRegenerate
+                  ? (override) => onRegenerate(m.id, override)
+                  : undefined
+              }
+            />
+          );
+        })}
 
         <VisionWarningBanner />
 
@@ -231,15 +277,11 @@ export function ChatWindow({
         {isStreaming && !showStreamingBubble && <ThinkingBubble />}
 
         {streamError && (
-          <div
-            className={cn(
-              "mx-4 my-3 rounded-card border px-4 py-3 text-sm",
-              "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
-            )}
-            role="alert"
-          >
-            {streamError}
-          </div>
+          <StreamErrorCard
+            error={streamError}
+            meta={streamErrorMeta}
+            onDismiss={() => setStreamError(null, null)}
+          />
         )}
 
         <div ref={endRef} className="h-6" />
