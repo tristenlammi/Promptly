@@ -12,6 +12,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -50,18 +51,35 @@ const METRIC_LABELS: Record<Metric, string> = {
 
 export function AnalyticsPanel() {
   const [days, setDays] = useState<RangeDays>(30);
-  const [metric, setMetric] = useState<Metric>("cost");
+  // Tokens is the default because it's the most universally-useful
+  // view — cost swings with provider pricing, messages undercounts
+  // heavy turns, and tokens are what actually bill against quota
+  // downstream.
+  const [metric, setMetric] = useState<Metric>("tokens");
+  const [chartUserId, setChartUserId] = useState<string | null>(null);
   const [drillUserId, setDrillUserId] = useState<string | null>(null);
 
   const summary = useAnalyticsSummary(days);
-  const timeseries = useAnalyticsTimeseries(days);
+  const allUsersSeries = useAnalyticsTimeseries(days);
+  // The per-user endpoint is only fetched when a specific user is
+  // picked; ``enabled`` on the underlying ``useQuery`` guards it.
+  const perUserSeries = useAnalyticsUserTimeseries(chartUserId, days);
   const users = useAnalyticsUsers(days);
   const byModel = useAnalyticsByModel(days);
 
+  const activeSeries = chartUserId ? perUserSeries : allUsersSeries;
+
   const filledSeries = useMemo(
-    () => fillMissingDays(timeseries.data ?? [], days),
-    [timeseries.data, days]
+    () => fillMissingDays(activeSeries.data ?? [], days),
+    [activeSeries.data, days]
   );
+
+  const selectedUsername = useMemo(() => {
+    if (!chartUserId) return null;
+    return (
+      users.data?.find((u) => u.user_id === chartUserId)?.username ?? null
+    );
+  }, [chartUserId, users.data]);
 
   return (
     <div className="space-y-5">
@@ -144,14 +162,117 @@ export function AnalyticsPanel() {
       <Card>
         <CardHeader
           title={`Daily ${METRIC_LABELS[metric].toLowerCase()}`}
-          subtitle="Stacked across all users."
-          right={<MetricToggle value={metric} onChange={setMetric} />}
+          subtitle={
+            chartUserId
+              ? `Filtered to ${selectedUsername ?? "the selected user"}.`
+              : "Summed across every user."
+          }
+          right={
+            <div className="flex flex-wrap items-center gap-2">
+              <UserFilter
+                value={chartUserId}
+                onChange={setChartUserId}
+                users={users.data ?? []}
+                loading={users.isLoading}
+              />
+              <MetricToggle value={metric} onChange={setMetric} />
+            </div>
+          }
         />
         <div className="h-72 w-full px-2 pb-3">
-          {timeseries.isLoading ? (
+          {activeSeries.isLoading ? (
             <ChartLoading />
           ) : filledSeries.length === 0 ? (
             <EmptyState message="No usage recorded in this window yet." />
+          ) : metric === "tokens" ? (
+            // Stacked bars (prompt + completion) + total line on top.
+            // Much more useful than a single line: you can see input vs
+            // output ratio at a glance and still trace the overall trend.
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={filledSeries}
+                margin={{ top: 8, right: 12, left: -12, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--border)"
+                  opacity={0.4}
+                />
+                <XAxis
+                  dataKey="day"
+                  tickFormatter={(v: string) => formatDayShort(v)}
+                  tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+                  stroke="var(--border)"
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+                  stroke="var(--border)"
+                  tickFormatter={(v: number) => formatCompactInt(v)}
+                  width={60}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelFormatter={(label) => formatDayLong(label as string)}
+                  formatter={(value, name) => [
+                    formatInt(Number(value ?? 0)),
+                    String(name),
+                  ]}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar
+                  dataKey="prompt_tokens"
+                  stackId="tokens"
+                  fill="#a855f7"
+                  name="Prompt"
+                  radius={[0, 0, 0, 0]}
+                />
+                <Bar
+                  dataKey="completion_tokens"
+                  stackId="tokens"
+                  fill="#10b981"
+                  name="Completion"
+                  radius={[4, 4, 0, 0]}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : metric === "messages" ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={filledSeries}
+                margin={{ top: 8, right: 12, left: -12, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--border)"
+                  opacity={0.4}
+                />
+                <XAxis
+                  dataKey="day"
+                  tickFormatter={(v: string) => formatDayShort(v)}
+                  tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+                  stroke="var(--border)"
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+                  stroke="var(--border)"
+                  tickFormatter={(v: number) => formatCompactInt(v)}
+                  width={60}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  labelFormatter={(label) => formatDayLong(label as string)}
+                  formatter={(value) => [
+                    formatInt(Number(value ?? 0)),
+                    "Messages",
+                  ]}
+                />
+                <Bar
+                  dataKey="messages"
+                  fill="var(--accent)"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
@@ -172,24 +293,20 @@ export function AnalyticsPanel() {
                 <YAxis
                   tick={{ fontSize: 11, fill: "var(--text-muted)" }}
                   stroke="var(--border)"
-                  tickFormatter={(v: number) =>
-                    metric === "cost" ? formatAud(v) : formatInt(v)
-                  }
+                  tickFormatter={(v: number) => formatAud(v)}
                   width={60}
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
                   labelFormatter={(label) => formatDayLong(label as string)}
-                  formatter={(value) => {
-                    const n = Number(value ?? 0);
-                    return metric === "cost"
-                      ? [formatAud(n), "Cost"]
-                      : [formatInt(n), METRIC_LABELS[metric]];
-                  }}
+                  formatter={(value) => [
+                    formatAud(Number(value ?? 0)),
+                    "Cost",
+                  ]}
                 />
                 <Line
                   type="monotone"
-                  dataKey={metricKey(metric)}
+                  dataKey="cost_usd"
                   stroke="var(--accent)"
                   strokeWidth={2}
                   dot={false}
@@ -199,64 +316,63 @@ export function AnalyticsPanel() {
             </ResponsiveContainer>
           )}
         </div>
+        <ChartSummaryRow series={filledSeries} metric={metric} />
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader
-              title="Cost by user"
-              subtitle="Top 10 spenders in the window. Click a row for the per-user trend."
-            />
-            <div className="h-72 w-full px-2 pb-3">
-              {users.isLoading ? (
-                <ChartLoading />
-              ) : (users.data ?? []).length === 0 ? (
-                <EmptyState message="No spend recorded yet." />
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={(users.data ?? []).slice(0, 10)}
-                    margin={{ top: 8, right: 12, left: -12, bottom: 0 }}
-                  >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke="var(--border)"
-                      opacity={0.4}
-                    />
-                    <XAxis
-                      dataKey="username"
-                      tick={{ fontSize: 11, fill: "var(--text-muted)" }}
-                      stroke="var(--border)"
-                      interval={0}
-                      angle={-25}
-                      textAnchor="end"
-                      height={50}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "var(--text-muted)" }}
-                      stroke="var(--border)"
-                      tickFormatter={(v: number) => formatAud(v)}
-                      width={60}
-                    />
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                      formatter={(value) => [formatAud(Number(value ?? 0)), "Cost"]}
-                    />
-                    <Bar dataKey="cost_usd_window" radius={[4, 4, 0, 0]}>
-                      {(users.data ?? []).slice(0, 10).map((row, i) => (
-                        <Cell
-                          key={row.user_id}
-                          fill={USER_COLORS[i % USER_COLORS.length]}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </Card>
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Cost by user"
+            subtitle="Top 10 spenders in the window. Click a row for the per-user trend."
+          />
+          <div className="h-72 w-full px-2 pb-3">
+            {users.isLoading ? (
+              <ChartLoading />
+            ) : (users.data ?? []).length === 0 ? (
+              <EmptyState message="No spend recorded yet." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={(users.data ?? []).slice(0, 10)}
+                  margin={{ top: 8, right: 12, left: -12, bottom: 0 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="var(--border)"
+                    opacity={0.4}
+                  />
+                  <XAxis
+                    dataKey="username"
+                    tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+                    stroke="var(--border)"
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    height={50}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+                    stroke="var(--border)"
+                    tickFormatter={(v: number) => formatAud(v)}
+                    width={60}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(value) => [formatAud(Number(value ?? 0)), "Cost"]}
+                  />
+                  <Bar dataKey="cost_usd_window" radius={[4, 4, 0, 0]}>
+                    {(users.data ?? []).slice(0, 10).map((row, i) => (
+                      <Cell
+                        key={row.user_id}
+                        fill={USER_COLORS[i % USER_COLORS.length]}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </Card>
 
         <Card>
           <CardHeader
@@ -746,6 +862,173 @@ function RangePicker({
   );
 }
 
+/**
+ * Dropdown that scopes the main trend chart to a single user. The
+ * options are sourced from ``useAnalyticsUsers`` (already loaded for
+ * the top-10 bar chart and the user table), so opening this picker
+ * doesn't trigger a new fetch.
+ */
+function UserFilter({
+  value,
+  onChange,
+  users,
+  loading,
+}: {
+  value: string | null;
+  onChange: (id: string | null) => void;
+  users: AnalyticsUserRow[];
+  loading: boolean;
+}) {
+  // Sort by cost desc (same ordering as the backend's ``analytics/users``
+  // endpoint returns) so the heaviest users float to the top of the
+  // dropdown. Preserves alphabetical as a tiebreaker for zero-spend
+  // accounts.
+  const sorted = useMemo(() => {
+    return [...users].sort((a, b) => {
+      if (b.cost_usd_window !== a.cost_usd_window) {
+        return b.cost_usd_window - a.cost_usd_window;
+      }
+      return a.username.localeCompare(b.username);
+    });
+  }, [users]);
+
+  return (
+    <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+      <UsersIcon className="h-3 w-3" />
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        disabled={loading}
+        className={cn(
+          "h-7 max-w-[14rem] truncate rounded-input border bg-[var(--surface)] px-2 text-[11px]",
+          "border-[var(--border)] text-[var(--text)]",
+          "focus:border-[var(--accent)] focus:outline-none",
+          "disabled:cursor-not-allowed disabled:opacity-60"
+        )}
+      >
+        <option value="">All users</option>
+        {sorted.map((u) => (
+          <option key={u.user_id} value={u.user_id}>
+            {u.username}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * Tiny stats bar under the main chart. Gives the admin quick totals
+ * for the currently-filtered window without having to hover across
+ * every bar — useful when a user filter is applied and the stat
+ * cards up top still show the fleet-wide numbers.
+ */
+function ChartSummaryRow({
+  series,
+  metric,
+}: {
+  series: AnalyticsTimeseriesPoint[];
+  metric: Metric;
+}) {
+  const stats = useMemo(() => {
+    let messages = 0;
+    let prompt = 0;
+    let completion = 0;
+    let cost = 0;
+    let peak = 0;
+    for (const p of series) {
+      messages += p.messages;
+      prompt += p.prompt_tokens;
+      completion += p.completion_tokens;
+      cost += p.cost_usd;
+      const perDay =
+        metric === "cost"
+          ? p.cost_usd
+          : metric === "messages"
+            ? p.messages
+            : p.prompt_tokens + p.completion_tokens;
+      if (perDay > peak) peak = perDay;
+    }
+    return { messages, prompt, completion, cost, peak };
+  }, [series, metric]);
+
+  if (series.length === 0) return null;
+
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border)] px-4 py-2 text-[11px] text-[var(--text-muted)]"
+      )}
+    >
+      {metric === "tokens" ? (
+        <>
+          <SummaryStat
+            label="Prompt"
+            value={formatInt(stats.prompt)}
+            dotColor="#a855f7"
+          />
+          <SummaryStat
+            label="Completion"
+            value={formatInt(stats.completion)}
+            dotColor="#10b981"
+          />
+          <SummaryStat
+            label="Total"
+            value={formatInt(stats.prompt + stats.completion)}
+          />
+          <SummaryStat
+            label="Peak day"
+            value={formatInt(stats.peak)}
+          />
+        </>
+      ) : metric === "messages" ? (
+        <>
+          <SummaryStat label="Total" value={formatInt(stats.messages)} />
+          <SummaryStat label="Peak day" value={formatInt(stats.peak)} />
+          <SummaryStat
+            label="Avg / day"
+            value={formatInt(stats.messages / series.length)}
+          />
+        </>
+      ) : (
+        <>
+          <SummaryStat label="Total" value={formatAud(stats.cost)} />
+          <SummaryStat label="Peak day" value={formatAud(stats.peak)} />
+          <SummaryStat
+            label="Avg / day"
+            value={formatAud(stats.cost / series.length)}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  dotColor,
+}: {
+  label: string;
+  value: string;
+  dotColor?: string;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      {dotColor && (
+        <span
+          className="inline-block h-2 w-2 rounded-full"
+          style={{ backgroundColor: dotColor }}
+        />
+      )}
+      <span className="uppercase tracking-wider">{label}</span>
+      <span className="font-medium tabular-nums text-[var(--text)]">
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function MetricToggle({
   value,
   onChange,
@@ -826,14 +1109,16 @@ const USER_COLORS = [
   "#eab308",
 ];
 
-function metricKey(m: Metric): keyof AnalyticsTimeseriesPoint {
-  if (m === "cost") return "cost_usd";
-  if (m === "messages") return "messages";
-  return "completion_tokens";
-}
-
 function formatInt(n: number): string {
   return Math.round(n).toLocaleString();
+}
+
+/** Compact number formatter for Y-axis ticks: 12,500 → "12.5k". */
+function formatCompactInt(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(abs < 10_000 ? 1 : 0)}k`;
+  return `${Math.round(n)}`;
 }
 
 function formatDayShort(iso: string): string {
