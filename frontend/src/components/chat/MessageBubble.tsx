@@ -1,8 +1,10 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import {
+  AtSign,
   Check,
   ChevronDown,
   Copy,
@@ -136,6 +138,88 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// Phase C — ``@[title](id)`` mention tokens. We rewrite them to a
+// Markdown link pointing at a fake ``promptly-mention:`` protocol
+// before handing the content to ReactMarkdown, then the ``a``
+// renderer below spots that href prefix and swaps in a chip.
+// Same preprocessing is applied to user messages (which render as
+// plain text), using ``renderMentionText`` directly.
+const MENTION_TOKEN_RE = /@\[([^\]\n]+?)\]\(([0-9a-fA-F-]{32,})\)/g;
+
+function rewriteMentionsForMarkdown(markdown: string): string {
+  if (!markdown) return markdown;
+  // Replace ``@[title](id)`` with ``[@title](promptly-mention:id)``.
+  // The zero-width space between ``@`` and title prevents Markdown
+  // parsers from collapsing adjacent tokens into one link.
+  return markdown.replace(MENTION_TOKEN_RE, (_m, title: string, id: string) => {
+    const safe = title.replace(/[\[\]]/g, "");
+    return `[@\u200B${safe}](promptly-mention:${id})`;
+  });
+}
+
+/** Render a plain-text string (user messages) replacing any
+ *  ``@[title](id)`` tokens with mention chips. Returns a list of
+ *  React nodes in input order — plain text segments survive
+ *  unchanged (``whitespace-pre-wrap`` styling on the parent
+ *  preserves their newlines). */
+function renderMentionText(text: string): ReactNode {
+  if (!text) return null;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  MENTION_TOKEN_RE.lastIndex = 0;
+  while ((match = MENTION_TOKEN_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(
+      <MentionChip
+        key={`mention-${match.index}`}
+        title={match[1]}
+        conversationId={match[2]}
+      />
+    );
+    lastIndex = MENTION_TOKEN_RE.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts.length > 0 ? parts : text;
+}
+
+/** Inline chip rendered wherever a ``@[title](id)`` token appears.
+ *  Clicking it navigates to that chat (new page, not a modal, so
+ *  the browser back button brings the user back naturally). */
+function MentionChip({
+  title,
+  conversationId,
+}: {
+  title: string;
+  conversationId: string;
+}) {
+  const navigate = useNavigate();
+  const clean = (title || "").replace(/[\[\]]/g, "").trim() || "Chat";
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        navigate(`/chat/${conversationId}`);
+      }}
+      className={cn(
+        "mx-[1px] inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 align-baseline text-[12px] font-medium leading-5 transition",
+        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]",
+        "hover:bg-[var(--accent)]/20 hover:border-[var(--accent)]/60"
+      )}
+      title={`Go to chat: ${clean}`}
+    >
+      <AtSign className="h-3 w-3" />
+      <span className="max-w-[14rem] truncate">{clean}</span>
+    </button>
+  );
+}
+
 // Wrap <pre> to add a copy button.
 const markdownComponents: Components = {
   pre({ children, ...props }) {
@@ -150,9 +234,24 @@ const markdownComponents: Components = {
       </div>
     );
   },
-  a({ children, ...props }) {
+  a({ children, href, ...props }) {
+    // ``promptly-mention:<id>`` is the synthetic protocol we use
+    // to represent ``@[title](id)`` tokens after preprocessing.
+    // Rewriting them to chips here means the AI's echoed mentions
+    // render the same as the user's own.
+    if (typeof href === "string" && href.startsWith("promptly-mention:")) {
+      const convId = href.slice("promptly-mention:".length);
+      // ``children`` is the ``[@<title>]`` text; strip the ``@`` +
+      // zero-width-space prefix so the chip renders cleanly.
+      const raw = String(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (children as any)?.[0] ?? children ?? ""
+      );
+      const title = raw.replace(/^@\u200B?/, "");
+      return <MentionChip title={title} conversationId={convId} />;
+    }
     return (
-      <a {...props} target="_blank" rel="noopener noreferrer">
+      <a {...props} href={href} target="_blank" rel="noopener noreferrer">
         {children}
       </a>
     );
@@ -397,7 +496,7 @@ function MessageBubbleImpl({
             )}
           >
             {isUser ? (
-              content
+              renderMentionText(content)
             ) : (
               <>
                 <ReactMarkdown
@@ -405,7 +504,9 @@ function MessageBubbleImpl({
                   rehypePlugins={[rehypeHighlight]}
                   components={markdownComponents}
                 >
-                  {stripInlineCitations(content || "")}
+                  {rewriteMentionsForMarkdown(
+                    stripInlineCitations(content || "")
+                  )}
                 </ReactMarkdown>
                 {streaming && (
                   <span

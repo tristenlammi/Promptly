@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import Conversation, ConversationShare
+from app.chat.models import Conversation, ConversationShare, ProjectShare
 from app.database import get_db
 
 logger = logging.getLogger("promptly.chat.shares")
@@ -76,6 +76,45 @@ async def _accepted_share(
     return res.scalars().first()
 
 
+async def _has_project_access(
+    project_id: uuid.UUID | None, user: User, db: AsyncSession
+) -> bool:
+    """Does ``user`` have any path to the given project?
+
+    Used by :func:`get_accessible_conversation` as a second check
+    after the direct conversation share: if the chat lives in a
+    project the caller either owns or has an accepted project
+    share for, they inherit read/post access.
+
+    Returning early for ``project_id is None`` keeps call sites
+    free of a None-guard — almost every conversation is project-less
+    so this path short-circuits cheaply.
+    """
+    if project_id is None:
+        return False
+    # Import lazily to avoid a circular import at module load — the
+    # projects router imports from ``shares.py`` for its own access
+    # helpers, and :class:`ChatProject` pulls in the whole project
+    # tree.
+    from app.chat.models import ChatProject
+
+    proj = await db.get(ChatProject, project_id)
+    if proj is None:
+        return False
+    if proj.user_id == user.id:
+        return True
+    share = (
+        await db.execute(
+            select(ProjectShare).where(
+                ProjectShare.project_id == project_id,
+                ProjectShare.invitee_user_id == user.id,
+                ProjectShare.status == "accepted",
+            )
+        )
+    ).scalars().first()
+    return share is not None
+
+
 async def get_accessible_conversation(
     conversation_id: uuid.UUID,
     user: User,
@@ -113,6 +152,15 @@ async def get_accessible_conversation(
     if share is not None:
         return conv, "collaborator"
 
+    # 0031 — project-level sharing. If the chat lives in a project
+    # the caller has accepted a share on (or owns outright), they
+    # inherit collaborator access to every conversation under that
+    # project. The ``owner`` role is reserved for the literal
+    # conversation creator so the send path can still reject edits
+    # on someone else's messages.
+    if await _has_project_access(conv.project_id, user, db):
+        return conv, "collaborator"
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Conversation not found",
@@ -122,12 +170,26 @@ async def get_accessible_conversation(
 async def list_accessible_conversation_ids(
     user: User, db: AsyncSession
 ) -> list[uuid.UUID]:
-    """All conversation ids the caller can read — owned + accepted.
+    """All conversation ids the caller can read — owned + accepted
+    conversation share + project share.
 
     Used by the conversation list endpoint and by the cross-chat
     full-text search to widen the ``WHERE`` clause without a JOIN at
-    each call site.
+    each call site. The project-share path brings in every chat
+    under any project the caller has accepted a share on.
     """
+    # Project ids the caller has *any* access to (owned + accepted
+    # share). Gather once and pass as an ``IN`` clause rather than
+    # joining through two more tables in the main query.
+    accessible_project_ids = await list_accessible_project_ids(user, db)
+
+    conds = [
+        Conversation.user_id == user.id,
+        ConversationShare.id.is_not(None),
+    ]
+    if accessible_project_ids:
+        conds.append(Conversation.project_id.in_(accessible_project_ids))
+
     res = await db.execute(
         select(Conversation.id)
         .outerjoin(
@@ -136,14 +198,44 @@ async def list_accessible_conversation_ids(
             & (ConversationShare.invitee_user_id == user.id)
             & (ConversationShare.status == "accepted"),
         )
-        .where(
-            or_(
-                Conversation.user_id == user.id,
-                ConversationShare.id.is_not(None),
-            )
+        .where(or_(*conds))
+    )
+    # ``outerjoin`` can produce duplicates when a chat is reachable
+    # via *both* a direct share and a project share. Dedupe client-
+    # side — the result fits comfortably in memory even for power
+    # users (a few thousand chats at most).
+    return list({row[0] for row in res.all()})
+
+
+async def list_accessible_project_ids(
+    user: User, db: AsyncSession
+) -> list[uuid.UUID]:
+    """Project ids the caller owns or has an accepted share on.
+
+    Deliberately tiny — the project share scale is "a handful per
+    user" so we don't bother with a composite index query. Called
+    by :func:`list_accessible_conversation_ids` and by the project
+    list endpoint to surface shared projects in the same UI as
+    owned ones.
+    """
+    # Import lazily — see note in ``_has_project_access``.
+    from app.chat.models import ChatProject
+
+    owned_res = await db.execute(
+        select(ChatProject.id).where(ChatProject.user_id == user.id)
+    )
+    shared_res = await db.execute(
+        select(ProjectShare.project_id).where(
+            ProjectShare.invitee_user_id == user.id,
+            ProjectShare.status == "accepted",
         )
     )
-    return [row[0] for row in res.all()]
+    ids: set[uuid.UUID] = set()
+    for row in owned_res.all():
+        ids.add(row[0])
+    for row in shared_res.all():
+        ids.add(row[0])
+    return list(ids)
 
 
 # ====================================================================

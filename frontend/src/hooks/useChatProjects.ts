@@ -17,6 +17,8 @@ import {
   type ChatProjectSummary,
   type ChatProjectDetail,
   type CreateChatProjectPayload,
+  type ProjectInviteRow,
+  type ProjectShareRow,
   type UpdateChatProjectPayload,
 } from "@/api/chatProjects";
 
@@ -27,6 +29,8 @@ const KEYS = {
   detail: (id: string) => ["chat-projects", "detail", id] as const,
   conversations: (id: string) =>
     ["chat-projects", "conversations", id] as const,
+  shares: (id: string) => ["chat-projects", "shares", id] as const,
+  invites: ["chat-project-invites"] as const,
 };
 
 export function useChatProjects(opts: { archived?: boolean } = {}) {
@@ -158,6 +162,89 @@ export function useRemoveConversationFromProject() {
       qc.invalidateQueries({ queryKey: KEYS.root });
       qc.invalidateQueries({ queryKey: KEYS.conversations(vars.projectId) });
       qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------
+// Project sharing — owner side
+// ---------------------------------------------------------------------
+
+/** List existing share rows (pending + accepted + declined) on the
+ *  project. Passing ``null`` / ``undefined`` disables the query so
+ *  the share modal can gate the fetch on open. */
+export function useProjectShares(projectId: string | null | undefined) {
+  return useQuery<ProjectShareRow[]>({
+    queryKey: projectId
+      ? KEYS.shares(projectId)
+      : ["chat-projects", "shares", "_"],
+    queryFn: () => chatProjectsApi.listShares(projectId as string),
+    enabled: Boolean(projectId),
+  });
+}
+
+export function useCreateProjectShare(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { username?: string; email?: string }) =>
+      chatProjectsApi.createShare(projectId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.shares(projectId) });
+      qc.invalidateQueries({ queryKey: KEYS.detail(projectId) });
+    },
+  });
+}
+
+export function useDeleteProjectShare(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (shareId: string) =>
+      chatProjectsApi.deleteShare(projectId, shareId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.shares(projectId) });
+      qc.invalidateQueries({ queryKey: KEYS.detail(projectId) });
+      // Revoking a share may change the invitee's accessible
+      // conversations — make sure their sidebar repaints.
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------
+// Project sharing — invitee side
+// ---------------------------------------------------------------------
+
+/** Pending project invites for the current user. Polled on the same
+ *  cadence as conversation invites (every 60 s) so a freshly-
+ *  invited teammate sees the badge without a manual refresh. */
+export function useProjectInvites() {
+  return useQuery<ProjectInviteRow[]>({
+    queryKey: KEYS.invites,
+    queryFn: () => chatProjectsApi.listInvites(),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useAcceptProjectInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (shareId: string) => chatProjectsApi.acceptInvite(shareId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.invites });
+      qc.invalidateQueries({ queryKey: KEYS.root });
+      // Accepting widens the caller's accessible-chat set — refresh
+      // the main conversation list too.
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function useDeclineProjectInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (shareId: string) => chatProjectsApi.declineInvite(shareId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.invites });
     },
   });
 }

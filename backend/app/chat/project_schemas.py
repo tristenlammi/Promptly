@@ -37,6 +37,19 @@ class ChatProjectFilePin(BaseModel):
 # ---------------------------------------------------------------------
 
 
+class ChatProjectParticipant(BaseModel):
+    """Minimal identity row for the project sharing UI.
+
+    Mirrors :class:`app.chat.shares.ShareUserBrief` so the frontend
+    can reuse a single ``UserChip`` component across chat and
+    project share surfaces.
+    """
+
+    user_id: uuid.UUID
+    username: str
+    email: str
+
+
 class ChatProjectSummary(BaseModel):
     """Lightweight row returned by the list endpoints.
 
@@ -61,6 +74,15 @@ class ChatProjectSummary(BaseModel):
     # and saves the frontend a second round-trip on every card.
     conversation_count: int = 0
     file_count: int = 0
+    # ``owner`` when the caller created the project, ``collaborator``
+    # when they have an accepted project share. Populated by the
+    # router; the UI uses it to hide destructive actions (delete,
+    # archive, manage-shares) from non-owners.
+    role: str = "owner"
+    # Non-null only for collaborators. Lets the card / list render
+    # "shared by Jane" in place of the default timestamp hint so the
+    # user can tell the two sources apart without clicking through.
+    shared_by: ChatProjectParticipant | None = None
 
 
 class ChatProjectDetail(ChatProjectSummary):
@@ -73,6 +95,12 @@ class ChatProjectDetail(ChatProjectSummary):
 
     system_prompt: str | None = None
     files: list[ChatProjectFilePin] = Field(default_factory=list)
+    # Owner + accepted collaborators on this project. Surfaced on
+    # the detail payload so the header can show "Shared with Alex,
+    # Sarah" and the share modal can seed its "People with access"
+    # list without a second round-trip.
+    owner: ChatProjectParticipant | None = None
+    collaborators: list[ChatProjectParticipant] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------

@@ -10,6 +10,16 @@ import type {
   WebSearchMode,
 } from "./types";
 
+/** Single-row payload for the ``@``-mention autocomplete in the
+ *  composer. Mirrors ``backend/app/chat/schemas.py::MentionCandidate``. */
+export interface MentionCandidate {
+  id: string;
+  title: string;
+  project_id: string | null;
+  project_title: string | null;
+  updated_at: string;
+}
+
 export interface CreateConversationPayload {
   title?: string | null;
   model_id?: string | null;
@@ -224,6 +234,36 @@ export const chatApi = {
     return data;
   },
 
+  /** Fetch candidates for the ``@``-mention autocomplete. When a
+   *  ``project_id`` is provided, sibling chats in that project are
+   *  surfaced separately (UI groups them above the generic
+   *  recents). Excludes the caller's current conversation so
+   *  self-references never appear. */
+  async mentionCandidates(params: {
+    q?: string;
+    projectId?: string | null;
+    excludeId?: string | null;
+    limit?: number;
+  }): Promise<{
+    project_context_id: string | null;
+    project_candidates: MentionCandidate[];
+    recent_candidates: MentionCandidate[];
+  }> {
+    const { data } = await apiClient.get<{
+      project_context_id: string | null;
+      project_candidates: MentionCandidate[];
+      recent_candidates: MentionCandidate[];
+    }>("/chat/conversations/mention-candidates", {
+      params: {
+        q: params.q ?? "",
+        project_id: params.projectId ?? undefined,
+        exclude_id: params.excludeId ?? undefined,
+        limit: params.limit ?? 12,
+      },
+    });
+    return data;
+  },
+
   /** Compact the middle of a long conversation. Keeps the start and
    *  end verbatim and replaces the middle with a single system-role
    *  summary produced by the conversation's current model. */
@@ -234,6 +274,28 @@ export const chatApi = {
       messages_removed: number;
       summary_message_id: string;
     }>(`/chat/conversations/${conversationId}/compact`);
+    return data;
+  },
+
+  /** Generate a standalone Markdown summary of the whole chat and
+   *  pin it as a file to the conversation's parent project, so every
+   *  other chat in that project picks it up on the next turn. Only
+   *  valid for owner-role conversations that already live inside a
+   *  project. */
+  async summariseToProject(conversationId: string): Promise<{
+    file_id: string;
+    filename: string;
+    project_id: string;
+    project_title: string;
+    chars: number;
+  }> {
+    const { data } = await apiClient.post<{
+      file_id: string;
+      filename: string;
+      project_id: string;
+      project_title: string;
+      chars: number;
+    }>(`/chat/conversations/${conversationId}/summarise-to-project`);
     return data;
   },
 

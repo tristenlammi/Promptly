@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Eye } from "lucide-react";
+import { Check, ChevronDown, Eye, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { useAvailableModels } from "@/hooks/useProviders";
@@ -33,15 +33,42 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
     return () => window.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Group models by provider for the dropdown.
+  // Group models for the dropdown. Custom Models render as a single
+  // top section (they share no real provider) so admins can pluck
+  // one out without hunting through OpenRouter's 100+ rows. Raw
+  // provider groups follow in their natural list order.
   const grouped = useMemo(() => {
-    const map = new Map<string, { name: string; models: typeof available }>();
-    for (const m of available) {
-      const existing = map.get(m.provider_id);
+    const customs = available.filter((m) => m.is_custom);
+    const raws = available.filter((m) => !m.is_custom);
+
+    const byProvider = new Map<
+      string,
+      { name: string; models: typeof available }
+    >();
+    for (const m of raws) {
+      const existing = byProvider.get(m.provider_id);
       if (existing) existing.models.push(m);
-      else map.set(m.provider_id, { name: m.provider_name, models: [m] });
+      else byProvider.set(m.provider_id, { name: m.provider_name, models: [m] });
     }
-    return Array.from(map.values());
+
+    const groups: Array<{
+      key: string;
+      name: string;
+      models: typeof available;
+      isCustom?: boolean;
+    }> = [];
+    if (customs.length > 0) {
+      groups.push({
+        key: "__custom__",
+        name: "Custom Models",
+        models: customs,
+        isCustom: true,
+      });
+    }
+    for (const [providerId, g] of byProvider.entries()) {
+      groups.push({ key: providerId, name: g.name, models: g.models });
+    }
+    return groups;
   }, [available]);
 
   if (isLoading) {
@@ -141,7 +168,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
           )}
         >
           {grouped.map((group) => (
-            <div key={group.name} className="py-1">
+            <div key={group.key} className="py-1">
               <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                 {group.name}
               </div>
@@ -149,6 +176,9 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
                 const active =
                   selected?.provider_id === m.provider_id &&
                   selected?.model_id === m.model_id;
+                const subtitle = m.is_custom
+                  ? `Based on ${m.base_display_name ?? m.provider_name}`
+                  : `${m.model_id}${m.context_window ? ` · ${(m.context_window / 1000).toFixed(0)}k ctx` : ""}`;
                 return (
                   <button
                     key={`${m.provider_id}:${m.model_id}`}
@@ -169,13 +199,11 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
                         <span className="truncate font-medium">
                           {m.display_name}
                         </span>
+                        {m.is_custom && <CustomBadge />}
                         {m.supports_vision && <VisionBadge />}
                       </div>
                       <div className="truncate text-[11px] text-[var(--text-muted)]">
-                        {m.model_id}
-                        {m.context_window
-                          ? ` · ${(m.context_window / 1000).toFixed(0)}k ctx`
-                          : ""}
+                        {subtitle}
                       </div>
                     </div>
                     {active && (
@@ -189,6 +217,21 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function CustomBadge() {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
+        "bg-[var(--accent)]/15 text-[var(--accent)]"
+      )}
+      title="Custom assistant — admin-curated personality + knowledge library"
+    >
+      <Sparkles className="h-2.5 w-2.5" />
+      Custom
+    </span>
   );
 }
 

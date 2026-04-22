@@ -20,12 +20,32 @@ import { StudySessionPage } from "@/pages/StudySessionPage";
 import { StudyTopicPage } from "@/pages/StudyTopicPage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useAuthStore } from "@/store/authStore";
+import { useModelStore } from "@/store/modelStore";
 import { applyTheme } from "@/store/themeStore";
 
 export default function App() {
   useAuthBootstrap();
   const status = useAuthStore((s) => s.status);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+
+  // Keep the model store's "default model" mirror in sync with
+  // ``user.settings`` so every new chat starts on the user's preferred
+  // model. The settings sub-object is recreated whenever the user
+  // changes (login, /me refresh, preferences PATCH), which flips the
+  // selector and re-runs this effect — at which point we push the
+  // pair into the model store's ``setDefault``.
+  const userSettings = useAuthStore((s) => s.user?.settings);
+  useEffect(() => {
+    const provider =
+      typeof userSettings?.default_provider_id === "string"
+        ? userSettings.default_provider_id
+        : null;
+    const model =
+      typeof userSettings?.default_model_id === "string"
+        ? userSettings.default_model_id
+        : null;
+    useModelStore.getState().setDefault(provider, model);
+  }, [userSettings]);
 
   // Keep the html.dark class in sync with the persisted theme on mount.
   useEffect(() => {

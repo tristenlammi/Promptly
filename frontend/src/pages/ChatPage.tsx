@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Clock, FolderKanban, Ghost, GitBranch, Share2, Split } from "lucide-react";
+import {
+  ArrowLeft,
+  Clock,
+  FolderKanban,
+  Ghost,
+  GitBranch,
+} from "lucide-react";
 
 import { authApi } from "@/api/auth";
 import { chatApi } from "@/api/chat";
@@ -9,15 +15,13 @@ import { TopNav } from "@/components/layout/TopNav";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ContextWarningBanner } from "@/components/chat/ContextWarningBanner";
 import { ContextWindowPill } from "@/components/chat/ContextWindowPill";
-import { ConversationExportMenu } from "@/components/chat/ConversationExportMenu";
-import { MoveToProjectMenu } from "@/components/chat/MoveToProjectMenu";
+import { SummariseToProjectButton } from "@/components/chat/SummariseToProjectButton";
 import type { RegenerateOverride } from "@/components/chat/MessageBubble";
 import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { InputBar } from "@/components/chat/InputBar";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
-import { ShareConversationDialog } from "@/components/chat/ShareConversationDialog";
 import {
   useBranchConversation,
   useConversationQuery,
@@ -28,7 +32,7 @@ import { useChatProject } from "@/hooks/useChatProjects";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
-import { useSelectedModel } from "@/store/modelStore";
+import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import type { ChatMessage, TemporaryMode, WebSearchMode } from "@/api/types";
 import { cn } from "@/utils/cn";
 
@@ -111,7 +115,6 @@ export function ChatPage() {
     },
     [branchMutation, id, navigate]
   );
-  const [shareOpen, setShareOpen] = useState(false);
   // Owner-only share affordance: collaborators see neither the
   // button nor the dialog. Falls open whenever role isn't explicitly
   // collaborator (default-owner for legacy chats without the field).
@@ -152,6 +155,30 @@ export function ChatPage() {
     setWebSearchMode(s.default_web_search_mode ?? DEFAULT_WEB_SEARCH_MODE);
     setToolsEnabled(s.default_tools_enabled ?? DEFAULT_TOOLS_ENABLED);
   }, [id, setActive]);
+
+  // Default-model behaviour: every NEW chat starts on the user's
+  // configured default; opening an EXISTING chat snaps the picker to
+  // that conversation's stored model so swapping models in chat A
+  // doesn't leak into chat B. The user can still pick a different
+  // model mid-chat — the next send persists that pick onto the
+  // conversation, and the snap below honours it from then on.
+  const convModelId = conversation?.model_id ?? null;
+  const convProviderId = conversation?.provider_id ?? null;
+  useEffect(() => {
+    if (!id) {
+      useModelStore.getState().applyDefault();
+      return;
+    }
+    if (convProviderId && convModelId) {
+      const store = useModelStore.getState();
+      if (
+        store.selectedProviderId !== convProviderId ||
+        store.selectedModelId !== convModelId
+      ) {
+        store.setSelection(convProviderId, convModelId);
+      }
+    }
+  }, [id, convProviderId, convModelId]);
 
   // Persist a preference flip to the server. Optimistic: update local
   // state + cached user immediately, fire the PATCH, roll back on
@@ -522,60 +549,25 @@ export function ChatPage() {
         subtitle={subtitle}
         actions={
           <div className="flex items-center gap-2">
-            {/* Compare is a desktop-only workflow — 2–4 parallel
-                columns don't fit comfortably below the md breakpoint
-                and the mobile header is already tight. Users can
-                still reach existing compare groups via the sidebar
-                nav on tablet+; phones just don't see the entry. */}
-            {!isMobile && (
-              <button
-                type="button"
-                onClick={() => navigate("/chat/compare/new")}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]",
-                  "px-2.5 py-1.5 text-xs"
-                )}
-                title="Compare two models side by side"
-                aria-label="Compare two models side by side"
-              >
-                <Split className="h-3.5 w-3.5" />
-                Compare
-              </button>
-            )}
-            {id && isOwner && !effectiveTemporaryMode && (
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]",
-                  // Icon-only on mobile to free up header real estate
-                  // for the title — same target size as the hamburger
-                  // and ModelSelector trigger so the action row reads
-                  // as a single visual unit.
-                  isMobile
-                    ? "h-9 w-9 justify-center"
-                    : "px-2.5 py-1.5 text-xs"
-                )}
-                title="Share this conversation"
-                aria-label="Share this conversation"
-              >
-                <Share2 className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
-                {!isMobile && "Share"}
-              </button>
-            )}
-            {id && isOwner && !effectiveTemporaryMode && (
-              <MoveToProjectMenu
-                conversationId={id}
-                currentProjectId={conversation?.project_id ?? null}
-                compact={isMobile}
-              />
-            )}
-            {id && hasMessages && (
-              <ConversationExportMenu
-                conversationId={id}
-                compact={isMobile}
-              />
-            )}
+            {/* Share + export moved off the top-nav and onto the
+                sidebar row's right-click / long-press context menu —
+                they weren't frequent enough to keep paying for header
+                real estate. Pin and delete remain on the sidebar
+                row's hover/quick-action cluster. */}
+            {/* Save-summary-to-project is only meaningful when the chat
+                already lives in a project. We also hide it for empty
+                chats — there's nothing to summarise before the user
+                has exchanged a few turns with the model. */}
+            {id &&
+              isOwner &&
+              !effectiveTemporaryMode &&
+              conversation?.project_id &&
+              hasMessages && (
+                <SummariseToProjectButton
+                  conversationId={id}
+                  compact={isMobile}
+                />
+              )}
             {!isMobile && (
               <ContextWindowPill
                 conversationId={id ?? null}
@@ -640,9 +632,11 @@ export function ChatPage() {
           onToolsChange={handleToolsChange}
           footer={footerText}
           autoFocus
+          currentConversationId={id ?? null}
+          projectId={conversation?.project_id ?? null}
           placeholder={
             selectedModel
-              ? "Message Promptly..."
+              ? "Message Promptly... (@ to reference a chat)"
               : "Configure a model in the Models tab first"
           }
         />
@@ -651,13 +645,6 @@ export function ChatPage() {
           Renders into the same DOM tree but its fixed positioning takes
           it out of normal flow; null when no file is selected. */}
       <PdfEditorPanel />
-      {id && isOwner && (
-        <ShareConversationDialog
-          open={shareOpen}
-          conversationId={id}
-          onClose={() => setShareOpen(false)}
-        />
-      )}
     </>
   );
 }
@@ -675,18 +662,33 @@ interface BranchBannerProps {
 function ProjectBreadcrumb({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const { data: project } = useChatProject(projectId);
+  // Explicit "back to project" affordance rather than a subtle
+  // breadcrumb link. Chats inside a project now carry the project's
+  // shared context (system prompt, files, references, collaborators),
+  // so the round-trip back to the project detail page — where all
+  // sibling chats live — is a core navigation step users expect to
+  // find with no hunting.
   return (
-    <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs text-[var(--text-muted)]">
-      <FolderKanban className="h-3 w-3 text-[var(--accent)]" />
-      <span>
-        Project:{" "}
-        <button
-          type="button"
-          onClick={() => navigate(`/projects/${projectId}`)}
-          className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
-        >
-          {project?.title ?? "Open project"}
-        </button>
+    <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs">
+      <button
+        type="button"
+        onClick={() => navigate(`/projects/${projectId}`)}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition",
+          "border-[var(--border)] text-[var(--text-muted)]",
+          "hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+        )}
+        title="Back to project"
+        aria-label="Back to project"
+      >
+        <ArrowLeft className="h-3 w-3" />
+        Back to project
+      </button>
+      <span className="inline-flex items-center gap-1 text-[var(--text-muted)]">
+        <FolderKanban className="h-3 w-3 text-[var(--accent)]" />
+        <span className="truncate font-medium text-[var(--text)]">
+          {project?.title ?? "Project"}
+        </span>
       </span>
     </div>
   );

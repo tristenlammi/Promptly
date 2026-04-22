@@ -49,11 +49,18 @@ from app.chat.project_schemas import (
     ChatProjectCreate,
     ChatProjectDetail,
     ChatProjectFilePin,
+    ChatProjectParticipant,
     ChatProjectPinFile,
     ChatProjectSummary,
     ChatProjectUpdate,
 )
+from app.chat.project_shares import (
+    get_accessible_project,
+    is_owner_of_project,
+    load_project_participants,
+)
 from app.chat.schemas import ConversationSummary
+from app.chat.shares import list_accessible_project_ids
 from app.database import get_db
 from app.files.models import UserFile
 from app.models_config.models import ModelProvider
@@ -69,17 +76,14 @@ router = APIRouter()
 async def _get_owned_project(
     project_id: uuid.UUID, user: User, db: AsyncSession
 ) -> ChatProject:
-    """Return the project if ``user`` owns it, else 404.
+    """Return the project iff ``user`` owns it, else 404.
 
-    Centralising the check here (rather than inlining in each
-    endpoint) keeps the "is this my project?" logic consistent if we
-    later layer on collaborators or admin impersonation."""
-    proj = await db.get(ChatProject, project_id)
-    if proj is None or proj.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
-        )
-    return proj
+    Now a thin wrapper around :func:`is_owner_of_project` so the
+    owner-vs-collaborator distinction lives in one place. Used by
+    endpoints that should never be exposed to a collaborator
+    (delete, archive / unarchive).
+    """
+    return await is_owner_of_project(project_id, user, db)
 
 
 async def _validate_provider(
@@ -107,16 +111,20 @@ async def _validate_provider(
 
 
 async def _summary_with_rollups(
-    proj: ChatProject, db: AsyncSession
+    proj: ChatProject,
+    db: AsyncSession,
+    caller: User,
 ) -> ChatProjectSummary:
     """Hydrate a :class:`ChatProjectSummary` with the conversation +
     file counts the list/card UI needs.
 
-    Two cheap ``SELECT COUNT(*)`` queries are cheaper than joining
-    and grouping for every list response; the N-projects * 2-counts
-    pattern is fine for the ~dozens of projects a power user will
-    accumulate. If projects ever scale into the hundreds we can
-    swap this for a single aggregated query against both tables."""
+    Also populates ``role`` / ``shared_by`` so collaborator-visible
+    cards can render "shared by Jane" instead of the owner's
+    timestamp line. Two cheap ``SELECT COUNT(*)`` queries are
+    cheaper than joining and grouping for every list response; the
+    N-projects * 2-counts pattern is fine for the dozens of
+    projects a power user will accumulate.
+    """
     conv_count = await db.scalar(
         select(func.count())
         .select_from(Conversation)
@@ -130,6 +138,19 @@ async def _summary_with_rollups(
     base = ChatProjectSummary.model_validate(proj)
     base.conversation_count = int(conv_count or 0)
     base.file_count = int(file_count or 0)
+
+    if proj.user_id == caller.id:
+        base.role = "owner"
+        base.shared_by = None
+    else:
+        base.role = "collaborator"
+        owner = await db.get(User, proj.user_id)
+        if owner is not None:
+            base.shared_by = ChatProjectParticipant(
+                user_id=owner.id,
+                username=owner.username,
+                email=owner.email,
+            )
     return base
 
 
@@ -144,19 +165,30 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ChatProjectSummary]:
-    """List the caller's chat projects.
+    """List projects the caller owns *or* has an accepted share on.
 
-    ``archived=false`` (default) → only active projects (``archived_at IS NULL``).
-    ``archived=true`` → only archived projects.
+    ``archived=false`` (default) → only active projects
+    (``archived_at IS NULL``). Collaborator-visible projects always
+    show in the active list — invitees don't get the archive UX
+    since they can't archive/unarchive.
 
-    We deliberately split into two queries (rather than one with a
-    client-side tab filter) to match the Study-page pattern: the
-    frontend can reuse the same TanStack Query keys and each tab
-    paints independently."""
-    q = select(ChatProject).where(ChatProject.user_id == user.id)
+    Owned and shared projects arrive in the same payload but each
+    row carries a ``role`` discriminator so the card UI can badge
+    shared ones.
+    """
+    accessible_ids = await list_accessible_project_ids(user, db)
+    if not accessible_ids:
+        return []
+    q = select(ChatProject).where(ChatProject.id.in_(accessible_ids))
     if archived:
-        q = q.where(ChatProject.archived_at.is_not(None)).order_by(
-            ChatProject.archived_at.desc()
+        # Archive is owner-facing only — collaborators don't get
+        # surfaced archived projects (the owner may have hidden it
+        # for a reason; surfacing it to shared users would be
+        # surprising).
+        q = (
+            q.where(ChatProject.user_id == user.id)
+            .where(ChatProject.archived_at.is_not(None))
+            .order_by(ChatProject.archived_at.desc())
         )
     else:
         q = q.where(ChatProject.archived_at.is_(None)).order_by(
@@ -164,10 +196,7 @@ async def list_projects(
         )
     res = await db.execute(q)
     rows = list(res.scalars().all())
-    # ``_summary_with_rollups`` does 2 counts per project — fine for
-    # typical dozens. Gather concurrently would be marginal and adds
-    # complexity; revisit if users start hitting hundreds of projects.
-    return [await _summary_with_rollups(p, db) for p in rows]
+    return [await _summary_with_rollups(p, db, user) for p in rows]
 
 
 @router.post(
@@ -190,7 +219,7 @@ async def create_project(
     db.add(proj)
     await db.commit()
     await db.refresh(proj)
-    return await _summary_with_rollups(proj, db)
+    return await _summary_with_rollups(proj, db, user)
 
 
 # ---------------------------------------------------------------------
@@ -204,7 +233,9 @@ async def get_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ChatProjectDetail:
-    proj = await _get_owned_project(project_id, user, db)
+    # Owner *or* accepted collaborator — project sharing grants
+    # full read access to the project detail page and its files.
+    proj, _role = await get_accessible_project(project_id, user, db)
     # Build the detail payload. Pinned files need a join against
     # ``user_files`` to pull the display metadata the frontend shows
     # on the Files tab.
@@ -224,7 +255,8 @@ async def get_project(
         )
         for pin, uf in files_q.all()
     ]
-    summary = await _summary_with_rollups(proj, db)
+    summary = await _summary_with_rollups(proj, db, user)
+    participants = await load_project_participants(proj, db)
     # ``ChatProjectDetail`` extends ``ChatProjectSummary`` — merge the
     # two payloads into one validated object so the HTTP shape stays
     # flat (no nested "summary" object the frontend has to unwrap).
@@ -232,6 +264,17 @@ async def get_project(
         **summary.model_dump(),
         system_prompt=proj.system_prompt,
         files=pins,
+        owner=ChatProjectParticipant(
+            user_id=participants.owner.user_id,
+            username=participants.owner.username,
+            email=participants.owner.email,
+        ),
+        collaborators=[
+            ChatProjectParticipant(
+                user_id=c.user_id, username=c.username, email=c.email
+            )
+            for c in participants.collaborators
+        ],
     )
 
 
@@ -242,7 +285,10 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ChatProjectSummary:
-    proj = await _get_owned_project(project_id, user, db)
+    # Collaborators have full write access to project settings
+    # (system prompt, title, description, default model) — matching
+    # the "complete access" contract for shared projects.
+    proj, _role = await get_accessible_project(project_id, user, db)
     # ``model_fields_set`` tells us which keys were actually sent by
     # the client — lets us differentiate "leave alone" (absent) from
     # "set to null" (explicit clear). Matches the PATCH semantics
@@ -267,7 +313,7 @@ async def update_project(
     proj.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(proj)
-    return await _summary_with_rollups(proj, db)
+    return await _summary_with_rollups(proj, db, user)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -303,7 +349,7 @@ async def archive_project(
         proj.updated_at = proj.archived_at
         await db.commit()
         await db.refresh(proj)
-    return await _summary_with_rollups(proj, db)
+    return await _summary_with_rollups(proj, db, user)
 
 
 @router.post("/{project_id}/unarchive", response_model=ChatProjectSummary)
@@ -318,7 +364,7 @@ async def unarchive_project(
         proj.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(proj)
-    return await _summary_with_rollups(proj, db)
+    return await _summary_with_rollups(proj, db, user)
 
 
 # ---------------------------------------------------------------------
@@ -336,16 +382,19 @@ async def list_project_conversations(
     user: User = Depends(get_current_user),
 ) -> list[ConversationSummary]:
     """Return every conversation under ``project_id`` (most recent
-    first). Collaborator-shared chats aren't included — projects are
-    a private organisational layer for now; sharing lives on the
-    conversation itself."""
-    proj = await _get_owned_project(project_id, user, db)
+    first).
+
+    Project sharing is workspace-level: once the caller has access
+    to the project (owner or accepted collaborator), they see
+    **every** chat in it — the inviter's originals as well as
+    anything other collaborators have added since. Individual
+    conversation shares still work on top of this and remain
+    invisible here; they're surfaced through the main sidebar.
+    """
+    proj, _role = await get_accessible_project(project_id, user, db)
     q = (
         select(Conversation)
-        .where(
-            Conversation.user_id == user.id,
-            Conversation.project_id == proj.id,
-        )
+        .where(Conversation.project_id == proj.id)
         .order_by(Conversation.updated_at.desc())
     )
     res = await db.execute(q)
@@ -375,8 +424,14 @@ async def pin_file(
     File must be owned by the caller (``user_files.user_id`` match).
     Admin-managed shared-pool files (``user_id IS NULL``) are *not*
     pinnable to a personal project today — the UX would be confusing
-    (admins can already surface those via system folders)."""
-    proj = await _get_owned_project(project_id, user, db)
+    (admins can already surface those via system folders).
+
+    Collaborators on a shared project can pin their *own* files;
+    the project owner (and other collaborators) will then see them
+    in the project's file list the same way they see the owner's
+    originals.
+    """
+    proj, _role = await get_accessible_project(project_id, user, db)
 
     uf = await db.get(UserFile, payload.file_id)
     if uf is None or uf.user_id != user.id:
@@ -421,7 +476,7 @@ async def unpin_file(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    proj = await _get_owned_project(project_id, user, db)
+    proj, _role = await get_accessible_project(project_id, user, db)
     await db.execute(
         delete(ChatProjectFile).where(
             ChatProjectFile.project_id == proj.id,
@@ -450,11 +505,12 @@ async def move_conversation_into_project(
 ) -> ConversationSummary:
     """Move an existing chat into the project.
 
-    Only the owner of the conversation may move it — collaborators
-    can't reorganise the owner's workspace. Temporary chats are
+    Caller must own the conversation (no moving someone else's
+    chats into your workspace) and have access to the target
+    project (owner or accepted collaborator). Temporary chats are
     rejected: tying a short-lived chat to a project complicates the
     cleanup sweep for negligible benefit."""
-    proj = await _get_owned_project(project_id, user, db)
+    proj, _role = await get_accessible_project(project_id, user, db)
     conv = await db.get(Conversation, conversation_id)
     if conv is None or conv.user_id != user.id:
         raise HTTPException(
@@ -485,7 +541,7 @@ async def remove_conversation_from_project(
 ) -> ConversationSummary:
     """Detach a chat from its project without deleting the chat
     itself — it resurfaces at the top level of the sidebar."""
-    proj = await _get_owned_project(project_id, user, db)
+    proj, _role = await get_accessible_project(project_id, user, db)
     conv = await db.get(Conversation, conversation_id)
     if conv is None or conv.user_id != user.id:
         raise HTTPException(

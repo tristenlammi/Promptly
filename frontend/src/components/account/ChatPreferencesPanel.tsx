@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Check, Globe, Loader2, Wrench } from "lucide-react";
+import { Check, Cpu, Globe, Loader2, Wrench } from "lucide-react";
 
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/shared/Button";
 import { useAuthStore } from "@/store/authStore";
-import type { WebSearchMode } from "@/api/types";
+import { useAvailableModels } from "@/hooks/useProviders";
+import { useModelStore } from "@/store/modelStore";
+import type { AvailableModel, WebSearchMode } from "@/api/types";
 import { cn } from "@/utils/cn";
 
 /** Self-service panel for the per-account chat defaults.
@@ -29,8 +31,24 @@ export function ChatPreferencesPanel() {
   const [webMode, setWebMode] = useState<WebSearchMode>(
     user?.settings?.default_web_search_mode ?? "auto"
   );
-  const [busy, setBusy] = useState<"tools" | "web" | null>(null);
+  const [busy, setBusy] = useState<"tools" | "web" | "model" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Pull the available-model list so the picker has something to
+  // render. The query is shared with the chat header's selector via
+  // TanStack's cache, so opening the account page mid-session is
+  // free.
+  const { data: availableModels, isLoading: modelsLoading } =
+    useAvailableModels();
+  const setStoreDefault = useModelStore((s) => s.setDefault);
+  const defaultModelId =
+    typeof user?.settings?.default_model_id === "string"
+      ? user.settings.default_model_id
+      : null;
+  const defaultProviderId =
+    typeof user?.settings?.default_provider_id === "string"
+      ? user.settings.default_provider_id
+      : null;
 
   useEffect(() => {
     if (!user?.settings) return;
@@ -81,6 +99,45 @@ export function ChatPreferencesPanel() {
     void persist("default_web_search_mode", next, "web");
   };
 
+  // Default-model persistence. Sent as a *pair* so the server never
+  // ends up with half-set state (e.g. provider id of model A, model
+  // id of model B). Empty strings clear both — the merge layer in
+  // ``auth/router.py`` strips ``""`` keys out of ``user.settings``.
+  // We optimistically push to the model store first so a brand-new
+  // chat opened in another tab picks up the change instantly.
+  const handleDefaultModelChange = async (model: AvailableModel | null) => {
+    setError(null);
+    setBusy("model");
+    const previousProvider = user?.settings?.default_provider_id;
+    const previousModel = user?.settings?.default_model_id;
+    const nextProvider = model?.provider_id ?? "";
+    const nextModel = model?.model_id ?? "";
+    patchSettings({
+      default_provider_id: model?.provider_id,
+      default_model_id: model?.model_id,
+    });
+    setStoreDefault(model?.provider_id ?? null, model?.model_id ?? null);
+    try {
+      const fresh = await authApi.updatePreferences({
+        default_provider_id: nextProvider,
+        default_model_id: nextModel,
+      });
+      setUser(fresh);
+    } catch (err) {
+      patchSettings({
+        default_provider_id: previousProvider as string | undefined,
+        default_model_id: previousModel as string | undefined,
+      });
+      setStoreDefault(
+        typeof previousProvider === "string" ? previousProvider : null,
+        typeof previousModel === "string" ? previousModel : null
+      );
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <section className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
       <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
@@ -99,6 +156,15 @@ export function ChatPreferencesPanel() {
       </header>
 
       <div className="space-y-5 px-4 py-4">
+        <DefaultModelRow
+          available={availableModels ?? []}
+          loading={modelsLoading}
+          selectedProviderId={defaultProviderId}
+          selectedModelId={defaultModelId}
+          onChange={handleDefaultModelChange}
+          disabled={busy === "model"}
+        />
+        <div className="border-t border-[var(--border)]" />
         <ToggleRow
           icon={<Wrench className="h-4 w-4 text-[var(--accent)]" />}
           title="Tools"
@@ -274,6 +340,99 @@ function WebSearchModeRow({
                 </button>
               );
             })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DefaultModelRow({
+  available,
+  loading,
+  selectedProviderId,
+  selectedModelId,
+  onChange,
+  disabled,
+}: {
+  available: AvailableModel[];
+  loading: boolean;
+  selectedProviderId: string | null;
+  selectedModelId: string | null;
+  onChange: (model: AvailableModel | null) => void;
+  disabled?: boolean;
+}) {
+  // Resolve the configured default against the live list. ``null``
+  // when the user hasn't picked one yet OR when their pick is no
+  // longer installed (e.g. the admin removed the provider). The copy
+  // below makes that distinction visible so the user knows whether
+  // to set or re-pick.
+  const currentValue =
+    selectedProviderId && selectedModelId
+      ? `${selectedProviderId}::${selectedModelId}`
+      : "";
+  const currentResolves =
+    !!available.find(
+      (m) =>
+        m.provider_id === selectedProviderId && m.model_id === selectedModelId
+    ) || !currentValue;
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10">
+          <Cpu className="h-4 w-4 text-[var(--accent)]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">Default model</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Every new chat starts on this model. Switching the model
+            inside a conversation only affects that conversation —
+            new chats always come back here.
+          </p>
+          <div className="mt-3">
+            <select
+              value={currentValue}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) {
+                  onChange(null);
+                  return;
+                }
+                const [provider_id, model_id] = v.split("::");
+                const found = available.find(
+                  (m) =>
+                    m.provider_id === provider_id && m.model_id === model_id
+                );
+                if (found) onChange(found);
+              }}
+              disabled={disabled || loading}
+              className={cn(
+                "w-full max-w-md rounded-input border bg-[var(--bg)] px-3 py-2 text-sm",
+                "border-[var(--border)] text-[var(--text)]",
+                "focus:border-[var(--accent)] focus:outline-none",
+                "disabled:cursor-not-allowed disabled:opacity-60"
+              )}
+            >
+              <option value="">
+                {loading ? "Loading models…" : "No default — use first available"}
+              </option>
+              {available.map((m) => (
+                <option
+                  key={`${m.provider_id}::${m.model_id}`}
+                  value={`${m.provider_id}::${m.model_id}`}
+                >
+                  {m.display_name} · {m.provider_name}
+                </option>
+              ))}
+            </select>
+            {!currentResolves && (
+              <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                Your saved default is no longer available. New chats will
+                fall back to the first model in the list until you pick a
+                new default.
+              </p>
+            )}
           </div>
         </div>
       </div>

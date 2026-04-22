@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   BookOpen,
@@ -12,7 +12,6 @@ import {
   PanelLeftOpen,
   Settings,
   ShieldCheck,
-  Split,
   Star,
   Trash2,
 } from "lucide-react";
@@ -26,6 +25,7 @@ import {
   useShareInvites,
   useUpdateConversation,
 } from "@/hooks/useConversations";
+import { useProjectInvites } from "@/hooks/useChatProjects";
 import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
@@ -35,9 +35,11 @@ import type { ConversationSummary } from "@/api/types";
 import { Inbox, Users } from "lucide-react";
 
 import { ConversationSearchBox } from "./ConversationSearchBox";
+import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
 import { DeleteChatModal } from "./DeleteChatModal";
 import { InstallAppButton } from "./InstallAppButton";
 import { NewChatButton } from "./NewChatButton";
+import { ShareConversationDialog } from "@/components/chat/ShareConversationDialog";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -55,15 +57,31 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [searchActive, setSearchActive] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
   const { data: invites } = useShareInvites();
-  const inviteCount = invites?.length ?? 0;
+  const { data: projectInvites } = useProjectInvites();
+  // Pill shows the combined total so the user notices new workspace
+  // invites without having to open the sidebar or remember where
+  // project invites live.
+  const inviteCount =
+    (invites?.length ?? 0) + (projectInvites?.length ?? 0);
 
-  const pinned = useMemo(
-    () => conversations.filter((c) => c.pinned),
+  // Project-scoped chats live exclusively inside their project's
+  // detail page now — surfacing them again in the global sidebar
+  // creates duplicate entries (one here, one under "Conversations"
+  // in the project) and clutters the date buckets with chats that
+  // belong to a shared workspace, not the user's personal stream.
+  // Filter them out at the source so pinned/unpinned/search all
+  // honour the same rule.
+  const personalConversations = useMemo(
+    () => conversations.filter((c) => !c.project_id),
     [conversations]
   );
+  const pinned = useMemo(
+    () => personalConversations.filter((c) => c.pinned),
+    [personalConversations]
+  );
   const unpinned = useMemo(
-    () => conversations.filter((c) => !c.pinned),
-    [conversations]
+    () => personalConversations.filter((c) => !c.pinned),
+    [personalConversations]
   );
   const groups = useMemo(() => groupByBucket(unpinned), [unpinned]);
 
@@ -88,17 +106,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
         <nav className="flex flex-col items-center gap-1">
           <SideIcon to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" />
-          {/* Compare is desktop-only — the 2–4 column layout is
-              unusable below the md breakpoint. Match the Study rule
-              so both "big layout" features share the same visibility
-              story on phones. */}
-          {!isMobile && (
-            <SideIcon
-              to="/chat/compare/archive"
-              icon={<Split className="h-4 w-4" />}
-              label="Compare"
-            />
-          )}
           <SideIcon to="/projects" icon={<FolderKanban className="h-4 w-4" />} label="Projects" />
           {!isMobile && (
             <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
@@ -149,13 +156,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           surfaces (Chat / Study / Files) reduces visual clutter. */}
       <nav className="mt-4 flex flex-col gap-0.5 px-2">
         <NavItem to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" end />
-        {!isMobile && (
-          <NavItem
-            to="/chat/compare/archive"
-            icon={<Split className="h-4 w-4" />}
-            label="Compare"
-          />
-        )}
         <NavItem to="/projects" icon={<FolderKanban className="h-4 w-4" />} label="Projects" />
         {!isMobile && (
           <NavItem to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
@@ -220,9 +220,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           );
         })}
 
-        {conversations.length === 0 && (
+        {personalConversations.length === 0 && (
           <div className="mt-6 px-2 text-xs text-[var(--text-muted)]">
-            No conversations yet. Start a new chat to get going.
+            No personal chats yet. Start a new chat or open a project.
           </div>
         )}
       </div>
@@ -362,6 +362,46 @@ function ConversationRow({
   const isActive = activeId === conv.id;
   const title = conv.title?.trim() || "New chat";
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  // Position is in *viewport* coordinates because the menu is rendered
+  // through a portal with ``position: fixed``.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(
+    null
+  );
+
+  // Sharing mirrors the chat page's old top-nav rule: owner-only and
+  // suppressed for one-hour temporary chats (which can't really be
+  // collaborated on without subverting the auto-delete contract).
+  const canShare =
+    conv.role !== "collaborator" && conv.temporary_mode !== "one_hour";
+
+  // Long-press → context menu on touch devices. We can't rely on the
+  // browser's native ``contextmenu`` event firing consistently after
+  // a long press on iOS Safari / mobile Chrome, so we instrument it
+  // ourselves with a 500 ms threshold and cancel on any pointer
+  // movement to avoid hijacking taps and scrolls.
+  const longPressTimer = useRef<number | null>(null);
+  const longPressFired = useRef(false);
+  const cancelLongPress = () => {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+  const onTouchStart = (e: React.TouchEvent) => {
+    longPressFired.current = false;
+    const t = e.touches[0];
+    if (!t) return;
+    const x = t.clientX;
+    const y = t.clientY;
+    cancelLongPress();
+    longPressTimer.current = window.setTimeout(() => {
+      longPressFired.current = true;
+      setMenuPos({ x, y });
+    }, 500);
+  };
+  const onTouchEndOrCancel = () => cancelLongPress();
+  const onTouchMove = () => cancelLongPress();
 
   const handleDelete = () =>
     new Promise<void>((resolve, reject) => {
@@ -386,10 +426,27 @@ function ConversationRow({
             ? "bg-black/[0.05] text-[var(--text)] dark:bg-white/[0.06]"
             : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
         )}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuPos({ x: e.clientX, y: e.clientY });
+        }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEndOrCancel}
+        onTouchCancel={onTouchEndOrCancel}
+        onTouchMove={onTouchMove}
       >
         <button
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          onClick={() => navigate(`/chat/${conv.id}`)}
+          onClick={() => {
+            // Long-press synthesises a click on touch end — swallow
+            // it so opening the menu doesn't also yank the user
+            // into the chat.
+            if (longPressFired.current) {
+              longPressFired.current = false;
+              return;
+            }
+            navigate(`/chat/${conv.id}`);
+          }}
         >
           {conv.starred && <Star className="h-3 w-3 shrink-0 fill-current text-yellow-500" />}
           {conv.temporary_mode === "one_hour" && (
@@ -448,6 +505,24 @@ function ConversationRow({
         onConfirm={handleDelete}
         onClose={() => setConfirmOpen(false)}
       />
+
+      {menuPos && (
+        <ConversationRowContextMenu
+          conversationId={conv.id}
+          position={menuPos}
+          canShare={canShare}
+          onShare={() => setShareOpen(true)}
+          onClose={() => setMenuPos(null)}
+        />
+      )}
+
+      {canShare && shareOpen && (
+        <ShareConversationDialog
+          open={shareOpen}
+          conversationId={conv.id}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
     </>
   );
 }

@@ -30,6 +30,10 @@ import {
   AttachmentPickerModal,
   type AttachedFile,
 } from "./AttachmentPickerModal";
+import {
+  MentionAutocomplete,
+  type MentionPickState,
+} from "./MentionAutocomplete";
 import { ToolsToggle } from "./ToolsToggle";
 import { WebSearchToggle } from "./WebSearchToggle";
 
@@ -60,6 +64,12 @@ interface InputBarProps {
    * on a long chat history.
    */
   autoFocus?: boolean;
+  /** Phase C — enable ``@`` references. Required for the picker to
+   *  filter out the current chat and prioritise project siblings.
+   *  Pass ``null`` for a not-yet-persisted chat; mentions still work
+   *  but the "exclude self" step is a no-op. */
+  currentConversationId?: string | null;
+  projectId?: string | null;
 }
 
 /** Pending in-flight upload tracked alongside finished attachments. */
@@ -85,13 +95,57 @@ export function InputBar({
   footer,
   allowAttachments = true,
   autoFocus = false,
+  currentConversationId = null,
+  projectId = null,
 }: InputBarProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  // Caret position inside ``value``. Refreshed on every key / click
+  // so the mention popover can detect when the user is mid-``@``.
+  const [caret, setCaret] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Registered by ``MentionAutocomplete`` so we can forward key
+  // events to the popover before applying our own (Enter = send)
+  // logic. Stored in a ref so re-registers don't cause re-renders.
+  const mentionKeyHandler = useRef<
+    ((e: { key: string }) => boolean) | null
+  >(null);
+  const registerMentionKeys = useCallback(
+    (handler: (e: { key: string }) => boolean) => {
+      mentionKeyHandler.current = handler;
+    },
+    []
+  );
+
+  // Replace the in-progress ``@query`` with a resolved token and
+  // advance the caret to sit right after the inserted token. Wrapped
+  // in ``setTimeout(0)`` to reassign the textarea's selectionStart
+  // only after React has applied the new value — otherwise we'd be
+  // writing to a stale DOM node.
+  const handleMentionInsert = useCallback(
+    (token: string, pick: MentionPickState) => {
+      const before = value.slice(0, pick.startIndex);
+      const after = value.slice(pick.endIndex);
+      const next = `${before}${token} ${after}`;
+      setValue(next);
+      const newCaret = pick.startIndex + token.length + 1;
+      setCaret(newCaret);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        try {
+          el.setSelectionRange(newCaret, newCaret);
+        } catch {
+          // older browsers
+        }
+      });
+    },
+    [value]
+  );
   const invalidateFiles = useInvalidateFiles();
   const isMobile = useIsMobile();
   const selectedModel = useModelStore((s) =>
@@ -338,6 +392,16 @@ export function InputBar({
   };
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Give the @-mention popover first crack at navigation keys.
+    // If it consumes (Up/Down/Enter/Tab while open, Esc), we stop
+    // here and don't fall through to Enter-to-send.
+    if (mentionKeyHandler.current) {
+      const consumed = mentionKeyHandler.current({ key: e.key });
+      if (consumed) {
+        e.preventDefault();
+        return;
+      }
+    }
     // On mobile, Enter should insert a newline so users have a
     // dedicated tap target (the send button) for submission. The
     // on-screen keyboard's Enter key on phones is almost universally
@@ -349,6 +413,17 @@ export function InputBar({
       submit();
     }
   };
+
+  // Keep the caret ref in sync with whatever the textarea's browser-
+  // managed selection is at any given moment. ``onSelect`` covers
+  // the mouse/keyboard/IME paths; combined with the setValue path
+  // below we always know where the caret is when we render the
+  // autocomplete.
+  const syncCaret = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    setCaret(el.selectionStart ?? 0);
+  }, []);
 
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -368,6 +443,16 @@ export function InputBar({
   return (
     <div className="relative border-t border-[var(--border)] bg-[var(--bg)] px-4 py-4 pb-safe-toolbar pl-safe pr-safe">
       {dropAllowed && isDragging && <DropOverlay />}
+
+      <MentionAutocomplete
+        textareaRef={textareaRef}
+        value={value}
+        caret={caret}
+        onInsert={handleMentionInsert}
+        currentConversationId={currentConversationId}
+        projectId={projectId}
+        onKeyRegister={registerMentionKeys}
+      />
 
       <div className="mx-auto w-full max-w-3xl">
         <div
@@ -415,8 +500,16 @@ export function InputBar({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value);
+              // Caret moves implicitly after typing; read it from
+              // the DOM after React flushes the new value.
+              requestAnimationFrame(syncCaret);
+            }}
             onKeyDown={handleKey}
+            onKeyUp={syncCaret}
+            onSelect={syncCaret}
+            onClick={syncCaret}
             onPaste={handlePaste}
             placeholder={placeholder}
             rows={1}

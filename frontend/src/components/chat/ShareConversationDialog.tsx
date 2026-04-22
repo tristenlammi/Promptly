@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2, Trash2, UserPlus } from "lucide-react";
 
 import { Modal } from "@/components/shared/Modal";
+import { UserPicker, type UserPickerValue } from "@/components/shared/UserPicker";
 import {
   useConversationShares,
   useCreateShare,
@@ -18,7 +19,12 @@ interface Props {
 /** Owner-only modal for inviting friends to a conversation and
  *  managing existing shares. The triggering surface (chat header
  *  share button) only renders for owners, but the backend also
- *  enforces it so a curious user can't sneak in via devtools. */
+ *  enforces it so a curious user can't sneak in via devtools.
+ *
+ *  The username / email input was replaced with a :class:`UserPicker`
+ *  (typeahead against ``/auth/users/directory``) so inviting a
+ *  teammate is a single click instead of remembering their exact
+ *  handle. Free-typed emails still fall back to the legacy path. */
 export function ShareConversationDialog({
   open,
   conversationId,
@@ -30,23 +36,29 @@ export function ShareConversationDialog({
   const create = useCreateShare(conversationId);
   const remove = useDeleteShare(conversationId);
 
-  const [identifier, setIdentifier] = useState("");
+  const [picked, setPicked] = useState<UserPickerValue>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Filter the directory dropdown so already-invited users don't
+  // appear as pickable rows — re-inviting a pending user is just
+  // noise.
+  const excludeUserIds = useMemo(
+    () => (data ?? []).map((row) => row.invitee.user_id),
+    [data]
+  );
+
+  const send = async () => {
     setErrorMsg(null);
-    const trimmed = identifier.trim();
-    if (!trimmed) return;
-    // Heuristic: if it looks like an email, send as email; otherwise
-    // treat as a username. The backend accepts either, so this is
-    // purely about giving people the right autocomplete on mobile.
-    const payload = trimmed.includes("@")
-      ? { email: trimmed }
-      : { username: trimmed };
+    if (!picked) return;
+    const payload =
+      picked.kind === "user"
+        ? { username: picked.user.username }
+        : picked.email.includes("@")
+          ? { email: picked.email }
+          : { username: picked.email };
     try {
       await create.mutateAsync(payload);
-      setIdentifier("");
+      setPicked(null);
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -55,29 +67,34 @@ export function ShareConversationDialog({
     }
   };
 
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void send();
+  };
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Share this conversation"
-      description="Invite a friend by username or email. They'll see it in their invites and the chat will show up in their sidebar once they accept. Whoever sends each message pays for it."
+      description="Pick a teammate from the list or paste their email. They'll see this chat in their invites inbox and in their sidebar once they accept. Whoever sends each message pays for it."
       widthClass="max-w-xl"
     >
-      <form onSubmit={submit} className="flex items-center gap-2">
-        <input
-          value={identifier}
-          onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="Username or email"
-          className={cn(
-            "min-w-0 flex-1 rounded-input border px-3 py-2 text-sm",
-            "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-            "focus:border-[var(--accent)]/60 focus:outline-none"
-          )}
-          autoFocus
-        />
+      <form onSubmit={submit} className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <UserPicker
+            value={picked}
+            onChange={setPicked}
+            excludeUserIds={excludeUserIds}
+            placeholder="Search by username or email…"
+            onSubmit={() => void send()}
+            autoFocus
+            disabled={create.isPending}
+          />
+        </div>
         <button
           type="submit"
-          disabled={!identifier.trim() || create.isPending}
+          disabled={!picked || create.isPending}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-input px-3 py-2 text-sm font-medium",
             "bg-[var(--accent)] text-white transition hover:opacity-90",

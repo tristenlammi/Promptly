@@ -14,7 +14,14 @@ from app.chat.models import (  # noqa: F401
     ChatProjectFile,
     CompareGroup,
     Conversation,
+    ConversationShare,
     Message,
+    ProjectShare,
+)
+from app.custom_models.models import (  # noqa: F401
+    CustomModel,
+    CustomModelFile,
+    KnowledgeChunk,
 )
 from app.files.models import FileFolder, UserFile  # noqa: F401
 from app.mfa.models import (  # noqa: F401

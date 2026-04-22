@@ -82,6 +82,24 @@ class UserResponse(BaseModel):
     last_login_at: datetime | None = None
 
 
+class DirectoryUser(BaseModel):
+    """Minimal user row surfaced by the ``@``-picker in share dialogs.
+
+    Deliberately shaped like :class:`app.chat.shares.ShareUserBrief`
+    (``user_id`` / ``username`` / ``email``) so the existing share
+    creation flow can send the same payload back. Sensitive fields
+    (role, settings, login telemetry) are omitted — the directory is
+    available to every authenticated user, not just admins, so we
+    only expose what's needed to pick someone to share with.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: uuid.UUID
+    username: str
+    email: EmailStr
+
+
 class UserPreferencesUpdate(BaseModel):
     """Body for ``PATCH /api/auth/me/preferences``.
 
@@ -114,6 +132,15 @@ class UserPreferencesUpdate(BaseModel):
       context block. Validated against the host's ``zoneinfo`` DB at
       patch time so an invalid value doesn't silently reach the
       prompt builder. Pass an empty string to clear.
+    * ``default_model_id`` / ``default_provider_id`` — preferred model
+      every NEW chat starts with. Stored as strings (provider id is a
+      UUID, kept stringly to round-trip cleanly through JSONB and the
+      ``""``-means-clear convention shared by the other prefs). The
+      pair is treated atomically by the frontend — choosing a default
+      always sends both. Existing chats are unaffected; the picker on
+      a loaded conversation reflects ``conversation.model_id`` /
+      ``provider_id`` instead, so swapping models mid-chat doesn't
+      leak into the next new chat.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -125,6 +152,8 @@ class UserPreferencesUpdate(BaseModel):
     # validators normalise both inputs.
     location: str | None = Field(default=None, max_length=120)
     timezone: str | None = Field(default=None, max_length=64)
+    default_model_id: str | None = Field(default=None, max_length=128)
+    default_provider_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("location")
     @classmethod

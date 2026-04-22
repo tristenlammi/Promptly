@@ -268,6 +268,58 @@ class CompactionResponse(BaseModel):
     summary_message_id: uuid.UUID
 
 
+class MentionCandidate(BaseModel):
+    """One row in the ``@``-mention autocomplete popover.
+
+    Kept deliberately small — the autocomplete queries on every
+    keystroke, so the wire payload is just the bits the UI needs
+    to render a two-line row (title + faint project hint) and
+    build the ``@[title](id)`` token on selection.
+    """
+
+    id: uuid.UUID
+    title: str
+    project_id: uuid.UUID | None = None
+    project_title: str | None = None
+    updated_at: datetime
+
+
+class MentionCandidatesResponse(BaseModel):
+    """Response wrapper for ``GET /conversations/mention-candidates``.
+
+    Split into two lists so the UI can render the project's
+    sibling chats as a highlighted "In this project" group above
+    the generic recents. ``project_context_id`` echoes the query
+    param back so the frontend can verify it's scoping against
+    the right project.
+    """
+
+    project_context_id: uuid.UUID | None = None
+    project_candidates: list[MentionCandidate]
+    recent_candidates: list[MentionCandidate]
+
+
+class SummariseToProjectResponse(BaseModel):
+    """Result of ``POST /conversations/{id}/summarise-to-project``.
+
+    The endpoint writes the generated Markdown summary to a new
+    :class:`app.files.models.UserFile` in the caller's Generated
+    folder and auto-pins it to the conversation's parent project
+    so every other chat in that project picks it up on the next
+    turn (via the existing project-file injection path).
+
+    We return enough context for the UI to show a success toast
+    that links to the project ("Summary saved to *Project X*") or
+    to open the file directly, without needing an extra round-trip.
+    """
+
+    file_id: uuid.UUID
+    filename: str
+    project_id: uuid.UUID
+    project_title: str
+    chars: int
+
+
 class EditMessageRequest(BaseModel):
     """Edit-and-resend payload.
 

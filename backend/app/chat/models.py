@@ -114,6 +114,17 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Phase C summary cache (migration 0030). Populated lazily by
+    # :func:`app.chat.summariser.get_or_generate_summary` the first
+    # time another chat references this one via ``@[title](id)``.
+    # Treated as stale when the latest message's ``created_at`` is
+    # newer than ``summary_generated_at``; the resolver regenerates
+    # in-place at that point.
+    summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation id={self.id} title={self.title!r}>"
 
@@ -313,5 +324,54 @@ class ConversationShare(UUIDPKMixin, TimestampMixin, Base):
     def __repr__(self) -> str:
         return (
             f"<ConversationShare id={self.id} conv={self.conversation_id} "
+            f"invitee={self.invitee_user_id} status={self.status!r}>"
+        )
+
+
+class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
+    """Invite / membership row for shared chat projects (migration 0031).
+
+    Mirrors ``ConversationShare``'s shape one-for-one — same
+    ``pending → accepted`` / ``pending → declined`` lifecycle, same
+    unique constraint idea, same "delete the row to revoke" policy.
+
+    Semantically this is a *much bigger grant* than a single-chat
+    share, though: accepting a project invite gives the invitee
+    **complete access** to every conversation under that project
+    (past + future), the project's pinned files, and the system-
+    prompt settings. The resolver in ``app/chat/shares.py`` walks
+    this table as a second path alongside conversation-level
+    shares when answering "can this user read this conversation?".
+    """
+
+    __tablename__ = "project_shares"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("chat_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    inviter_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    invitee_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "invitee_user_id",
+            name="uq_project_shares_project_invitee",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ProjectShare id={self.id} project={self.project_id} "
             f"invitee={self.invitee_user_id} status={self.status!r}>"
         )

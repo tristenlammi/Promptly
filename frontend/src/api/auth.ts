@@ -11,6 +11,16 @@ export interface SetupStatus {
   requires_setup: boolean;
 }
 
+/** Minimal user payload returned by ``GET /auth/users/directory``.
+ *  Mirrors ``ShareUserBrief`` on the backend so share-create payloads
+ *  can send ``username`` straight through after the picker resolves
+ *  a selection. */
+export interface DirectoryUser {
+  user_id: string;
+  username: string;
+  email: string;
+}
+
 export const authApi = {
   async me(): Promise<User> {
     const { data } = await apiClient.get<User>("/auth/me");
@@ -57,6 +67,24 @@ export const authApi = {
     const { data } = await apiClient.patch<User>(
       "/auth/me/preferences",
       payload
+    );
+    return data;
+  },
+  /** Search the user directory for ``q`` (matches username or email,
+   *  case-insensitive). Used by the share pickers (conversation +
+   *  project). Returns at most ``limit`` rows, excluding the caller
+   *  so self-invites never appear as a dropdown option. */
+  async directoryUsers(
+    params: { q?: string; limit?: number } = {}
+  ): Promise<DirectoryUser[]> {
+    const { data } = await apiClient.get<DirectoryUser[]>(
+      "/auth/users/directory",
+      {
+        params: {
+          q: params.q ?? "",
+          limit: params.limit ?? 12,
+        },
+      }
     );
     return data;
   },

@@ -125,3 +125,18 @@ class AvailableModel(BaseModel):
     context_window: int | None = None
     supports_vision: bool = False
     supports_image_output: bool = False
+    # ----- Custom Models discriminator (Phase RAG-1) -----
+    # ``True`` for synthetic rows that wrap a CustomModel row. The
+    # frontend ModelSelector groups these under a "Custom Models"
+    # section and renders the base model's display name as a subtitle
+    # so the user knows what's actually answering. ``model_id`` for
+    # custom rows is the synthetic ``custom:<uuid>`` that the chat
+    # router resolves at send time.
+    is_custom: bool = False
+    # The id of the underlying ``custom_models`` row — handy for the
+    # frontend when it needs to deep-link into the admin edit drawer.
+    # ``None`` for non-custom rows.
+    custom_model_id: uuid.UUID | None = None
+    # Display name of the underlying base model so the picker can
+    # render a subtitle without doing a second lookup.
+    base_display_name: str | None = None

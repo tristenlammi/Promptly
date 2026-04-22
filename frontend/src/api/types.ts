@@ -36,6 +36,13 @@ export interface UserSettings {
    *  "current local time" line of the same ambient context block.
    *  Validated against the server's ``zoneinfo`` DB on PATCH. */
   timezone?: string;
+  /** User-level "every new chat starts here" preference. Stored as
+   *  the ``model_id`` string from ``AvailableModel`` (NOT a UUID).
+   *  Always paired with ``default_provider_id`` so the resolver can
+   *  disambiguate models that share an id across providers. */
+  default_model_id?: string;
+  /** Provider UUID matching ``default_model_id``. */
+  default_provider_id?: string;
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -48,6 +55,12 @@ export interface UserPreferencesUpdate {
   location?: string;
   /** Pass an empty string to clear the stored value. */
   timezone?: string;
+  /** Pass an empty string to clear the stored default. Always paired
+   *  with ``default_provider_id`` — the frontend treats them as one
+   *  atomic field. */
+  default_model_id?: string;
+  /** Pass an empty string to clear. See ``default_model_id``. */
+  default_provider_id?: string;
 }
 
 export interface User {
@@ -354,6 +367,17 @@ export interface AvailableModel {
   display_name: string;
   context_window?: number | null;
   supports_vision?: boolean;
+  /** True when this entry represents a Custom Model (admin-curated
+   *  assistant with a personality + knowledge library). Custom-model
+   *  rows carry a synthetic ``model_id`` of the form ``custom:<uuid>``;
+   *  the backend resolves it back to the underlying base model at
+   *  chat time. */
+  is_custom?: boolean;
+  /** Only set when ``is_custom`` is true. Raw ``CustomModel.id`` uuid. */
+  custom_model_id?: string | null;
+  /** Only set when ``is_custom`` is true. Used as the subtitle in the
+   *  model picker so users can see "GPT-4o" under the custom name. */
+  base_display_name?: string | null;
 }
 
 export interface TestConnectionResult {

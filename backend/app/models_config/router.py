@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
+from app.custom_models.embedding import is_embedding_model_id
 from app.database import get_db
 from app.models_config.models import ModelProvider
 from app.models_config.provider import (
@@ -241,6 +242,15 @@ async def list_available_models_for(
     function and the route handler share the same access-control logic
     so the tool path can never expose a model the user couldn't pick
     from the dropdown.
+
+    Custom Models (admin-curated wrappers that add personality + a
+    RAG knowledge base on top of a base model) are appended as first-
+    class ``AvailableModel`` rows with ``is_custom=True`` and a
+    synthetic ``custom:<uuid>`` ``model_id``. The picker, default-
+    model preference, and per-conversation storage all keep working
+    against the existing ``(provider_id, model_id)`` contract — only
+    the chat dispatcher has to know to resolve the synthetic id
+    back to its underlying base model before streaming.
     """
     if user.role == "admin":
         provider_filter = (
@@ -277,6 +287,17 @@ async def list_available_models_for(
         )
         for m in provider.models or []:
             model_id = m["id"]
+            # Embedding-only models live in the same provider catalog
+            # (they're registered so the Custom Models RAG pipeline can
+            # resolve them) but they can't run chat completions. Hide
+            # them from the picker — both when explicitly tagged and
+            # when the id matches a known embedding name pattern, so
+            # auto-discovered Ollama models (``nomic-embed-text``,
+            # ``bge-m3``, etc.) don't leak through either.
+            if m.get("kind") == "embedding":
+                continue
+            if is_embedding_model_id(model_id):
+                continue
             if provider_allow is not None and model_id not in provider_allow:
                 continue
             if user_allow is not None and model_id not in user_allow:
@@ -295,6 +316,85 @@ async def list_available_models_for(
                     ),
                 )
             )
+
+    # ------------------------------------------------------------------
+    # Append Custom Models as synthetic entries.
+    #
+    # Lookup strategy:
+    #   * Build a ``provider_id → ModelProvider`` map from the list we
+    #     already fetched above so we can attach the real ``provider_name``
+    #     / ``provider_type`` to each custom row without a second DB
+    #     round trip for the common case.
+    #   * A CustomModel whose base provider isn't in the user's allowed
+    #     set is silently filtered out — the admin might have attached
+    #     a power-user provider that regular users aren't meant to use.
+    # ------------------------------------------------------------------
+    from app.custom_models.models import CustomModel  # local import: avoids cycle
+
+    # The provider loop above already iterated ``result`` — re-run the
+    # same query to build a ``provider_id → ModelProvider`` map for
+    # the custom-row annotation loop. Cheaper than restructuring the
+    # function to keep both shapes in a single pass, and keeps this
+    # block a pure add-on that can be removed cleanly.
+    refetch = await db.execute(
+        select(ModelProvider)
+        .where(provider_filter & (ModelProvider.enabled.is_(True)))
+    )
+    allowed_provider_map = {p.id: p for p in refetch.scalars().all()}
+
+    custom_rows = (
+        await db.execute(
+            select(CustomModel).order_by(CustomModel.display_name)
+        )
+    ).scalars().all()
+
+    for cm in custom_rows:
+        base_provider = allowed_provider_map.get(cm.base_provider_id)
+        if base_provider is None:
+            # Admin curated a custom model whose base provider isn't
+            # visible to this user — skip rather than surface an
+            # "Unknown provider" entry in the dropdown.
+            continue
+        # Respect the admin's enabled_models whitelist on the base
+        # provider too — if the underlying model isn't picker-visible,
+        # neither is the custom wrapper.
+        provider_allow = (
+            set(base_provider.enabled_models)
+            if base_provider.enabled_models is not None
+            else None
+        )
+        if provider_allow is not None and cm.base_model_id not in provider_allow:
+            continue
+        if user_allow is not None and cm.base_model_id not in user_allow:
+            continue
+
+        # Capture the base display name so the frontend ModelSelector
+        # can render "custom chip + subtitle" without a second fetch.
+        base_entry = next(
+            (m for m in (base_provider.models or []) if m.get("id") == cm.base_model_id),
+            None,
+        )
+        base_label = (
+            (base_entry or {}).get("display_name") or cm.base_model_id
+        )
+        flat.append(
+            AvailableModel(
+                provider_id=base_provider.id,
+                provider_name=base_provider.name,
+                provider_type=base_provider.type,  # type: ignore[arg-type]
+                model_id=f"custom:{cm.id}",
+                display_name=cm.display_name,
+                context_window=(base_entry or {}).get("context_window"),
+                supports_vision=bool((base_entry or {}).get("supports_vision", False)),
+                supports_image_output=bool(
+                    (base_entry or {}).get("supports_image_output", False)
+                ),
+                is_custom=True,
+                custom_model_id=cm.id,
+                base_display_name=base_label,
+            )
+        )
+
     return flat
 
 

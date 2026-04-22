@@ -4,20 +4,26 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   FileText,
+  Lightbulb,
   Loader2,
   MessageSquare,
   Plus,
   Save,
   Settings2,
+  Share2,
   Trash2,
   Upload,
+  Users,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
+import { ShareProjectDialog } from "@/components/chat/ShareProjectDialog";
 import { TopNav } from "@/components/layout/TopNav";
 import { chatApi } from "@/api/chat";
 import {
@@ -32,6 +38,7 @@ import {
 } from "@/hooks/useChatProjects";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
+import { estimateTokens, formatTokens } from "@/utils/tokenEstimate";
 
 // Small pretty-printer; matches the format used elsewhere (e.g. the
 // attachment picker) for visual consistency. Intentionally local —
@@ -56,6 +63,7 @@ export function ProjectDetailPage() {
   const [tab, setTab] = useState<Tab>("conversations");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const archive = useArchiveChatProject();
   const unarchive = useUnarchiveChatProject();
@@ -64,6 +72,8 @@ export function ProjectDetailPage() {
   if (!id) return null;
 
   const isArchived = Boolean(project?.archived_at);
+  const isOwner = (project?.role ?? "owner") === "owner";
+  const collaboratorCount = project?.collaborators?.length ?? 0;
 
   return (
     <>
@@ -72,7 +82,9 @@ export function ProjectDetailPage() {
         subtitle={
           project?.description
             ? project.description
-            : "Shared instructions, files, and conversations"
+            : project?.role === "collaborator" && project?.shared_by
+              ? `Shared by ${project.shared_by.username}`
+              : "Shared instructions, files, and conversations"
         }
         actions={
           <div className="flex items-center gap-2">
@@ -83,6 +95,18 @@ export function ProjectDetailPage() {
             >
               Back
             </Button>
+            {!isArchived && isOwner && (
+              <Button
+                variant="ghost"
+                leftIcon={<Share2 className="h-4 w-4" />}
+                onClick={() => setShareOpen(true)}
+                title="Share this project with a teammate"
+              >
+                {collaboratorCount > 0
+                  ? `Share (${collaboratorCount})`
+                  : "Share"}
+              </Button>
+            )}
             {!isArchived && (
               <>
                 <Button
@@ -121,13 +145,43 @@ export function ProjectDetailPage() {
                     This project is archived. Unarchive to start new chats
                     under it.
                   </span>
-                  <Button
-                    variant="ghost"
-                    leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
-                    onClick={() => unarchive.mutate(project.id)}
-                  >
-                    Unarchive
-                  </Button>
+                  {isOwner && (
+                    <Button
+                      variant="ghost"
+                      leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
+                      onClick={() => unarchive.mutate(project.id)}
+                    >
+                      Unarchive
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {isOwner && collaboratorCount > 0 && (
+                <div className="mb-4 flex items-center gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--text-muted)]">
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Shared with{" "}
+                    <span className="font-medium text-[var(--text)]">
+                      {(project.collaborators ?? [])
+                        .map((c) => c.username)
+                        .join(", ")}
+                    </span>
+                    . They can see and edit every chat in this project.
+                  </span>
+                </div>
+              )}
+
+              {!isOwner && project.shared_by && (
+                <div className="mb-4 flex items-center gap-2 rounded-card border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3 text-xs text-[var(--text)]">
+                  <Users className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                  <span>
+                    You have collaborator access to this project, shared by{" "}
+                    <span className="font-medium">
+                      {project.shared_by.username}
+                    </span>
+                    . You can see and edit every chat in it.
+                  </span>
                 </div>
               )}
 
@@ -154,6 +208,7 @@ export function ProjectDetailPage() {
                     onDelete={() => setDeleteOpen(true)}
                     archivePending={archive.isPending}
                     unarchivePending={unarchive.isPending}
+                    isOwner={isOwner}
                   />
                 )}
               </div>
@@ -167,6 +222,15 @@ export function ProjectDetailPage() {
         onClose={() => setImportOpen(false)}
         defaultProjectId={id}
       />
+
+      {project && isOwner && (
+        <ShareProjectDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          projectId={project.id}
+          projectTitle={project.title}
+        />
+      )}
 
       <ConfirmDoubleModal
         open={deleteOpen}
@@ -467,6 +531,7 @@ function SettingsTab({
   onDelete,
   archivePending,
   unarchivePending,
+  isOwner,
 }: {
   project: ReturnType<typeof useChatProject>["data"] extends
     | infer D
@@ -478,6 +543,7 @@ function SettingsTab({
   onDelete: () => void;
   archivePending: boolean;
   unarchivePending: boolean;
+  isOwner: boolean;
 }) {
   const [title, setTitle] = useState(project.title);
   const [description, setDescription] = useState(project.description ?? "");
@@ -529,25 +595,10 @@ function SettingsTab({
             maxLength={2000}
           />
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-            System prompt{" "}
-            <span className="text-[var(--text-muted)]/70">
-              (shared across every chat in this project)
-            </span>
-          </label>
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            rows={8}
-            placeholder="e.g. You are a research assistant for my thesis on..."
-            className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            maxLength={20000}
-          />
-          <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-            {systemPrompt.length} / 20,000
-          </div>
-        </div>
+        <ProjectInstructionsEditor
+          value={systemPrompt}
+          onChange={setSystemPrompt}
+        />
         <div className="flex items-center justify-end">
           <Button
             variant="primary"
@@ -560,41 +611,155 @@ function SettingsTab({
         </div>
       </section>
 
-      <section className="space-y-3 border-t border-[var(--border)] pt-6">
-        <h3 className="text-sm font-semibold">Lifecycle</h3>
-        <div className="flex items-center gap-2">
-          {isArchived ? (
+      {isOwner && (
+        <section className="space-y-3 border-t border-[var(--border)] pt-6">
+          <h3 className="text-sm font-semibold">Lifecycle</h3>
+          <div className="flex items-center gap-2">
+            {isArchived ? (
+              <Button
+                variant="secondary"
+                leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
+                onClick={onUnarchive}
+                disabled={unarchivePending}
+              >
+                {unarchivePending ? "Unarchiving..." : "Unarchive"}
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                leftIcon={<Archive className="h-3.5 w-3.5" />}
+                onClick={onArchive}
+                disabled={archivePending}
+              >
+                {archivePending ? "Archiving..." : "Archive"}
+              </Button>
+            )}
             <Button
-              variant="secondary"
-              leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
-              onClick={onUnarchive}
-              disabled={unarchivePending}
+              variant="ghost"
+              leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+              onClick={onDelete}
             >
-              {unarchivePending ? "Unarchiving..." : "Unarchive"}
+              Delete project...
             </Button>
+          </div>
+          <p className="text-xs text-[var(--text-muted)]">
+            Deleting a project preserves every conversation inside it — they
+            move back to your top-level chat list.
+          </p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Project instructions editor
+//
+// Richer wrapper around the bare ``<textarea>`` we used to have for the
+// project's ``system_prompt`` field. Visually it's still a textarea — no
+// structured bullet CRUD — but the surrounding chrome nudges the user
+// toward treating it as a *project memory* surface rather than a
+// generic instruction blob:
+//
+//   * Friendlier placeholder with example bullets so new users have a
+//     concrete starting point.
+//   * Live token counter (not just a raw character count) with a
+//     green / amber / red tint so the user can see when they're
+//     eating into the context budget shown by the chat-window pill.
+//   * A collapsible "Tips for writing good project instructions"
+//     block so the guidance is one click away but not loud by default.
+//
+// Character cap stays the same; this is pure UI polish on top of the
+// existing ``chat_projects.system_prompt`` column — no schema change.
+// ---------------------------------------------------------------------
+
+const PROJECT_INSTRUCTIONS_PLACEHOLDER = `Durable facts about this project — they go into every chat in it.
+
+Examples:
+- I'm writing this in Python 3.11 on Ubuntu; my database is Postgres 15.
+- Target audience: high-school physics teachers in Australia.
+- Always answer concisely. Skip pleasantries and preamble.
+- My team is 3 people — Sarah (PM), Raj (designer), me (engineer).
+- When I paste code, default to assuming it's production-ready, not a draft.`;
+
+const PROJECT_INSTRUCTIONS_TIPS: string[] = [
+  "Write facts and conventions, not tasks. Good: \"I use metric units.\" Bad: \"Help me write my report.\"",
+  "Bullet points beat paragraphs — each line is something the AI should treat as always-true.",
+  "Include preferences the AI keeps getting wrong (tone, verbosity, formatting). They're why this field exists.",
+  "Aim for under ~500 tokens. Larger prompts work, but every chat pays that cost on every turn.",
+];
+
+function ProjectInstructionsEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [showTips, setShowTips] = useState(false);
+  const tokens = useMemo(() => estimateTokens(value), [value]);
+
+  // Soft thresholds. Under 500 tokens is "plenty of room"; 500-1500 is
+  // "fine but starting to eat into the budget"; 1500+ is "this will
+  // measurably reduce every chat's context window". We never hard-block
+  // — the 20k-char maxLength already does that at the boundary.
+  let toneClass = "text-emerald-500";
+  let toneLabel = "compact";
+  if (tokens >= 1500) {
+    toneClass = "text-red-500";
+    toneLabel = "long — consider trimming";
+  } else if (tokens >= 500) {
+    toneClass = "text-amber-500";
+    toneLabel = "getting long";
+  }
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
+        Project instructions{" "}
+        <span className="text-[var(--text-muted)]/70">
+          (shared across every chat in this project)
+        </span>
+      </label>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={10}
+        placeholder={PROJECT_INSTRUCTIONS_PLACEHOLDER}
+        className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        maxLength={20000}
+      />
+      <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+        <button
+          type="button"
+          onClick={() => setShowTips((s) => !s)}
+          className="inline-flex items-center gap-1 text-[var(--text-muted)] transition hover:text-[var(--text)]"
+        >
+          {showTips ? (
+            <ChevronDown className="h-3 w-3" />
           ) : (
-            <Button
-              variant="secondary"
-              leftIcon={<Archive className="h-3.5 w-3.5" />}
-              onClick={onArchive}
-              disabled={archivePending}
-            >
-              {archivePending ? "Archiving..." : "Archive"}
-            </Button>
+            <ChevronRight className="h-3 w-3" />
           )}
-          <Button
-            variant="ghost"
-            leftIcon={<Trash2 className="h-3.5 w-3.5" />}
-            onClick={onDelete}
-          >
-            Delete project...
-          </Button>
+          <Lightbulb className="h-3 w-3" />
+          Tips for good project instructions
+        </button>
+        <span className="text-[var(--text-muted)]">
+          <span className={cn("font-medium", toneClass)}>
+            ~{formatTokens(tokens)} tokens
+          </span>{" "}
+          · {toneLabel} · {value.length.toLocaleString()} / 20,000 chars
+        </span>
+      </div>
+
+      {showTips && (
+        <div className="mt-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--text-muted)]">
+          <ul className="list-disc space-y-1 pl-4">
+            {PROJECT_INSTRUCTIONS_TIPS.map((tip) => (
+              <li key={tip}>{tip}</li>
+            ))}
+          </ul>
         </div>
-        <p className="text-xs text-[var(--text-muted)]">
-          Deleting a project preserves every conversation inside it — they
-          move back to your top-level chat list.
-        </p>
-      </section>
+      )}
     </div>
   );
 }

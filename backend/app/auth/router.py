@@ -40,6 +40,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.auth.schemas import (
     AuthResponse,
+    DirectoryUser,
     LoginRequest,
     RegisterRequest,
     SetupRequest,
@@ -644,6 +645,50 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
+
+
+@router.get("/users/directory", response_model=list[DirectoryUser])
+async def list_directory_users(
+    q: str = "",
+    limit: int = 12,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DirectoryUser]:
+    """Lightweight user directory for share-picker autocompletes.
+
+    Every authenticated user can query this — sharing would be
+    crippled if only admins could resolve handles to ids. Returns
+    non-disabled accounts matching ``q`` (case-insensitive substring
+    against both username and email) minus the caller themselves.
+
+    Kept intentionally simple: no cursor / pagination, hard-capped
+    result size, plain ``ILIKE`` filter. In practice Promptly
+    deployments are small-team (tens to low hundreds of users) so a
+    full scan with a prefix match stays well under 10ms on any
+    reasonable Postgres box. Swap to a trigram index if the user
+    table ever grows past that scale.
+    """
+    limit = max(1, min(30, limit))
+    q_norm = q.strip()
+
+    stmt = select(User).where(
+        User.id != current_user.id,
+        User.disabled.is_(False),
+    )
+    if q_norm:
+        # Postgres ILIKE is case-insensitive out of the box and
+        # cheap enough on the ``users`` table (small cardinality).
+        pattern = f"%{q_norm}%"
+        stmt = stmt.where(
+            or_(User.username.ilike(pattern), User.email.ilike(pattern))
+        )
+    stmt = stmt.order_by(User.username.asc()).limit(limit)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        DirectoryUser(user_id=u.id, username=u.username, email=u.email)
+        for u in rows
+    ]
 
 
 @router.patch("/me/preferences", response_model=UserResponse)

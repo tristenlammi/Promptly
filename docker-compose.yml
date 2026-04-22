@@ -95,6 +95,17 @@ services:
       - DEFAULT_SEARCH_PROVIDER=${DEFAULT_SEARCH_PROVIDER:-searxng}
       - SEARCH_RESULT_COUNT=${SEARCH_RESULT_COUNT:-5}
       - SEARCH_CONCURRENT_REQUESTS=${SEARCH_CONCURRENT_REQUESTS:-3}
+      # Internal-only Ollama URL — the container is reachable on
+      # the ``promptly`` network at the well-known port (host port
+      # mapping uses 11435 to dodge any host-side Ollama install).
+      # Used by the Custom Models RAG pipeline for local embeddings
+      # and, in Phase 2, for chat completions against locally-pulled
+      # models.
+      - OLLAMA_URL=http://ollama:11434
+      # Embedding model auto-pulled on Ollama first start. Small
+      # (~270 MB), fast, 768-dim — plenty for knowledge-base RAG
+      # without making first-run downloads painful.
+      - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
     volumes:
       # Bind-mount user data into the project directory so it's
       # always next to the compose file — easy to back up, easy
@@ -108,6 +119,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Ollama is a soft dependency — the backend boots even if
+      # Ollama is still warming up its embedding model (the RAG
+      # ingester will surface a friendly "indexing failed, retry"
+      # state in the UI rather than crashing the whole chat path).
+      # ``service_started`` is enough; we don't wait on a healthcheck
+      # because the model pull can take a minute on a cold install.
+      ollama:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       # The /api/health endpoint pings Postgres, Redis, and
@@ -124,7 +143,13 @@ services:
       - promptly
 
   postgres:
-    image: postgres:15-alpine
+    # ``pgvector/pgvector:pg15`` is the official pgvector-on-Postgres
+    # image, drop-in compatible with the previous ``postgres:15-alpine``
+    # data files (same major version). The ``vector`` extension is
+    # enabled by an Alembic migration on first boot — the image just
+    # ships the shared library so ``CREATE EXTENSION vector`` succeeds.
+    # Required by Custom Models' RAG knowledge base.
+    image: pgvector/pgvector:pg15
     container_name: Promptly-Postgres
     environment:
       - POSTGRES_USER=promptly
@@ -154,6 +179,115 @@ services:
     restart: unless-stopped
     networks:
       - promptly
+
+  ollama:
+    # Local LLM runtime. Phase 1 uses it strictly for embeddings
+    # (so the Custom Models RAG knowledge base works offline, even
+    # without an OpenAI key); Phase 2 unlocks chat completions
+    # against any model the admin pulls via the Local Models tab.
+    #
+    # The host port is deliberately 11435 (default Ollama port +1)
+    # so a host-side Ollama install — which a lot of devs run for
+    # other tooling — can keep using 11434 without colliding. The
+    # backend talks to it on the internal ``promptly`` network at
+    # the unmapped 11434, which is unaffected.
+    image: ollama/ollama:latest
+    container_name: Promptly-Ollama
+    # ``OLLAMA_HOST`` defaults to 127.0.0.1 inside the container,
+    # which means the docker network can't reach the API. Bind to
+    # all interfaces so the backend can hit it. ``OLLAMA_KEEP_ALIVE``
+    # holds models in memory between requests — at the embed-only
+    # scale of Phase 1 a long keep-alive is essentially free and
+    # eliminates 1-2s warm-up on every PATCH that re-indexes.
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      # Model auto-pulled by ``entrypoint-bootstrap.sh`` on first
+      # start. Mirrored from the backend env so a single env var
+      # controls both sides.
+      - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
+    ports:
+      # Only this port is published; the backend reaches Ollama
+      # over the internal docker network on the unmapped 11434.
+      - "${OLLAMA_HOST_PORT:-11435}:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+      # Bootstrap script auto-pulls the embedding model on first
+      # start so the user gets working RAG out of the box without
+      # `docker exec ollama ollama pull ...`. Kept tiny on purpose;
+      # heavier chat models are pulled via the Local Models UI in
+      # Phase 2, with a real progress bar.
+      - ./scripts/ollama-bootstrap.sh:/usr/local/bin/ollama-bootstrap.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/ollama-bootstrap.sh"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - promptly
+
+  # ------------------------------------------------------------
+  # Optional GPU override for the Ollama runtime.
+  #
+  # Enabled with ``COMPOSE_PROFILES=gpu``:
+  #
+  #   COMPOSE_PROFILES=gpu docker compose up -d
+  #
+  # This brings up a second service definition (``ollama-gpu``)
+  # that reserves the host's NVIDIA GPUs via the NVIDIA Container
+  # Toolkit. It uses ``container_name`` + ``profiles`` so the
+  # CPU-only ``ollama`` service above is skipped when the profile
+  # is active; the backend still reaches it as ``ollama`` over the
+  # internal network because both services share the same name
+  # via a network alias.
+  #
+  # Requires:
+  #   - NVIDIA driver on the host
+  #   - NVIDIA Container Toolkit installed + configured
+  #     (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+  #
+  # Non-NVIDIA hardware (AMD ROCm, Apple Silicon) is currently
+  # CPU-only via the default service; upstream Ollama's ROCm
+  # support isn't stable enough to enable by default here.
+  # ------------------------------------------------------------
+  ollama-gpu:
+    profiles: ["gpu"]
+    image: ollama/ollama:latest
+    container_name: Promptly-Ollama-GPU
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
+    ports:
+      - "${OLLAMA_HOST_PORT:-11435}:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+      - ./scripts/ollama-bootstrap.sh:/usr/local/bin/ollama-bootstrap.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/ollama-bootstrap.sh"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      promptly:
+        # Share an alias with the CPU service so the backend's
+        # ``OLLAMA_URL=http://ollama:11434`` resolves to whichever
+        # variant is up.
+        aliases:
+          - ollama
 
   searxng:
     # Pinned to a specific dated build so a `docker compose

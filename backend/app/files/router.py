@@ -186,11 +186,56 @@ async def _load_readable_file(
     db: AsyncSession, file_id: uuid.UUID, user: User
 ) -> UserFile:
     row = await db.get(UserFile, file_id)
-    if row is None or not _can_read(row.user_id, user):
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
         )
-    return row
+    if _can_read(row.user_id, user):
+        return row
+    # Project-share side-door: a collaborator on a shared project
+    # can read any file pinned to that project (including files
+    # owned by the project creator or other collaborators). Without
+    # this path the chat-preamble download links inside a shared
+    # project 404 for anyone but the pin's original owner.
+    if await _file_is_accessible_via_project(db, row.id, user):
+        return row
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+    )
+
+
+async def _file_is_accessible_via_project(
+    db: AsyncSession, file_id: uuid.UUID, user: User
+) -> bool:
+    """Does ``user`` reach ``file_id`` through a shared project pin?
+
+    Returns True if the file is pinned to any project the caller
+    can access (owns or has an accepted share on). Isolated as a
+    helper so the fast path in :func:`_load_readable_file` stays
+    synchronous-ish (one ``SELECT`` then done) and we only issue
+    the second query after the simple ownership check fails.
+    """
+    # Importing here keeps the files module free of a top-level
+    # dependency on chat tables — the chat side already knows
+    # everything about files, but not vice-versa.
+    from app.chat.models import ChatProjectFile
+    from app.chat.shares import list_accessible_project_ids
+    from sqlalchemy import select as _select
+
+    accessible_project_ids = await list_accessible_project_ids(user, db)
+    if not accessible_project_ids:
+        return False
+    row = (
+        await db.execute(
+            _select(ChatProjectFile.file_id)
+            .where(
+                ChatProjectFile.file_id == file_id,
+                ChatProjectFile.project_id.in_(accessible_project_ids),
+            )
+            .limit(1)
+        )
+    ).first()
+    return row is not None
 
 
 async def _load_writable_file(

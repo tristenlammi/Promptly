@@ -238,9 +238,13 @@ from app.admin.router import router as admin_router  # noqa: E402
 from app.app_settings.router import router as app_settings_router  # noqa: E402
 from app.auth.router import router as auth_router  # noqa: E402
 from app.chat.compare_router import router as chat_compare_router  # noqa: E402
+from app.chat.project_shares import invite_router as project_invite_router  # noqa: E402
+from app.chat.project_shares import router as project_shares_router  # noqa: E402
 from app.chat.projects_router import router as chat_projects_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
+from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
+from app.local_models.router import router as local_models_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
 from app.notifications.router import router as notifications_router  # noqa: E402
@@ -257,10 +261,42 @@ app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(
     chat_projects_router, prefix="/api/chat/projects", tags=["chat-projects"]
 )
+# Project share management endpoints — separate router so it can
+# be version-bumped independently of the core projects CRUD.
+app.include_router(
+    project_shares_router,
+    prefix="/api/chat/projects",
+    tags=["chat-projects"],
+)
+# Invitee-perspective endpoints (``/api/chat/project-share-invites``)
+# live on ``/api/chat`` so they sit next to the conversation
+# equivalents.
+app.include_router(
+    project_invite_router, prefix="/api/chat", tags=["chat-projects"]
+)
 # Compare router already defines its own ``/api/chat/compare`` prefix
 # so it slots in without a double-prefix here.
 app.include_router(chat_compare_router)
 app.include_router(models_router, prefix="/api/models", tags=["models"])
+# Custom Models — admin-curated assistants (personality + knowledge
+# library). Lives under the admin prefix so non-admins can't list
+# them; the picker integration on ``/api/models/available`` exposes
+# the user-safe surface.
+app.include_router(
+    custom_models_router,
+    prefix="/api/admin/custom-models",
+    tags=["custom-models"],
+)
+# Local Models — thin admin-only wrapper over the bundled Ollama
+# container (list / pull / delete / hardware probe). The pulled
+# models surface through ``/api/models/available`` via the
+# auto-registered Ollama ``ModelProvider`` row, so no chat-path
+# wiring is needed here.
+app.include_router(
+    local_models_router,
+    prefix="/api/admin/local-models",
+    tags=["local-models"],
+)
 app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])

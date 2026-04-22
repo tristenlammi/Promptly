@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.audit import (
@@ -53,12 +53,24 @@ from app.chat.schemas import (
     ConversationSummary,
     ConversationUpdate,
     EditMessageRequest,
+    MentionCandidate,
+    MentionCandidatesResponse,
     MessageResponse,
     RegenerateMessageRequest,
     SendMessageRequest,
     SendMessageResponse,
+    SummariseToProjectResponse,
 )
 from app.chat.compaction import CompactionError, compact_conversation
+from app.chat.mentions import (
+    build_reference_system_block,
+    extract_mentions,
+    resolve_mentions,
+)
+from app.chat.summariser import (
+    SummariseError,
+    summarise_conversation_to_markdown,
+)
 from app.chat.shares import (
     get_accessible_conversation,
     list_accessible_conversation_ids,
@@ -86,6 +98,7 @@ from app.chat.tools import (
     list_openai_tools,
 )
 from app.database import SessionLocal, get_db
+from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.models import UserFile
 from app.files.prompt import (
     build_attachment_preamble,
@@ -230,6 +243,131 @@ async def search_conversations(
         )
         for r in rows
     ]
+
+
+@router.get(
+    "/conversations/mention-candidates",
+    response_model=MentionCandidatesResponse,
+)
+async def list_mention_candidates(
+    q: str = Query(default="", max_length=200),
+    project_id: uuid.UUID | None = Query(default=None),
+    exclude_id: uuid.UUID | None = Query(default=None),
+    limit: int = Query(default=12, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MentionCandidatesResponse:
+    """Autocomplete source for ``@`` mentions in the composer.
+
+    Returns two lists (both ordered by most-recently-updated first):
+
+    * ``project_candidates`` — sibling chats in the same project
+      as the conversation the user is composing from. Surfaced
+      first in the popover because references within a project
+      are the common case.
+    * ``recent_candidates`` — the caller's most recently active
+      chats, project-agnostic.
+
+    When ``q`` is non-empty, titles are filtered by a case-
+    insensitive substring match (fuzzy enough without touching the
+    FTS index). ``exclude_id`` is the conversation the user is
+    composing from; we drop it from the results so ``@``-mentioning
+    yourself is never an option.
+
+    Scoped to owner-role conversations only for now — referencing
+    a chat you don't own gets complicated (the referenced chat's
+    owner can't see the reference, which is confusing) so we keep
+    this tight in v1.
+    """
+    q_norm = q.strip().lower()
+
+    # Base query: owned, non-compare-column, optionally filtered
+    # by title substring. Compare columns that haven't been crowned
+    # get filtered out the same way the sidebar does — they're
+    # drafts, not meaningful references.
+    base_select = (
+        select(Conversation)
+        .where(Conversation.user_id == user.id)
+        .where(
+            # Exclude uncrowned compare columns. A crowned compare
+            # column becomes a normal chat (its ``compare_group_id``
+            # stays set, but ``CompareGroup.crowned_conversation_id``
+            # points at it); filtering by ``compare_group_id IS NULL``
+            # alone would drop the winners too. The simplest stable
+            # check: only exclude rows whose group exists *and*
+            # hasn't crowned them. We do this as a correlated
+            # ``NOT IN`` to keep the SQL readable.
+            (Conversation.compare_group_id.is_(None))
+            | (
+                Conversation.id.in_(
+                    select(CompareGroup.crowned_conversation_id).where(
+                        CompareGroup.crowned_conversation_id.isnot(None)
+                    )
+                )
+            )
+        )
+        .order_by(Conversation.updated_at.desc())
+    )
+    if exclude_id is not None:
+        base_select = base_select.where(Conversation.id != exclude_id)
+    if q_norm:
+        base_select = base_select.where(
+            func.lower(Conversation.title).like(f"%{q_norm}%")
+        )
+
+    project_rows: list[Conversation] = []
+    if project_id is not None:
+        # Verify the project belongs to the caller before including
+        # its chats — a malicious client shouldn't be able to enumerate
+        # titles in someone else's project by guessing the id.
+        proj = await db.get(ChatProject, project_id)
+        if proj is not None and proj.user_id == user.id:
+            proj_result = await db.execute(
+                base_select.where(Conversation.project_id == project_id).limit(limit)
+            )
+            project_rows = list(proj_result.scalars().all())
+
+    # Recents: the same base but *excluding* anything already in
+    # project_rows so the two lists don't duplicate the same chat.
+    already_ids = {c.id for c in project_rows}
+    recent_select = base_select.limit(limit + len(already_ids))
+    recent_result = await db.execute(recent_select)
+    recent_rows: list[Conversation] = [
+        c for c in recent_result.scalars().all() if c.id not in already_ids
+    ][:limit]
+
+    # Resolve project titles in a single batch so the popover can
+    # render "In project: Acme SRE" next to each candidate.
+    project_ids = {
+        c.project_id
+        for c in (*project_rows, *recent_rows)
+        if c.project_id is not None
+    }
+    project_title_map: dict[uuid.UUID, str] = {}
+    if project_ids:
+        proj_title_result = await db.execute(
+            select(ChatProject.id, ChatProject.title).where(
+                ChatProject.id.in_(project_ids)
+            )
+        )
+        project_title_map = {pid: title for pid, title in proj_title_result.all()}
+
+    def to_candidate(c: Conversation) -> MentionCandidate:
+        return MentionCandidate(
+            id=c.id,
+            title=(c.title or "Untitled chat").strip() or "Untitled chat",
+            project_id=c.project_id,
+            project_title=(
+                project_title_map.get(c.project_id) if c.project_id else None
+            ),
+            updated_at=c.updated_at,
+        )
+
+    return MentionCandidatesResponse(
+        project_context_id=project_id,
+        project_candidates=[to_candidate(c) for c in project_rows],
+        recent_candidates=[to_candidate(c) for c in recent_rows],
+    )
 
 
 @router.get("/conversations", response_model=list[ConversationSummary])
@@ -723,9 +861,27 @@ async def send_message(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
         )
 
+    # Custom Models — synthetic ``custom:<uuid>`` ids wrap a real base
+    # model. Resolve here so we can enforce the per-user allowlist
+    # against the *underlying* base model id (the synthetic id will
+    # never be in ``user.allowed_models``). The conversation still
+    # stores the synthetic id verbatim so reloading the chat snaps the
+    # picker back to the custom model the user originally chose.
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    effective_model_id = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown or disabled custom model",
+            )
+        effective_model_id = resolved.base_model_id
+
     # Enforce per-user model allowlist for non-admins. None = unrestricted.
     if user.role != "admin" and user.allowed_models is not None:
-        if model_id not in set(user.allowed_models):
+        if effective_model_id not in set(user.allowed_models):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to that model. Ask an admin to grant it.",
@@ -941,8 +1097,25 @@ async def edit_and_resend_message(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
         )
+
+    # Mirror ``send_message``: resolve synthetic ``custom:<uuid>`` ids
+    # to their base model id before the allowlist check so non-admins
+    # can still regenerate against a custom model they were originally
+    # allowed to pick.
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    effective_model_id_for_check = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown or disabled custom model",
+            )
+        effective_model_id_for_check = resolved.base_model_id
+
     if user.role != "admin" and user.allowed_models is not None:
-        if model_id not in set(user.allowed_models):
+        if effective_model_id_for_check not in set(user.allowed_models):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to that model. Ask an admin to grant it.",
@@ -1129,8 +1302,25 @@ async def regenerate_assistant_message(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
         )
+
+    # Resolve ``custom:<uuid>`` to the underlying base model id for
+    # the allowlist check. See :func:`send_message` for the full
+    # rationale — in short: the synthetic id will never be in
+    # ``user.allowed_models`` but the base one is.
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    effective_model_id_for_check = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown or disabled custom model",
+            )
+        effective_model_id_for_check = resolved.base_model_id
+
     if user.role != "admin" and user.allowed_models is not None:
-        if model_id not in set(user.allowed_models):
+        if effective_model_id_for_check not in set(user.allowed_models):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to that model. Ask an admin to grant it.",
@@ -1256,6 +1446,165 @@ async def compact_conversation_endpoint(
     return CompactionResponse(
         messages_removed=result.messages_removed,
         summary_message_id=uuid.UUID(result.summary_message_id),
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/summarise-to-project",
+    response_model=SummariseToProjectResponse,
+)
+async def summarise_to_project_endpoint(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SummariseToProjectResponse:
+    """Generate a Markdown summary of the chat and pin it to its project.
+
+    Writes the summary as a new file in the user's Generated folder,
+    then pins it to the conversation's parent project so every other
+    chat in the project picks it up on the next turn (via the
+    existing project-file injection pipeline — no new wiring).
+
+    Preconditions:
+
+    * Caller must be the conversation owner. Collaborators can't
+      mutate the project's pinned-file set indirectly.
+    * Conversation must live inside a project (``project_id`` set).
+      If the user wants to pin the summary but the chat is
+      standalone, they first need to move it into a project.
+    * Conversation must have a provider + model configured
+      (matches compaction — we need something to call).
+    * At least 4 textual turns — see :mod:`app.chat.summariser`
+      for the threshold.
+
+    Errors:
+
+    * 400 for "not in a project", "chat too short", "no provider".
+    * 403 if the caller isn't the owner.
+    * 502 if the LLM call fails (no file is written in that case).
+    """
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the conversation owner can save a summary to the project.",
+        )
+
+    if conv.project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "This chat isn't in a project yet. Move it into one "
+                "first — then the summary will be visible to every "
+                "other chat in that project."
+            ),
+        )
+
+    project = await db.get(ChatProject, conv.project_id)
+    if project is None or project.user_id != user.id:
+        # Shouldn't normally happen — project_id is owner-scoped in
+        # the move-to-project path — but guard in case a race left
+        # the conversation pointing at a deleted project.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Parent project not found.",
+        )
+
+    if not conv.provider_id or not conv.model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No model configured for this conversation. Send at "
+                "least one message first so a default is persisted."
+            ),
+        )
+
+    provider = await db.get(ModelProvider, conv.provider_id)
+    if provider is None or not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This conversation's provider is unavailable.",
+        )
+
+    try:
+        summary_md = await summarise_conversation_to_markdown(
+            conversation=conv,
+            llm_provider=provider,
+            llm_model_id=conv.model_id,
+            db=db,
+        )
+    except SummariseError as e:
+        msg = str(e)
+        if "too short" in msg or "no textual" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=msg
+            )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=msg
+        )
+
+    # Pretty filename built from the conversation title so it reads
+    # well in the project's file list. We don't have a rich title-
+    # sanitiser on the backend; a minimal strip here is enough for a
+    # filesystem-friendly name (``persist_generated_file`` doesn't
+    # touch the stored filename, it just uses the extension).
+    raw_title = (conv.title or "Untitled chat").strip() or "Untitled chat"
+    safe_title = "".join(
+        ch if ch.isalnum() or ch in (" ", "-", "_") else "-"
+        for ch in raw_title
+    ).strip()[:80] or "chat"
+    filename = f"Summary — {safe_title}.md"
+
+    body = (
+        f"# Summary: {raw_title}\n\n"
+        f"_Generated from conversation `{conv.id}` on save — "
+        f"regenerate anytime from the chat header._\n\n"
+        f"{summary_md}\n"
+    )
+    try:
+        uf = await persist_generated_file(
+            db,
+            user=user,
+            filename=filename,
+            mime_type="text/markdown",
+            content=body.encode("utf-8"),
+            source_kind="chat_summary",
+        )
+    except GeneratedFileError as e:
+        # Usually quota — give the user the message directly; the
+        # storage / billing UX already explains how to resolve it.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+
+    # Auto-pin to the project. Idempotent: if we somehow ran twice
+    # with the same file id (we don't — persist_generated_file
+    # always mints a fresh UUID) the unique (project, file) row
+    # would be swallowed by the existing_q check.
+    existing_q = await db.execute(
+        select(ChatProjectFile).where(
+            ChatProjectFile.project_id == project.id,
+            ChatProjectFile.file_id == uf.id,
+        )
+    )
+    if existing_q.scalar_one_or_none() is None:
+        db.add(ChatProjectFile(project_id=project.id, file_id=uf.id))
+        project.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    logger.info(
+        "Summarised conversation %s -> file %s, pinned to project %s",
+        conv.id,
+        uf.id,
+        project.id,
+    )
+
+    return SummariseToProjectResponse(
+        file_id=uf.id,
+        filename=uf.filename,
+        project_id=project.id,
+        project_title=project.title,
+        chars=len(summary_md),
     )
 
 
@@ -1822,6 +2171,45 @@ async def _stream_generator(
             yield _sse({"done": True})
             return
 
+        # ------------------------------------------------------------------
+        # Custom Models resolution.
+        #
+        # If the conversation's model id is a synthetic ``custom:<uuid>``
+        # reference, swap in the base provider + base model id for the
+        # rest of this generator. We deliberately mutate ``ctx["model_id"]``
+        # in place so every downstream helper that reads it
+        # (``_model_supports_vision``, the ``model_router.stream_chat_events``
+        # call, ``distill_query``, etc.) sees the resolved base model
+        # without any per-call conditionals.
+        #
+        # ``custom_assistant`` stays around so the system-prompt merge
+        # later on can splice the assistant's personality + the top-K
+        # retrieved knowledge block above the tools / personal-context
+        # layers.
+        # ------------------------------------------------------------------
+        from app.custom_models.resolver import (
+            is_custom_model_id,
+            resolve_custom_model,
+        )
+
+        custom_assistant = None
+        if is_custom_model_id(ctx["model_id"]):
+            resolved = await resolve_custom_model(ctx["model_id"], db)
+            if resolved is None:
+                yield _sse(
+                    {
+                        "error": (
+                            "This custom model is no longer available — "
+                            "ask an admin to re-create it or pick a different model."
+                        )
+                    }
+                )
+                yield _sse({"done": True})
+                return
+            custom_assistant = resolved.custom_model
+            provider = resolved.base_provider
+            ctx["model_id"] = resolved.base_model_id
+
         # Build message history from DB (ordered).
         messages_result = await db.execute(
             select(Message)
@@ -1854,8 +2242,25 @@ async def _stream_generator(
         # prompts.
         project_system_prompt: str | None = None
         if conv.project_id is not None:
+            # Walk the project-share ACL so a collaborator's send
+            # still picks up the project's system prompt + pinned
+            # files. Owner check first (common path); fall back to
+            # :func:`_has_project_access` for accepted collaborators.
             project_row = await db.get(ChatProject, conv.project_id)
-            if project_row is not None and project_row.user_id == user.id:
+            caller_has_project = False
+            if project_row is not None:
+                if project_row.user_id == user.id:
+                    caller_has_project = True
+                else:
+                    # Import locally to avoid a cycle — ``shares``
+                    # imports ``project_shares`` which imports this
+                    # router indirectly.
+                    from app.chat.shares import _has_project_access
+
+                    caller_has_project = await _has_project_access(
+                        project_row.id, user, db
+                    )
+            if project_row is not None and caller_has_project:
                 project_system_prompt = (
                     project_row.system_prompt.strip()
                     if project_row.system_prompt
@@ -1872,14 +2277,14 @@ async def _stream_generator(
                     .order_by(ChatProjectFile.pinned_at.asc())
                 )
                 pinned_files = list(pin_rows.scalars().all())
-                # ACL: only honour files the caller still owns. Files
-                # shared with them via the admin pool are fair game
-                # too (``user_id is None``) — same rule as
-                # ``_load_message_attachments``.
-                pinned_files = [
-                    f for f in pinned_files
-                    if f.user_id is None or f.user_id == user.id
-                ]
+                # ACL for pinned files in a (possibly shared) project:
+                # anyone with project access can *use* any file pinned
+                # there — the project itself is the access grant. The
+                # previous rule (only files the caller owns) broke
+                # cross-user pins once project sharing shipped. Admin
+                # pool files (``user_id IS NULL``) are always allowed.
+                if not pinned_files:
+                    pinned_files = []
                 if pinned_files:
                     existing = per_message_attachments.get(
                         triggering_user_msg_id, []
@@ -2133,6 +2538,96 @@ async def _stream_generator(
             system_prompt = merge_system_prompt(
                 personal_context, system_prompt or ""
             )
+
+        # Phase C — @-mention resolution. Scan the triggering user
+        # message for ``@[title](id)`` tokens, verify the caller has
+        # read access to each referenced chat, and prepend a block
+        # of their cached summaries to the system prompt so the
+        # model picks up the relevant context. Failures (provider
+        # error, inaccessible id, chat too short) drop individual
+        # references without blocking the send — the raw tokens
+        # still render as chips in the user's message.
+        trig_row = next(
+            (m for m in history_rows if m.id == triggering_user_msg_id),
+            None,
+        )
+        if trig_row is not None and trig_row.content:
+            mentions_found = extract_mentions(trig_row.content)
+            if mentions_found:
+                refs = await resolve_mentions(
+                    mentions_found,
+                    caller=user,
+                    exclude_conversation_id=conv.id,
+                    llm_provider=provider,
+                    llm_model_id=ctx["model_id"],
+                    db=db,
+                )
+                ref_block = build_reference_system_block(refs)
+                if ref_block:
+                    # Mentions land on top (first arg to
+                    # ``merge_system_prompt``) so the model reads
+                    # "you've been given these reference chats"
+                    # before the longer-lived project / tool /
+                    # personal layers.
+                    system_prompt = merge_system_prompt(
+                        ref_block, system_prompt or ""
+                    )
+
+        # ------------------------------------------------------------------
+        # Custom Models — personality + retrieved knowledge.
+        #
+        # Merged last so the personality sits at the very top of the
+        # system prompt (highest priority). ``merge_system_prompt`` is
+        # first-arg-wins, so folding personality on top of whatever the
+        # earlier merges produced preserves each layer's original
+        # intent while giving the assistant's voice the last word.
+        #
+        # Retrieval failures (no embedding provider configured, embed
+        # call timed out, no chunks yet indexed) degrade silently into
+        # a personality-only chat — better than crashing the stream
+        # mid-send when the user just wanted to talk to their pet LLM.
+        # ------------------------------------------------------------------
+        if custom_assistant is not None:
+            from app.custom_models.retrieval import (
+                format_retrieved_block,
+                retrieve_context,
+            )
+
+            # Source of truth for the retrieval query: the last user
+            # turn in the conversation history. Falls back to the
+            # triggering message id when the ordered history look-up
+            # doesn't land (defensive — shouldn't happen in practice
+            # since the user turn was just persisted).
+            query_source = next(
+                (m.content for m in reversed(history_rows) if m.role == "user"),
+                None,
+            ) or (trig_row.content if trig_row is not None else "")
+            retrieved = []
+            if query_source:
+                try:
+                    retrieved = await retrieve_context(
+                        db,
+                        custom_model=custom_assistant,
+                        query=query_source,
+                    )
+                except Exception:  # noqa: BLE001 - best-effort retrieval
+                    logger.exception(
+                        "custom_model retrieve_context failed; falling back to "
+                        "personality-only"
+                    )
+                    retrieved = []
+
+            blocks: list[str] = []
+            if custom_assistant.personality:
+                blocks.append(custom_assistant.personality.strip())
+            knowledge_block = format_retrieved_block(retrieved)
+            if knowledge_block:
+                blocks.append(knowledge_block)
+
+            if blocks:
+                system_prompt = merge_system_prompt(
+                    "\n\n".join(blocks), system_prompt or ""
+                )
 
         try:
             for hop in range(MAX_TOOL_HOPS):

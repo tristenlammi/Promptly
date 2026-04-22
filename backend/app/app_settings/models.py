@@ -6,7 +6,16 @@ from datetime import datetime
 
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -67,6 +76,31 @@ class AppSettings(Base):
     budget_alerts_sent: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
     )
+
+    # ----- Custom Models embedding provider (Phase RAG-1) -----
+    # Workspace-level choice the admin makes once during the setup
+    # wizard ("How should we embed knowledge for Custom Models?").
+    # Both fields nullable so a fresh install starts in "not yet
+    # configured" state and the wizard / Custom Models panel
+    # surfaces a banner instead of silently picking something.
+    #
+    # ``embedding_provider_id``  — points at any ``ModelProvider``
+    #   that exposes an ``/embeddings`` endpoint. Includes the
+    #   bundled internal Ollama provider for local embeddings.
+    # ``embedding_model_id``     — model id within that provider's
+    #   catalog (e.g. ``text-embedding-3-small`` for OpenAI,
+    #   ``nomic-embed-text`` for the local Ollama).
+    # ``embedding_dim``          — the vector dimension that model
+    #   produces. Tracked separately so the ingester picks the right
+    #   ``knowledge_chunks.embedding_<dim>`` column without round-
+    #   tripping to the provider on every chunk.
+    embedding_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    embedding_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    embedding_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # ----- Bookkeeping -----
     created_at: Mapped[datetime] = mapped_column(
