@@ -20,6 +20,8 @@ import io
 import logging
 import os
 
+from PIL import Image, UnidentifiedImageError
+
 from app.files.models import UserFile
 from app.files.storage import absolute_path, read_text
 from app.models_config.provider import ImagePart
@@ -64,6 +66,24 @@ _IMAGE_EXTS: frozenset[str] = frozenset(
 # base64, which most providers tolerate. Larger images are skipped with
 # a warning so the user knows.
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+# Smallest plausible real image. A valid JPEG/PNG/WebP/GIF has a
+# multi-byte magic header + palette/IDAT chunks; anything under this is
+# definitely corrupted (we've seen phone browsers occasionally upload
+# 0-byte or truncated files when the user backgrounds the app mid-upload).
+# Shipping a data URL with sub-hundred-byte payload reliably trips the
+# "Invalid image data-url" response from Gemini and similar providers,
+# so we prefer to drop the attachment with a clear warning.
+_MIN_IMAGE_BYTES = 100
+
+# Providers we target (OpenAI / Gemini / Anthropic / OpenRouter OpenAI-
+# compat) all accept PNG, JPEG, and WebP. GIF is supported by some
+# (OpenAI, OpenRouter) but not Gemini's OpenAI-compat layer, and HEIC is
+# rejected by all of them. To avoid a provider-specific 400 we transcode
+# anything outside the "universal" set to JPEG before base64-encoding.
+_UNIVERSAL_IMAGE_MIMES: frozenset[str] = frozenset(
+    {"image/png", "image/jpeg", "image/webp"}
+)
 
 # MIME types we treat as "text enough to paste into the prompt".
 _INLINE_TEXT_MIMES: frozenset[str] = frozenset(
@@ -311,6 +331,42 @@ def build_attachment_preamble(
     return "\n".join(chunks)
 
 
+def _transcode_to_jpeg(raw: bytes) -> bytes | None:
+    """Best-effort re-encode of arbitrary image bytes to JPEG.
+
+    Returns ``None`` if Pillow can't open the payload (truncated upload,
+    unsupported format, etc.). Used as a fallback for non-universal
+    formats (GIF, BMP, …) so every provider accepts the resulting
+    data URL.
+    """
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            im.load()
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=90, optimize=False)
+            return buf.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        logger.warning("Pillow could not transcode image to JPEG: %s", exc)
+        return None
+
+
+def _image_payload_is_valid(raw: bytes) -> bool:
+    """Return True iff Pillow can parse the bytes as a real image.
+
+    A lightweight guard against truncated / corrupted uploads (common
+    on flaky mobile connections) that would otherwise produce a
+    base64 data URL the provider rejects mid-stream.
+    """
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            im.verify()
+        return True
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+        return False
+
+
 def build_image_parts(
     files: list[UserFile],
 ) -> tuple[list[ImagePart], list[str]]:
@@ -323,6 +379,16 @@ def build_image_parts(
       skip) so the chat router can forward them to the client. We never
       raise — a busted image just becomes a warning, which is friendlier
       than a 500 mid-stream.
+
+    Defensive behaviour (tuned for mobile uploads, which fail in more
+    exciting ways than desktop drops):
+
+    * empty / truncated files are dropped with a warning rather than
+      shipped as an empty ``data:image/jpeg;base64,`` URL (every
+      provider rejects that, with Gemini specifically responding
+      ``Invalid image data-url``);
+    * non-universal formats (GIF, BMP, anything Pillow can open) are
+      transcoded to JPEG so all vision providers accept them.
     """
     parts: list[ImagePart] = []
     warnings: list[str] = []
@@ -351,7 +417,45 @@ def build_image_parts(
             )
             continue
 
+        if len(raw) < _MIN_IMAGE_BYTES:
+            logger.warning(
+                "image %s is %d bytes — dropping to avoid malformed data URL",
+                f.id,
+                len(raw),
+            )
+            warnings.append(
+                f"{f.filename!r} looks empty or corrupted (only "
+                f"{_human_size(len(raw))} on disk). Try attaching it "
+                "again — mobile uploads sometimes fail silently when the "
+                "app is backgrounded mid-upload."
+            )
+            continue
+
+        if not _image_payload_is_valid(raw):
+            logger.warning(
+                "image %s failed Pillow verify; dropping from prompt", f.id
+            )
+            warnings.append(
+                f"{f.filename!r} didn't decode as a valid image. "
+                "Try re-saving or re-taking the photo and attaching again."
+            )
+            continue
+
         mime = _normalise_image_mime(f)
+        if mime not in _UNIVERSAL_IMAGE_MIMES:
+            # GIF/BMP/HEIC → JPEG so every provider accepts it. HEIC
+            # should never reach here (blocked by the upload allowlist)
+            # but we keep the fallback in case the allowlist ever widens.
+            transcoded = _transcode_to_jpeg(raw)
+            if transcoded is None:
+                warnings.append(
+                    f"{f.filename!r} couldn't be converted to a vision-"
+                    "friendly format; the model won't see it."
+                )
+                continue
+            raw = transcoded
+            mime = "image/jpeg"
+
         encoded = base64.b64encode(raw).decode("ascii")
         url = f"data:{mime};base64,{encoded}"
         parts.append(ImagePart(url=url, detail="auto"))

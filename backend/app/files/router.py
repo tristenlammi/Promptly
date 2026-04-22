@@ -607,6 +607,28 @@ async def upload_file(
     finally:
         await file.close()
 
+    # Reject empty uploads up front. Phone browsers occasionally deliver
+    # a multipart body with zero bytes of payload when the app is
+    # backgrounded mid-upload; sniff_and_validate would catch it a few
+    # lines down, but failing here gives a clearer 400 and stops us from
+    # auditing it as a MIME mismatch.
+    if size == 0:
+        delete_blob(rel_path)
+        await _audit_upload_rejection(
+            db,
+            request=request,
+            user=user,
+            code="empty_upload",
+            declared_filename=clean_name,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "The upload was empty. This often means the connection "
+                "dropped mid-transfer — try attaching the file again."
+            ),
+        )
+
     abs_path = absolute_path(rel_path)
 
     # ----- 4) Magic-byte sniff -----

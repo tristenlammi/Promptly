@@ -16,6 +16,7 @@ import { compareApi, type CompareGroupDetail } from "@/api/compare";
 import { useAvailableModels } from "@/hooks/useProviders";
 import type { AvailableModel } from "@/api/types";
 import { CompareColumn } from "@/components/compare/CompareColumn";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 const MAX_COLUMNS = 4;
@@ -288,6 +289,7 @@ function CompareSetup() {
 function CompareRun({ groupId }: { groupId: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
   const [draft, setDraft] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   // Map<conversationId, streamId>. Non-null values mean the column is
@@ -522,6 +524,9 @@ function CompareRun({ groupId }: { groupId: string }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
+              // On mobile the Enter key should insert a newline; send
+              // is handled exclusively by the send button.
+              if (isMobile) return;
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 if (canSend) handleSend();

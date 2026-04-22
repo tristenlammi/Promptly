@@ -1302,6 +1302,22 @@ def _classify_upstream_error(
             "error_help_url": "https://openrouter.ai/settings/privacy",
         }
 
+    # Provider-agnostic catch: the image attachment didn't decode. We
+    # already transcode non-universal formats and drop truncated files
+    # before shipping, but flaky mobile uploads can still produce bytes
+    # the provider rejects. Give the user a clearer nudge than the raw
+    # ``Invalid image data-url`` string Google returns.
+    if (
+        "invalid image data-url" in lowered
+        or "invalid image data url" in lowered
+        or ("invalid image" in lowered and "data" in lowered and "url" in lowered)
+    ):
+        return {
+            "error_code": "invalid_image_attachment",
+            "error_title": "One of your image attachments couldn't be read",
+            "error_help_url": None,
+        }
+
     return None
 
 

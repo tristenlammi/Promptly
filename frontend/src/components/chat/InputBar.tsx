@@ -338,6 +338,12 @@ export function InputBar({
   };
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // On mobile, Enter should insert a newline so users have a
+    // dedicated tap target (the send button) for submission. The
+    // on-screen keyboard's Enter key on phones is almost universally
+    // expected to be "new line" in chat UIs (iMessage, WhatsApp,
+    // Messenger all behave this way).
+    if (isMobile) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();

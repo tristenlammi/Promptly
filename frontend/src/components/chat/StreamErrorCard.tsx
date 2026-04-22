@@ -140,6 +140,14 @@ function describeClassifiedError(code: string): ClassifiedCopy {
         helpLabel: "Open OpenRouter privacy settings",
       };
 
+    case "invalid_image_attachment":
+      return {
+        fallbackTitle: "One of your image attachments couldn't be read",
+        explanation:
+          "The provider rejected the image bytes — usually because the upload was truncated (common on spotty mobile connections) or the photo was saved in a format the model doesn't support. Try removing the attachment and uploading the image again. If it keeps failing, re-save or re-take the photo as a standard JPEG or PNG.",
+        helpLabel: "Learn more",
+      };
+
     default:
       return {
         fallbackTitle: "Something went wrong with this request",

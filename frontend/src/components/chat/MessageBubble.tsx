@@ -30,6 +30,7 @@ import type {
 } from "@/api/types";
 import { useEditorStore } from "@/store/editorStore";
 import { useModelStore } from "@/store/modelStore";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
 /** Override passed to a regenerate handler. ``null`` regenerates with
@@ -538,6 +539,7 @@ function UserMessageEditor({
   onSave,
   onCancel,
 }: UserMessageEditorProps) {
+  const isMobile = useIsMobile();
   const [text, setText] = useState(initialText);
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -580,7 +582,10 @@ function UserMessageEditor({
       onCancel();
       return;
     }
-    // Enter (without Shift) submits, matching the main InputBar's behavior.
+    // Desktop only: Enter (without Shift) submits, matching the main
+    // InputBar. On mobile Enter inserts a newline so the phone keyboard's
+    // return key doesn't silently fire edits.
+    if (isMobile) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void handleSubmit();
