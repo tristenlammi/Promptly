@@ -531,6 +531,7 @@ function MobileHomeActions({
   onBrowse: () => void;
 }) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
+  const galleryRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const upload = useUploadFile();
   const [err, setErr] = useState<string | null>(null);
@@ -567,9 +568,16 @@ function MobileHomeActions({
         busy={busy}
       />
       <MobileActionRow
+        icon={<ImageIcon className="h-5 w-5" />}
+        label="Choose from gallery"
+        hint="Pick a photo from your device"
+        onClick={() => galleryRef.current?.click()}
+        disabled={busy}
+      />
+      <MobileActionRow
         icon={<Upload className="h-5 w-5" />}
         label="Upload from device"
-        hint="Photos, documents, anything up to 40 MB"
+        hint="Documents and other files up to 40 MB"
         onClick={() => fileRef.current?.click()}
         disabled={busy}
       />
@@ -590,6 +598,18 @@ function MobileHomeActions({
         type="file"
         accept="image/*"
         capture="environment"
+        className="hidden"
+        onChange={handlePick}
+      />
+      {/* Gallery picker — ``accept="image/*"`` without ``capture`` tells
+          iOS + Android to open the photo library directly (on Android
+          this routes through Google Photos / the system photo picker
+          instead of the generic Files/Drive chooser that appears with
+          no filter). */}
+      <input
+        ref={galleryRef}
+        type="file"
+        accept="image/*"
         className="hidden"
         onChange={handlePick}
       />

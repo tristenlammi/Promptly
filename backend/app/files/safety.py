@@ -330,8 +330,17 @@ def strip_image_metadata_in_place(path: Path, canonical_mime: str) -> None:
 
     Best-effort: a failure here logs a warning but does NOT raise.
     We've already proven the file is a real image of the claimed type
-    via ``sniff_and_validate``, so the worst case of a crash here is
-    that a few bytes of metadata stay on disk — annoying, not unsafe.
+    via ``sniff_and_validate``, so the worst case of a failure is that
+    a few bytes of metadata stay on disk — annoying, not unsafe.
+
+    Important: we write Pillow's output to a sibling temp file and only
+    replace the original if the save succeeded *and* produced a
+    non-empty file. Saving directly to ``path`` is tempting but
+    Pillow's ``Image.save`` truncates the destination *before* it
+    finishes writing, so a mid-save exception leaves a 0-byte / partial
+    file on disk. We've observed that path on real mobile uploads
+    (certain phone JPEGs with embedded HEIF color profiles) producing
+    downstream "Invalid image data-url" rejections from Gemini.
     """
     if not canonical_mime.startswith("image/"):
         return
@@ -342,6 +351,11 @@ def strip_image_metadata_in_place(path: Path, canonical_mime: str) -> None:
         return
 
     save_kwargs = dict(_PIL_SAVE_KWARGS.get(fmt, {}))
+
+    # Sibling temp path so Pillow can fail without touching the
+    # original bytes. Same directory keeps ``os.replace`` atomic on
+    # POSIX + the Docker bind mount we use in prod.
+    tmp_path = path.with_suffix(path.suffix + ".stripping.tmp")
 
     try:
         with Image.open(path) as im:
@@ -372,7 +386,20 @@ def strip_image_metadata_in_place(path: Path, canonical_mime: str) -> None:
             # ignores the kwarg silently for formats that don't
             # support EXIF (PNG/GIF/BMP), so it's safe to pass
             # universally.
-            scrubbed.save(path, format=fmt, exif=b"", **save_kwargs)
+            scrubbed.save(tmp_path, format=fmt, exif=b"", **save_kwargs)
+
+        # Only replace the original if the temp file actually contains
+        # bytes. Pillow occasionally writes a 0-byte output on certain
+        # JPEG variants without raising — the earlier in-place version
+        # of this function silently corrupted those uploads.
+        try:
+            tmp_size = tmp_path.stat().st_size
+        except OSError:
+            tmp_size = 0
+        if tmp_size <= 0:
+            raise OSError("Pillow produced an empty output file")
+
+        os.replace(tmp_path, path)
     except (UnidentifiedImageError, OSError, ValueError) as e:
         logger.warning(
             "EXIF strip failed for %s (%s); leaving original bytes in place: %s",
@@ -380,6 +407,10 @@ def strip_image_metadata_in_place(path: Path, canonical_mime: str) -> None:
             canonical_mime,
             e,
         )
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _iter_frames(im: Image.Image):

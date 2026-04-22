@@ -684,6 +684,28 @@ async def upload_file(
     except OSError:
         pass
 
+    # Final sanity check: never persist a 0-byte row. ``strip_image_metadata_in_place``
+    # is defensive, but if *anything* still produced a 0-byte file (bind-mount
+    # quirks, external process, …), failing here is much friendlier than shipping
+    # an unusable row that trips "Invalid image data-url" downstream.
+    if size <= 0:
+        delete_blob(rel_path)
+        await _audit_upload_rejection(
+            db,
+            request=request,
+            user=user,
+            code="empty_upload",
+            declared_filename=clean_name,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "The upload finished but the file was empty on disk. "
+                "Try attaching it again — if the problem keeps happening, "
+                "re-save the image as a standard JPEG or PNG first."
+            ),
+        )
+
     # ----- 7) Resolve the auto-routed destination (now that we know
     # the upload will succeed) -----
     if parent_folder is None and scope == "mine":
