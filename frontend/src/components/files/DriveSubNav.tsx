@@ -3,7 +3,6 @@ import { useLocation, useSearchParams, NavLink } from "react-router-dom";
 import { DRIVE_SUBNAV_ITEMS } from "@/components/layout/navItems";
 import { cn } from "@/utils/cn";
 
-import { InstallFilesPwaButton } from "./InstallFilesPwaButton";
 import { StorageUsageIndicator } from "./StorageUsageIndicator";
 
 /**
@@ -12,12 +11,13 @@ import { StorageUsageIndicator } from "./StorageUsageIndicator";
  * separate "Promptly Files" PWA uses this component verbatim and
  * just points ``start_url`` at ``/files``.
  *
- * On the right side this strip also hosts:
- *   - the live storage-usage pill (compact on mobile, verbose on
- *     desktop — see ``StorageUsageIndicator``), and
- *   - the "Install Promptly Files as an app" prompt, rendered only
- *     when the browser supports installation and the user hasn't
- *     already installed or dismissed it.
+ * On the right side this strip also hosts the live storage-usage
+ * pill (compact on mobile, verbose on desktop — see
+ * ``StorageUsageIndicator``). A separate "install Files as its
+ * own PWA" indicator used to live here too but was removed as
+ * redundant with the main Promptly install prompt; the manifest
+ * infrastructure is still in place so Chrome's overflow-menu
+ * "Install app" still targets the Files PWA on ``/files*``.
  *
  * On mobile the whole row scrolls horizontally so both the tabs and
  * the right-side chips always stay reachable instead of truncating.
@@ -92,7 +92,6 @@ export function DriveSubNav({ className }: { className?: string }) {
           the spacer rather than the chips themselves keeps the
           overflow scroller behaving correctly on tight screens. */}
       <div className="ml-auto" />
-      <InstallFilesPwaButton />
       <StorageUsageIndicator />
     </div>
   );
