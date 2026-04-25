@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets as _secrets
 import urllib.parse
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from fastapi import (
@@ -53,7 +55,7 @@ from app.auth.audit import (
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
-from app.files.models import FileFolder, UserFile
+from app.files.models import FileFolder, FileShareGrant, FileShareLink, UserFile
 from app.files.quota import StorageQuota, get_quota
 from app.files.safety import (
     UnsafeUploadError,
@@ -71,14 +73,27 @@ from app.files.schemas import (
     BreadcrumbEntry,
     BrowseResponse,
     FileResponse,
+    FileSearchHit,
+    FileSearchResponse,
     FileUpdateRequest,
     FolderCreateRequest,
     FolderResponse,
     FolderUpdateRequest,
+    RecentFilesResponse,
     Scope,
+    ShareAccessMode,
+    ShareFolderBrowseResponse,
+    ShareLinkCreateRequest,
+    ShareLinkListResponse,
+    ShareLinkMetaResponse,
+    ShareLinkResponse,
+    ShareLinkUnlockRequest,
+    ShareLinkUnlockResponse,
     SourceContentResponse,
     SourceUpdateRequest,
+    StarredListResponse,
     StorageQuotaResponse,
+    TrashListResponse,
 )
 from app.files.system_folders import (
     folder_for_chat_upload,
@@ -129,6 +144,9 @@ def _folder_to_response(folder: FileFolder) -> FolderResponse:
         scope=_scope_of(folder.user_id),
         created_at=folder.created_at,
         system_kind=folder.system_kind,
+        updated_at=folder.updated_at,
+        starred_at=folder.starred_at,
+        trashed_at=folder.trashed_at,
     )
 
 
@@ -155,6 +173,9 @@ def _file_to_response(f: UserFile) -> FileResponse:
         size_bytes=f.size_bytes,
         scope=_scope_of(f.user_id),
         created_at=f.created_at,
+        updated_at=f.updated_at,
+        starred_at=f.starred_at,
+        trashed_at=f.trashed_at,
     )
 
 
@@ -317,6 +338,9 @@ async def browse(
         (FileFolder.parent_id == parent.id)
         if parent is not None
         else FileFolder.parent_id.is_(None),
+        # Drive stage 1: Trash rows are invisible to /browse. They
+        # only surface via /files/trash.
+        FileFolder.trashed_at.is_(None),
     )
     folder_rows = (
         (
@@ -335,6 +359,7 @@ async def browse(
         (UserFile.folder_id == parent.id)
         if parent is not None
         else UserFile.folder_id.is_(None),
+        UserFile.trashed_at.is_(None),
     )
     file_rows = (
         (
@@ -784,6 +809,30 @@ async def upload_file(
         delete_blob(rel_path)
         raise
     await db.refresh(row)
+
+    # ----- 9) FTS content extraction (best effort, synchronous) -----
+    # We run this *after* the commit so a failure here can't roll
+    # back the upload. Text-ish files and PDFs populate
+    # ``content_text`` so the Drive search index sees their
+    # contents; everything else stays NULL and only the filename
+    # side of ``content_tsv`` catches matches.
+    from app.files.extraction import extract_content_text
+
+    try:
+        content_text = extract_content_text(row)
+        if content_text is not None:
+            row.content_text = content_text
+            await db.commit()
+            await db.refresh(row)
+    except Exception:  # noqa: BLE001 — extraction must never break upload
+        logger.exception(
+            "FTS extraction failed for file %s; leaving content_text NULL",
+            row.id,
+        )
+        # Roll back any partial session state so the upload response
+        # still represents the clean persisted row.
+        await db.rollback()
+
     return _file_to_response(row)
 
 
@@ -1059,6 +1108,22 @@ async def update_file_source(
             detail=f"Source saved, PDF could not be overwritten: {e}",
         )
 
+    # Keep the FTS index in sync with the new source text. Update
+    # both the source row (plain text = the new markdown) and the
+    # rendered row (re-extract from the freshly-generated PDF bytes
+    # so searching finds words that only appeared post-render).
+    from app.files.extraction import extract_content_text, extract_from_text
+
+    try:
+        source.content_text = extract_from_text(new_text)
+        rendered.content_text = extract_content_text(rendered)
+    except Exception:  # noqa: BLE001 — FTS must never break the save
+        logger.exception(
+            "FTS re-extraction failed for source %s / rendered %s",
+            source.id,
+            rendered.id,
+        )
+
     await record_event(
         db,
         request=request,
@@ -1120,14 +1185,779 @@ async def update_file(
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_file(
     file_id: uuid.UUID,
+    purge: bool = Query(
+        False,
+        description=(
+            "Bypass the Drive Trash and permanently delete the row + "
+            "blob. Admin-only; ordinary callers always soft-trash."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
+    """Delete a file.
+
+    Drive stage 1 rewrites the default behaviour from *hard delete*
+    to *soft trash*: we stamp ``trashed_at`` on the row and leave
+    the blob on disk. The real delete happens when the user calls
+    ``DELETE /files/trash`` (empty trash) or restores + re-deletes
+    via the admin-only ``?purge=true`` flag.
+
+    Admins can still bypass the trash (useful for support / abuse
+    flows) by passing ``?purge=true``. Non-admin callers get a 403
+    if they try to use that flag, so a compromised frontend can't
+    skip the safety net.
+    """
     row = await _load_writable_file(db, file_id, user)
-    storage = row.storage_path
-    await db.delete(row)
+
+    if purge:
+        if user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="purge=true is admin-only",
+            )
+        storage = row.storage_path
+        await db.delete(row)
+        await db.commit()
+        delete_blob(storage)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # Default path: soft-trash. Idempotent — re-trashing a trashed
+    # row just refreshes the timestamp.
+    row.trashed_at = datetime.now(timezone.utc)
     await db.commit()
-    delete_blob(storage)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------
+# Drive stage 1 — Trash / Restore / Empty trash
+# --------------------------------------------------------------------
+async def _descendant_folder_ids(
+    db: AsyncSession, root_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Return ``root_id`` plus every descendant folder id (BFS).
+
+    We deliberately iterate in Python rather than trust an adjacency
+    CTE — the folder tree is bounded at 64 levels by the cycle check
+    in :func:`_would_create_cycle`, and the overwhelming majority of
+    Drive trees are < 10 levels deep. This keeps the query shape
+    identical to the plain ``DELETE /folders/{id}`` path we already
+    ship.
+    """
+    to_walk: list[uuid.UUID] = [root_id]
+    collected: list[uuid.UUID] = []
+    while to_walk:
+        frontier = to_walk
+        to_walk = []
+        collected.extend(frontier)
+        children = (
+            (
+                await db.execute(
+                    select(FileFolder.id).where(
+                        FileFolder.parent_id.in_(frontier)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        to_walk.extend(children)
+    return collected
+
+
+@router.post("/{file_id}/trash", response_model=FileResponse)
+async def trash_file(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Soft-delete a file.
+
+    Idempotent — trashing an already-trashed file just refreshes
+    the ``trashed_at`` timestamp so the "X deleted recently" list
+    feels correct.
+    """
+    row = await _load_writable_file(db, file_id, user)
+    row.trashed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(row)
+    return _file_to_response(row)
+
+
+@router.post("/{file_id}/restore", response_model=FileResponse)
+async def restore_file(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FileResponse:
+    row = await _load_writable_file(db, file_id, user)
+    row.trashed_at = None
+    await db.commit()
+    await db.refresh(row)
+    return _file_to_response(row)
+
+
+@router.post("/folders/{folder_id}/trash", response_model=FolderResponse)
+async def trash_folder(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FolderResponse:
+    """Soft-delete a folder and everything under it.
+
+    Cascades to every descendant folder + every file whose
+    ``folder_id`` is in that subtree. The cascade is run in a
+    single UPDATE so partial failure is impossible — either the
+    whole subtree lands in trash or nothing does.
+    """
+    from sqlalchemy import update
+
+    folder = await _load_writable_folder(db, folder_id, user)
+    _assert_not_system_folder(folder, "trash")
+
+    now = datetime.now(timezone.utc)
+    folder_ids = await _descendant_folder_ids(db, folder.id)
+
+    await db.execute(
+        update(FileFolder)
+        .where(FileFolder.id.in_(folder_ids))
+        .values(trashed_at=now)
+    )
+    await db.execute(
+        update(UserFile)
+        .where(UserFile.folder_id.in_(folder_ids))
+        .values(trashed_at=now)
+    )
+    await db.commit()
+    await db.refresh(folder)
+    return _folder_to_response(folder)
+
+
+@router.post("/folders/{folder_id}/restore", response_model=FolderResponse)
+async def restore_folder(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FolderResponse:
+    """Restore a folder subtree from the trash.
+
+    We only un-trash descendants whose ``trashed_at`` matches the
+    folder's ``trashed_at`` within a 5-second window — this keeps
+    files the user *individually* trashed earlier from getting
+    accidentally rescued when the parent folder is restored.
+    """
+    from sqlalchemy import update
+
+    folder = await _load_writable_folder(db, folder_id, user)
+    _assert_not_system_folder(folder, "restore")
+
+    if folder.trashed_at is None:
+        # Already live — idempotent.
+        return _folder_to_response(folder)
+
+    window_low = folder.trashed_at - timedelta(seconds=5)
+    window_high = folder.trashed_at + timedelta(seconds=5)
+    folder_ids = await _descendant_folder_ids(db, folder.id)
+
+    await db.execute(
+        update(FileFolder)
+        .where(
+            FileFolder.id.in_(folder_ids),
+            FileFolder.trashed_at.is_not(None),
+            FileFolder.trashed_at >= window_low,
+            FileFolder.trashed_at <= window_high,
+        )
+        .values(trashed_at=None)
+    )
+    await db.execute(
+        update(UserFile)
+        .where(
+            UserFile.folder_id.in_(folder_ids),
+            UserFile.trashed_at.is_not(None),
+            UserFile.trashed_at >= window_low,
+            UserFile.trashed_at <= window_high,
+        )
+        .values(trashed_at=None)
+    )
+    await db.commit()
+    await db.refresh(folder)
+    return _folder_to_response(folder)
+
+
+@router.get("/trash", response_model=TrashListResponse)
+async def list_trash(
+    scope: Scope = Query("mine"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TrashListResponse:
+    """List trashed folders + files in ``scope``.
+
+    Ordered by ``trashed_at DESC`` so the most-recently-trashed row
+    is first — matches the Drive UX. Admins see the shared-pool
+    trash when they pass ``scope=shared``.
+    """
+    folder_filter = and_(
+        _owner_filter(scope, user),
+        FileFolder.trashed_at.is_not(None),
+    )
+    folder_rows = (
+        (
+            await db.execute(
+                select(FileFolder)
+                .where(folder_filter)
+                .order_by(FileFolder.trashed_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    file_filter = and_(
+        _file_owner_filter(scope, user),
+        UserFile.trashed_at.is_not(None),
+    )
+    file_rows = (
+        (
+            await db.execute(
+                select(UserFile)
+                .where(file_filter)
+                .order_by(UserFile.trashed_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return TrashListResponse(
+        folders=[_folder_to_response(f) for f in folder_rows],
+        files=[_file_to_response(f) for f in file_rows],
+    )
+
+
+@router.delete("/trash", status_code=status.HTTP_204_NO_CONTENT)
+async def empty_trash(
+    scope: Scope = Query("mine"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Permanently delete every trashed row in ``scope``.
+
+    Blob deletion is best-effort and runs *after* the commit so a
+    half-failed unlink can't leave orphan DB rows. We intentionally
+    don't use a transactional two-phase commit here — a leftover
+    blob on disk is harmless (next upload reuses the bucket), but
+    a leftover DB row with no blob would 404 on download.
+    """
+    if scope == "shared" and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can empty the shared trash",
+        )
+
+    file_rows = (
+        (
+            await db.execute(
+                select(UserFile).where(
+                    _file_owner_filter(scope, user),
+                    UserFile.trashed_at.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    folder_rows = (
+        (
+            await db.execute(
+                select(FileFolder).where(
+                    _owner_filter(scope, user),
+                    FileFolder.trashed_at.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    storage_paths = [f.storage_path for f in file_rows]
+    for row in file_rows:
+        await db.delete(row)
+    for folder in folder_rows:
+        # System folders can't be trashed in the first place, but
+        # double-check before the nuke so a misfired admin flag
+        # can't accidentally delete the Chat Uploads folder.
+        if folder.system_kind is not None:
+            continue
+        await db.delete(folder)
+
+    await db.commit()
+
+    for p in storage_paths:
+        delete_blob(p)
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------
+# Drive stage 1 — Starred / Recent
+# --------------------------------------------------------------------
+@router.post("/{file_id}/star", response_model=FileResponse)
+async def star_file(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FileResponse:
+    row = await _load_writable_file(db, file_id, user)
+    if row.trashed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can't star a trashed file. Restore it first.",
+        )
+    if row.starred_at is None:
+        row.starred_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(row)
+    return _file_to_response(row)
+
+
+@router.delete("/{file_id}/star", response_model=FileResponse)
+async def unstar_file(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FileResponse:
+    row = await _load_writable_file(db, file_id, user)
+    row.starred_at = None
+    await db.commit()
+    await db.refresh(row)
+    return _file_to_response(row)
+
+
+@router.post("/folders/{folder_id}/star", response_model=FolderResponse)
+async def star_folder(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FolderResponse:
+    folder = await _load_writable_folder(db, folder_id, user)
+    if folder.trashed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can't star a trashed folder. Restore it first.",
+        )
+    if folder.starred_at is None:
+        folder.starred_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(folder)
+    return _folder_to_response(folder)
+
+
+@router.delete("/folders/{folder_id}/star", response_model=FolderResponse)
+async def unstar_folder(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FolderResponse:
+    folder = await _load_writable_folder(db, folder_id, user)
+    folder.starred_at = None
+    await db.commit()
+    await db.refresh(folder)
+    return _folder_to_response(folder)
+
+
+@router.get("/starred", response_model=StarredListResponse)
+async def list_starred(
+    scope: Scope = Query("mine"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StarredListResponse:
+    folder_filter = and_(
+        _owner_filter(scope, user),
+        FileFolder.starred_at.is_not(None),
+        FileFolder.trashed_at.is_(None),
+    )
+    folder_rows = (
+        (
+            await db.execute(
+                select(FileFolder)
+                .where(folder_filter)
+                .order_by(FileFolder.starred_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    file_filter = and_(
+        _file_owner_filter(scope, user),
+        UserFile.starred_at.is_not(None),
+        UserFile.trashed_at.is_(None),
+    )
+    file_rows = (
+        (
+            await db.execute(
+                select(UserFile)
+                .where(file_filter)
+                .order_by(UserFile.starred_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return StarredListResponse(
+        folders=[_folder_to_response(f) for f in folder_rows],
+        files=[_file_to_response(f) for f in file_rows],
+    )
+
+
+@router.get("/recent", response_model=RecentFilesResponse)
+async def list_recent(
+    scope: Scope = Query("mine"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RecentFilesResponse:
+    """Most-recently-updated files, optionally scoped to shared.
+
+    Relies on the ``updated_at`` trigger installed in migration
+    0035 — every row mutation bumps it, so this feed also captures
+    renames / moves / re-renders, not just fresh uploads.
+    """
+    file_filter = and_(
+        _file_owner_filter(scope, user),
+        UserFile.trashed_at.is_(None),
+    )
+    rows = (
+        (
+            await db.execute(
+                select(UserFile)
+                .where(file_filter)
+                .order_by(UserFile.updated_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return RecentFilesResponse(files=[_file_to_response(f) for f in rows])
+
+
+# --------------------------------------------------------------------
+# Drive stage 1 — Search (FTS)
+# --------------------------------------------------------------------
+@router.get("/search", response_model=FileSearchResponse)
+async def search_files(
+    q: str = Query(..., min_length=1, max_length=256),
+    scope: Scope = Query("mine"),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FileSearchResponse:
+    """Full-text search over the caller's files.
+
+    Uses ``websearch_to_tsquery`` so the query string accepts the
+    familiar quote-phrase / ``-exclude`` / ``OR`` operators a user
+    would already know from Google. ``ts_rank`` orders hits; the
+    setweight (filename A, content B) applied in migration 0036
+    means filename matches always beat content-only matches.
+
+    Trashed rows are excluded so the search feels like "find a live
+    file" instead of "find anything ever".
+    """
+    from sqlalchemy import literal, text as sql_text
+
+    tsquery = sql_text("websearch_to_tsquery('english', :q)").bindparams(q=q)
+    rank_expr = sql_text(
+        "ts_rank(content_tsv, websearch_to_tsquery('english', :q))"
+    ).bindparams(q=q)
+    headline_expr = sql_text(
+        "ts_headline('english', coalesce(content_text, filename), "
+        "websearch_to_tsquery('english', :q), "
+        "'StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8, "
+        "MaxFragments=1')"
+    ).bindparams(q=q)
+
+    tsv_match = sql_text("content_tsv @@ websearch_to_tsquery('english', :q)").bindparams(q=q)
+
+    stmt = (
+        select(UserFile, rank_expr.label("rank"), headline_expr.label("snippet"))
+        .where(
+            _file_owner_filter(scope, user),
+            UserFile.trashed_at.is_(None),
+            tsv_match,
+        )
+        .order_by(literal(None))  # placeholder, replaced below
+        .limit(limit)
+    )
+    # Replace the placeholder order_by with our raw rank expression.
+    stmt = stmt.order_by(None).order_by(
+        sql_text(
+            "ts_rank(content_tsv, websearch_to_tsquery('english', :q)) DESC"
+        ).bindparams(q=q)
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    hits: list[FileSearchHit] = []
+    # Collect parent folder names in one lookup for the breadcrumb
+    # strings — cheaper than one query per row.
+    folder_ids = [r[0].folder_id for r in rows if r[0].folder_id is not None]
+    folder_name_by_id: dict[uuid.UUID, str] = {}
+    if folder_ids:
+        folder_name_by_id = {
+            fid: name
+            for fid, name in (
+                await db.execute(
+                    select(FileFolder.id, FileFolder.name).where(
+                        FileFolder.id.in_(folder_ids)
+                    )
+                )
+            ).all()
+        }
+
+    for f, rank, snippet in rows:
+        breadcrumb = None
+        if f.folder_id and f.folder_id in folder_name_by_id:
+            breadcrumb = folder_name_by_id[f.folder_id]
+        hits.append(
+            FileSearchHit(
+                file=_file_to_response(f),
+                rank=float(rank or 0),
+                snippet=snippet,
+                breadcrumb=breadcrumb,
+            )
+        )
+
+    return FileSearchResponse(query=q, hits=hits)
+
+
+# --------------------------------------------------------------------
+# Drive stage 1 — Share links (owner side, authenticated)
+# --------------------------------------------------------------------
+def _link_to_response(link: FileShareLink) -> ShareLinkResponse:
+    return ShareLinkResponse(
+        id=link.id,
+        resource_type=link.resource_type,  # type: ignore[arg-type]
+        resource_id=link.resource_id,
+        token=link.token,
+        access_mode=link.access_mode,  # type: ignore[arg-type]
+        has_password=link.password_hash is not None,
+        expires_at=link.expires_at,
+        revoked_at=link.revoked_at,
+        access_count=link.access_count,
+        last_accessed_at=link.last_accessed_at,
+        created_at=link.created_at,
+        path=f"/s/{link.token}",
+    )
+
+
+async def _assert_share_owner_of_file(
+    db: AsyncSession, file_id: uuid.UUID, user: User
+) -> UserFile:
+    """Owner-only guard for share-link CRUD.
+
+    Shared-pool files can only be link-shared by admins. Private
+    pool files can only be link-shared by the owner. Project
+    collaborators *cannot* mint new links for a file someone else
+    pinned — that surface is deliberately owner-only so revocation
+    stays meaningful.
+    """
+    row = await db.get(UserFile, file_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+    if not _can_write(row.user_id, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the file owner can manage share links",
+        )
+    if row.trashed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can't share a trashed file. Restore it first.",
+        )
+    return row
+
+
+async def _assert_share_owner_of_folder(
+    db: AsyncSession, folder_id: uuid.UUID, user: User
+) -> FileFolder:
+    folder = await db.get(FileFolder, folder_id)
+    if folder is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found"
+        )
+    if not _can_write(folder.user_id, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the folder owner can manage share links",
+        )
+    if folder.trashed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can't share a trashed folder. Restore it first.",
+        )
+    return folder
+
+
+async def _create_share_link(
+    db: AsyncSession,
+    *,
+    resource_type: str,
+    resource_id: uuid.UUID,
+    created_by: uuid.UUID,
+    payload: ShareLinkCreateRequest,
+) -> FileShareLink:
+    from app.auth.utils import hash_password
+
+    expires_at: datetime | None = None
+    if payload.expires_in_days is not None:
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            days=payload.expires_in_days
+        )
+    password_hash = hash_password(payload.password) if payload.password else None
+
+    link = FileShareLink(
+        resource_type=resource_type,
+        resource_id=resource_id,
+        created_by=created_by,
+        # 32 bytes of CSPRNG entropy → ~256 bits. Unique constraint on
+        # the column + retries handled implicitly by the DB (we just
+        # raise on collision, which is astronomically improbable).
+        token=_secrets.token_urlsafe(32),
+        access_mode=payload.access_mode,
+        password_hash=password_hash,
+        expires_at=expires_at,
+    )
+    db.add(link)
+    await db.commit()
+    await db.refresh(link)
+    return link
+
+
+@router.post(
+    "/{file_id}/share-links",
+    response_model=ShareLinkResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_file_share_link(
+    file_id: uuid.UUID,
+    payload: ShareLinkCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ShareLinkResponse:
+    row = await _assert_share_owner_of_file(db, file_id, user)
+    link = await _create_share_link(
+        db,
+        resource_type="file",
+        resource_id=row.id,
+        created_by=user.id,
+        payload=payload,
+    )
+    return _link_to_response(link)
+
+
+@router.post(
+    "/folders/{folder_id}/share-links",
+    response_model=ShareLinkResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_folder_share_link(
+    folder_id: uuid.UUID,
+    payload: ShareLinkCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ShareLinkResponse:
+    folder = await _assert_share_owner_of_folder(db, folder_id, user)
+    _assert_not_system_folder(folder, "share")
+    link = await _create_share_link(
+        db,
+        resource_type="folder",
+        resource_id=folder.id,
+        created_by=user.id,
+        payload=payload,
+    )
+    return _link_to_response(link)
+
+
+async def _list_share_links(
+    db: AsyncSession,
+    *,
+    resource_type: str,
+    resource_id: uuid.UUID,
+) -> list[FileShareLink]:
+    rows = (
+        (
+            await db.execute(
+                select(FileShareLink)
+                .where(
+                    FileShareLink.resource_type == resource_type,
+                    FileShareLink.resource_id == resource_id,
+                )
+                .order_by(FileShareLink.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+@router.get(
+    "/{file_id}/share-links", response_model=ShareLinkListResponse
+)
+async def list_file_share_links(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ShareLinkListResponse:
+    row = await _assert_share_owner_of_file(db, file_id, user)
+    rows = await _list_share_links(
+        db, resource_type="file", resource_id=row.id
+    )
+    return ShareLinkListResponse(links=[_link_to_response(r) for r in rows])
+
+
+@router.get(
+    "/folders/{folder_id}/share-links", response_model=ShareLinkListResponse
+)
+async def list_folder_share_links(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ShareLinkListResponse:
+    folder = await _assert_share_owner_of_folder(db, folder_id, user)
+    rows = await _list_share_links(
+        db, resource_type="folder", resource_id=folder.id
+    )
+    return ShareLinkListResponse(links=[_link_to_response(r) for r in rows])
+
+
+@router.delete(
+    "/share-links/{link_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def revoke_share_link(
+    link_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    link = await db.get(FileShareLink, link_id)
+    if link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found"
+        )
+    # Only the link creator (or an admin) can revoke. We don't want
+    # a project-share collaborator revoking the link the owner
+    # minted.
+    if link.created_by != user.id and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the link creator can revoke it",
+        )
+    if link.revoked_at is None:
+        link.revoked_at = datetime.now(timezone.utc)
+        await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1157,7 +1987,11 @@ async def resolve_attachments(
     resolved: list[UserFile] = []
     for file_id in id_list:
         row = by_id.get(file_id)
-        if row is None or not _can_read(row.user_id, user):
+        # Drive stage 1: trashed rows are invisible to the chat
+        # attach flow. Treat them as "not found" rather than 403
+        # so a stale message-compose path gets a clear "Unknown
+        # attachment" error.
+        if row is None or row.trashed_at is not None or not _can_read(row.user_id, user):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown or inaccessible attachment: {file_id}",

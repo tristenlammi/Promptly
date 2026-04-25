@@ -7,24 +7,34 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatPage } from "@/pages/ChatPage";
 import { ComparePage } from "@/pages/ComparePage";
 import { CompareArchivePage } from "@/pages/CompareArchivePage";
-import { FilesPage } from "@/pages/FilesPage";
+import { FilesPage, SharedWithMePage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
+import { RecentFilesPage } from "@/pages/RecentFilesPage";
+import { SearchResultsPage } from "@/pages/SearchResultsPage";
 import { SetupPage } from "@/pages/SetupPage";
+import { ShareLinkLandingPage } from "@/pages/ShareLinkLandingPage";
+import { StarredFilesPage } from "@/pages/StarredFilesPage";
 import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
 import { StudyPage } from "@/pages/StudyPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
 import { StudyTopicPage } from "@/pages/StudyTopicPage";
+import { TrashPage } from "@/pages/TrashPage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
+import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
 import { useAuthStore } from "@/store/authStore";
 import { useModelStore } from "@/store/modelStore";
 import { applyTheme } from "@/store/themeStore";
 
 export default function App() {
   useAuthBootstrap();
+  // Swap the active web manifest on /files* so the browser install
+  // prompt targets the standalone "Promptly Files" PWA identity,
+  // keeping the main Promptly (chat) install separate.
+  useDrivePwaManifest();
   const status = useAuthStore((s) => s.status);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
@@ -104,6 +114,11 @@ export default function App() {
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Public share links must work for anonymous visitors.
+            The landing page itself enforces any password / sign-in
+            requirements via the backend, so we let the route
+            through without the global redirect-to-login. */}
+        <Route path="/s/:token" element={<ShareLinkLandingPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -136,6 +151,11 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Navigate to="/chat" replace />} />
       <Route path="/setup" element={<Navigate to="/chat" replace />} />
+      {/* Share-link landing page lives OUTSIDE AppLayout so it has
+          no chat sidebar, no auth chrome, and no Promptly-branded
+          nav — just the shared file/folder. Mounted above the
+          AppLayout block so it wins the route match. */}
+      <Route path="/s/:token" element={<ShareLinkLandingPage />} />
       <Route element={<AppLayout />}>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatPage />} />
@@ -192,7 +212,15 @@ export default function App() {
             )
           }
         />
+        {/* Drive surfaces. Every one has its own deep-linkable URL
+            — prereq for the stage-3 "Promptly Drive" PWA split. */}
         <Route path="/files" element={<FilesPage />} />
+        <Route path="/files/folder/:folderId" element={<FilesPage />} />
+        <Route path="/files/recent" element={<RecentFilesPage />} />
+        <Route path="/files/starred" element={<StarredFilesPage />} />
+        <Route path="/files/shared" element={<SharedWithMePage />} />
+        <Route path="/files/trash" element={<TrashPage />} />
+        <Route path="/files/search" element={<SearchResultsPage />} />
         <Route path="/account/security" element={<AccountSecurityPage />} />
         <Route
           path="/admin"

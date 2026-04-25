@@ -1,7 +1,9 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ChevronRight,
   Download,
+  Eye,
   File as FileIcon,
   FileText,
   Folder as FolderClosedIcon,
@@ -13,40 +15,52 @@ import {
   Loader2,
   MoreVertical,
   Pencil,
+  Share2,
   Sparkles,
+  Star,
   Trash2,
   Upload,
   Users,
 } from "lucide-react";
 
 import {
-  filesApi,
   type FileItem,
   type FileScope,
   type FolderItem,
   type SystemFolderKind,
 } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
+import { DriveSubNav } from "@/components/files/DriveSubNav";
+import { FilePreviewModal } from "@/components/files/FilePreviewModal";
+import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
+import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
+import {
+  downloadAuthed,
+  extractError,
+  humanSize,
+} from "@/components/files/helpers";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import {
   useBrowseFiles,
   useCreateFolder,
-  useDeleteFile,
-  useDeleteFolder,
   useMoveFile,
   useMoveFolder,
   useRenameFile,
   useRenameFolder,
-  useUploadFile,
+  useStarFile,
+  useStarFolder,
+  useTrashFile,
+  useTrashFolder,
+  useUnstarFile,
+  useUnstarFolder,
 } from "@/hooks/useFiles";
 import { useAuthStore } from "@/store/authStore";
-import { apiClient } from "@/api/client";
+import { useUploadStore } from "@/store/uploadStore";
 import { cn } from "@/utils/cn";
 
-// Drag-and-drop payload types. Values are entity ids (UUID strings).
 const DRAG_FILE = "application/x-promptly-file";
 const DRAG_FOLDER = "application/x-promptly-folder";
 const DRAG_SOURCE_PARENT = "application/x-promptly-source-parent";
@@ -77,7 +91,6 @@ function readDragPayload(dt: DataTransfer): DragPayload | null {
   return null;
 }
 
-/** Cheap check usable in dragover, where dataTransfer.getData() is empty. */
 function dragHasItem(dt: DataTransfer): boolean {
   const types = Array.from(dt.types || []);
   return types.includes(DRAG_FILE) || types.includes(DRAG_FOLDER);
@@ -91,19 +104,47 @@ interface MoveModalState {
   currentParentId: string | null;
 }
 
-/** Result of a drop attempt. The page-level handler reports back so callers
- * can surface an error (e.g. backend rejected because of cycle). */
 interface DropOutcome {
   ok: boolean;
   error?: string;
 }
 
-export function FilesPage() {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-  const [scope, setScope] = useState<FileScope>("mine");
-  const [folderId, setFolderId] = useState<string | null>(null);
+interface FilesPageProps {
+  /** Lock the page to a specific scope — used by the ``/files/shared``
+   *  deep link, which displays only the shared pool. */
+  forcedScope?: FileScope;
+  /** Display title / subtitle overrides. */
+  title?: string;
+  subtitle?: string;
+}
 
-  const { data, isLoading, isError, error, refetch } = useBrowseFiles(scope, folderId);
+export function FilesPage({
+  forcedScope,
+  title = "Files",
+  subtitle = "Upload and organise files you can attach to any chat.",
+}: FilesPageProps = {}) {
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const navigate = useNavigate();
+  const routeParams = useParams<{ folderId?: string }>();
+  const routeFolderId = routeParams.folderId ?? null;
+
+  const [scope, setScope] = useState<FileScope>(forcedScope ?? "mine");
+  const [folderId, setFolderId] = useState<string | null>(routeFolderId);
+
+  // Sync scope + folderId whenever the caller's ``forcedScope`` prop
+  // or the URL route param changes. Without this, clicking a sidebar
+  // link after navigating into a subfolder wouldn't reset the view.
+  useEffect(() => {
+    if (forcedScope && scope !== forcedScope) setScope(forcedScope);
+  }, [forcedScope, scope]);
+  useEffect(() => {
+    setFolderId(routeFolderId);
+  }, [routeFolderId]);
+
+  const { data, isLoading, isError, error, refetch } = useBrowseFiles(
+    scope,
+    folderId
+  );
 
   const crumbs = data?.breadcrumbs ?? [];
   const writable = data?.writable ?? false;
@@ -113,26 +154,42 @@ export function FilesPage() {
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
 
+  // Drive stage 1 — preview / share / star state.
+  const [preview, setPreview] = useState<FileItem | null>(null);
+  const [shareFor, setShareFor] = useState<
+    { kind: "file" | "folder"; id: string; name: string } | null
+  >(null);
+
+  const navigateToFolder = useCallback(
+    (id: string | null) => {
+      // Keep URLs deep-linkable: sidebar / Drive PWA start_url both
+      // depend on every folder having its own path. Within the same
+      // top-level view we just swap the route so history works.
+      if (id) navigate(`/files/folder/${id}`);
+      else navigate("/files");
+    },
+    [navigate]
+  );
+
   const changeScope = (next: FileScope) => {
-    if (next === scope) return;
+    if (forcedScope || next === scope) return;
     setScope(next);
-    setFolderId(null);
     setDropError(null);
+    // Changing scopes always drops you back to the root of the new
+    // scope, otherwise the URL's folder id belongs to the *old*
+    // scope and the backend will 404 it.
+    navigateToFolder(null);
   };
 
-  /** Drop dispatcher used by folder rows and breadcrumbs. Returns whether the
-   * drop resulted in a real move (so callers can clear hover state etc.). */
   const handleDropOnto = useCallback(
     async (
       targetFolderId: string | null,
       payload: DragPayload
     ): Promise<DropOutcome> => {
       if (!writable) return { ok: false };
-      // Same-parent drop is a no-op; suppress noise.
       if (payload.sourceParent === (targetFolderId ?? "")) {
         return { ok: false };
       }
-      // Folder dropped on itself.
       if (payload.kind === "folder" && payload.id === targetFolderId) {
         return { ok: false };
       }
@@ -165,38 +222,45 @@ export function FilesPage() {
     setMoveModal(s);
   }, []);
 
+  const visibleFiles = data?.files ?? [];
+
   return (
     <>
       <TopNav
-        title="Files"
-        subtitle="Upload and organise files you can attach to any chat."
+        title={title}
+        subtitle={subtitle}
+        actions={<FilesTopNavSearch />}
       />
+      <DriveSubNav />
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-6 py-6">
-          {/* Scope tabs */}
-          <div className="mb-4 flex items-center gap-1 rounded-input border border-[var(--border)] bg-[var(--surface)] p-1">
-            <ScopeTab
-              active={scope === "mine"}
-              onClick={() => changeScope("mine")}
-              icon={<FolderClosedIcon className="h-3.5 w-3.5" />}
-              label="My files"
-            />
-            <ScopeTab
-              active={scope === "shared"}
-              onClick={() => changeScope("shared")}
-              icon={<Users className="h-3.5 w-3.5" />}
-              label={isAdmin ? "Shared pool" : "Shared"}
-              hint={!isAdmin ? "read-only" : undefined}
-            />
-          </div>
+        <div className="mx-auto w-full max-w-4xl px-4 py-4 md:px-6 md:py-6">
+          {!forcedScope && (
+            <div className="mb-4 flex items-center gap-1 rounded-input border border-[var(--border)] bg-[var(--surface)] p-1">
+              <ScopeTab
+                active={scope === "mine"}
+                onClick={() => changeScope("mine")}
+                icon={<FolderClosedIcon className="h-3.5 w-3.5" />}
+                label="My files"
+              />
+              <ScopeTab
+                active={scope === "shared"}
+                onClick={() => changeScope("shared")}
+                icon={<Users className="h-3.5 w-3.5" />}
+                label={isAdmin ? "Shared pool" : "Shared"}
+                hint={!isAdmin ? "read-only" : undefined}
+              />
+            </div>
+          )}
 
-          {/* Breadcrumbs + actions */}
-          <div className="mb-3 flex items-center justify-between gap-3">
+          {/* Breadcrumbs + folder actions: stack vertically on phones
+              so the breadcrumb trail gets its own line and the Upload
+              button stays full-width + tap-sized. */}
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
             <Breadcrumbs
               crumbs={crumbs}
               scope={scope}
-              onNavigate={setFolderId}
+              onNavigate={navigateToFolder}
               writable={writable}
               onDrop={handleDropOnto}
             />
@@ -248,9 +312,11 @@ export function FilesPage() {
               data={data}
               scope={scope}
               currentFolderId={folderId}
-              onOpenFolder={setFolderId}
+              onOpenFolder={navigateToFolder}
               onDropOnFolder={handleDropOnto}
               onOpenMove={openMoveModal}
+              onPreview={setPreview}
+              onShare={setShareFor}
             />
           )}
         </div>
@@ -283,6 +349,24 @@ export function FilesPage() {
           }}
         />
       )}
+
+      <FilePreviewModal
+        open={!!preview}
+        file={preview}
+        siblings={visibleFiles}
+        onSelect={setPreview}
+        onClose={() => setPreview(null)}
+        onShare={(f) =>
+          setShareFor({ kind: "file", id: f.id, name: f.filename })
+        }
+        onToggleStar={undefined}
+      />
+
+      <ShareLinkDialog
+        open={!!shareFor}
+        resource={shareFor}
+        onClose={() => setShareFor(null)}
+      />
     </>
   );
 }
@@ -448,45 +532,54 @@ function FolderActions({
 }) {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const createFolder = useCreateFolder();
-  const uploadFile = useUploadFile();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const startUploads = useUploadStore((s) => s.startUploads);
 
-  const handlePickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file
-    if (!file) return;
-    setUploadError(null);
-    try {
-      await uploadFile.mutateAsync({ scope, file, folderId: parentId });
-      onChanged();
-    } catch (err: unknown) {
-      setUploadError(extractError(err));
-    }
+  // Multi-file: picking five files kicks off five uploads that
+  // progress in parallel in the background panel. We intentionally
+  // don't ``await`` anything here — the store owns the lifetime now,
+  // so the Upload button stays snappy even on very large batches.
+  const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    e.target.value = "";
+    if (!selected || selected.length === 0) return;
+    startUploads({
+      files: Array.from(selected),
+      scope,
+      folderId: parentId,
+    });
+    // ``onChanged`` still fires so the current folder view refetches
+    // immediately; completed uploads will pop in as the queue drains.
+    onChanged();
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    // ``grid grid-cols-2`` on phones gives each button half the row so
+    // the Upload CTA gets a proper tap target without overflowing. On
+    // ``sm+`` we revert to the inline desktop layout.
+    <div className="grid shrink-0 grid-cols-2 items-center gap-2 sm:flex">
       <Button
         size="sm"
         variant="secondary"
         leftIcon={<FolderPlus className="h-3.5 w-3.5" />}
         onClick={() => setShowNewFolder(true)}
+        className="w-full sm:w-auto"
       >
         New folder
       </Button>
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         className="hidden"
-        onChange={handlePickFile}
+        onChange={handlePickFiles}
       />
       <Button
         size="sm"
         variant="primary"
         leftIcon={<Upload className="h-3.5 w-3.5" />}
         onClick={() => fileInputRef.current?.click()}
-        loading={uploadFile.isPending}
+        className="w-full sm:w-auto"
       >
         Upload
       </Button>
@@ -500,12 +593,6 @@ function FolderActions({
           setShowNewFolder(false);
         }}
       />
-
-      {uploadError && (
-        <div className="absolute right-6 top-28 rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-          {uploadError}
-        </div>
-      )}
     </div>
   );
 }
@@ -586,6 +673,8 @@ function ContentGrid({
   onOpenFolder,
   onDropOnFolder,
   onOpenMove,
+  onPreview,
+  onShare,
 }: {
   data: { folders: FolderItem[]; files: FileItem[]; writable: boolean };
   scope: FileScope;
@@ -596,6 +685,8 @@ function ContentGrid({
     payload: DragPayload
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
+  onPreview: (file: FileItem) => void;
+  onShare: (r: { kind: "file" | "folder"; id: string; name: string }) => void;
 }) {
   const empty = data.folders.length === 0 && data.files.length === 0;
   if (empty) {
@@ -611,10 +702,6 @@ function ContentGrid({
     );
   }
 
-  // Pin system folders to the top of the list — they're auto-created
-  // and used by the chat upload flow, so it's nice for users to see
-  // them first. Within each group keep the server's order (already
-  // stable by name).
   const sortedFolders = [...data.folders].sort((a, b) => {
     const aSys = a.system_kind ? 0 : 1;
     const bSys = b.system_kind ? 0 : 1;
@@ -634,6 +721,9 @@ function ContentGrid({
             onOpen={() => onOpenFolder(f.id)}
             onDropOnFolder={onDropOnFolder}
             onOpenMove={onOpenMove}
+            onShare={() =>
+              onShare({ kind: "folder", id: f.id, name: f.name })
+            }
           />
         ))}
         {data.files.map((f) => (
@@ -643,6 +733,10 @@ function ContentGrid({
             scope={scope}
             writable={data.writable}
             onOpenMove={onOpenMove}
+            onPreview={() => onPreview(f)}
+            onShare={() =>
+              onShare({ kind: "file", id: f.id, name: f.filename })
+            }
           />
         ))}
       </ul>
@@ -658,6 +752,7 @@ function FolderRow({
   onOpen,
   onDropOnFolder,
   onOpenMove,
+  onShare,
 }: {
   folder: FolderItem;
   scope: FileScope;
@@ -669,6 +764,7 @@ function FolderRow({
     payload: DragPayload
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
+  onShare: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -676,53 +772,72 @@ function FolderRow({
     open: false,
     value: folder.name,
   });
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [over, setOver] = useState(false);
   const renameFolder = useRenameFolder();
-  const deleteFolder = useDeleteFolder();
+  const trashFolder = useTrashFolder();
+  const starFolder = useStarFolder();
+  const unstarFolder = useUnstarFolder();
 
-  // System folders are still drop targets and openable, but the
-  // routing helpers depend on them existing forever — so the user
-  // can't rename/delete/drag them.
   const isSystem = folder.system_kind != null;
   const userCanMutate = writable && !isSystem;
 
+  const mutationItems: ContextMenuItem[] = isSystem
+    ? []
+    : [
+        folder.starred_at
+          ? {
+              icon: <Star className="h-3.5 w-3.5" />,
+              label: "Unstar",
+              onClick: () => unstarFolder.mutate({ id: folder.id, scope }),
+              disabled: !writable,
+            }
+          : {
+              icon: <Star className="h-3.5 w-3.5" />,
+              label: "Star",
+              onClick: () => starFolder.mutate({ id: folder.id, scope }),
+              disabled: !writable,
+            },
+        {
+          icon: <Share2 className="h-3.5 w-3.5" />,
+          label: "Share",
+          onClick: onShare,
+          disabled: !writable,
+        },
+        {
+          icon: <Pencil className="h-3.5 w-3.5" />,
+          label: "Rename",
+          onClick: () => setRename({ open: true, value: folder.name }),
+          disabled: !writable,
+        },
+        {
+          icon: <FolderInput className="h-3.5 w-3.5" />,
+          label: "Move to…",
+          onClick: () =>
+            onOpenMove({
+              open: true,
+              kind: "folder",
+              id: folder.id,
+              name: folder.name,
+              currentParentId: folder.parent_id,
+            }),
+          disabled: !writable,
+        },
+        {
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          label: "Trash",
+          destructive: true,
+          onClick: () => setTrashOpen(true),
+          disabled: !writable,
+        },
+      ];
   const items: ContextMenuItem[] = [
     {
       icon: <FolderClosedIcon className="h-3.5 w-3.5" />,
       label: "Open",
       onClick: onOpen,
     },
-    ...(isSystem
-      ? []
-      : [
-          {
-            icon: <Pencil className="h-3.5 w-3.5" />,
-            label: "Rename",
-            onClick: () => setRename({ open: true, value: folder.name }),
-            disabled: !writable,
-          },
-          {
-            icon: <FolderInput className="h-3.5 w-3.5" />,
-            label: "Move to…",
-            onClick: () =>
-              onOpenMove({
-                open: true,
-                kind: "folder",
-                id: folder.id,
-                name: folder.name,
-                currentParentId: folder.parent_id,
-              }),
-            disabled: !writable,
-          },
-          {
-            icon: <Trash2 className="h-3.5 w-3.5" />,
-            label: "Delete",
-            destructive: true,
-            onClick: () => setDeleteOpen(true),
-            disabled: !writable,
-          },
-        ]),
+    ...mutationItems,
   ];
 
   const allowDrop = (e: React.DragEvent) => {
@@ -781,6 +896,9 @@ function FolderRow({
       >
         <SystemAwareFolderIcon kind={folder.system_kind} />
         <span className="truncate text-sm font-medium">{folder.name}</span>
+        {folder.starred_at && (
+          <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
+        )}
         {isSystem && (
           <span className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
             system
@@ -797,31 +915,7 @@ function FolderRow({
         <RowMenu
           open={menuOpen}
           onOpenChange={setMenuOpen}
-          items={[
-            {
-              icon: <Pencil className="h-3.5 w-3.5" />,
-              label: "Rename",
-              onClick: () => setRename({ open: true, value: folder.name }),
-            },
-            {
-              icon: <FolderInput className="h-3.5 w-3.5" />,
-              label: "Move to…",
-              onClick: () =>
-                onOpenMove({
-                  open: true,
-                  kind: "folder",
-                  id: folder.id,
-                  name: folder.name,
-                  currentParentId: folder.parent_id,
-                }),
-            },
-            {
-              icon: <Trash2 className="h-3.5 w-3.5" />,
-              label: "Delete",
-              destructive: true,
-              onClick: () => setDeleteOpen(true),
-            },
-          ]}
+          items={mutationItems}
         />
       )}
 
@@ -846,14 +940,15 @@ function FolderRow({
       />
 
       <ConfirmModal
-        open={deleteOpen}
-        title="Delete folder?"
-        description={`“${folder.name}” and everything inside it will be removed permanently.`}
-        confirmLabel="Delete folder"
-        onClose={() => setDeleteOpen(false)}
+        open={trashOpen}
+        title="Move folder to trash?"
+        description={`"${folder.name}" and everything inside it will be moved to the trash. You can restore it from the Trash view.`}
+        confirmLabel="Move to trash"
+        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
+        onClose={() => setTrashOpen(false)}
         onConfirm={async () => {
-          await deleteFolder.mutateAsync({ id: folder.id, scope });
-          setDeleteOpen(false);
+          await trashFolder.mutateAsync({ id: folder.id, scope });
+          setTrashOpen(false);
         }}
       />
     </li>
@@ -865,11 +960,15 @@ function FileRow({
   scope,
   writable,
   onOpenMove,
+  onPreview,
+  onShare,
 }: {
   file: FileItem;
   scope: FileScope;
   writable: boolean;
   onOpenMove: (s: MoveModalState) => void;
+  onPreview: () => void;
+  onShare: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -877,15 +976,41 @@ function FileRow({
     open: false,
     value: file.filename,
   });
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const renameFile = useRenameFile();
-  const deleteFile = useDeleteFile();
+  const trashFile = useTrashFile();
+  const starFile = useStarFile();
+  const unstarFile = useUnstarFile();
 
-  const items: ContextMenuItem[] = [
+  const mutationItems: ContextMenuItem[] = [
+    {
+      icon: <Eye className="h-3.5 w-3.5" />,
+      label: "Preview",
+      onClick: onPreview,
+    },
     {
       icon: <Download className="h-3.5 w-3.5" />,
       label: "Download",
       onClick: () => downloadAuthed(file),
+    },
+    file.starred_at
+      ? {
+          icon: <Star className="h-3.5 w-3.5" />,
+          label: "Unstar",
+          onClick: () => unstarFile.mutate({ id: file.id, scope }),
+          disabled: !writable,
+        }
+      : {
+          icon: <Star className="h-3.5 w-3.5" />,
+          label: "Star",
+          onClick: () => starFile.mutate({ id: file.id, scope }),
+          disabled: !writable,
+        },
+    {
+      icon: <Share2 className="h-3.5 w-3.5" />,
+      label: "Share",
+      onClick: onShare,
+      disabled: !writable,
     },
     {
       icon: <Pencil className="h-3.5 w-3.5" />,
@@ -908,9 +1033,9 @@ function FileRow({
     },
     {
       icon: <Trash2 className="h-3.5 w-3.5" />,
-      label: "Delete",
+      label: "Trash",
       destructive: true,
-      onClick: () => setDeleteOpen(true),
+      onClick: () => setTrashOpen(true),
       disabled: !writable,
     },
   ];
@@ -928,21 +1053,30 @@ function FileRow({
         e.preventDefault();
         setCtx({ x: e.clientX, y: e.clientY });
       }}
+      onDoubleClick={onPreview}
       className={cn(
         "group flex items-center gap-3 px-4 py-3 transition",
         "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
         writable && "cursor-grab"
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <button
+        onClick={onPreview}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
         <FileTypeIcon mime={file.mime_type} />
         <div className="min-w-0">
-          <div className="truncate text-sm">{file.filename}</div>
+          <div className="flex items-center gap-1.5 truncate text-sm">
+            <span className="truncate">{file.filename}</span>
+            {file.starred_at && (
+              <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
+            )}
+          </div>
           <div className="text-xs text-[var(--text-muted)]">
             {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
           </div>
         </div>
-      </div>
+      </button>
 
       <button
         onClick={() => downloadAuthed(file)}
@@ -957,31 +1091,7 @@ function FileRow({
         <RowMenu
           open={menuOpen}
           onOpenChange={setMenuOpen}
-          items={[
-            {
-              icon: <Pencil className="h-3.5 w-3.5" />,
-              label: "Rename",
-              onClick: () => setRename({ open: true, value: file.filename }),
-            },
-            {
-              icon: <FolderInput className="h-3.5 w-3.5" />,
-              label: "Move to…",
-              onClick: () =>
-                onOpenMove({
-                  open: true,
-                  kind: "file",
-                  id: file.id,
-                  name: file.filename,
-                  currentParentId: file.folder_id,
-                }),
-            },
-            {
-              icon: <Trash2 className="h-3.5 w-3.5" />,
-              label: "Delete",
-              destructive: true,
-              onClick: () => setDeleteOpen(true),
-            },
-          ]}
+          items={mutationItems.filter((it) => !it.disabled)}
         />
       )}
 
@@ -989,7 +1099,7 @@ function FileRow({
         open={ctx !== null}
         x={ctx?.x ?? 0}
         y={ctx?.y ?? 0}
-        items={items}
+        items={mutationItems}
         onClose={() => setCtx(null)}
       />
 
@@ -1006,14 +1116,15 @@ function FileRow({
       />
 
       <ConfirmModal
-        open={deleteOpen}
-        title="Delete file?"
-        description={`“${file.filename}” will be removed permanently.`}
-        confirmLabel="Delete file"
-        onClose={() => setDeleteOpen(false)}
+        open={trashOpen}
+        title="Move file to trash?"
+        description={`"${file.filename}" will be moved to the trash. You can restore it from the Trash view.`}
+        confirmLabel="Move to trash"
+        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
+        onClose={() => setTrashOpen(false)}
         onConfirm={async () => {
-          await deleteFile.mutateAsync({ id: file.id, scope });
-          setDeleteOpen(false);
+          await trashFile.mutateAsync({ id: file.id, scope });
+          setTrashOpen(false);
         }}
       />
     </li>
@@ -1066,13 +1177,6 @@ function FileTypeIcon({ mime }: { mime: string }) {
   return <FileIcon className="h-5 w-5 shrink-0 text-[var(--text-muted)]" />;
 }
 
-interface RowMenuItem {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  destructive?: boolean;
-}
-
 function RowMenu({
   open,
   onOpenChange,
@@ -1080,7 +1184,7 @@ function RowMenu({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: RowMenuItem[];
+  items: ContextMenuItem[];
 }) {
   return (
     <div className="relative shrink-0">
@@ -1097,10 +1201,10 @@ function RowMenu({
             className="fixed inset-0 z-10"
             onClick={() => onOpenChange(false)}
           />
-          <div className="absolute right-0 top-9 z-20 w-36 overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-lg">
-            {items.map((it) => (
+          <div className="absolute right-0 top-9 z-20 w-44 overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-lg">
+            {items.map((it, i) => (
               <button
-                key={it.label}
+                key={`${it.label}-${i}`}
                 onClick={() => {
                   onOpenChange(false);
                   it.onClick();
@@ -1198,6 +1302,7 @@ function ConfirmModal({
   title,
   description,
   confirmLabel,
+  confirmIcon,
   onConfirm,
   onClose,
 }: {
@@ -1205,6 +1310,7 @@ function ConfirmModal({
   title: string;
   description: string;
   confirmLabel: string;
+  confirmIcon?: React.ReactNode;
   onConfirm: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -1231,7 +1337,13 @@ function ConfirmModal({
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="danger" size="sm" onClick={run} loading={busy}>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={run}
+            loading={busy}
+            leftIcon={confirmIcon}
+          >
             {confirmLabel}
           </Button>
         </>
@@ -1243,36 +1355,19 @@ function ConfirmModal({
   );
 }
 
-function humanSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
-}
-
-/** Authenticated download: Axios adds the Bearer token, we turn the blob into
- * a temporary object URL the browser can save. */
-async function downloadAuthed(file: FileItem): Promise<void> {
-  const res = await apiClient.get<Blob>(filesApi.downloadUrl(file.id).replace(/^\/api/, ""), {
-    responseType: "blob",
-  });
-  const url = window.URL.createObjectURL(res.data);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = file.filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoke on next tick so Safari has a chance to start the download.
-  setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+/**
+ * Thin wrapper used by the ``/files/shared`` route — behaves like
+ * ``FilesPage`` but pins the scope to "shared" and updates the
+ * chrome to reflect that only read-only shared-pool items live
+ * here. Keeping this as a wrapper means every Drive surface (incl.
+ * trash/star/recent) keeps one canonical implementation.
+ */
+export function SharedWithMePage() {
+  return (
+    <FilesPage
+      forcedScope="shared"
+      title="Shared"
+      subtitle="Files shared with you by other Promptly users."
+    />
+  );
 }

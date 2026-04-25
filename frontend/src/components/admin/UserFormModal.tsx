@@ -68,7 +68,12 @@ export function UserFormModal({
   // input is distinguishable from "0" (which is a valid cap meaning
   // "this user gets nothing"). The submit handler folds these back
   // into number | null when shipping to the server.
-  const [storageCapMb, setStorageCapMb] = useState("");
+  //
+  // Storage is captured in GB with up to two decimal places — the
+  // canonical unit for personal cloud caps (10 GB / 50 GB / 1 TB
+  // all read naturally) while still letting an admin type "0.5" for
+  // a 512 MB allocation without breaking out of the field's units.
+  const [storageCapGb, setStorageCapGb] = useState("");
   const [dailyTokens, setDailyTokens] = useState("");
   const [monthlyTokens, setMonthlyTokens] = useState("");
 
@@ -85,10 +90,10 @@ export function UserFormModal({
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
       setPicked(new Set(user.allowed_models ?? []));
-      setStorageCapMb(
+      setStorageCapGb(
         user.storage_cap_bytes === null
           ? ""
-          : String(Math.round(user.storage_cap_bytes / (1024 * 1024)))
+          : formatGb(user.storage_cap_bytes)
       );
       setDailyTokens(
         user.daily_token_budget === null
@@ -107,7 +112,7 @@ export function UserFormModal({
       setRole("user");
       setFullAccess(true);
       setPicked(new Set());
-      setStorageCapMb("");
+      setStorageCapGb("");
       setDailyTokens("");
       setMonthlyTokens("");
     }
@@ -155,10 +160,7 @@ export function UserFormModal({
       const n = Math.floor(Number(trimmed));
       return Number.isFinite(n) && n >= 0 ? n : null;
     };
-    const storageBytes =
-      storageCapMb.trim() === ""
-        ? null
-        : Math.max(0, Math.floor(Number(storageCapMb))) * 1024 * 1024;
+    const storageBytes = parseGbToBytes(storageCapGb);
 
     try {
       await onSubmit({
@@ -280,16 +282,18 @@ export function UserFormModal({
           </span>
           <p className="mb-2 text-[11px] text-[var(--text-muted)]">
             Leave a field blank to inherit the org-wide default. Enter
-            0 to revoke without disabling. Storage is in megabytes; token
-            budgets count prompt + completion tokens combined.
+            0 to revoke without disabling. Storage is in gigabytes
+            (decimals allowed, e.g. 0.5 for 512 MB); token budgets
+            count prompt + completion tokens combined.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <LabeledInput
-              label="Storage (MB)"
+              label="Storage (GB)"
               type="number"
-              value={storageCapMb}
-              onChange={setStorageCapMb}
+              value={storageCapGb}
+              onChange={setStorageCapGb}
               min={0}
+              step={0.1}
               placeholder="org default"
               autoComplete="off"
             />
@@ -429,6 +433,35 @@ export function UserFormModal({
       </form>
     </Modal>
   );
+}
+
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+/**
+ * Render a byte count as a GB string suitable for the input field.
+ * - Whole GB values render without a trailing ".00" (e.g. "10", not "10.00").
+ * - Sub-GB values round to two decimal places so the field doesn't
+ *   display noise like "0.48828125" when the stored value is 500 MB.
+ */
+function formatGb(bytes: number): string {
+  const gb = bytes / BYTES_PER_GB;
+  if (gb === 0) return "0";
+  const rounded = Math.round(gb * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+/**
+ * Parse a GB string from the input field back into bytes.
+ * - "" → null (revert to org-wide default).
+ * - Anything non-numeric / negative also falls through to null so an
+ *   accidental typo doesn't silently wipe a user's cap to 0.
+ */
+function parseGbToBytes(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * BYTES_PER_GB);
 }
 
 function LabeledInput({

@@ -9,9 +9,10 @@ Folders form a tree via `parent_id`. Files live either at a folder's root
 """
 from __future__ import annotations
 
+import datetime as _dt
 import uuid
 
-from sqlalchemy import BigInteger, ForeignKey, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -36,6 +37,28 @@ class FileFolder(UUIDPKMixin, CreatedAtMixin, Base):
     # See ``app.files.system_folders.SystemKind`` for the enum.
     system_kind: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
+    )
+    # Soft-delete pointer for the Drive "Trash" view. NULL = live, any
+    # non-null timestamp means the row is in the trash and should be
+    # filtered out of normal browse results. The empty-trash endpoint
+    # walks rows where this is non-null and does the real DB + blob
+    # delete. Added in migration ``0035_files_trash_starred``.
+    trashed_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Per-user "Starred" flag; non-null = pinned in the Starred view,
+    # value is when it was starred. Also used as a tiebreaker in the
+    # default folder ordering.
+    starred_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Drives the Recent view. Maintained by the ``files_set_updated_at``
+    # trigger so we don't have to remember to bump it on every
+    # mutation path.
+    updated_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
     )
 
     def __repr__(self) -> str:
@@ -85,6 +108,103 @@ class UserFile(UUIDPKMixin, CreatedAtMixin, Base):
         nullable=True,
         index=True,
     )
+    # --- Drive stage 1 additions (migration 0035) ---
+    # See ``FileFolder`` for semantics. Same columns live on both
+    # tables so the list views / filters / trigger are symmetric.
+    trashed_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    starred_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    # Plain-text content extracted at upload time (or source-save
+    # time) for the full-text search index. NULL for binary uploads
+    # that carry no extractable text. Capped at ~256KB in the
+    # extraction helper to keep the tsvector size reasonable; see
+    # migration ``0036_files_fts`` for the generated ``content_tsv``
+    # derived from this column.
+    content_text: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<UserFile id={self.id} name={self.filename!r} owner={self.user_id}>"
+
+
+class FileShareLink(UUIDPKMixin, CreatedAtMixin, Base):
+    """A signed, optionally password-protected share link to a file or folder.
+
+    Polymorphic pointer via ``(resource_type, resource_id)`` so the
+    same table holds both. Not a FK because Postgres doesn't do
+    polymorphic FKs; orphaned links 404 on resolve, which is fine.
+    Added in migration ``0037_file_share_links``.
+    """
+
+    __tablename__ = "file_share_links"
+
+    # ``'file'`` or ``'folder'``. Validated by a DB check constraint.
+    resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 43-char URL-safe base64 of 32 random bytes. Unique across the
+    # table; we also have a partial UNIQUE on live rows.
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # ``'public'`` = anyone with URL (password/expiry gated).
+    # ``'invite'`` = auth'd Promptly user; first visit creates a
+    # ``FileShareGrant`` row for that user.
+    access_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Optional bcrypt hash. NULL = no password required.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # NULL = never expires.
+    expires_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Soft-delete; revoked links 410 Gone rather than 404 so the
+    # UI can explain what happened.
+    revoked_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    access_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    last_accessed_at: Mapped[_dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FileShareLink id={self.id} "
+            f"{self.resource_type}={self.resource_id} mode={self.access_mode}>"
+        )
+
+
+class FileShareGrant(UUIDPKMixin, CreatedAtMixin, Base):
+    """Recorded claim of an ``access_mode='invite'`` link by a user.
+
+    Lets a returning authenticated user skip the "you've been invited
+    to view this" nudge — we look up ``(link_id, user_id)`` and if it
+    exists, go straight through to the resource.
+    """
+
+    __tablename__ = "file_share_grants"
+
+    link_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("file_share_links.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<FileShareGrant link={self.link_id} user={self.user_id}>"

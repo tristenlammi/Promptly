@@ -23,7 +23,12 @@ from app.custom_models.models import (  # noqa: F401
     CustomModelFile,
     KnowledgeChunk,
 )
-from app.files.models import FileFolder, UserFile  # noqa: F401
+from app.files.models import (  # noqa: F401
+    FileFolder,
+    FileShareGrant,
+    FileShareLink,
+    UserFile,
+)
 from app.mfa.models import (  # noqa: F401
     EmailOtpChallenge,
     MfaBackupCode,

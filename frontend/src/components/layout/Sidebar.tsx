@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
-  BookOpen,
   Clock,
-  FolderKanban,
-  FolderOpen,
   LogOut,
-  MessagesSquare,
   Pin,
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { NAV_ITEMS, type NavItem as NavItemConfig } from "./navItems";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -85,6 +82,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   );
   const groups = useMemo(() => groupByBucket(unpinned), [unpinned]);
 
+  // Stage-3 prep: drive nav rendering from the shared ``NAV_ITEMS``
+  // config so the future Promptly Drive PWA layout can filter the
+  // same list to ``section === "drive"`` without touching markup.
+  const visibleNavItems: NavItemConfig[] = NAV_ITEMS.filter((it) => {
+    if (it.desktopOnly && isMobile) return false;
+    if (it.adminOnly && !isAdmin) return false;
+    return true;
+  });
+
   if (collapsed) {
     return (
       <aside
@@ -105,12 +111,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           <NewChatButton compact />
         </div>
         <nav className="flex flex-col items-center gap-1">
-          <SideIcon to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" />
-          <SideIcon to="/projects" icon={<FolderKanban className="h-4 w-4" />} label="Projects" />
-          {!isMobile && (
-            <SideIcon to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
-          )}
-          <SideIcon to="/files" icon={<FolderOpen className="h-4 w-4" />} label="Files" />
+          {visibleNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <SideIcon
+                key={item.to}
+                to={item.to}
+                icon={<Icon className="h-4 w-4" />}
+                label={item.label}
+              />
+            );
+          })}
           {isAdmin && (
             <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
           )}
@@ -153,14 +164,22 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Nav — Models management lives inside Settings now (admin-only
           tab); keeping the top-level nav focused on the day-to-day
-          surfaces (Chat / Study / Files) reduces visual clutter. */}
+          surfaces (Chat / Study / Files) reduces visual clutter. The
+          list itself is driven by the shared ``NAV_ITEMS`` config
+          so stage-3's Drive-only PWA can filter by ``section``. */}
       <nav className="mt-4 flex flex-col gap-0.5 px-2">
-        <NavItem to="/chat" icon={<MessagesSquare className="h-4 w-4" />} label="Chat" end />
-        <NavItem to="/projects" icon={<FolderKanban className="h-4 w-4" />} label="Projects" />
-        {!isMobile && (
-          <NavItem to="/study" icon={<BookOpen className="h-4 w-4" />} label="Study" />
-        )}
-        <NavItem to="/files" icon={<FolderOpen className="h-4 w-4" />} label="Files" />
+        {visibleNavItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <NavItem
+              key={item.to}
+              to={item.to}
+              icon={<Icon className="h-4 w-4" />}
+              label={item.label}
+              end={item.exact}
+            />
+          );
+        })}
         {/* Phase 4b: invites entry. Always rendered so the badge has a
             stable place to sit; click opens a modal listing pending
             invites the caller can accept or decline. */}

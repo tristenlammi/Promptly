@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Promptly Files",
+  "short_name": "Files",
+  "description": "Cloud storage for your Promptly files — upload, organise, search, share. Installs as its own app separate from Promptly Chat.",
+  "id": "/files?source=pwa",
+  "start_url": "/files?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAF9F7",
+  "theme_color": "#D97757",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-files-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-files-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-files-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Recent files",
+      "short_name": "Recent",
+      "url": "/files/recent?source=pwa-shortcut",
+      "icons": [
+        { "src": "/pwa-files-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Starred",
+      "short_name": "Starred",
+      "url": "/files/starred?source=pwa-shortcut",
+      "icons": [
+        { "src": "/pwa-files-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Trash",
+      "short_name": "Trash",
+      "url": "/files/trash?source=pwa-shortcut",
+      "icons": [
+        { "src": "/pwa-files-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
+  ]
+}

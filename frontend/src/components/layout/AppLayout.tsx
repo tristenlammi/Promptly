@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
 import { SearchPalette } from "@/components/chat/SearchPalette";
+import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
+import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
@@ -60,6 +62,14 @@ export function AppLayout() {
           open={searchPaletteOpen}
           onClose={closeSearchPalette}
         />
+        {/* Drive upload panel only renders on ``/files*`` routes —
+            the panel itself short-circuits when no uploads are in
+            flight, so these two tags are zero-cost everywhere else.
+            The watcher is always mounted so completion events fire
+            query invalidations even if the user is on ``/chat`` when
+            an upload finishes. */}
+        <UploadQueueWatcher />
+        <UploadProgressPanel />
       </div>
     );
   }
@@ -106,6 +116,8 @@ export function AppLayout() {
 
       <NetworkStatusToast />
       <SearchPalette open={searchPaletteOpen} onClose={closeSearchPalette} />
+      <UploadQueueWatcher />
+      <UploadProgressPanel />
     </div>
   );
 }

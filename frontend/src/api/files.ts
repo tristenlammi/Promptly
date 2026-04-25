@@ -18,6 +18,12 @@ export interface FolderItem {
   scope: FileScope;
   created_at: string;
   system_kind: SystemFolderKind | null;
+  /** Drive stage 1 — non-null on rows last modified after migration 0035. */
+  updated_at: string | null;
+  /** Drive stage 1 — non-null when the folder is starred. */
+  starred_at: string | null;
+  /** Drive stage 1 — non-null when the folder (or an ancestor) was trashed. */
+  trashed_at: string | null;
 }
 
 export interface FileItem {
@@ -28,6 +34,101 @@ export interface FileItem {
   size_bytes: number;
   scope: FileScope;
   created_at: string;
+  /** See ``FolderItem``; populated on every read path once 0035 applies. */
+  updated_at: string | null;
+  starred_at: string | null;
+  trashed_at: string | null;
+}
+
+// --------------------------------------------------------------------
+// Drive stage 1 — search / list / share-link DTOs
+// --------------------------------------------------------------------
+export interface FileSearchHit {
+  file: FileItem;
+  rank: number;
+  snippet: string | null;
+  breadcrumb: string | null;
+}
+
+export interface FileSearchResponse {
+  query: string;
+  hits: FileSearchHit[];
+}
+
+export interface RecentFilesResponse {
+  files: FileItem[];
+}
+
+export interface StarredListResponse {
+  folders: FolderItem[];
+  files: FileItem[];
+}
+
+export interface TrashListResponse {
+  folders: FolderItem[];
+  files: FileItem[];
+}
+
+export type ShareAccessMode = "public" | "invite";
+export type ShareResourceType = "file" | "folder";
+
+export interface ShareLinkCreatePayload {
+  access_mode: ShareAccessMode;
+  password?: string | null;
+  expires_in_days?: number | null;
+}
+
+export interface ShareLink {
+  id: string;
+  resource_type: ShareResourceType;
+  resource_id: string;
+  token: string;
+  access_mode: ShareAccessMode;
+  has_password: boolean;
+  expires_at: string | null;
+  revoked_at: string | null;
+  access_count: number;
+  last_accessed_at: string | null;
+  created_at: string;
+  /** ``/s/{token}`` — landing page path (prepend current origin for copy). */
+  path: string;
+}
+
+export interface ShareLinkListResponse {
+  links: ShareLink[];
+}
+
+export interface ShareLinkMeta {
+  resource_type: ShareResourceType;
+  access_mode: ShareAccessMode;
+  requires_password: boolean;
+  requires_auth: boolean;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+}
+
+export interface ShareLinkUnlockResponse {
+  unlock_token: string;
+}
+
+export interface ShareFolderBrowseResponse {
+  folder: FolderItem;
+  breadcrumbs: BreadcrumbEntry[];
+  folders: FolderItem[];
+  files: FileItem[];
+}
+
+/** Response of ``GET /api/files/quota`` — mirrors
+ *  ``StorageQuotaResponse`` on the backend. ``cap_bytes`` /
+ *  ``remaining_bytes`` are nullable when the user is uncapped. */
+export interface StorageQuota {
+  cap_bytes: number | null;
+  used_bytes: number;
+  remaining_bytes: number | null;
 }
 
 export interface BreadcrumbEntry {
@@ -73,6 +174,13 @@ export const filesApi = {
     const { data } = await apiClient.get<BrowseResult>(
       `/files/browse?${params.toString()}`
     );
+    return data;
+  },
+
+  /** Storage cap + current usage for the signed-in user. Used by the
+   *  Drive sub-nav storage pill and the upload panel's footer. */
+  async getQuota(): Promise<StorageQuota> {
+    const { data } = await apiClient.get<StorageQuota>("/files/quota");
     return data;
   },
 
@@ -165,6 +273,130 @@ export const filesApi = {
   /** Build the URL for a download. Caller is responsible for attaching auth. */
   downloadUrl(id: string): string {
     return `/api/files/${id}/download`;
+  },
+
+  // ----------------------------------------------------------------
+  // Drive stage 1 — Trash
+  // ----------------------------------------------------------------
+  async trashFile(id: string): Promise<FileItem> {
+    const { data } = await apiClient.post<FileItem>(`/files/${id}/trash`);
+    return data;
+  },
+  async restoreFile(id: string): Promise<FileItem> {
+    const { data } = await apiClient.post<FileItem>(`/files/${id}/restore`);
+    return data;
+  },
+  async trashFolder(id: string): Promise<FolderItem> {
+    const { data } = await apiClient.post<FolderItem>(
+      `/files/folders/${id}/trash`
+    );
+    return data;
+  },
+  async restoreFolder(id: string): Promise<FolderItem> {
+    const { data } = await apiClient.post<FolderItem>(
+      `/files/folders/${id}/restore`
+    );
+    return data;
+  },
+  async listTrash(scope: FileScope): Promise<TrashListResponse> {
+    const { data } = await apiClient.get<TrashListResponse>(
+      `/files/trash?scope=${scope}`
+    );
+    return data;
+  },
+  async emptyTrash(scope: FileScope): Promise<void> {
+    await apiClient.delete(`/files/trash?scope=${scope}`);
+  },
+
+  // ----------------------------------------------------------------
+  // Drive stage 1 — Starred / Recent / Search
+  // ----------------------------------------------------------------
+  async starFile(id: string): Promise<FileItem> {
+    const { data } = await apiClient.post<FileItem>(`/files/${id}/star`);
+    return data;
+  },
+  async unstarFile(id: string): Promise<FileItem> {
+    const { data } = await apiClient.delete<FileItem>(`/files/${id}/star`);
+    return data;
+  },
+  async starFolder(id: string): Promise<FolderItem> {
+    const { data } = await apiClient.post<FolderItem>(
+      `/files/folders/${id}/star`
+    );
+    return data;
+  },
+  async unstarFolder(id: string): Promise<FolderItem> {
+    const { data } = await apiClient.delete<FolderItem>(
+      `/files/folders/${id}/star`
+    );
+    return data;
+  },
+  async listStarred(scope: FileScope): Promise<StarredListResponse> {
+    const { data } = await apiClient.get<StarredListResponse>(
+      `/files/starred?scope=${scope}`
+    );
+    return data;
+  },
+  async listRecent(
+    scope: FileScope,
+    limit = 50
+  ): Promise<RecentFilesResponse> {
+    const { data } = await apiClient.get<RecentFilesResponse>(
+      `/files/recent?scope=${scope}&limit=${limit}`
+    );
+    return data;
+  },
+  async search(
+    q: string,
+    scope: FileScope,
+    limit = 20
+  ): Promise<FileSearchResponse> {
+    const params = new URLSearchParams({ q, scope, limit: String(limit) });
+    const { data } = await apiClient.get<FileSearchResponse>(
+      `/files/search?${params.toString()}`
+    );
+    return data;
+  },
+
+  // ----------------------------------------------------------------
+  // Drive stage 1 — Share links (owner side, authenticated)
+  // ----------------------------------------------------------------
+  async listFileShareLinks(fileId: string): Promise<ShareLinkListResponse> {
+    const { data } = await apiClient.get<ShareLinkListResponse>(
+      `/files/${fileId}/share-links`
+    );
+    return data;
+  },
+  async listFolderShareLinks(
+    folderId: string
+  ): Promise<ShareLinkListResponse> {
+    const { data } = await apiClient.get<ShareLinkListResponse>(
+      `/files/folders/${folderId}/share-links`
+    );
+    return data;
+  },
+  async createFileShareLink(
+    fileId: string,
+    payload: ShareLinkCreatePayload
+  ): Promise<ShareLink> {
+    const { data } = await apiClient.post<ShareLink>(
+      `/files/${fileId}/share-links`,
+      payload
+    );
+    return data;
+  },
+  async createFolderShareLink(
+    folderId: string,
+    payload: ShareLinkCreatePayload
+  ): Promise<ShareLink> {
+    const { data } = await apiClient.post<ShareLink>(
+      `/files/folders/${folderId}/share-links`,
+      payload
+    );
+    return data;
+  },
+  async revokeShareLink(linkId: string): Promise<void> {
+    await apiClient.delete(`/files/share-links/${linkId}`);
   },
 
   /** Load the editable Markdown source backing a rendered artefact.

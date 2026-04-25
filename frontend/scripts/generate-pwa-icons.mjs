@@ -23,7 +23,8 @@ import sharp from "sharp";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, "..");
-const sourceSvg = path.join(projectRoot, "public", "promptly-icon.svg");
+const mainSvg = path.join(projectRoot, "public", "promptly-icon.svg");
+const filesSvg = path.join(projectRoot, "public", "promptly-files-icon.svg");
 const outDir = path.join(projectRoot, "public");
 
 // Brand background — must match the SVG's solid fill so masked icons
@@ -39,7 +40,7 @@ async function exists(file) {
   }
 }
 
-async function renderAny(size, outName) {
+async function renderAny(size, outName, sourceSvg) {
   const out = path.join(outDir, outName);
   const svg = await readFile(sourceSvg);
   await sharp(svg, { density: 384 })
@@ -55,7 +56,7 @@ async function renderAny(size, outName) {
  * content getting clipped. We render the SVG into the inner safe-zone
  * and pad the outside with the brand background.
  */
-async function renderMaskable(size, outName) {
+async function renderMaskable(size, outName, sourceSvg) {
   const out = path.join(outDir, outName);
   const inner = Math.round(size * 0.78); // ~11% padding each side
   const pad = Math.round((size - inner) / 2);
@@ -81,32 +82,57 @@ async function renderMaskable(size, outName) {
   return out;
 }
 
+// Two app icon sets — the main "Promptly" chat app and the "Promptly
+// Files" Drive PWA. Each installs independently on the user's home
+// screen, so they need visually distinct tiles. The main mark is a
+// serif "P"; the Files mark is a white folder glyph on the same
+// brand background so the two feel like siblings.
+const ICON_SETS = [
+  {
+    label: "main",
+    sourceSvg: mainSvg,
+    targets: [
+      { kind: "any", size: 192, name: "pwa-192.png" },
+      { kind: "any", size: 512, name: "pwa-512.png" },
+      { kind: "any", size: 180, name: "apple-touch-icon.png" },
+      { kind: "any", size: 32, name: "favicon.png" },
+      { kind: "maskable", size: 512, name: "pwa-maskable-512.png" },
+    ],
+  },
+  {
+    label: "files",
+    sourceSvg: filesSvg,
+    targets: [
+      { kind: "any", size: 192, name: "pwa-files-192.png" },
+      { kind: "any", size: 512, name: "pwa-files-512.png" },
+      { kind: "any", size: 180, name: "apple-touch-icon-files.png" },
+      { kind: "maskable", size: 512, name: "pwa-files-maskable-512.png" },
+    ],
+  },
+];
+
 async function main() {
-  if (!(await exists(sourceSvg))) {
-    console.error(`[pwa-icons] Source SVG missing: ${sourceSvg}`);
-    process.exit(1);
-  }
-
-  const targets = [
-    { kind: "any", size: 192, name: "pwa-192.png" },
-    { kind: "any", size: 512, name: "pwa-512.png" },
-    { kind: "any", size: 180, name: "apple-touch-icon.png" },
-    { kind: "any", size: 32, name: "favicon.png" },
-    { kind: "maskable", size: 512, name: "pwa-maskable-512.png" },
-  ];
-
-  console.log("[pwa-icons] generating from", path.relative(projectRoot, sourceSvg));
-  for (const t of targets) {
-    const out =
-      t.kind === "maskable"
-        ? await renderMaskable(t.size, t.name)
-        : await renderAny(t.size, t.name);
-    const { size } = await stat(out);
+  for (const set of ICON_SETS) {
+    if (!(await exists(set.sourceSvg))) {
+      console.error(`[pwa-icons] Source SVG missing: ${set.sourceSvg}`);
+      process.exit(1);
+    }
     console.log(
-      `[pwa-icons]   ${t.name.padEnd(24)} ${t.size}x${t.size}  (${(
-        size / 1024
-      ).toFixed(1)} KB)`
+      `[pwa-icons] generating ${set.label} set from`,
+      path.relative(projectRoot, set.sourceSvg)
     );
+    for (const t of set.targets) {
+      const out =
+        t.kind === "maskable"
+          ? await renderMaskable(t.size, t.name, set.sourceSvg)
+          : await renderAny(t.size, t.name, set.sourceSvg);
+      const { size } = await stat(out);
+      console.log(
+        `[pwa-icons]   ${t.name.padEnd(32)} ${t.size}x${t.size}  (${(
+          size / 1024
+        ).toFixed(1)} KB)`
+      );
+    }
   }
 
   // Write a marker file so we can tell at a glance whether icons were

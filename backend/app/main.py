@@ -244,6 +244,7 @@ from app.chat.projects_router import router as chat_projects_router  # noqa: E40
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
+from app.files.share_router import router as file_share_router  # noqa: E402
 from app.local_models.router import router as local_models_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
@@ -300,6 +301,14 @@ app.include_router(
 app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])
+# Public share-link API. Mounted under ``/api/s/*`` so nginx still
+# proxies it to the backend (``/s/*`` alone would collide with the
+# SPA route for the share landing page). Each endpoint is
+# token-gated + optionally password-gated — *no* auth dependency
+# is applied here because anonymous visitors are the whole point.
+# Sits outside ``/api/files`` so revocation + auth rules stay
+# deliberately separate from the owner-side CRUD.
+app.include_router(file_share_router, prefix="/api/s", tags=["file-shares"])
 app.include_router(
     notifications_router,
     prefix="/api/notifications",

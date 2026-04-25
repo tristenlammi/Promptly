@@ -73,18 +73,32 @@ export function AppSettingsPanel() {
 // --------------------------------------------------------------------
 // Quotas card — org-wide defaults applied to users without an override
 // --------------------------------------------------------------------
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+/**
+ * Render a byte count as a GB string. Whole numbers render without
+ * a decimal (e.g. "10"); sub-GB values show up to two decimals so
+ * stored 500 MB reads as "0.49" rather than "0.48828125".
+ */
+function bytesToGbString(bytes: number): string {
+  const gb = bytes / BYTES_PER_GB;
+  if (gb === 0) return "0";
+  const rounded = Math.round(gb * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
 interface QuotasForm {
-  default_storage_cap_mb: string;
+  default_storage_cap_gb: string;
   default_daily_token_budget: string;
   default_monthly_token_budget: string;
 }
 
 function quotasToForm(s: AppSettings): QuotasForm {
   return {
-    default_storage_cap_mb:
+    default_storage_cap_gb:
       s.default_storage_cap_bytes == null
         ? ""
-        : String(Math.round(s.default_storage_cap_bytes / (1024 * 1024))),
+        : bytesToGbString(s.default_storage_cap_bytes),
     default_daily_token_budget:
       s.default_daily_token_budget == null
         ? ""
@@ -107,7 +121,7 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
   }, [initial]);
 
   const dirty =
-    form.default_storage_cap_mb !== initial.default_storage_cap_mb ||
+    form.default_storage_cap_gb !== initial.default_storage_cap_gb ||
     form.default_daily_token_budget !== initial.default_daily_token_budget ||
     form.default_monthly_token_budget !== initial.default_monthly_token_budget;
 
@@ -126,18 +140,26 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
     return n;
   };
 
+  // Storage is entered in GB with decimals allowed (e.g. "0.5"), so
+  // it needs a separate parser from the integer-only token quotas.
+  const parseGbToBytes = (raw: string): number | null | "invalid" => {
+    if (raw.trim() === "") return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return "invalid";
+    return Math.round(n * BYTES_PER_GB);
+  };
+
   const handleSave = async () => {
     setError(null);
     const patch: AppSettingsPatch = {};
 
-    if (form.default_storage_cap_mb !== initial.default_storage_cap_mb) {
-      const mb = parseQuota(form.default_storage_cap_mb);
-      if (mb === "invalid") {
-        setError("Storage default must be a non-negative number of MB.");
+    if (form.default_storage_cap_gb !== initial.default_storage_cap_gb) {
+      const bytes = parseGbToBytes(form.default_storage_cap_gb);
+      if (bytes === "invalid") {
+        setError("Storage default must be a non-negative number of GB.");
         return;
       }
-      patch.default_storage_cap_bytes =
-        mb === null ? null : mb * 1024 * 1024;
+      patch.default_storage_cap_bytes = bytes;
     }
     if (
       form.default_daily_token_budget !== initial.default_daily_token_budget
@@ -225,11 +247,13 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field
-          label="Storage / user (MB)"
-          value={form.default_storage_cap_mb}
-          onChange={(v) => setField("default_storage_cap_mb", v)}
+          label="Storage / user (GB)"
+          value={form.default_storage_cap_gb}
+          onChange={(v) => setField("default_storage_cap_gb", v)}
           placeholder="unlimited"
           type="number"
+          step={0.1}
+          min={0}
           disabled={busy}
         />
         <Field
@@ -673,6 +697,8 @@ function Field({
   type = "text",
   disabled,
   autoComplete,
+  step,
+  min,
 }: {
   label: string;
   value: string;
@@ -681,6 +707,8 @@ function Field({
   type?: string;
   disabled?: boolean;
   autoComplete?: string;
+  step?: number | string;
+  min?: number | string;
 }) {
   return (
     <label className="block text-xs">
@@ -694,6 +722,8 @@ function Field({
         placeholder={placeholder}
         disabled={disabled}
         autoComplete={autoComplete}
+        step={step}
+        min={min}
         className={cn(
           "w-full rounded-input border bg-[var(--bg)] px-3 py-1.5 text-sm",
           "border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)]",
