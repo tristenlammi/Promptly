@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, Share, X } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -7,27 +7,43 @@ import { useIsStandalone } from "@/hooks/useIsStandalone";
 import { cn } from "@/utils/cn";
 
 /**
- * "Install Promptly Files as an App" indicator rendered only on
- * Drive routes.
+ * "Install Promptly Files as an App" indicator rendered on every
+ * Drive route.
  *
- * Behaviour:
- *   - Chrome/Android/Edge: listens for ``beforeinstallprompt``,
- *     stashes the deferred prompt, and fires it from our Install
- *     button. Once accepted or dismissed the event is consumed and
- *     the button hides itself.
- *   - iOS Safari: never fires ``beforeinstallprompt``, so we fall
- *     back to a short instructions sheet ("Share → Add to Home
- *     Screen"). Detected via user-agent sniffing — this is the one
- *     legitimate place for it, since the spec gives us no other
- *     feature test.
- *   - Already installed (``display-mode: standalone``): render
- *     nothing at all. Done, dusted.
- *   - User-dismissed: suppressed for ``DISMISS_DAYS`` via
- *     ``localStorage``. The key is Files-specific so this doesn't
- *     conflict with the main Promptly install banner.
+ * This chip is the user's path to installing the *Files* PWA as a
+ * distinct app on their home screen. Importantly, it must stay
+ * visible **even when the user is already inside the main Promptly
+ * PWA** — installing a second PWA is the whole point, so
+ * ``display-mode: standalone`` alone is not a reason to hide it.
  *
- * The component is visually tiny by design — a single pill-shaped
- * chip that slots into ``DriveSubNav`` next to the storage indicator.
+ * Behaviour by platform:
+ *
+ *   - Chrome/Android/Edge (browser or inside main Promptly PWA):
+ *     listens for ``beforeinstallprompt``, stashes the deferred
+ *     event, and fires it on click. Works because the Files
+ *     manifest declares a narrower ``scope: "/files/"`` + unique
+ *     ``id`` so the browser treats it as an app distinct from any
+ *     already-installed Promptly app.
+ *
+ *   - When no ``beforeinstallprompt`` fires (e.g. in the installed
+ *     main PWA's restricted surface, or before the engagement
+ *     heuristic has triggered): the chip still works — tapping it
+ *     opens a manual-install help sheet appropriate for the
+ *     detected platform (Android or iOS).
+ *
+ *   - iOS Safari never fires ``beforeinstallprompt``; the chip
+ *     always opens the iOS help sheet with the Share → Add to
+ *     Home Screen walkthrough.
+ *
+ * Hidden conditions:
+ *   - User confirmed the Files PWA install (``appinstalled`` fired
+ *     *or* they've since launched a session inside the Files PWA —
+ *     see ``isInsideFilesPwa()`` below).
+ *   - User dismissed the chip — suppressed for ``DISMISS_DAYS`` via
+ *     a Files-specific ``localStorage`` key.
+ *
+ * The component slots into ``DriveSubNav`` next to the storage
+ * pill, which is why it stays visually tiny.
  */
 
 type BeforeInstallPromptEvent = Event & {
@@ -36,18 +52,38 @@ type BeforeInstallPromptEvent = Event & {
 };
 
 const DISMISS_KEY = "promptly-files:install-dismissed-until";
+const INSTALLED_KEY = "promptly-files:installed";
 const DISMISS_DAYS = 14;
 
 export function InstallFilesPwaButton({ className }: { className?: string }) {
   const standalone = useIsStandalone();
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(false);
+  const [installed, setInstalled] = useState<boolean>(() =>
+    readInstalledFlag()
+  );
   const [showIosSheet, setShowIosSheet] = useState(false);
+  const [showAndroidSheet, setShowAndroidSheet] = useState(false);
   const [dismissedUntil, setDismissedUntil] = useState<number>(() =>
     readDismissedUntil()
   );
 
   const isIos = useIsIos();
+  // Detect whether *this* running window is the Files PWA itself
+  // (as opposed to the main Promptly PWA, or a regular browser tab).
+  // We rely on the launched ``start_url`` marker plus the scoped
+  // ``display-mode: standalone``: if both are true the user already
+  // has the Files app installed and is using it right now.
+  const insideFilesPwa = useInsideFilesPwa(standalone);
+
+  // Persist "user has the Files PWA" so we can keep the chip hidden
+  // on subsequent sessions when the user visits /files from inside
+  // the main Promptly PWA.
+  useEffect(() => {
+    if (insideFilesPwa && !installed) {
+      writeInstalledFlag(true);
+      setInstalled(true);
+    }
+  }, [insideFilesPwa, installed]);
 
   useEffect(() => {
     const onPrompt = (e: Event) => {
@@ -55,6 +91,7 @@ export function InstallFilesPwaButton({ className }: { className?: string }) {
       setDeferred(e as BeforeInstallPromptEvent);
     };
     const onInstalled = () => {
+      writeInstalledFlag(true);
       setInstalled(true);
       setDeferred(null);
     };
@@ -66,30 +103,37 @@ export function InstallFilesPwaButton({ className }: { className?: string }) {
     };
   }, []);
 
-  // Never render if: already installed, already dismissed recently,
-  // or (Chromium path) we haven't captured the install prompt AND
-  // this isn't iOS. iOS is the one platform where we show the chip
-  // without a deferred event because there's no API — the chip
-  // opens our instructions sheet instead.
   const dismissed = dismissedUntil > Date.now();
-  const canInstallChromium = !!deferred;
-  const canShowIosHelp = isIos && !standalone;
-  if (installed || standalone || dismissed) return null;
-  if (!canInstallChromium && !canShowIosHelp) return null;
+
+  // Hide only when we're sure the user already has it — or they
+  // asked us to shut up. Crucially we do **not** hide just because
+  // ``standalone`` is true: that's how we stayed invisible inside
+  // the main Promptly PWA before.
+  if (installed || insideFilesPwa || dismissed) return null;
 
   const onInstallClick = async () => {
+    // Chromium happy path — we have a deferred install event.
     if (deferred) {
       try {
         await deferred.prompt();
-        await deferred.userChoice;
+        const choice = await deferred.userChoice;
+        if (choice.outcome === "accepted") {
+          writeInstalledFlag(true);
+          setInstalled(true);
+        }
       } finally {
         setDeferred(null);
       }
       return;
     }
+    // No native prompt available — fall back to platform-specific
+    // instructions. Order matters: iOS first because the
+    // user-agent check is more specific.
     if (isIos) {
       setShowIosSheet(true);
+      return;
     }
+    setShowAndroidSheet(true);
   };
 
   const onDismiss = (e: React.MouseEvent) => {
@@ -138,6 +182,16 @@ export function InstallFilesPwaButton({ className }: { className?: string }) {
         open={showIosSheet}
         onClose={() => setShowIosSheet(false)}
       />
+      <AndroidInstallSheet
+        open={showAndroidSheet}
+        hostPwa={standalone}
+        onClose={() => setShowAndroidSheet(false)}
+        onMarkInstalled={() => {
+          writeInstalledFlag(true);
+          setInstalled(true);
+          setShowAndroidSheet(false);
+        }}
+      />
     </>
   );
 }
@@ -150,6 +204,56 @@ function readDismissedUntil(): number {
   } catch {
     return 0;
   }
+}
+
+function readInstalledFlag(): boolean {
+  try {
+    return localStorage.getItem(INSTALLED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeInstalledFlag(v: boolean) {
+  try {
+    if (v) localStorage.setItem(INSTALLED_KEY, "1");
+    else localStorage.removeItem(INSTALLED_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Best-effort detection of whether this window is running as the
+ * Files PWA itself (rather than the main Promptly PWA or a normal
+ * browser tab). We rely on two signals:
+ *   - ``display-mode: standalone`` is true, AND
+ *   - The initial navigation was into /files with ``?source=pwa``
+ *     (our ``start_url`` marker) OR ``?source=pwa-shortcut``
+ *     (launched from a manifest shortcut).
+ * The ``source=pwa`` marker is stashed in ``sessionStorage`` the
+ * first time we see it so that subsequent in-PWA navigation
+ * (which strips the query string) still counts.
+ */
+function useInsideFilesPwa(standalone: boolean): boolean {
+  return useMemo(() => {
+    if (typeof window === "undefined") return false;
+    if (!standalone) return false;
+    const onDrive =
+      window.location.pathname === "/files" ||
+      window.location.pathname.startsWith("/files/");
+    if (!onDrive) return false;
+    const qs = new URLSearchParams(window.location.search);
+    const source = qs.get("source");
+    const markedThisLoad = source === "pwa" || source === "pwa-shortcut";
+    const SESSION_KEY = "promptly-files:pwa-session";
+    try {
+      if (markedThisLoad) sessionStorage.setItem(SESSION_KEY, "1");
+      return markedThisLoad || sessionStorage.getItem(SESSION_KEY) === "1";
+    } catch {
+      return markedThisLoad;
+    }
+  }, [standalone]);
 }
 
 function useIsIos(): boolean {
@@ -214,6 +318,92 @@ function IosInstallSheet({
         Opening Promptly Files from the home screen launches it as a standalone app —
         no browser chrome, just your Drive. You can still use Promptly Chat from its
         own icon at the same time.
+      </p>
+    </Modal>
+  );
+}
+
+/**
+ * Android install walkthrough shown when Chrome didn't give us a
+ * deferred install event. Two realistic reasons that happens:
+ *   1. The page is being viewed inside the main Promptly PWA — the
+ *      Android system's ``beforeinstallprompt`` is often suppressed
+ *      in an already-standalone surface. The fix is to open this
+ *      URL in Chrome proper and install from there.
+ *   2. Chrome's engagement heuristic hasn't triggered yet. Same
+ *      Chrome-menu path still works.
+ * Either way we walk the user through the Chrome overflow menu —
+ * the one action the user can always take to install a PWA
+ * manually on Android.
+ */
+function AndroidInstallSheet({
+  open,
+  onClose,
+  onMarkInstalled,
+  hostPwa,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onMarkInstalled: () => void;
+  /** True if the chip was tapped from inside a standalone PWA
+   *  (meaning the user must jump to Chrome first). */
+  hostPwa: boolean;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Install Promptly Files"
+      description="Add a dedicated Files icon to your home screen."
+      footer={
+        <>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="sm" onClick={onMarkInstalled}>
+            I installed it
+          </Button>
+        </>
+      }
+    >
+      <ol className="space-y-3 text-sm">
+        {hostPwa && (
+          <li className="flex items-start gap-3">
+            <StepNumber>1</StepNumber>
+            <span>
+              Tap the <span className="font-medium">⋮</span> menu in the top-right
+              of the Promptly app, then choose{" "}
+              <span className="font-medium">Open in Chrome</span> (or
+              <span className="font-medium"> Open in browser</span>).
+            </span>
+          </li>
+        )}
+        <li className="flex items-start gap-3">
+          <StepNumber>{hostPwa ? 2 : 1}</StepNumber>
+          <span>
+            In Chrome, make sure the URL bar shows <span className="font-mono">/files</span>.
+          </span>
+        </li>
+        <li className="flex items-start gap-3">
+          <StepNumber>{hostPwa ? 3 : 2}</StepNumber>
+          <span>
+            Tap the <span className="font-medium">⋮</span> menu in Chrome and choose{" "}
+            <span className="font-medium">Install app</span> (sometimes labelled{" "}
+            <span className="font-medium">Add to Home screen</span>).
+          </span>
+        </li>
+        <li className="flex items-start gap-3">
+          <StepNumber>{hostPwa ? 4 : 3}</StepNumber>
+          <span>
+            Confirm the name (<span className="font-medium">Promptly Files</span>) and tap{" "}
+            <span className="font-medium">Install</span>. The Files icon will appear on
+            your home screen and open straight into your Drive.
+          </span>
+        </li>
+      </ol>
+      <p className="mt-4 text-xs text-[var(--text-muted)]">
+        Promptly Files is a separate app from Promptly Chat — installing one doesn't
+        remove the other, and they can both run at the same time.
       </p>
     </Modal>
   );

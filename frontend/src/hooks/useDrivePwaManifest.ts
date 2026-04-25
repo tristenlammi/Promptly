@@ -14,9 +14,18 @@ import { useLocation } from "react-router-dom";
  * into different default URLs, giving the user genuine "two apps"
  * home-screen behaviour without us splitting the codebase.
  *
- * Both manifests intentionally share ``scope: "/"`` — we need auth
- * routes like ``/login`` to stay in-scope so an installed Promptly
- * Files PWA can still log the user in without opening a browser tab.
+ * Scopes are intentionally disjoint:
+ *   - Promptly (main): ``scope: "/"``
+ *   - Promptly Files:  ``scope: "/files/"``
+ *
+ * Without this Chrome treats any already-installed Promptly PWA as
+ * "the app that owns /files" and refuses to fire a second
+ * ``beforeinstallprompt`` for the Files manifest. Narrowing the Files
+ * scope to just ``/files/`` lets Chrome consider them two separate
+ * installable apps. The trade-off is that non-Drive URLs (``/login``,
+ * ``/settings``, etc.) opened from inside the Files PWA will open in
+ * a Chrome browser tab instead of inside the Files PWA — which is the
+ * correct UX since those belong to Promptly Chat, not to the Drive.
  *
  * On iOS Safari the manifest is largely ignored for "Add to Home
  * Screen", so we also swap a couple of apple-specific meta tags
