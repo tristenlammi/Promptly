@@ -541,10 +541,19 @@ function FolderActions({
   // so the Upload button stays snappy even on very large batches.
   const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files;
+    if (!selected || selected.length === 0) {
+      e.target.value = "";
+      return;
+    }
+    // IMPORTANT: materialise the FileList into a plain array BEFORE
+    // resetting ``e.target.value``. The ``files`` collection is live —
+    // setting ``value = ""`` drains it in place (per the HTML spec),
+    // which previously left ``startUploads`` with a zero-length array
+    // and silently dropped every upload on the floor.
+    const fileArray = Array.from(selected);
     e.target.value = "";
-    if (!selected || selected.length === 0) return;
     startUploads({
-      files: Array.from(selected),
+      files: fileArray,
       scope,
       folderId: parentId,
     });
