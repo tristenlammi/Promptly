@@ -91,3 +91,9 @@ aiosmtplib==3.0.2
 # Python and depends only on ``cryptography`` which is already pinned
 # above, so it doesn't add any system-library baggage to the image.
 pywebpush==2.0.0
+
+# ---- Testing (dev-only; safe to leave installed in images) ----
+# Used by the study-gate regression tests (and any future automated
+# suite). Both are pure-Python with no system dependencies.
+pytest==8.3.3
+pytest-asyncio==0.24.0

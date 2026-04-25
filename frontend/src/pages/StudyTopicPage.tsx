@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
@@ -13,13 +13,17 @@ import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ExamBreakdown } from "@/components/study/ExamBreakdown";
 import { FinalExamCard } from "@/components/study/FinalExamCard";
+import { LearnerProfilePanel } from "@/components/study/LearnerProfilePanel";
+import { MisconceptionsPanel } from "@/components/study/MisconceptionsPanel";
 import { PrereqBatchBanner } from "@/components/study/PrereqBatchBanner";
+import { ReviewQueueWidget } from "@/components/study/ReviewQueueWidget";
 import { TopNav } from "@/components/layout/TopNav";
 import { UnitCard } from "@/components/study/UnitCard";
 import {
   useArchiveStudyProject,
   useDeleteStudyProject,
   useEnterStudyUnit,
+  useObjectiveMasteryQuery,
   useRegenerateStudyPlan,
   useStartFinalExam,
   useStudyProjectQuery,
@@ -36,6 +40,21 @@ export function StudyTopicPage() {
   const { data: project, isLoading, error, refetch } = useStudyProjectQuery(
     projectId ?? null
   );
+  // Project-level mastery fetch so the unit cards can render their
+  // compact "N/M at floor · X due" summary without every card
+  // hitting the API independently. Cheap — same query already used
+  // by the in-session ``UnitContextPanel``.
+  const masteryQuery = useObjectiveMasteryQuery(projectId ?? null);
+  const masteryByUnit = useMemo(() => {
+    const entries = masteryQuery.data?.entries ?? [];
+    const map = new Map<string, typeof entries>();
+    for (const entry of entries) {
+      const bucket = map.get(entry.unit_id) ?? [];
+      bucket.push(entry);
+      map.set(entry.unit_id, bucket);
+    }
+    return map;
+  }, [masteryQuery.data]);
   const enterUnit = useEnterStudyUnit();
   const startExam = useStartFinalExam();
   const regenerate = useRegenerateStudyPlan();
@@ -48,18 +67,48 @@ export function StudyTopicPage() {
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // Build the session-page URL with optional one-shot query params.
+  // ``kickoff`` carries the fresh-session stream id so the page can
+  // attach before the redis buffer expires; ``review`` carries a
+  // mastery-row id the student clicked from the review queue. Both
+  // are consumed + stripped from the URL on first render.
+  const buildSessionUrl = useCallback(
+    (sessionId: string, streamId: string | null, objectiveId?: string) => {
+      const params = new URLSearchParams();
+      if (streamId) params.set("kickoff", streamId);
+      if (objectiveId) params.set("review", objectiveId);
+      const qs = params.toString();
+      return `/study/sessions/${sessionId}${qs ? `?${qs}` : ""}`;
+    },
+    []
+  );
+
   const handleOpenUnit = useCallback(
     async (unitId: string) => {
       setLocalError(null);
       try {
         const resp = await enterUnit.mutateAsync(unitId);
-        navigate(`/study/sessions/${resp.session.id}`);
+        navigate(buildSessionUrl(resp.session.id, resp.stream_id));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setLocalError(msg);
       }
     },
-    [enterUnit, navigate]
+    [enterUnit, navigate, buildSessionUrl]
+  );
+
+  const handleStartReview = useCallback(
+    async (unitId: string, objectiveId: string) => {
+      setLocalError(null);
+      try {
+        const resp = await enterUnit.mutateAsync(unitId);
+        navigate(buildSessionUrl(resp.session.id, resp.stream_id, objectiveId));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setLocalError(msg);
+      }
+    },
+    [enterUnit, navigate, buildSessionUrl]
   );
 
   const handleStartExam = useCallback(async () => {
@@ -264,6 +313,21 @@ export function StudyTopicPage() {
             <PrereqBatchBanner projectId={project.id} units={project.units} />
           )}
 
+          {/* Learner state widgets — hidden during the planning failure
+              state since there's no coherent project to show them for. */}
+          {!isPlanning && (
+            <div className="mt-6 space-y-4">
+              <ReviewQueueWidget
+                projectId={project.id}
+                onStartReview={handleStartReview}
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <LearnerProfilePanel projectId={project.id} />
+                <MisconceptionsPanel projectId={project.id} />
+              </div>
+            </div>
+          )}
+
           {/* Planning / error state */}
           {isPlanning && (
             <div className="mt-6 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
@@ -339,6 +403,7 @@ export function StudyTopicPage() {
                     unit={u}
                     onOpen={() => handleOpenUnit(u.id)}
                     disabled={isArchived || enterUnit.isPending}
+                    masteryEntries={masteryByUnit.get(u.id)}
                   />
                 ))}
               </div>

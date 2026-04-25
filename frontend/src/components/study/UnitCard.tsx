@@ -1,13 +1,24 @@
 import { CheckCircle2, Circle, Clock, Play, RotateCcw, Sparkles } from "lucide-react";
 
-import type { StudyUnitSummary } from "@/api/types";
+import type { ObjectiveMasteryEntry, StudyUnitSummary } from "@/api/types";
 import { cn } from "@/utils/cn";
 
 interface UnitCardProps {
   unit: StudyUnitSummary;
   onOpen: () => void;
   disabled?: boolean;
+  /** Mastery rows for THIS unit's objectives, filtered client-side
+   *  from the project-level ``useObjectiveMasteryQuery``. Undefined
+   *  = data not loaded yet or a unit that predates the 10/10
+   *  migration; in that case the summary row stays collapsed. */
+  masteryEntries?: ObjectiveMasteryEntry[];
 }
+
+/** Per-objective mastery threshold — must stay in sync with
+ *  ``study_config.PER_OBJECTIVE_FLOOR`` on the backend. If the
+ *  backend moves it this number moves with it, otherwise the UI
+ *  cheerfully lies about what's completable. */
+const PER_OBJECTIVE_FLOOR = 75;
 
 /** A single unit tile on the topic detail page.
  *
@@ -41,10 +52,26 @@ function stalenessFooter(
   return { label, toneClass };
 }
 
-export function UnitCard({ unit, onOpen, disabled }: UnitCardProps) {
+export function UnitCard({
+  unit,
+  onOpen,
+  disabled,
+  masteryEntries,
+}: UnitCardProps) {
   const objectivesPreview = (unit.learning_objectives ?? []).slice(0, 3);
   const hasExamFocus = Boolean(unit.exam_focus);
   const staleFooter = stalenessFooter(unit);
+  // Compact mastery rollup for the card footer. Only rendered when
+  // we actually have per-objective rows for this unit — skips the
+  // line entirely for fresh plans that haven't been studied yet.
+  const objectiveCount = unit.learning_objectives?.length ?? 0;
+  const scoredEntries = masteryEntries ?? [];
+  const meetsFloor = scoredEntries.filter(
+    (e) => e.mastery_score >= PER_OBJECTIVE_FLOOR
+  ).length;
+  const dueCount = scoredEntries.filter((e) => e.is_due).length;
+  const showMasterySummary =
+    objectiveCount > 0 && scoredEntries.length > 0;
 
   const statusMeta = (() => {
     switch (unit.status) {
@@ -149,8 +176,30 @@ export function UnitCard({ unit, onOpen, disabled }: UnitCardProps) {
           <div className="text-[10px] text-[var(--text-muted)]">
             {unit.mastery_score !== null
               ? `Mastery ${unit.mastery_score}/100`
-              : `${unit.learning_objectives?.length ?? 0} objectives`}
+              : `${objectiveCount} objectives`}
           </div>
+          {showMasterySummary && (
+            <div
+              className="text-[10px] text-[var(--text-muted)]"
+              title={`${meetsFloor} of ${objectiveCount} objectives at ${PER_OBJECTIVE_FLOOR}%+` +
+                (dueCount > 0 ? ` · ${dueCount} due for review` : "")}
+            >
+              <span
+                className={cn(
+                  meetsFloor === objectiveCount
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-[var(--text-muted)]"
+                )}
+              >
+                {meetsFloor}/{objectiveCount} at {PER_OBJECTIVE_FLOOR}%
+              </span>
+              {dueCount > 0 && (
+                <span className="ml-1 text-amber-700 dark:text-amber-300">
+                  · {dueCount} due
+                </span>
+              )}
+            </div>
+          )}
           {staleFooter && (
             <div
               className={cn("text-[10px]", staleFooter.toneClass)}

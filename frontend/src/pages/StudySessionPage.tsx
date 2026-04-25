@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
 import { InputBar } from "@/components/chat/InputBar";
@@ -14,6 +14,7 @@ import { CalibrationWarningToast } from "@/components/study/CalibrationWarningTo
 import { UnitCompletedToast } from "@/components/study/UnitCompletedToast";
 import { UnitsInsertedToast } from "@/components/study/UnitsInsertedToast";
 import { UnitContextPanel } from "@/components/study/UnitContextPanel";
+import { ConfidenceWidget } from "@/components/study/ConfidenceWidget";
 import { WhiteboardPanel } from "@/components/study/Whiteboard/WhiteboardPanel";
 import { studyApi } from "@/api/study";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -35,6 +36,23 @@ import type { StudyMessage } from "@/api/types";
 export function StudySessionPage() {
   const { id: sessionId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // One-shot review-focus pointer captured from ``?review=<id>``.
+  // Consumed (and cleared from the URL) by the first send so we
+  // don't redundantly resend it after a tab refresh. The backend
+  // is the source of truth once the session is stamped.
+  const reviewFocusIdRef = useRef<string | null>(
+    searchParams.get("review")
+  );
+  // One-shot kickoff stream id captured from ``?kickoff=<id>``. The
+  // session-enter endpoint returns it for brand-new sessions so the
+  // tutor can speak first; we attach exactly once per mount and
+  // strip the param so a refresh doesn't try to re-consume a
+  // stream key that has already been getdel'd out of redis.
+  const kickoffStreamIdRef = useRef<string | null>(
+    searchParams.get("kickoff")
+  );
+  const kickoffAttachedRef = useRef(false);
 
   const setActiveSession = useStudyStore((s) => s.setActiveSession);
   const setMessages = useStudyStore((s) => s.setMessages);
@@ -153,6 +171,29 @@ export function StudySessionPage() {
     setMessages(session.messages);
   }, [session, setMessages]);
 
+  // Attach to the AI kick-off stream the server enqueued when the
+  // student opened a fresh unit session. Runs exactly once per mount
+  // (guarded by ``kickoffAttachedRef``) so a re-render or a route
+  // param churn doesn't re-consume a redis key that was already
+  // getdel'd — the stream endpoint would just yield ``Stream not
+  // found`` and the UI would look broken for no reason.
+  useEffect(() => {
+    if (!sessionId) return;
+    if (kickoffAttachedRef.current) return;
+    const streamId = kickoffStreamIdRef.current;
+    if (!streamId) return;
+    kickoffAttachedRef.current = true;
+    kickoffStreamIdRef.current = null;
+
+    const next = new URLSearchParams(searchParams);
+    next.delete("kickoff");
+    setSearchParams(next, { replace: true });
+
+    useStudyStore.getState().setStreaming(true);
+    useStudyStore.getState().setStreamError(null);
+    void attachStream(sessionId, streamId);
+  }, [sessionId, attachStream, searchParams, setSearchParams]);
+
   // Seed the exercise history store once the query resolves. This powers
   // the "Revisit exercise" vs "Open exercise" labels in chat as well as
   // the WhiteboardPanel's history tab (which reads from the store rather
@@ -230,17 +271,30 @@ export function StudySessionPage() {
       store.setStreaming(true);
       store.appendMessage(optimisticMsg);
 
+      // Consume the one-shot review-focus pointer on the FIRST send.
+      // We clear both the ref and the URL param so the deep-link
+      // doesn't linger in the address bar or refire on a refresh —
+      // the backend is the source of truth from here on.
+      const reviewFocus = reviewFocusIdRef.current;
+      if (reviewFocus) {
+        reviewFocusIdRef.current = null;
+        const next = new URLSearchParams(searchParams);
+        next.delete("review");
+        setSearchParams(next, { replace: true });
+      }
+
       await sendMessage(
         sessionId,
         {
           content: text,
           provider_id: selectedModel.provider_id,
           model_id: selectedModel.model_id,
+          review_focus_objective_id: reviewFocus,
         },
         { optimisticUserId: optimisticId }
       );
     },
-    [sessionId, selectedModel, sendMessage]
+    [sessionId, selectedModel, sendMessage, searchParams, setSearchParams]
   );
 
   const handleExerciseSubmit = useCallback(
@@ -413,9 +467,22 @@ export function StudySessionPage() {
                     Loading session...
                   </div>
                 ) : (
-                  <StudyChat onOpenExercise={handleOpenExerciseFromChat} />
+                  <StudyChat
+                    onOpenExercise={handleOpenExerciseFromChat}
+                    teachbackPassed={Boolean(session?.teachback_passed_at)}
+                    confidenceCaptured={Boolean(
+                      session?.confidence_captured_at
+                    )}
+                  />
                 )}
               </div>
+              {kind === "unit" &&
+                session &&
+                !session.confidence_captured_at &&
+                session.min_turns_required !== null &&
+                session.student_turn_count >= session.min_turns_required && (
+                  <FallbackConfidenceStrip sessionId={session.id} />
+                )}
               <div className="px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
                 <InputBar
                   streaming={isStreaming}
@@ -451,6 +518,7 @@ export function StudySessionPage() {
               ) : kind === "unit" && unit && project ? (
                 <UnitContextPanel
                   unit={unit}
+                  projectId={project.id}
                   projectTitle={project.title}
                   totalUnits={project.total_units}
                 />
@@ -486,5 +554,53 @@ export function StudySessionPage() {
         archivePending={archiveMutation.isPending}
       />
     </>
+  );
+}
+
+/** Minimal "rate your confidence" strip shown above the input bar ONLY
+ *  when the unit is otherwise close to completable but the tutor has
+ *  forgotten to emit ``<request_confidence/>``. Collapsed by default
+ *  (single clickable link) so it doesn't compete with the chat; on
+ *  click it expands the full ``ConfidenceWidget`` inline.
+ *
+ *  This is the fallback path — the primary path is the marker-driven
+ *  widget inside ``StudyChat``. Without this fallback a model that
+ *  skips the marker would hard-block the completion gate with no
+ *  student-visible recovery.
+ */
+function FallbackConfidenceStrip({ sessionId }: { sessionId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  if (expanded) {
+    return (
+      <div className="px-3 pb-2 pt-1 sm:px-4">
+        <ConfidenceWidget
+          sessionId={sessionId}
+          onCaptured={() => setDismissed(true)}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="px-3 pb-2 pt-1 text-[11px] text-[var(--text-muted)] sm:px-4">
+      Ready to wrap this unit? Your tutor hasn't asked for a confidence
+      rating yet.{" "}
+      <button
+        type="button"
+        className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+        onClick={() => setExpanded(true)}
+      >
+        Rate it anyway
+      </button>
+      <span className="mx-1">·</span>
+      <button
+        type="button"
+        className="text-[var(--text-muted)] hover:underline"
+        onClick={() => setDismissed(true)}
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }

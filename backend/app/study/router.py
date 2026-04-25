@@ -36,12 +36,17 @@ from app.auth.models import User
 from app.database import SessionLocal, get_db
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, ProviderError, model_router
+from app.study import review as study_review
+from app.study.config import min_turns_required as study_min_turns_required
 from app.study.models import (
     StudyExam,
     StudyMessage,
+    StudyMisconception,
+    StudyObjectiveMastery,
     StudyProject,
     StudySession,
     StudyUnit,
+    StudyUnitReflection,
     WhiteboardExercise,
 )
 from app.study.frame_auth import (
@@ -55,6 +60,19 @@ from app.study.planner import (
     generate_and_apply_plan,
 )
 from app.study.schemas import (
+    CompletionReadinessObjective,
+    CompletionReadinessResponse,
+    ConfidenceCaptureRequest,
+    ConfidenceCaptureResponse,
+    LearnerProfile,
+    LearnerProfileResponse,
+    LearnerProfileUpdate,
+    MisconceptionEntry,
+    MisconceptionListResponse,
+    ObjectiveMasteryEntry,
+    ObjectiveMasteryListResponse,
+    ReviewQueueItem,
+    ReviewQueueResponse,
     StudyExamStartRequest,
     StudyExamStartResponse,
     StudyExamSummary,
@@ -86,6 +104,7 @@ from app.study.service import (
     build_unit_system_prompt,
     consume_stream,
     enqueue_stream,
+    evaluate_completion_gate,
     format_submission_user_message,
     parse_action_payload,
     parse_whiteboard_payload,
@@ -654,6 +673,308 @@ async def regenerate_plan(
 
 
 # ====================================================================
+# Learner state (Study 10/10) — profile, mastery, misconceptions,
+# review queue, confidence capture. These endpoints back the
+# LearnerProfilePanel, ObjectiveMasteryList, MisconceptionsPanel,
+# ReviewQueueWidget, and ConfidenceWidget frontend components.
+# ====================================================================
+def _render_learner_profile(project: StudyProject) -> LearnerProfileResponse:
+    raw = project.learner_profile or {}
+    return LearnerProfileResponse(
+        profile=LearnerProfile(**raw) if isinstance(raw, dict) else LearnerProfile(),
+        updated_at=project.learner_profile_updated_at,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/learner-profile",
+    response_model=LearnerProfileResponse,
+)
+async def get_learner_profile(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> LearnerProfileResponse:
+    project = await _get_owned_project(project_id, user, db)
+    return _render_learner_profile(project)
+
+
+@router.put(
+    "/projects/{project_id}/learner-profile",
+    response_model=LearnerProfileResponse,
+)
+async def update_learner_profile(
+    project_id: uuid.UUID,
+    payload: LearnerProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> LearnerProfileResponse:
+    """Student-editable profile update.
+
+    Only fields present in the payload are touched — omitting a
+    field leaves the existing value alone. Passing an empty list or
+    empty string is treated as an explicit clear (student said "no,
+    I don't have any interests to list right now").
+    """
+    project = await _get_owned_project(project_id, user, db)
+    current: dict[str, Any] = dict(project.learner_profile or {})
+
+    if payload.occupation is not None:
+        current["occupation"] = payload.occupation.strip()
+    if payload.interests is not None:
+        current["interests"] = [i.strip() for i in payload.interests if i.strip()]
+    if payload.goals is not None:
+        current["goals"] = [g.strip() for g in payload.goals if g.strip()]
+    if payload.background is not None:
+        current["background"] = payload.background.strip()
+    if payload.preferred_examples_from is not None:
+        current["preferred_examples_from"] = [
+            p.strip() for p in payload.preferred_examples_from if p.strip()
+        ]
+    if payload.free_form is not None:
+        current["free_form"] = {str(k): v for k, v in payload.free_form.items()}
+
+    project.learner_profile = current
+    project.learner_profile_updated_at = datetime.now(timezone.utc)
+    project.updated_at = project.learner_profile_updated_at
+    await db.commit()
+    await db.refresh(project)
+    return _render_learner_profile(project)
+
+
+def _render_mastery_entry(
+    row: StudyObjectiveMastery, now: datetime
+) -> ObjectiveMasteryEntry:
+    days_since: int | None = None
+    if row.last_reviewed_at is not None:
+        ref = row.last_reviewed_at
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+        days_since = max(0, int((now - ref).total_seconds() // 86400))
+    is_due = False
+    if row.next_review_at is not None:
+        ref = row.next_review_at
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+        is_due = ref <= now
+    return ObjectiveMasteryEntry(
+        id=row.id,
+        project_id=row.project_id,
+        unit_id=row.unit_id,
+        objective_index=row.objective_index,
+        objective_text=row.objective_text,
+        mastery_score=row.mastery_score,
+        ease_factor=row.ease_factor,
+        interval_days=row.interval_days,
+        last_reviewed_at=row.last_reviewed_at,
+        next_review_at=row.next_review_at,
+        review_count=row.review_count,
+        consecutive_failures=row.consecutive_failures,
+        days_since_review=days_since,
+        is_due=is_due,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/objective-mastery",
+    response_model=ObjectiveMasteryListResponse,
+)
+async def list_objective_mastery(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ObjectiveMasteryListResponse:
+    project = await _get_owned_project(project_id, user, db)
+    rows = await study_review.list_mastery_for_project(db, project.id)
+    now = datetime.now(timezone.utc)
+    return ObjectiveMasteryListResponse(
+        entries=[_render_mastery_entry(r, now) for r in rows]
+    )
+
+
+@router.get(
+    "/projects/{project_id}/misconceptions",
+    response_model=MisconceptionListResponse,
+)
+async def list_misconceptions(
+    project_id: uuid.UUID,
+    include_resolved: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MisconceptionListResponse:
+    project = await _get_owned_project(project_id, user, db)
+    stmt = select(StudyMisconception).where(
+        StudyMisconception.project_id == project.id
+    )
+    if not include_resolved:
+        stmt = stmt.where(StudyMisconception.resolved_at.is_(None))
+    stmt = stmt.order_by(StudyMisconception.last_seen_at.desc())
+    rows = list((await db.execute(stmt)).scalars().all())
+    return MisconceptionListResponse(
+        entries=[MisconceptionEntry.model_validate(r) for r in rows]
+    )
+
+
+@router.post(
+    "/projects/{project_id}/misconceptions/{misconception_id:uuid}/resolve",
+    response_model=MisconceptionEntry,
+)
+async def resolve_misconception(
+    project_id: uuid.UUID,
+    misconception_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MisconceptionEntry:
+    """Student-initiated "I've got this now" dismissal."""
+    project = await _get_owned_project(project_id, user, db)
+    row = await db.get(StudyMisconception, misconception_id)
+    if row is None or row.project_id != project.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Misconception not found",
+        )
+    if row.resolved_at is None:
+        row.resolved_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(row)
+    return MisconceptionEntry.model_validate(row)
+
+
+@router.get(
+    "/projects/{project_id}/review-queue",
+    response_model=ReviewQueueResponse,
+)
+async def get_review_queue(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ReviewQueueResponse:
+    """Top items due for spaced-repetition review across the project.
+
+    Joins to ``study_units`` so the frontend can render the unit
+    title in the widget without a second round-trip.
+    """
+    project = await _get_owned_project(project_id, user, db)
+    queue_rows = await study_review.compute_due(db, project.id)
+    if not queue_rows:
+        return ReviewQueueResponse(items=[])
+
+    unit_ids = {r.unit_id for r in queue_rows}
+    units_stmt = select(StudyUnit).where(StudyUnit.id.in_(unit_ids))
+    units_by_id = {
+        u.id: u for u in (await db.execute(units_stmt)).scalars().all()
+    }
+    now = datetime.now(timezone.utc)
+    items: list[ReviewQueueItem] = []
+    for row in queue_rows:
+        unit = units_by_id.get(row.unit_id)
+        if unit is None:
+            continue
+        overdue = 0
+        if row.next_review_at is not None:
+            ref = row.next_review_at
+            if ref.tzinfo is None:
+                ref = ref.replace(tzinfo=timezone.utc)
+            overdue = max(0, int((now - ref).total_seconds() // 86400))
+        items.append(
+            ReviewQueueItem(
+                objective_id=row.id,
+                unit_id=row.unit_id,
+                unit_title=unit.title,
+                objective_index=row.objective_index,
+                objective_text=row.objective_text,
+                mastery_score=row.mastery_score,
+                days_overdue=overdue,
+                last_reviewed_at=row.last_reviewed_at,
+            )
+        )
+    return ReviewQueueResponse(items=items)
+
+
+@router.post(
+    "/sessions/{session_id}/confidence",
+    response_model=ConfidenceCaptureResponse,
+)
+async def capture_session_confidence(
+    session_id: uuid.UUID,
+    payload: ConfidenceCaptureRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ConfidenceCaptureResponse:
+    """Student-initiated confidence capture.
+
+    Complements the tutor's ``capture_confidence`` action so the
+    student can volunteer a rating even if the tutor didn't ask. Sets
+    ``confidence_captured_at`` which is one of the mark-complete gate
+    conditions.
+    """
+    session, _ = await _get_owned_session(session_id, user, db)
+    now = datetime.now(timezone.utc)
+    session.confidence_captured_at = now
+    session.updated_at = now
+    await db.commit()
+    await db.refresh(session)
+    return ConfidenceCaptureResponse(
+        session_id=session.id,
+        captured_at=now,
+        level=payload.level,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/completion-readiness",
+    response_model=CompletionReadinessResponse,
+)
+async def get_completion_readiness(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CompletionReadinessResponse:
+    """Read-only snapshot of the six-condition completion gate.
+
+    Lets the UI render a live progress checklist (teach-back ✓,
+    confidence ⨯, 3/5 turns…) without having to duplicate the gate
+    logic client-side — the same :func:`evaluate_completion_gate`
+    the ``mark_complete`` action handler uses is the single source
+    of truth for what "ready" means.
+    """
+    session, _ = await _get_owned_session(session_id, user, db)
+    if session.kind != "unit" or session.unit_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Completion readiness is only meaningful for unit sessions.",
+        )
+    unit = await db.get(StudyUnit, session.unit_id)
+    if unit is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unit no longer exists.",
+        )
+    readiness = await evaluate_completion_gate(
+        db=db, unit=unit, session=session, proposed_score=None, proposed_summary=None
+    )
+    return CompletionReadinessResponse(
+        ready=readiness["ready"],
+        unmet=list(readiness["unmet"]),
+        overall_score=readiness["overall_score"],
+        per_objective=[
+            CompletionReadinessObjective(
+                index=e["index"],
+                text=e["text"],
+                score=e["score"],
+                meets_floor=e["meets_floor"],
+            )
+            for e in readiness["per_objective"]
+        ],
+        teachback_passed=readiness["teachback_passed"],
+        confidence_captured=readiness["confidence_captured"],
+        student_turn_count=readiness["student_turn_count"],
+        min_turns_required=readiness["min_turns_required"],
+        has_reflection=readiness["has_reflection"],
+    )
+
+
+# ====================================================================
 # Units
 # ====================================================================
 @router.post("/units/{unit_id}/enter", response_model=UnitEnterResponse)
@@ -668,6 +989,13 @@ async def enter_unit(
     one; if the stored session was hard-deleted out from under us we
     transparently regenerate it. Entering a ``not_started`` unit
     transitions it to ``in_progress``.
+
+    For brand-new sessions (zero prior messages) we enqueue a
+    synthetic kickoff stream so the tutor speaks first — a warm
+    opener that references the unit's objectives and asks if the
+    student is ready. Re-entering an existing session does NOT
+    enqueue a second kickoff; the client gets ``stream_id=None``
+    and reads the existing transcript normally.
     """
     unit, project = await _get_owned_unit(unit_id, user, db)
 
@@ -680,6 +1008,7 @@ async def enter_unit(
     session: StudySession | None = None
     if unit.session_id:
         session = await db.get(StudySession, unit.session_id)
+    fresh_session = session is None
     if session is None:
         session = StudySession(
             project_id=project.id,
@@ -690,6 +1019,19 @@ async def enter_unit(
         await db.flush()
         unit.session_id = session.id
 
+    # Even if the session existed, treat it as kickoff-eligible when
+    # there are zero persisted messages (e.g. a prior kickoff failed
+    # before writing anything). Cheap COUNT keeps this O(1).
+    existing_msgs = 0
+    if not fresh_session:
+        count_res = await db.execute(
+            select(func.count(StudyMessage.id)).where(
+                StudyMessage.session_id == session.id
+            )
+        )
+        existing_msgs = int(count_res.scalar() or 0)
+    should_kickoff = fresh_session or existing_msgs == 0
+
     now = datetime.now(timezone.utc)
     if unit.status == "not_started":
         unit.status = "in_progress"
@@ -697,13 +1039,59 @@ async def enter_unit(
     unit.updated_at = now
     project.updated_at = now
 
-    await db.commit()
+    # Resolve a model + provider ONLY if we're actually going to
+    # kickoff — avoids failing the enter call when the project
+    # doesn't have a model set yet and the student just wants to
+    # browse the existing transcript.
+    kickoff_stream_id: uuid.UUID | None = None
+    if should_kickoff and project.model_id:
+        try:
+            provider = await _pick_provider_for_model(project.model_id, user, db)
+        except HTTPException:
+            provider = None
+        if provider is not None:
+            # Mirror the final-exam kickoff pattern: a short
+            # student-authored "let's start" seed so the tutor's
+            # opener reads as a natural reply rather than an
+            # unprompted monologue. Visible in the transcript (like
+            # the exam kickoff) so the conversation stays coherent.
+            kickoff = StudyMessage(
+                session_id=session.id,
+                role="user",
+                content="I just opened this unit. I'm ready — let's start.",
+            )
+            db.add(kickoff)
+            session.student_turn_count = (session.student_turn_count or 0) + 1
+            session.updated_at = now
+            await db.commit()
+            await db.refresh(kickoff)
+
+            kickoff_stream_id = uuid.uuid4()
+            ctx: StudyStreamContext = {
+                "session_id": str(session.id),
+                "project_id": str(project.id),
+                "user_message_id": str(kickoff.id),
+                "provider_id": str(provider.id),
+                "model_id": project.model_id,
+                "temperature": 0.6,
+                "max_tokens": 2000,
+                "reviewing_exercise_id": None,
+                "session_kind": "unit",
+                "unit_id": str(unit.id),
+                "exam_id": None,
+            }
+            await enqueue_stream(kickoff_stream_id, ctx)
+        else:
+            await db.commit()
+    else:
+        await db.commit()
     await db.refresh(unit)
     await db.refresh(session)
 
     return UnitEnterResponse(
         unit=_unit_summary(unit),
         session=StudySessionSummary.model_validate(session),
+        stream_id=kickoff_stream_id,
     )
 
 
@@ -1015,11 +1403,41 @@ async def send_message(
     now = datetime.now(timezone.utc)
     project.updated_at = now
     session.updated_at = now
+    # Monotonic student-turn counter — feeds the completion gate's
+    # "student has had enough back-and-forth before closing" check.
+    session.student_turn_count = (session.student_turn_count or 0) + 1
     if session.kind == "unit" and session.unit_id:
         unit = await db.get(StudyUnit, session.unit_id)
         if unit is not None:
             unit.last_studied_at = now
             unit.updated_at = now
+            # Seed min_turns_required the first time this session gets
+            # a user message. Uses the unit's current objective count,
+            # so if the tutor later splices in prereqs the floor stays
+            # keyed to THIS unit's scope.
+            if session.min_turns_required is None:
+                n_obj = len(unit.learning_objectives or []) or 1
+                session.min_turns_required = study_min_turns_required(n_obj)
+
+    # Sticky-until-satisfied review focus. The frontend passes
+    # ``review_focus_objective_id`` on the FIRST message after a
+    # ReviewQueueWidget deep-link; we only stamp it if the session
+    # doesn't already have a focus AND the referenced mastery row
+    # belongs to this session's unit (prevents cross-unit deep-links
+    # from silently corrupting focus). The focus auto-clears when
+    # the tutor scores the matching objective — see
+    # handle_update_objective_mastery.
+    if (
+        payload.review_focus_objective_id is not None
+        and session.current_review_focus_objective_id is None
+        and session.kind == "unit"
+        and session.unit_id is not None
+    ):
+        focus_row = await db.get(
+            StudyObjectiveMastery, payload.review_focus_objective_id
+        )
+        if focus_row is not None and focus_row.unit_id == session.unit_id:
+            session.current_review_focus_objective_id = focus_row.id
 
     await db.commit()
     await db.refresh(user_msg)
@@ -1151,8 +1569,57 @@ async def _stream_generator(
 
         # Pick the right system prompt + tag set for this session kind.
         if session_kind == "unit" and unit is not None:
+            # Seed per-objective mastery rows (idempotent) so a
+            # legacy unit created before the 0033 migration still
+            # gets a populated Mastery-state block on first open.
+            await study_review.seed_objectives_for_unit(db, unit)
+            mastery_rows = await study_review.list_mastery_for_project(db, project.id)
+            # Recent reflections across the project, most-recent first.
+            refl_stmt = (
+                select(StudyUnitReflection)
+                .join(StudyUnit, StudyUnit.id == StudyUnitReflection.unit_id)
+                .where(StudyUnit.project_id == project.id)
+                .order_by(StudyUnitReflection.created_at.desc())
+                .limit(10)
+            )
+            recent_reflections = list(
+                (await db.execute(refl_stmt)).scalars().all()
+            )
+            # Unresolved misconceptions, most-recently seen first.
+            misc_stmt = (
+                select(StudyMisconception)
+                .where(
+                    StudyMisconception.project_id == project.id,
+                    StudyMisconception.resolved_at.is_(None),
+                )
+                .order_by(StudyMisconception.last_seen_at.desc())
+                .limit(20)
+            )
+            open_misconceptions = list(
+                (await db.execute(misc_stmt)).scalars().all()
+            )
+            review_queue = await study_review.compute_due(db, project.id)
+            # Resolve the sticky review focus (if any) to a mastery
+            # row so the prompt can inject a dedicated focus block.
+            # Focus lives on ``study_sessions`` and auto-clears when
+            # the tutor scores the matching objective — see
+            # handle_update_objective_mastery + the 0034 migration.
+            review_focus: StudyObjectiveMastery | None = None
+            focus_id = getattr(session, "current_review_focus_objective_id", None)
+            if focus_id is not None:
+                review_focus = await db.get(StudyObjectiveMastery, focus_id)
+            # Commit the seeding changes so the transaction stays
+            # tidy even if the LLM call downstream fails.
+            await db.commit()
             system_prompt = build_unit_system_prompt(
-                project=project, unit=unit, all_units=all_units
+                project=project,
+                unit=unit,
+                all_units=all_units,
+                mastery_rows=mastery_rows,
+                recent_reflections=recent_reflections,
+                open_misconceptions=open_misconceptions,
+                review_queue=review_queue,
+                review_focus=review_focus,
             )
             allowed_tags = ["whiteboard_action", "unit_action"]
         elif session_kind == "exam" and exam is not None:
@@ -1267,8 +1734,32 @@ async def _stream_generator(
             captures=pending_side_actions,
             project=project,
             unit=unit,
+            session=session,
             exam=exam,
         )
+
+        # If the tutor tried to close the unit but the gate rejected
+        # it, inject a synthetic ``system`` message into the
+        # transcript listing the unmet conditions. This is what makes
+        # the completion gate self-correcting — the rejected list is
+        # visible to the model on its very next turn so it knows
+        # exactly which step it skipped.
+        mc_rejected = capture_result.get("mark_complete_rejected")
+        if mc_rejected and unit is not None:
+            unmet_text = "\n".join(f"- {item}" for item in mc_rejected.get("unmet") or [])
+            nudge = (
+                "[system] mark_complete was REJECTED — the server gate found "
+                "these unmet conditions:\n"
+                f"{unmet_text}\n"
+                "Do NOT emit mark_complete again until every condition is met."
+            )
+            db.add(
+                StudyMessage(
+                    session_id=session.id,
+                    role="system",
+                    content=nudge,
+                )
+            )
 
         # Mark the exercise being reviewed as 'reviewed' and stash
         # feedback (the full assistant reply).
@@ -1356,6 +1847,41 @@ async def _stream_generator(
                         if unit.completed_at
                         else None,
                     },
+                }
+            )
+
+        mc_rejected_event = capture_result.get("mark_complete_rejected")
+        if mc_rejected_event and unit is not None:
+            yield _sse(
+                {
+                    "event": "mark_complete_rejected",
+                    "unit_id": str(unit.id),
+                    "unmet": mc_rejected_event.get("unmet") or [],
+                    "score": mc_rejected_event.get("score"),
+                }
+            )
+
+        # Durable-state invalidation events so the frontend can refresh
+        # the Learner profile panel / objective mastery list / etc.
+        # without polling.
+        state_changed: list[str] = []
+        if capture_result.get("learner_profile_updated"):
+            state_changed.append("learner_profile")
+        if capture_result.get("mastery_updated"):
+            state_changed.append("objective_mastery")
+        if capture_result.get("misconceptions_changed"):
+            state_changed.append("misconceptions")
+        if capture_result.get("reflection_written"):
+            state_changed.append("reflections")
+        if state_changed:
+            yield _sse(
+                {
+                    "event": "study_state_updated",
+                    "project_id": str(project.id),
+                    # Key name mirrors the SSEPayload.changes contract
+                    # the frontend hook reads — keeping them in lockstep
+                    # avoids falling back to the broad-invalidate path.
+                    "changes": state_changed,
                 }
             )
 

@@ -590,6 +590,12 @@ export interface StudySessionSummary {
   exam_id: string | null;
   created_at: string;
   updated_at: string;
+  teachback_passed_at: string | null;
+  confidence_captured_at: string | null;
+  min_turns_required: number | null;
+  student_turn_count: number;
+  hint_count: number;
+  current_review_focus_objective_id: string | null;
 }
 
 export interface StudySessionDetail extends StudySessionSummary {
@@ -716,6 +722,10 @@ export interface StudyProjectDetail extends StudyProjectSummary {
 export interface UnitEnterResponse {
   unit: StudyUnitSummary;
   session: StudySessionSummary;
+  /** Optional kick-off stream id — backend enqueues an AI opener so
+   *  the tutor speaks first on a brand-new unit session. ``null`` on
+   *  re-entries where there's already conversation history. */
+  stream_id: string | null;
 }
 
 export interface StartExamResponse {
@@ -756,6 +766,95 @@ export interface WhiteboardSubmitResponse {
   stream_id: string;
   user_message: StudyMessage;
   exercise: WhiteboardExerciseSummary;
+}
+
+// ---- Learner state (Study 10/10) ----
+
+/**
+ * Structured view of the learner profile JSONB the tutor builds up
+ * over time. All fields are optional so the UI can render gracefully
+ * when the student has just started.
+ */
+export interface LearnerProfile {
+  occupation?: string | null;
+  interests?: string[];
+  goals?: string[];
+  background?: string | null;
+  preferred_examples_from?: string[];
+  free_form?: Record<string, unknown>;
+}
+
+export interface LearnerProfileResponse {
+  profile: LearnerProfile;
+  updated_at: string | null;
+}
+
+export interface LearnerProfileUpdate {
+  occupation?: string | null;
+  interests?: string[];
+  goals?: string[];
+  background?: string | null;
+  preferred_examples_from?: string[];
+  free_form?: Record<string, unknown>;
+}
+
+export interface ObjectiveMasteryEntry {
+  id: string;
+  project_id: string;
+  unit_id: string;
+  objective_index: number;
+  objective_text: string;
+  mastery_score: number;
+  ease_factor: number;
+  interval_days: number;
+  last_reviewed_at: string | null;
+  next_review_at: string | null;
+  review_count: number;
+  consecutive_failures: number;
+  days_since_review: number | null;
+  is_due: boolean;
+}
+
+export interface ObjectiveMasteryListResponse {
+  entries: ObjectiveMasteryEntry[];
+}
+
+export interface ReviewQueueItem {
+  objective_id: string;
+  unit_id: string;
+  unit_title: string;
+  objective_index: number;
+  objective_text: string;
+  mastery_score: number;
+  days_overdue: number;
+  last_reviewed_at: string | null;
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewQueueItem[];
+}
+
+export interface MisconceptionEntry {
+  id: string;
+  project_id: string;
+  unit_id: string | null;
+  objective_index: number | null;
+  description: string;
+  correction: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  times_seen: number;
+  resolved_at: string | null;
+}
+
+export interface MisconceptionListResponse {
+  entries: MisconceptionEntry[];
+}
+
+export interface ConfidenceCaptureResponse {
+  session_id: string;
+  captured_at: string;
+  level: number;
 }
 
 // ---- MFA ----

@@ -39,7 +39,17 @@ export default defineConfig({
         start_url: "/",
         scope: "/",
         display: "standalone",
-        orientation: "any",
+        // Portrait-only. Chat UX doesn't benefit from landscape on a
+        // phone (message column goes too wide, input bar loses vertical
+        // breathing room) and the flip between orientations is jarring
+        // mid-conversation. ``portrait-primary`` would pin to a single
+        // rotation; we use the plain ``portrait`` family so tablets can
+        // still flip 180° without unmounting. Installed PWAs on Android
+        // honour this immediately; iOS respects it on home-screen
+        // installs. Regular (non-installed) browser tabs are a runtime
+        // lock via ``screen.orientation.lock('portrait')`` — see
+        // ``App.tsx``.
+        orientation: "portrait",
         background_color: "#FAF9F7",
         theme_color: "#D97757",
         lang: "en",

@@ -2,19 +2,27 @@ import { CheckCircle2, Target } from "lucide-react";
 
 import type { StudyUnitSummary } from "@/api/types";
 import { cn } from "@/utils/cn";
+import { ObjectiveMasteryList } from "./ObjectiveMasteryList";
+import { useObjectiveMasteryQuery } from "@/hooks/useStudy";
 
 /** Read-only sidebar showing the learning objectives and mastery
  *  status for the current unit — keeps context visible while the
  *  user chats with the tutor. */
 export function UnitContextPanel({
   unit,
+  projectId,
   projectTitle,
   totalUnits,
 }: {
   unit: StudyUnitSummary;
+  projectId: string;
   projectTitle: string;
   totalUnits: number;
 }) {
+  const masteryQuery = useObjectiveMasteryQuery(projectId);
+  const unitMastery = (masteryQuery.data?.entries ?? []).filter(
+    (e) => e.unit_id === unit.id
+  );
   const done = unit.status === "completed";
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-4">
@@ -67,6 +75,10 @@ export function UnitContextPanel({
             ))}
           </ul>
         </div>
+      )}
+
+      {unitMastery.length > 0 && (
+        <ObjectiveMasteryList entries={unitMastery} />
       )}
 
       {unit.exam_focus && (

@@ -52,6 +52,37 @@ export default function App() {
     applyTheme();
   }, []);
 
+  // Runtime companion to the manifest's ``orientation: portrait``.
+  //
+  // Installed PWAs pick up the manifest declaration automatically,
+  // but plain browser tabs need an explicit call to the Screen
+  // Orientation API. On supporting browsers (Chrome/Edge Android in
+  // fullscreen or installed-PWA context) this pins the layout to
+  // portrait; on browsers that reject the lock outside fullscreen
+  // (most mobile Safari) the call throws and we swallow silently —
+  // the manifest still covers the home-screen install path, and a
+  // non-installed Safari tab can't be locked from JS anyway.
+  useEffect(() => {
+    // ``ScreenOrientation.lock`` is defined in the WICG Screen
+    // Orientation spec but not yet in lib.dom — we narrow through a
+    // minimal structural type so TS doesn't complain.
+    type LockableOrientation = ScreenOrientation & {
+      lock?: (orientation: "portrait") => Promise<void>;
+    };
+    const orientation = screen.orientation as LockableOrientation | undefined;
+    if (!orientation || typeof orientation.lock !== "function") return;
+    try {
+      const p = orientation.lock("portrait");
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          /* browser refused (e.g. Safari outside fullscreen) — no-op */
+        });
+      }
+    } catch {
+      /* older browsers throw synchronously — no-op */
+    }
+  }, []);
+
   if (status === "idle" || status === "loading") {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--text-muted)]">

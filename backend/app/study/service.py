@@ -12,11 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models_config.provider import ChatMessage
 from app.redis_client import redis
+from app.study import config as study_config
+from app.study import review as study_review
 from app.study.models import (
     StudyExam,
     StudyMessage,
+    StudyMisconception,
+    StudyObjectiveMastery,
     StudyProject,
+    StudySession,
     StudyUnit,
+    StudyUnitReflection,
     WhiteboardExercise,
 )
 from app.study.parser import Capture
@@ -118,6 +124,24 @@ Learning objectives:
 
 {staleness_block}
 
+## Hydrated state blocks — read these BEFORE you start teaching
+The sections below are generated from durable state the system keeps
+about this student. Treat them as fact. If they're marked "(none yet)"
+it's a signal to probe gently, NOT an excuse to re-ask things the
+student already told you.
+
+{learner_profile_block}
+
+{mastery_state_block}
+
+{reflections_block}
+
+{misconceptions_block}
+
+{review_queue_block}
+
+{review_focus_block}
+
 ## Core teaching principles — apply these on EVERY reply
 
 1. **Socratic scaffolding — don't just hand over the answer.**
@@ -138,16 +162,20 @@ Learning objectives:
    prerequisite, climb back up. Always keep them one small step
    beyond what they can already do, never five.
 
-3. **Personalise via analogy.**
-   Early in the unit — your first or second reply — ask a light
-   question about their world: what do they do day-to-day, any
-   hobbies or subjects they love? Then reuse that context throughout:
+3. **Personalise via analogy — but don't re-interrogate.**
+   If the "Learner profile" block above already lists an occupation,
+   interests, or goals, DO NOT ask again. Reuse that context directly:
    a pianist gets wave interference through overtones; a football fan
    gets vectors through passing lanes; a cook gets chemistry through
-   caramelisation. If they won't share, pick broad everyday analogies
-   (cooking, driving, packing a bag) and keep moving. Abstract ideas
-   stick when they're hung on a mental framework the student already
-   owns.
+   caramelisation. The profile block is the student's own words — act
+   like you remembered them.
+   Only when the profile block says "(empty — probe early)" should
+   you, in your first or second reply, ask ONE light question about
+   their world (day-to-day, hobbies, what they love). As soon as they
+   answer, emit `<unit_action>{{"type": "save_learner_profile", ...}}`
+   (see the action reference below) so the next unit doesn't re-probe.
+   If they won't share, fall back to broad everyday analogies
+   (cooking, driving, packing a bag) and keep moving.
 
 4. **Diagnose wrong answers — don't just mark them wrong.**
    When the student gets something wrong, FIRST guess their reasoning
@@ -180,6 +208,126 @@ Learning objectives:
    answer to plug the last gap or to confirm you're genuinely done.
    Skipping this step and rubber-stamping the unit is a red flag —
    students often nod along without actually owning the material.
+
+8. **Worked-example fading.**
+   New objective → you do ONE worked example end-to-end, narrating
+   every step. Second attempt → the student does the "hard" step
+   themselves while you scaffold the rest (faded example). Third
+   attempt → the student runs it solo, you observe. Never jump
+   straight from "here's the theory" to "now you do five of these"
+   — cognitive load theory says the scaffolded middle step is where
+   mastery actually consolidates.
+
+9. **Struggle-positive framing — "that tells me…", not "incorrect".**
+   Every wrong answer is data, not a failure. Lead with what the
+   mistake reveals: "that tells me you're thinking about X as if it
+   were Y — that's a really common bridge to build, let's retrace
+   it." Words to avoid: "wrong", "no", "incorrect" as the opener.
+   Words to use: "interesting", "that tells me…", "close —", "let's
+   dig into why you said…". The student should feel safer being
+   wrong than silent.
+
+10. **Confidence BEFORE feedback — interleave review.**
+    When you ask a practice question, make them commit to a
+    confidence rating (1-5) BEFORE you reveal whether they were
+    right. Emit `<unit_action>{{"type": "capture_confidence", ...}}`
+    with their rating so the system records it. This exposes
+    Dunning-Kruger ("I'm 5/5 sure" + wrong = the single most
+    valuable teaching moment). Also: after every {interleaving_trigger_turns}
+    turns on new material, weave in ONE review question from the
+    "Due for review" block above before returning to new content.
+
+    **UI markers.** When you need a confidence rating from the
+    student, include the literal token ``<request_confidence/>``
+    anywhere in your message — the frontend strips it from the
+    rendered text and shows an inline 1-5 slider next to your
+    message so the student can click instead of typing a number.
+    When you want the student to do the teach-back step, include
+    ``<request_teachback/>`` — this toggles a "your turn, explain
+    it back" banner in the chat. Both markers are idempotent; emit
+    at most ONE per message and never both at once.
+
+11. **Transfer prompts — anchor every unit to the student's world.**
+    Close each unit with a transfer question: "where else have you
+    seen this pattern?" or "can you think of a situation in <their
+    domain> where this would apply?". Capture 1-3 "concept anchors"
+    from their answer into the `summarise_unit` action's
+    ``concepts_anchored`` list — these are the mental hooks the
+    NEXT unit's opener will cite.
+
+12. **Bridging narrative — open with an anchor, close with a preview.**
+    Your FIRST message of the unit MUST reference at least one
+    concrete anchor from the "Recent unit reflections" block above
+    (if the block is not empty) — not just "building on the last
+    unit" generically, but "remember when we worked through <anchor>
+    in unit N? This unit extends that by…". Your FINAL message
+    before marking complete MUST preview the next unit by name (see
+    the "Upcoming units" block) with one sentence on why this unit
+    prepares them for it.
+
+## Action reference — these are the tutor actions you can emit
+
+Every action is a ``<unit_action>`` JSON block. Most of them update
+durable state the system keeps about the student. You can emit
+multiple actions in one reply when they're independent (e.g.
+``capture_confidence`` plus ``update_objective_mastery``), but never
+emit ``mark_complete`` alongside any other action.
+
+- ``save_learner_profile`` — write keys into the learner profile.
+  Use this the VERY FIRST time the student tells you their
+  occupation, interests, goals, or background. Additive merge —
+  you can call it repeatedly to enrich the profile.
+  ``{{"type": "save_learner_profile", "profile": {{"occupation": "...",
+    "interests": ["..."], "goals": ["..."], "background": "...",
+    "preferred_examples_from": ["..."], "free_form": {{...}} }} }}``
+
+- ``update_objective_mastery`` — record that you just assessed a
+  specific objective. Called after a teach-back, a practice
+  question, or a whiteboard submission that clearly targets one
+  objective. Also reschedules the spaced-repetition cadence.
+  ``{{"type": "update_objective_mastery", "objective_index": 0,
+    "score": 0-100, "evidence": "1-2 sentence note on what they
+    demonstrated."}}``
+
+- ``log_misconception`` — when you spot a recurring wrong model
+  the student has (not a one-off slip). Unit-scoped by default.
+  ``{{"type": "log_misconception", "objective_index": 0 | null,
+    "description": "The student thinks X causes Y when it's the
+    other way round.", "correction": "Short correct framing."}}``
+
+- ``resolve_misconception`` — when the student has clearly moved
+  past a previously logged misconception. Pass the ``id`` the
+  system assigned when you logged it (listed in the "Known
+  misconceptions" block above).
+  ``{{"type": "resolve_misconception", "misconception_id": "<uuid>"}}``
+
+- ``teachback_passed`` — emit this AFTER the student has explained
+  the unit in their own words AND you're satisfied with the
+  explanation. Required before the server accepts ``mark_complete``.
+  ``{{"type": "teachback_passed", "objective_index": 0 | null,
+    "summary_in_student_words": "Their paraphrase, lightly cleaned
+    up."}}``
+
+- ``capture_confidence`` — record a confidence rating. Emit this
+  whenever the student gives you a 1-5 number (Principle #10).
+  Required at least once before ``mark_complete``.
+  ``{{"type": "capture_confidence", "level": 1-5,
+    "objective_index": 0 | null, "note": "optional short note"}}``
+
+- ``summarise_unit`` — emit RIGHT BEFORE ``mark_complete``. Writes
+  the bridging reflection the NEXT unit's opener will cite.
+  ``{{"type": "summarise_unit", "summary": "2-3 sentence recap of
+    what they now understand.",
+    "objectives_summary": {{"0": "one-line verdict", ...}},
+    "concepts_anchored": ["concrete hook phrase", ...]}}``
+
+- ``mark_complete`` — FINAL action. Server will REFUSE with HTTP 422
+  if any of these conditions isn't met: overall mastery ≥ 80, every
+  objective ≥ 75, ``teachback_passed`` emitted, at least one
+  ``capture_confidence`` recorded, enough student turns on record,
+  and a ``summarise_unit`` reflection written. Failed gate is NOT a
+  failure — it's the system telling you which step to do next. Read
+  the error, do the missing step, try again.
 
 ## Teaching flow you MUST follow
 
@@ -900,6 +1048,181 @@ _STALENESS_FLIP_BLOCK = (
 )
 
 
+def _format_learner_profile_block(profile: dict[str, Any] | None) -> str:
+    """Render the learner-profile JSONB as the "Learner profile" block.
+
+    Deliberately terse — the prompt budget is limited and the tutor
+    only needs enough to land a relevant analogy. Returns the
+    "(empty — probe early)" sentinel when nothing is known so
+    Principle #3 can decide whether to probe.
+    """
+    header = "## Learner profile"
+    if not profile or not isinstance(profile, dict):
+        return f"{header}\n(empty — probe early, then save via `save_learner_profile`)"
+    rendered: list[str] = []
+    occupation = (profile.get("occupation") or "").strip()
+    if occupation:
+        rendered.append(f"- Occupation: {occupation}")
+    interests = [str(i).strip() for i in (profile.get("interests") or []) if str(i).strip()]
+    if interests:
+        rendered.append(f"- Interests: {', '.join(interests[:8])}")
+    goals = [str(g).strip() for g in (profile.get("goals") or []) if str(g).strip()]
+    if goals:
+        rendered.append(f"- Goals: {', '.join(goals[:5])}")
+    background = (profile.get("background") or "").strip()
+    if background:
+        rendered.append(f"- Background: {background[:300]}")
+    pref = [
+        str(p).strip()
+        for p in (profile.get("preferred_examples_from") or [])
+        if str(p).strip()
+    ]
+    if pref:
+        rendered.append(f"- Prefer examples from: {', '.join(pref[:5])}")
+    free_form = profile.get("free_form")
+    if isinstance(free_form, dict) and free_form:
+        rendered.append(f"- Notes: {json.dumps(free_form, ensure_ascii=False)[:300]}")
+    if not rendered:
+        return f"{header}\n(empty — probe early, then save via `save_learner_profile`)"
+    return header + "\n" + "\n".join(rendered)
+
+
+def _format_mastery_state_block(
+    unit: StudyUnit,
+    rows: list[StudyObjectiveMastery],
+) -> str:
+    """Render per-objective mastery for the CURRENT unit.
+
+    We restrict to the active unit's rows because the full list can
+    span 10+ units and blows out the token budget. Overall unit
+    mastery is pulled from ``unit.mastery_score`` if set so the
+    block still shows something on a unit the student is re-opening
+    post-completion.
+    """
+    header = "## Mastery state (this unit)"
+    unit_rows = sorted(
+        [r for r in rows if r.unit_id == unit.id],
+        key=lambda r: r.objective_index,
+    )
+    overall = unit.mastery_score if unit.mastery_score is not None else 0
+    lines = [f"- Overall unit mastery: {overall}/100"]
+    if not unit_rows:
+        lines.append("- (per-objective rows haven't been seeded yet — first pass through this unit)")
+        return header + "\n" + "\n".join(lines)
+    now = datetime.now(timezone.utc)
+    for row in unit_rows:
+        last = row.last_reviewed_at
+        if last is None:
+            hint = "never reviewed"
+        else:
+            days = max(0, (now - last).days)
+            hint = f"reviewed {days}d ago"
+        lines.append(
+            f"- Objective {row.objective_index + 1} — "
+            f"{row.objective_text[:100]}: mastery {row.mastery_score}/100 "
+            f"(floor {study_config.PER_OBJECTIVE_FLOOR}, {hint})"
+        )
+    return header + "\n" + "\n".join(lines)
+
+
+def _format_reflections_block(reflections: list[StudyUnitReflection]) -> str:
+    """Recent unit reflections — the bridging-narrative scaffolding.
+
+    Capped at :data:`study_config.MAX_REFLECTIONS_IN_PROMPT` most-recent
+    rows, sorted newest first. The tutor is instructed (Principle #12)
+    to cite at least one anchor from this block in the unit opener.
+    """
+    header = "## Recent unit reflections (last 3)"
+    if not reflections:
+        return f"{header}\n(none yet — this is one of the first units in the plan)"
+    lines: list[str] = []
+    for r in reflections[: study_config.MAX_REFLECTIONS_IN_PROMPT]:
+        anchors = r.concepts_anchored or []
+        anchor_str = f" · anchors: {', '.join(str(a) for a in anchors[:4])}" if anchors else ""
+        summary = (r.summary or "").strip()[:280]
+        lines.append(f"- Unit {r.unit_id}: {summary}{anchor_str}")
+    return header + "\n" + "\n".join(lines)
+
+
+def _format_misconceptions_block(misconceptions: list[StudyMisconception]) -> str:
+    """Unresolved misconceptions — what the tutor should watch for.
+
+    Capped at :data:`study_config.MAX_MISCONCEPTIONS_IN_PROMPT` items.
+    Resolved rows are filtered out upstream so this list is always
+    "actively problematic" patterns.
+    """
+    header = "## Known misconceptions (unresolved)"
+    if not misconceptions:
+        return f"{header}\n(none logged yet)"
+    lines: list[str] = []
+    for m in misconceptions[: study_config.MAX_MISCONCEPTIONS_IN_PROMPT]:
+        lines.append(
+            f"- [id={m.id}] seen {m.times_seen}x — {m.description[:160]} "
+            f"→ correction: {m.correction[:160]}"
+        )
+    return header + "\n" + "\n".join(lines)
+
+
+def _format_review_focus_block(focus: StudyObjectiveMastery | None) -> str:
+    """Focus block injected when the student deep-linked into this
+    session from the ReviewQueueWidget. Signals to the tutor that
+    BEFORE anything else this turn it should do one review pass on
+    the named objective — a ~2-turn check-in, score it via
+    ``update_objective_mastery``, then continue with the normal
+    unit flow. The focus auto-clears as soon as that score lands so
+    subsequent turns don't keep re-prioritising the same item.
+
+    Intentionally placed AFTER the Due-for-review block so both can
+    coexist — if multiple items are due the tutor still sees them,
+    but this one gets handled first.
+    """
+    if focus is None:
+        return ""
+    overdue = 0
+    if focus.next_review_at is not None:
+        delta = datetime.now(timezone.utc) - focus.next_review_at
+        overdue = max(0, delta.days)
+    return (
+        "## Session focus — student deep-linked here to review this\n"
+        "The student clicked THIS review item from the Review queue widget "
+        "to land in this unit. Before teaching anything new, run ONE quick "
+        "check on it (single question + evidence-based correction if needed), "
+        "then emit `update_objective_mastery` with the resulting score. "
+        "Once you've scored it the focus auto-clears and the session can "
+        "continue with normal unit content.\n\n"
+        f"- mastery={focus.mastery_score}, {overdue}d overdue\n"
+        f"- objective {focus.objective_index + 1}: {focus.objective_text[:200]}"
+    )
+
+
+def _format_review_queue_block(
+    queue: list[StudyObjectiveMastery],
+    current_unit_id: uuid.UUID,
+) -> str:
+    """Top due-for-review items the tutor should interleave.
+
+    Items belonging to the CURRENT unit are filtered out — no point
+    telling the tutor "review unit N's objective #2" when they're
+    literally inside unit N. The remainder are capped at
+    :data:`study_config.MAX_REVIEW_ITEMS_IN_PROMPT`.
+    """
+    header = "## Due for review (interleave BEFORE new content)"
+    filtered = [r for r in queue if r.unit_id != current_unit_id]
+    if not filtered:
+        return f"{header}\n(nothing due right now — focus purely on new material)"
+    now = datetime.now(timezone.utc)
+    lines: list[str] = []
+    for r in filtered[: study_config.MAX_REVIEW_ITEMS_IN_PROMPT]:
+        overdue = 0
+        if r.next_review_at is not None:
+            overdue = max(0, (now - r.next_review_at).days)
+        lines.append(
+            f"- [mastery={r.mastery_score}, {overdue}d overdue] "
+            f"objective {r.objective_index + 1}: {r.objective_text[:120]}"
+        )
+    return header + "\n" + "\n".join(lines)
+
+
 def _build_staleness_block(unit: StudyUnit) -> str:
     """Pick the staleness block that matches ``unit``'s current tier.
 
@@ -922,8 +1245,20 @@ def build_unit_system_prompt(
     project: StudyProject,
     unit: StudyUnit,
     all_units: list[StudyUnit],
+    mastery_rows: list[StudyObjectiveMastery] | None = None,
+    recent_reflections: list[StudyUnitReflection] | None = None,
+    open_misconceptions: list[StudyMisconception] | None = None,
+    review_queue: list[StudyObjectiveMastery] | None = None,
+    review_focus: StudyObjectiveMastery | None = None,
 ) -> str:
-    """System prompt for a per-unit tutor session."""
+    """System prompt for a per-unit tutor session.
+
+    The new keyword arguments carry the hydrated learner state
+    introduced by the "Study to 10/10" plan. All are optional so the
+    function stays backwards-compatible with callers that haven't
+    been wired up yet (they'll see the "(none yet)" variants of each
+    block, which is the correct behaviour for an unhydrated session).
+    """
     goal_str = (project.goal or "").strip() or "(not specified)"
     learning_request = (project.learning_request or "").strip() or "(not specified)"
     objectives_str = _fmt_objectives(unit.learning_objectives or [])
@@ -959,6 +1294,15 @@ def build_unit_system_prompt(
 
     staleness_block = _build_staleness_block(unit)
 
+    learner_profile_block = _format_learner_profile_block(
+        getattr(project, "learner_profile", None)
+    )
+    mastery_state_block = _format_mastery_state_block(unit, mastery_rows or [])
+    reflections_block = _format_reflections_block(recent_reflections or [])
+    misconceptions_block = _format_misconceptions_block(open_misconceptions or [])
+    review_queue_block = _format_review_queue_block(review_queue or [], unit.id)
+    review_focus_block = _format_review_focus_block(review_focus)
+
     return _UNIT_SYSTEM_PROMPT_TEMPLATE.format(
         project_title=project.title,
         learning_request=learning_request,
@@ -974,6 +1318,13 @@ def build_unit_system_prompt(
         exam_focus_block=exam_focus_block,
         diagnostic_block=diagnostic_block,
         staleness_block=staleness_block,
+        learner_profile_block=learner_profile_block,
+        mastery_state_block=mastery_state_block,
+        reflections_block=reflections_block,
+        misconceptions_block=misconceptions_block,
+        review_queue_block=review_queue_block,
+        review_focus_block=review_focus_block,
+        interleaving_trigger_turns=study_config.INTERLEAVING_TRIGGER_TURNS,
         whiteboard_block=_WHITEBOARD_INSTRUCTIONS,
     )
 
@@ -1295,18 +1646,216 @@ def parse_whiteboard_payload(body: str) -> dict[str, Any] | None:
     return None
 
 
-async def handle_unit_action(
+class MarkCompleteGateResult(TypedDict):
+    """Outcome of the multi-condition ``mark_complete`` gate.
+
+    Keys:
+        passed: True when every condition held and the unit was
+            actually flipped to ``completed``.
+        unmet: Human-readable list of conditions that blocked the
+            close. Surfaced back to the tutor as a synthetic user
+            message so it can self-correct in the SAME conversation.
+        score: The reported mastery score, clamped to 0-100.
+    """
+
+    passed: bool
+    unmet: list[str]
+    score: int
+
+
+class CompletionReadiness(TypedDict):
+    """Structured readiness report used by the readiness API.
+
+    Mirrors the ``unmet`` strings produced by
+    :func:`evaluate_completion_gate` but breaks every check out into
+    a first-class boolean so the UI can render a progress checklist
+    ("Teach-back ✓, confidence ⨯, 3/5 turns…") without string
+    parsing. Always safe to compute — read-only, no writes.
+
+    ``unmet`` is the same human-readable list the tutor self-correct
+    message uses, so frontend and AI see identical prose.
+    """
+
+    ready: bool
+    unmet: list[str]
+    overall_score: int
+    per_objective: list[dict[str, Any]]
+    teachback_passed: bool
+    confidence_captured: bool
+    student_turn_count: int
+    min_turns_required: int | None
+    has_reflection: bool
+
+
+async def evaluate_completion_gate(
     *,
     db: AsyncSession,
     unit: StudyUnit,
-    payload: dict[str, Any],
-) -> bool:
-    """Apply a ``<unit_action>`` payload to a unit. Returns True if applied.
+    session: StudySession | None,
+    proposed_score: int | None = None,
+    proposed_summary: str | None = None,
+) -> CompletionReadiness:
+    """Pure(-ish) multi-condition readiness check.
 
-    Currently the only supported action is ``mark_complete``. We gate
-    it on a minimum mastery score — the tutor is instructed to hold
-    off below 70, but we enforce it server-side too so a buggy model
-    can't rubber-stamp the student.
+    Computes the exact set of ``unmet`` conditions the ``mark_complete``
+    gate would flag right now, without mutating anything. Used by
+    both:
+
+    * the ``mark_complete`` action handler (authoritative gate that
+      then performs the write), and
+    * ``GET /study/sessions/{id}/completion-readiness`` (UI hint so
+      the student sees why the unit isn't closable yet).
+
+    The two callers pass different ``proposed_score`` values:
+
+    * Action-handler path passes the score the tutor claims in the
+      ``mark_complete`` payload — so a tutor that rushes with
+      ``mastery_score=40`` trips the overall-floor check immediately.
+    * Readiness-API path passes ``None`` — the overall-score gate is
+      then evaluated against the current unit mastery average as a
+      forecast ("if the tutor tried to close right now, this is
+      what would happen").
+    """
+    unmet: list[str] = []
+
+    # 1. Overall mastery floor (optional — skipped when the caller
+    # hasn't proposed a score, so the readiness endpoint doesn't
+    # spam "overall mastery is 0" before any objective has been
+    # scored).
+    if proposed_score is not None:
+        if proposed_score < study_config.MASTERY_FLOOR:
+            unmet.append(
+                f"overall mastery is {proposed_score}/100, needs ≥ "
+                f"{study_config.MASTERY_FLOOR} (keep teaching or re-assess)"
+            )
+
+    # 2. Per-objective floor.
+    mastery_rows = await db.execute(
+        select(StudyObjectiveMastery).where(StudyObjectiveMastery.unit_id == unit.id)
+    )
+    mastery_list = list(mastery_rows.scalars().all())
+    mastery_by_idx = {r.objective_index: r for r in mastery_list}
+    expected_objectives = list(unit.learning_objectives or [])
+    per_objective: list[dict[str, Any]] = []
+    for idx, text in enumerate(expected_objectives):
+        row = mastery_by_idx.get(idx)
+        if row is None:
+            unmet.append(
+                f"objective #{idx + 1} ({text[:60]}) has no mastery score yet — "
+                "assess it then emit `update_objective_mastery`"
+            )
+            per_objective.append(
+                {
+                    "index": idx,
+                    "text": text,
+                    "score": None,
+                    "meets_floor": False,
+                }
+            )
+            continue
+        meets = row.mastery_score >= study_config.PER_OBJECTIVE_FLOOR
+        if not meets:
+            unmet.append(
+                f"objective #{idx + 1} mastery is {row.mastery_score}/100, "
+                f"needs ≥ {study_config.PER_OBJECTIVE_FLOOR}"
+            )
+        per_objective.append(
+            {
+                "index": idx,
+                "text": text,
+                "score": row.mastery_score,
+                "meets_floor": meets,
+            }
+        )
+
+    teachback_ok = bool(session is not None and session.teachback_passed_at is not None)
+    confidence_ok = bool(
+        session is not None and session.confidence_captured_at is not None
+    )
+    turn_count = int(session.student_turn_count) if session is not None else 0
+    min_turns = session.min_turns_required if session is not None else None
+
+    # 3. Teach-back.
+    if session is not None and not teachback_ok:
+        unmet.append(
+            "teach-back hasn't been recorded — ask the student to explain "
+            "the unit in their own words then emit `teachback_passed`"
+        )
+
+    # 4. Confidence capture.
+    if session is not None and not confidence_ok:
+        unmet.append(
+            "confidence rating hasn't been captured — ask for a 1-5 number "
+            "then emit `capture_confidence`"
+        )
+
+    # 5. Minimum student turns.
+    if (
+        session is not None
+        and min_turns is not None
+        and turn_count < min_turns
+    ):
+        unmet.append(
+            f"student has sent {turn_count} turns; "
+            f"unit requires at least {min_turns} before completion"
+        )
+
+    # 6. Reflection presence — readiness-check version. The
+    # write-path in ``handle_unit_action`` will auto-stub from the
+    # ``mark_complete`` summary when available; here we only report
+    # whether a row already exists so the UI can show "summary
+    # recorded ✓".
+    reflection_stmt = select(StudyUnitReflection).where(
+        StudyUnitReflection.unit_id == unit.id
+    )
+    has_reflection = (
+        await db.execute(reflection_stmt)
+    ).scalars().first() is not None
+    has_usable_summary = bool(
+        has_reflection or (proposed_summary and proposed_summary.strip())
+    )
+    if not has_usable_summary:
+        unmet.append(
+            "unit reflection hasn't been written — emit `summarise_unit` "
+            "with 2-3 sentence recap before `mark_complete`"
+        )
+
+    overall_score = proposed_score
+    if overall_score is None:
+        overall_score = (
+            int(round(sum(r.mastery_score for r in mastery_list) / len(mastery_list)))
+            if mastery_list
+            else 0
+        )
+
+    return CompletionReadiness(
+        ready=not unmet,
+        unmet=unmet,
+        overall_score=overall_score,
+        per_objective=per_objective,
+        teachback_passed=teachback_ok,
+        confidence_captured=confidence_ok,
+        student_turn_count=turn_count,
+        min_turns_required=min_turns,
+        has_reflection=has_reflection,
+    )
+
+
+async def handle_unit_action(
+    *,
+    db: AsyncSession,
+    project: StudyProject,
+    unit: StudyUnit,
+    session: StudySession | None,
+    payload: dict[str, Any],
+) -> MarkCompleteGateResult | bool:
+    """Apply a ``<unit_action>`` payload to a unit.
+
+    For ``mark_complete`` we run the multi-condition gate introduced
+    by the Study 10/10 plan and return a
+    :class:`MarkCompleteGateResult` either way so the caller can feed
+    the ``unmet`` list back to the tutor. Any other action type
+    returns ``False`` (caller ignores).
     """
     action_type = str(payload.get("type", "")).lower()
     if action_type != "mark_complete":
@@ -1318,11 +1867,38 @@ async def handle_unit_action(
     except (TypeError, ValueError):
         score = 0
     score = max(0, min(100, score))
-    if score < 70:
-        # Tutor isn't actually confident — ignore the action.
-        return False
 
-    summary = str(payload.get("summary") or "").strip()[:2000] or None
+    summary_text = str(payload.get("summary") or "").strip()[:2000]
+
+    readiness = await evaluate_completion_gate(
+        db=db,
+        unit=unit,
+        session=session,
+        proposed_score=score,
+        proposed_summary=summary_text,
+    )
+
+    # The write-path still auto-stubs a reflection when the tutor
+    # supplied a summary on the mark_complete but no dedicated
+    # ``summarise_unit`` action fired earlier. The readiness check
+    # only reports presence — this is where the stub actually lands.
+    if summary_text and not readiness["has_reflection"]:
+        db.add(
+            StudyUnitReflection(
+                unit_id=unit.id,
+                session_id=session.id if session else None,
+                summary=summary_text,
+                objectives_summary={},
+                concepts_anchored=[],
+            )
+        )
+
+    if not readiness["ready"]:
+        return MarkCompleteGateResult(
+            passed=False, unmet=list(readiness["unmet"]), score=score
+        )
+
+    summary = summary_text or None
 
     now = datetime.now(timezone.utc)
     unit.status = "completed"
@@ -1333,6 +1909,350 @@ async def handle_unit_action(
     unit.updated_at = now
     # Clear the retry focus now that the unit is re-mastered.
     unit.exam_focus = None
+    return MarkCompleteGateResult(passed=True, unmet=[], score=score)
+
+
+# ====================================================================
+# Study-10/10 action handlers — profile, mastery, misconceptions,
+# teach-back, confidence, unit reflection.
+# ====================================================================
+async def handle_save_learner_profile(
+    *, db: AsyncSession, project: StudyProject, payload: dict[str, Any]
+) -> bool:
+    """Merge the tutor's ``save_learner_profile`` payload into the project.
+
+    Additive merge — scalar fields overwrite only when the payload
+    provides a non-empty value; list fields are unioned (dedup while
+    preserving order); ``free_form`` is shallow-merged. This lets the
+    tutor refine the profile over multiple turns without ever
+    accidentally deleting context the student told us earlier.
+    """
+    incoming = payload.get("profile")
+    if not isinstance(incoming, dict):
+        return False
+
+    current: dict[str, Any] = dict(project.learner_profile or {})
+    changed = False
+
+    scalar_keys = ("occupation", "background")
+    for key in scalar_keys:
+        val = incoming.get(key)
+        if isinstance(val, str) and val.strip():
+            if current.get(key) != val.strip():
+                current[key] = val.strip()
+                changed = True
+
+    list_keys = ("interests", "goals", "preferred_examples_from")
+    for key in list_keys:
+        val = incoming.get(key)
+        if isinstance(val, list):
+            cleaned = [str(x).strip() for x in val if str(x).strip()]
+            if not cleaned:
+                continue
+            existing = [str(x) for x in (current.get(key) or [])]
+            merged: list[str] = list(existing)
+            for item in cleaned:
+                if item not in merged:
+                    merged.append(item)
+            if merged != existing:
+                current[key] = merged
+                changed = True
+
+    free_form = incoming.get("free_form")
+    if isinstance(free_form, dict) and free_form:
+        existing_ff = dict(current.get("free_form") or {})
+        existing_ff.update({str(k): v for k, v in free_form.items()})
+        current["free_form"] = existing_ff
+        changed = True
+
+    if not changed:
+        return False
+
+    project.learner_profile = current
+    project.learner_profile_updated_at = datetime.now(timezone.utc)
+    project.updated_at = datetime.now(timezone.utc)
+    return True
+
+
+async def handle_update_objective_mastery(
+    *,
+    db: AsyncSession,
+    project: StudyProject,
+    unit: StudyUnit,
+    payload: dict[str, Any],
+    session: StudySession | None = None,
+) -> bool:
+    """Apply an ``update_objective_mastery`` payload.
+
+    Writes the new mastery score, advances the SM-2-lite schedule,
+    and nudges the unit-level ``mastery_score`` to the average of the
+    unit's objective rows so the existing UI still reflects progress.
+
+    Also: if the session currently has a ``current_review_focus_
+    objective_id`` and the scored objective matches, the focus is
+    auto-cleared — this is the sticky-until-satisfied contract for
+    the deep-linked review flow (see the 0034 migration).
+    """
+    raw_idx = payload.get("objective_index")
+    try:
+        idx = int(raw_idx)
+    except (TypeError, ValueError):
+        return False
+    objectives = unit.learning_objectives or []
+    if idx < 0 or idx >= len(objectives):
+        return False
+
+    raw_score = payload.get("score")
+    try:
+        score = int(raw_score)
+    except (TypeError, ValueError):
+        return False
+    score = max(0, min(100, score))
+
+    row_stmt = select(StudyObjectiveMastery).where(
+        StudyObjectiveMastery.unit_id == unit.id,
+        StudyObjectiveMastery.objective_index == idx,
+    )
+    row = (await db.execute(row_stmt)).scalar_one_or_none()
+    if row is None:
+        row = StudyObjectiveMastery(
+            project_id=project.id,
+            unit_id=unit.id,
+            objective_index=idx,
+            objective_text=objectives[idx],
+            mastery_score=score,
+            ease_factor=study_config.DEFAULT_EASE_FACTOR,
+            interval_days=0,
+            review_count=0,
+            consecutive_failures=0,
+        )
+        db.add(row)
+        await db.flush()
+
+    success = score >= study_config.REVIEW_PASS_SCORE
+    study_review.schedule_next_review(row, success=success, score=score)
+
+    # Refresh the unit-level average so the existing ring/progress bars
+    # still tell the truth.
+    all_rows_stmt = select(StudyObjectiveMastery).where(
+        StudyObjectiveMastery.unit_id == unit.id
+    )
+    all_rows = list((await db.execute(all_rows_stmt)).scalars().all())
+    if all_rows:
+        avg = int(round(sum(r.mastery_score for r in all_rows) / len(all_rows)))
+        unit.mastery_score = max(unit.mastery_score or 0, avg) if unit.status == "completed" else avg
+        unit.last_studied_at = datetime.now(timezone.utc)
+        unit.updated_at = datetime.now(timezone.utc)
+
+    # Auto-clear the review focus the moment its target objective
+    # gets a fresh score. Cheap equality-on-id is fine because the
+    # focus is always a row for the current session's unit (enforced
+    # at stamp time); we still guard on objective_index for safety
+    # when the column points at a row from an earlier unit.
+    if (
+        session is not None
+        and session.current_review_focus_objective_id is not None
+        and row.id == session.current_review_focus_objective_id
+    ):
+        session.current_review_focus_objective_id = None
+
+    return True
+
+
+async def handle_log_misconception(
+    *,
+    db: AsyncSession,
+    project: StudyProject,
+    unit: StudyUnit,
+    payload: dict[str, Any],
+) -> bool:
+    """Record or re-stamp a misconception.
+
+    If a row already exists with the same ``description`` (case-
+    insensitive exact match) on this project, we bump ``times_seen``
+    and ``last_seen_at`` rather than inserting a duplicate. This
+    matches the plan's intent: the catalog should show recurring
+    patterns, not every variant phrasing the tutor dreams up.
+    """
+    description = str(payload.get("description") or "").strip()
+    correction = str(payload.get("correction") or "").strip()
+    if not description or not correction:
+        return False
+
+    now = datetime.now(timezone.utc)
+    existing_stmt = select(StudyMisconception).where(
+        StudyMisconception.project_id == project.id,
+        func.lower(StudyMisconception.description) == description.lower(),
+        StudyMisconception.resolved_at.is_(None),
+    )
+    existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+    if existing is not None:
+        existing.times_seen = (existing.times_seen or 1) + 1
+        existing.last_seen_at = now
+        if correction and existing.correction != correction:
+            existing.correction = correction[:2000]
+        return True
+
+    raw_idx = payload.get("objective_index")
+    try:
+        idx: int | None = int(raw_idx) if raw_idx is not None else None
+    except (TypeError, ValueError):
+        idx = None
+
+    db.add(
+        StudyMisconception(
+            project_id=project.id,
+            unit_id=unit.id,
+            objective_index=idx,
+            description=description[:2000],
+            correction=correction[:2000],
+            first_seen_at=now,
+            last_seen_at=now,
+            times_seen=1,
+        )
+    )
+    return True
+
+
+async def handle_resolve_misconception(
+    *, db: AsyncSession, project: StudyProject, payload: dict[str, Any]
+) -> bool:
+    """Mark a previously-logged misconception as resolved.
+
+    Accepts either ``misconception_id`` (preferred — the tutor gets
+    the id from the "Known misconceptions" prompt block) or
+    ``description`` as a fallback so the tutor can still resolve by
+    exact-match description if it forgot to cite the id.
+    """
+    raw_id = payload.get("misconception_id")
+    target: StudyMisconception | None = None
+    if isinstance(raw_id, str):
+        try:
+            target_id = uuid.UUID(raw_id.strip())
+        except (ValueError, TypeError):
+            target_id = None
+        if target_id is not None:
+            stmt = select(StudyMisconception).where(
+                StudyMisconception.project_id == project.id,
+                StudyMisconception.id == target_id,
+                StudyMisconception.resolved_at.is_(None),
+            )
+            target = (await db.execute(stmt)).scalar_one_or_none()
+    if target is None:
+        description = str(payload.get("description") or "").strip()
+        if description:
+            stmt = select(StudyMisconception).where(
+                StudyMisconception.project_id == project.id,
+                func.lower(StudyMisconception.description) == description.lower(),
+                StudyMisconception.resolved_at.is_(None),
+            )
+            target = (await db.execute(stmt)).scalar_one_or_none()
+
+    if target is None:
+        return False
+    target.resolved_at = datetime.now(timezone.utc)
+    return True
+
+
+async def handle_teachback_passed(
+    *, db: AsyncSession, session: StudySession, payload: dict[str, Any]
+) -> bool:
+    """Stamp ``teachback_passed_at`` on the session.
+
+    The actual paraphrase is dropped on the floor for now — it's
+    already visible in the chat transcript, and persisting a duplicate
+    copy would just bloat the session row. If we later want to query
+    for it we can stamp into ``objectives_summary`` on the reflection
+    row instead.
+    """
+    if session.teachback_passed_at is not None:
+        return False
+    session.teachback_passed_at = datetime.now(timezone.utc)
+    session.updated_at = datetime.now(timezone.utc)
+    _ = payload  # reserved for future use
+    return True
+
+
+async def handle_capture_confidence(
+    *, db: AsyncSession, session: StudySession, payload: dict[str, Any]
+) -> bool:
+    """Record a 1-5 confidence rating on the current session.
+
+    Idempotent w.r.t. "is the gate satisfied?" — the gate only needs
+    ONE confidence capture, so re-emitting just refreshes the
+    timestamp. A future analytics job can trawl the message stream
+    for the actual ratings over time.
+    """
+    raw_level = payload.get("level")
+    try:
+        level = int(raw_level)
+    except (TypeError, ValueError):
+        return False
+    if level < 1 or level > 5:
+        return False
+    session.confidence_captured_at = datetime.now(timezone.utc)
+    session.updated_at = datetime.now(timezone.utc)
+    _ = payload
+    return True
+
+
+async def handle_summarise_unit(
+    *,
+    db: AsyncSession,
+    unit: StudyUnit,
+    session: StudySession | None,
+    payload: dict[str, Any],
+) -> bool:
+    """Persist a ``summarise_unit`` payload as a ``StudyUnitReflection`` row.
+
+    One row per ``(unit, session)`` pair — re-emitting within the
+    same session updates the existing row instead of piling up
+    duplicates, which matters because the unit-completion gate only
+    checks for *existence* of a reflection.
+    """
+    summary = str(payload.get("summary") or "").strip()
+    if not summary:
+        return False
+
+    objectives_summary_raw = payload.get("objectives_summary")
+    objectives_summary: dict[str, Any] = {}
+    if isinstance(objectives_summary_raw, dict):
+        for k, v in objectives_summary_raw.items():
+            if isinstance(v, (str, int, float, bool)):
+                objectives_summary[str(k)] = str(v)[:400]
+
+    concepts_raw = payload.get("concepts_anchored")
+    anchors: list[str] = []
+    if isinstance(concepts_raw, list):
+        for c in concepts_raw[:8]:
+            text = str(c).strip()
+            if text:
+                anchors.append(text[:200])
+
+    now = datetime.now(timezone.utc)
+    existing_stmt = select(StudyUnitReflection).where(
+        StudyUnitReflection.unit_id == unit.id,
+        StudyUnitReflection.session_id == (session.id if session else None),
+    )
+    existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+    if existing is not None:
+        existing.summary = summary[:4000]
+        if objectives_summary:
+            existing.objectives_summary = objectives_summary
+        if anchors:
+            existing.concepts_anchored = anchors
+        return True
+
+    db.add(
+        StudyUnitReflection(
+            unit_id=unit.id,
+            session_id=session.id if session else None,
+            summary=summary[:4000],
+            objectives_summary=objectives_summary,
+            concepts_anchored=anchors,
+            created_at=now,
+        )
+    )
     return True
 
 
@@ -1644,6 +2564,7 @@ async def apply_captures(
     captures: list[Capture],
     project: StudyProject,
     unit: StudyUnit | None,
+    session: StudySession | None,
     exam: StudyExam | None,
 ) -> dict[str, Any]:
     """Apply any non-whiteboard captures a parser yielded mid-stream.
@@ -1665,6 +2586,18 @@ async def apply_captures(
         # ``calibration_warning`` SSE event and stamps
         # ``calibration_warning_sent_at`` so it fires at most once.
         "calibration_warning": None,
+        # When the tutor emits ``mark_complete`` but the server gate
+        # rejects it, this holds the list of unmet conditions. The SSE
+        # generator appends a synthetic system message to the transcript
+        # so the tutor can self-correct on the next turn.
+        "mark_complete_rejected": None,
+        # Durable-state side-effects — set by the respective handlers
+        # so the frontend can invalidate the right caches after the
+        # stream finishes.
+        "learner_profile_updated": False,
+        "mastery_updated": False,
+        "misconceptions_changed": False,
+        "reflection_written": False,
     }
     for cap in captures:
         payload = parse_action_payload(cap.body)
@@ -1711,9 +2644,64 @@ async def apply_captures(
                 if await handle_set_calibrated(db=db, project=project, payload=payload):
                     result["project_calibrated"] = True
                 continue
-            applied = await handle_unit_action(db=db, unit=unit, payload=payload)
-            if applied:
-                result["unit_completed"] = True
+            if action_type == "save_learner_profile":
+                if await handle_save_learner_profile(
+                    db=db, project=project, payload=payload
+                ):
+                    result["learner_profile_updated"] = True
+                continue
+            if action_type == "update_objective_mastery":
+                if await handle_update_objective_mastery(
+                    db=db,
+                    project=project,
+                    unit=unit,
+                    payload=payload,
+                    session=session,
+                ):
+                    result["mastery_updated"] = True
+                continue
+            if action_type == "log_misconception":
+                if await handle_log_misconception(
+                    db=db, project=project, unit=unit, payload=payload
+                ):
+                    result["misconceptions_changed"] = True
+                continue
+            if action_type == "resolve_misconception":
+                if await handle_resolve_misconception(
+                    db=db, project=project, payload=payload
+                ):
+                    result["misconceptions_changed"] = True
+                continue
+            if action_type == "teachback_passed" and session is not None:
+                await handle_teachback_passed(
+                    db=db, session=session, payload=payload
+                )
+                continue
+            if action_type == "capture_confidence" and session is not None:
+                await handle_capture_confidence(
+                    db=db, session=session, payload=payload
+                )
+                continue
+            if action_type == "summarise_unit":
+                if await handle_summarise_unit(
+                    db=db, unit=unit, session=session, payload=payload
+                ):
+                    result["reflection_written"] = True
+                continue
+            if action_type == "mark_complete":
+                gate = await handle_unit_action(
+                    db=db,
+                    project=project,
+                    unit=unit,
+                    session=session,
+                    payload=payload,
+                )
+                if isinstance(gate, dict):
+                    if gate["passed"]:
+                        result["unit_completed"] = True
+                    else:
+                        result["mark_complete_rejected"] = gate
+                continue
         elif cap.tag == "exam_action" and exam is not None:
             applied = await handle_exam_action(
                 db=db, project=project, exam=exam, payload=payload

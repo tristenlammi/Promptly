@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, ProviderError, model_router
+from app.study import review as study_review
 from app.study.models import StudyProject, StudyUnit
 
 logger = logging.getLogger("promptly.study.planner")
@@ -352,6 +353,13 @@ async def apply_plan(
         )
         db.add(row)
         rows.append(row)
+
+    # Flush BEFORE seeding so the unit rows get their DB-side defaults
+    # (notably timestamps) and the FK in ``study_objective_mastery``
+    # points at rows that actually exist.
+    await db.flush()
+    for row in rows:
+        await study_review.seed_objectives_for_unit(db, row)
 
     if plan.difficulty:
         project.difficulty = plan.difficulty

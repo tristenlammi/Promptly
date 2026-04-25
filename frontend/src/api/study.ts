@@ -1,6 +1,13 @@
 import { apiClient } from "./client";
 import type {
+  ConfidenceCaptureResponse,
+  LearnerProfileResponse,
+  LearnerProfileUpdate,
+  MisconceptionEntry,
+  MisconceptionListResponse,
   NotesState,
+  ObjectiveMasteryListResponse,
+  ReviewQueueResponse,
   StartExamResponse,
   StudyExamSummary,
   StudyProjectDetail,
@@ -51,6 +58,13 @@ export interface StudySendMessagePayload {
   model_id?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;
+  /** Deep-link hint: mastery-row id the student clicked from the
+   *  ReviewQueueWidget. Backend stamps it on the session on the
+   *  FIRST message only (sticky-until-satisfied) and then clears it
+   *  when the tutor scores the matching objective. Safe to send on
+   *  every message — the server ignores it once the session already
+   *  has a focus. */
+  review_focus_objective_id?: string | null;
 }
 
 export interface ListProjectsParams {
@@ -244,6 +258,67 @@ export const studyApi = {
   ): Promise<WhiteboardSubmitResponse> {
     const { data } = await apiClient.post<WhiteboardSubmitResponse>(
       `/study/sessions/${sessionId}/whiteboard/submit`,
+      payload
+    );
+    return data;
+  },
+
+  // ---- Learner state (Study 10/10) --------------------------------
+  async getLearnerProfile(projectId: string): Promise<LearnerProfileResponse> {
+    const { data } = await apiClient.get<LearnerProfileResponse>(
+      `/study/projects/${projectId}/learner-profile`
+    );
+    return data;
+  },
+  async updateLearnerProfile(
+    projectId: string,
+    payload: LearnerProfileUpdate
+  ): Promise<LearnerProfileResponse> {
+    const { data } = await apiClient.put<LearnerProfileResponse>(
+      `/study/projects/${projectId}/learner-profile`,
+      payload
+    );
+    return data;
+  },
+  async getObjectiveMastery(
+    projectId: string
+  ): Promise<ObjectiveMasteryListResponse> {
+    const { data } = await apiClient.get<ObjectiveMasteryListResponse>(
+      `/study/projects/${projectId}/objective-mastery`
+    );
+    return data;
+  },
+  async getMisconceptions(
+    projectId: string,
+    includeResolved = false
+  ): Promise<MisconceptionListResponse> {
+    const { data } = await apiClient.get<MisconceptionListResponse>(
+      `/study/projects/${projectId}/misconceptions`,
+      { params: { include_resolved: includeResolved } }
+    );
+    return data;
+  },
+  async resolveMisconception(
+    projectId: string,
+    misconceptionId: string
+  ): Promise<MisconceptionEntry> {
+    const { data } = await apiClient.post<MisconceptionEntry>(
+      `/study/projects/${projectId}/misconceptions/${misconceptionId}/resolve`
+    );
+    return data;
+  },
+  async getReviewQueue(projectId: string): Promise<ReviewQueueResponse> {
+    const { data } = await apiClient.get<ReviewQueueResponse>(
+      `/study/projects/${projectId}/review-queue`
+    );
+    return data;
+  },
+  async captureConfidence(
+    sessionId: string,
+    payload: { level: number; objective_index?: number | null; note?: string | null }
+  ): Promise<ConfidenceCaptureResponse> {
+    const { data } = await apiClient.post<ConfidenceCaptureResponse>(
+      `/study/sessions/${sessionId}/confidence`,
       payload
     );
     return data;

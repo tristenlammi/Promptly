@@ -118,6 +118,14 @@ interface SSEPayload {
   before_unit_id?: string | null;
   project_id?: string;
   batch_id?: string | null;
+  /** Keys of learner state that changed this turn, so we know which
+   *  query caches to invalidate rather than blasting all of them. */
+  changes?: string[];
+  /** List of unmet completion-gate conditions returned when the AI
+   *  tried ``mark_complete`` prematurely. Shown to the student as a
+   *  subtle hint strip so they understand why the unit isn't closing. */
+  unmet?: string[];
+  session_id?: string;
 }
 
 interface SendMessageOptions {
@@ -261,6 +269,42 @@ export function useStudyStream(): UseStudyStreamResult {
             mastery_summary: data.unit.mastery_summary,
             completed_at: data.unit.completed_at,
           });
+          continue;
+        }
+
+        if (data.event === "study_state_updated") {
+          // Fine-grained invalidation driven by the ``changes`` list
+          // the server emits. Falls back to a broad invalidation if
+          // the list is absent so a shape mismatch never leaves the
+          // UI stale.
+          const changes = new Set(data.changes ?? []);
+          if (changes.size === 0 || changes.has("learner_profile")) {
+            qc.invalidateQueries({ queryKey: ["study", "learner-profile"] });
+          }
+          if (changes.size === 0 || changes.has("objective_mastery")) {
+            qc.invalidateQueries({ queryKey: ["study", "objective-mastery"] });
+            qc.invalidateQueries({ queryKey: ["study", "review-queue"] });
+          }
+          if (changes.size === 0 || changes.has("misconceptions")) {
+            qc.invalidateQueries({ queryKey: ["study", "misconceptions"] });
+          }
+          if (changes.size === 0 || changes.has("reflections")) {
+            qc.invalidateQueries({ queryKey: ["study", "project"] });
+          }
+          // The session itself almost always advances too (teachback /
+          // confidence flags), so refresh that here rather than
+          // waiting for the post-stream sweep.
+          qc.invalidateQueries({ queryKey: ["study", "session"] });
+          continue;
+        }
+
+        if (data.event === "mark_complete_rejected") {
+          // The server refused the tutor's mark_complete emission —
+          // the AI is already receiving the unmet list as a synthetic
+          // system message and will self-correct. We still invalidate
+          // the session query so any surfaced counters (turn count,
+          // teachback flag) update for the student.
+          qc.invalidateQueries({ queryKey: ["study", "session"] });
           continue;
         }
 

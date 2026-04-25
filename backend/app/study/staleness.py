@@ -41,9 +41,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Literal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import StudyProject, StudyUnit
+from .models import StudyObjectiveMastery, StudyProject, StudyUnit
 
 # Tier thresholds, in whole days. Changing these is a product call, not
 # a hot-path tweak — they're pulled out as constants so tests can read
@@ -195,11 +196,53 @@ async def apply_staleness_to_project(
     """
     reference_now = now or datetime.now(timezone.utc)
     changed = False
-    for unit in units:
+
+    # Fetch all per-objective mastery rows up front so we can do the
+    # per-objective evaluation (Study-10/10 plan) without N+1 queries.
+    unit_list = list(units)
+    unit_ids = [u.id for u in unit_list if u.status == "completed"]
+    mastery_by_unit: dict[object, list[StudyObjectiveMastery]] = {}
+    if unit_ids:
+        mastery_stmt = select(StudyObjectiveMastery).where(
+            StudyObjectiveMastery.unit_id.in_(unit_ids)
+        )
+        for row in (await db.execute(mastery_stmt)).scalars().all():
+            mastery_by_unit.setdefault(row.unit_id, []).append(row)
+
+    for unit in unit_list:
         if unit.status != "completed":
             continue
         verdict = evaluate_staleness(unit, reference_now)
+
+        # Per-objective staleness check — if more than half of the
+        # objectives are stale (their individual review interval is
+        # overdue by > the soft threshold) flip the unit back to
+        # in_progress even when the UNIT-level timestamp isn't past
+        # the flip tier. This matches the plan's "surgical precision"
+        # requirement: the unit is only as fresh as its weakest
+        # objective.
+        per_objective_flip = False
+        rows = mastery_by_unit.get(unit.id, [])
+        if rows:
+            stale_rows = 0
+            for row in rows:
+                ref = row.last_reviewed_at
+                if ref is None:
+                    continue
+                if ref.tzinfo is None:
+                    ref = ref.replace(tzinfo=timezone.utc)
+                gap = int((reference_now - ref).total_seconds() // 86400)
+                if gap >= _STALE_FLIP_DAYS:
+                    stale_rows += 1
+            if rows and stale_rows * 2 > len(rows):
+                per_objective_flip = True
+
         if verdict.tier == "fresh" or verdict.tier == "nudge":
+            if per_objective_flip and unit.status != "in_progress":
+                unit.status = "in_progress"
+                if unit.mastery_score is not None:
+                    unit.mastery_score = min(unit.mastery_score, _FLIP_SCORE_CAP)
+                changed = True
             continue
 
         # Apply soft decay: only move the score down, never up, so a
@@ -210,7 +253,7 @@ async def apply_staleness_to_project(
                 unit.mastery_score = verdict.recommended_score
                 changed = True
 
-        if verdict.flip_status and unit.status != "in_progress":
+        if (verdict.flip_status or per_objective_flip) and unit.status != "in_progress":
             unit.status = "in_progress"
             changed = True
 
