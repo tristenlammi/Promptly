@@ -52,6 +52,14 @@ class FileResponse(BaseModel):
     updated_at: datetime | None = None
     starred_at: datetime | None = None
     trashed_at: datetime | None = None
+    # Provenance hint surfaced to the client so the preview / edit
+    # routing can decide "this is a Drive Document, open the TipTap
+    # editor" vs "this is an AI-generated PDF, open the Markdown side
+    # panel" vs "this is an ordinary user upload, open the plain
+    # preview". Mirrors ``GeneratedKind`` on the backend and stays
+    # nullable for ordinary uploads.
+    source_kind: str | None = None
+    source_file_id: uuid.UUID | None = None
 
 
 class BreadcrumbEntry(BaseModel):
@@ -299,3 +307,73 @@ class ShareFolderBrowseResponse(BaseModel):
     breadcrumbs: list[BreadcrumbEntry]
     folders: list[FolderResponse]
     files: list[FileResponse]
+
+
+# --------------------------------------------------------------------
+# Drive stage 4 — Documents (TipTap + Y.js collab)
+# --------------------------------------------------------------------
+class DocumentCreateRequest(BaseModel):
+    """``POST /api/documents`` payload.
+
+    Creates a brand new Drive Document — a ``UserFile`` row with
+    ``source_kind="document"`` and a matching ``document_state`` row
+    holding an empty Y.Doc. The caller is the author.
+
+    ``name`` is optional; when omitted the server picks the default
+    localised title ("Untitled document") so the Drive list doesn't
+    show an empty string before the user types anything.
+    """
+
+    scope: Scope = "mine"
+    folder_id: uuid.UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, raw: str | None) -> str | None:
+        return _clean_name(raw) if raw is not None else None
+
+
+class CollabTokenResponse(BaseModel):
+    """``GET /api/documents/{id}/collab-token`` payload.
+
+    ``token`` is a short-lived HS256 JWT carrying ``{document_id,
+    user_id, perm}``. The editor passes it to Hocuspocus as the
+    websocket auth token (see ``onAuthenticate`` on the collab
+    server). Expires quickly (~5 minutes) so a copied URL loses
+    access fast.
+    """
+
+    token: str
+    # Unix timestamp. The client uses this to schedule a refresh a
+    # few seconds before the old token stops working so an edit
+    # session never drops.
+    expires_at: int
+    # Echo the user's display name / colour back so the caller can
+    # pre-fill the collaboration-cursor awareness state without a
+    # separate ``/me`` round trip.
+    user: "CollabTokenUser"
+
+
+class CollabTokenUser(BaseModel):
+    id: uuid.UUID
+    name: str
+    color: str
+
+
+CollabTokenResponse.model_rebuild()
+
+
+class DocumentAssetResponse(BaseModel):
+    """``POST /api/documents/{id}/assets`` payload.
+
+    Returned when the editor uploads an inline image or audio clip
+    from inside a doc. ``url`` is the authenticated download path
+    the TipTap node uses as its ``src`` attribute.
+    """
+
+    id: uuid.UUID
+    filename: str
+    mime_type: str
+    size_bytes: int
+    url: str

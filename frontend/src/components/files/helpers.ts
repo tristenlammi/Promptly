@@ -46,12 +46,21 @@ export async function downloadAuthed(file: FileItem): Promise<void> {
 export type PreviewKind =
   | "image"
   | "pdf"
+  | "document"
   | "markdown"
   | "text"
   | "code"
   | "binary";
 
-export function classifyMime(mime: string, filename: string): PreviewKind {
+export function classifyMime(
+  mime: string,
+  filename: string,
+  sourceKind?: string | null
+): PreviewKind {
+  // Drive Documents (TipTap + Y.js) are technically ``text/html`` but
+  // we route them into the dedicated preview renderer so the HTML
+  // gets the sanitized-body treatment + an Edit button.
+  if (sourceKind === "document") return "document";
   const lower = (filename ?? "").toLowerCase();
   if (mime?.startsWith("image/")) return "image";
   if (mime === "application/pdf" || lower.endsWith(".pdf")) return "pdf";

@@ -92,6 +92,22 @@ aiosmtplib==3.0.2
 # above, so it doesn't add any system-library baggage to the image.
 pywebpush==2.0.0
 
+# ---- Drive documents (Y.js server-side snapshot rendering) ----
+# ``pycrdt`` is the Python binding for the Rust y-crdt core — same
+# wire format as the Hocuspocus / y-prosemirror clients, so the
+# backend can decode the binary Y.Doc the collab server POSTs during
+# snapshot, inspect the ProseMirror-shaped XmlFragment, and render
+# HTML + a plain-text digest for full-text search. Only used inside
+# the documents router snapshot path.
+pycrdt==0.12.50
+# Lenient HTML parser used for sanitising the rendered snapshot on
+# the server side before we write it to disk.
+html5lib==1.1
+# Server-side HTML sanitiser (allowlist-based). Paired with
+# html5lib so a malicious inline-blob author can never persist a
+# <script> through the snapshot pipeline.
+bleach==6.1.0
+
 # ---- Testing (dev-only; safe to leave installed in images) ----
 # Used by the study-gate regression tests (and any future automated
 # suite). Both are pure-Python with no system dependencies.

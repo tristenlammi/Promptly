@@ -38,6 +38,15 @@ export interface FileItem {
   updated_at: string | null;
   starred_at: string | null;
   trashed_at: string | null;
+  /** Provenance hint. ``"document"`` on Drive Documents (TipTap + Y.js),
+   *  ``"rendered_pdf"`` / ``"markdown_source"`` on chat-generated PDFs,
+   *  ``null`` on ordinary user uploads. Kept loose-typed so UI code
+   *  doesn't break when a new kind ships before this type is updated. */
+  source_kind?: string | null;
+  /** Non-null on rows that point back at an editable source (e.g. a
+   *  rendered PDF → its markdown source, or a document asset → its
+   *  owning document). */
+  source_file_id?: string | null;
 }
 
 // --------------------------------------------------------------------

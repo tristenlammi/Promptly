@@ -47,6 +47,7 @@ services:
     depends_on:
       - frontend
       - backend
+      - collab
     restart: unless-stopped
     healthcheck:
       # nginx:alpine ships wget. We hit a static path the SPA
@@ -139,6 +140,39 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    networks:
+      - promptly
+
+  collab:
+    # Hocuspocus websocket collaboration server for Drive documents.
+    # Terminates Y.js sync websockets on port 1234 (internal only —
+    # nginx proxies /api/collab/* here) and persists document CRDT
+    # state to the shared Postgres instance. Debounces a snapshot POST
+    # back to the FastAPI backend so the file's HTML blob + FTS index
+    # stays within ~3s of the live CRDT.
+    build:
+      context: ./collab
+      dockerfile: Dockerfile
+    container_name: Promptly-Collab
+    environment:
+      # SECRET_KEY is used for two things here:
+      #   1. Verifying the short-lived collab JWT the backend hands
+      #      the browser (HS256, shared secret).
+      #   2. Authenticating the snapshot POST back to the backend
+      #      (bearer token) so only this service can overwrite
+      #      HTML/FTS content.
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgresql://promptly:${POSTGRES_PASSWORD}@postgres:5432/promptly
+      - BACKEND_INTERNAL_URL=http://backend:8000
+      - SNAPSHOT_DEBOUNCE_MS=${COLLAB_SNAPSHOT_DEBOUNCE_MS:-3000}
+    expose:
+      - "1234"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    restart: unless-stopped
     networks:
       - promptly
 

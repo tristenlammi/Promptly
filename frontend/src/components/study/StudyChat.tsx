@@ -30,14 +30,34 @@ export function StudyChat({
   teachbackPassed = false,
   confidenceCaptured = false,
 }: StudyChatProps = {}) {
-  const messages = useStudyStore((s) => s.messages);
+  const allMessages = useStudyStore((s) => s.messages);
   const streamingContent = useStudyStore((s) => s.streamingContent);
   const isStreaming = useStudyStore((s) => s.isStreaming);
   const streamError = useStudyStore((s) => s.streamError);
   const activeSessionId = useStudyStore((s) => s.activeSessionId);
+  const activeExercise = useStudyStore((s) => s.activeExercise);
   const exerciseHistory = useStudyStore((s) => s.exerciseHistory);
   const setActiveExercise = useStudyStore((s) => s.setActiveExercise);
   const endRef = useRef<HTMLDivElement | null>(null);
+
+  // ``role === "system"`` rows are internal nudges the backend writes
+  // for the LLM (e.g. the mark_complete-rejected reason). They MUST
+  // stay in the database so the model sees them on its next turn —
+  // but they are NOT for the student. Filter them out of the
+  // user-visible transcript here.
+  const messages = useMemo(
+    () => allMessages.filter((m) => m.role !== "system"),
+    [allMessages]
+  );
+
+  // While a whiteboard exercise is open and unreviewed, the student's
+  // entire attention belongs to that exercise. We suppress inline
+  // chat widgets (confidence slider, teach-back banner) during that
+  // window — otherwise the student sees a question in chat AND an
+  // exercise on the right and has to guess which one to do first
+  // (which is exactly the "I jumped ahead" trap the user reported).
+  const exerciseInProgress =
+    activeExercise !== null && activeExercise.status !== "reviewed";
 
   // Quick lookup: exercise id → status (so we can flip the button
   // label between "Open" and "Revisit" without an extra API round-trip).
@@ -131,12 +151,14 @@ export function StudyChat({
                 exerciseReviewed={exerciseReviewed}
               />
               {isMarkerAnchor &&
+                !exerciseInProgress &&
                 lastAssistantMarkers?.requestTeachback && (
                   <div className="mx-3 mb-3 sm:mx-4">
                     <TeachbackBanner passed={teachbackPassed} />
                   </div>
                 )}
               {isMarkerAnchor &&
+                !exerciseInProgress &&
                 lastAssistantMarkers?.requestConfidence &&
                 !confidenceCaptured &&
                 activeSessionId && (
@@ -168,7 +190,17 @@ export function StudyChat({
               "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
             )}
           >
-            {streamError}
+            <div className="font-medium">
+              We couldn't reach the tutor.
+            </div>
+            <div className="mt-1 text-xs opacity-80">
+              Check your connection and try sending the message again.
+              If this keeps happening, the tutor model may be down —
+              switch models from the picker above.
+            </div>
+            <div className="mt-2 text-[11px] uppercase tracking-wide opacity-60">
+              Details: {streamError}
+            </div>
           </div>
         )}
 

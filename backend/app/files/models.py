@@ -12,7 +12,16 @@ from __future__ import annotations
 import datetime as _dt
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -208,3 +217,54 @@ class FileShareGrant(UUIDPKMixin, CreatedAtMixin, Base):
 
     def __repr__(self) -> str:
         return f"<FileShareGrant link={self.link_id} user={self.user_id}>"
+
+
+class DocumentState(Base):
+    """Y.js CRDT state for a Drive Document.
+
+    One row per document (1:1 with ``UserFile``). The Hocuspocus
+    collab service reads + writes this table via its Database
+    extension — every idle batch of edits flushes the full merged
+    Y.Doc here so a container restart never loses in-flight work and
+    every Hocuspocus replica agrees on the same state.
+
+    The file blob on disk holds the *rendered* HTML snapshot (kept
+    in sync by the snapshot endpoint the collab server calls) so
+    preview, download, and full-text search continue to work without
+    any Y.js awareness. The ORM row on ``UserFile`` is what the rest
+    of Drive (listings, quota, share links, trash) interacts with;
+    this table is an implementation detail of the editor.
+
+    Added in migration ``0038_document_state``.
+    """
+
+    __tablename__ = "document_state"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    # Full merged Y.Doc state (not a delta) — overwritten on every
+    # store. Cap is implicit via Postgres BYTEA (1 GB) but real docs
+    # will stay in the tens-of-KB range.
+    yjs_update: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # Monotonic store counter bumped by the collab server. Lets the
+    # backend snapshot endpoint ignore an out-of-order POST if two
+    # replicas ever race.
+    version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentState file={self.file_id} v={self.version}>"

@@ -1744,14 +1744,24 @@ async def _stream_generator(
         # the completion gate self-correcting — the rejected list is
         # visible to the model on its very next turn so it knows
         # exactly which step it skipped.
+        #
+        # The frontend filters ``role == "system"`` rows out of the
+        # visible transcript so the student never sees this nudge —
+        # the wording below is therefore tuned for the *model*, not
+        # the student. Keep it terse and instructional; if it ever
+        # does leak (older client, server-rendered email digest,
+        # etc.) it should still read as a benign internal note
+        # rather than a scary "REJECTED" alert.
         mc_rejected = capture_result.get("mark_complete_rejected")
         if mc_rejected and unit is not None:
             unmet_text = "\n".join(f"- {item}" for item in mc_rejected.get("unmet") or [])
             nudge = (
-                "[system] mark_complete was REJECTED — the server gate found "
-                "these unmet conditions:\n"
+                "Internal tutor note (not shown to the student): the "
+                "completion gate didn't accept mark_complete yet. "
+                "Outstanding requirements:\n"
                 f"{unmet_text}\n"
-                "Do NOT emit mark_complete again until every condition is met."
+                "Address each item before emitting mark_complete again. "
+                "Don't mention this note in chat — just continue teaching."
             )
             db.add(
                 StudyMessage(

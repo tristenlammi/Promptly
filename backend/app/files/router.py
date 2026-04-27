@@ -176,6 +176,8 @@ def _file_to_response(f: UserFile) -> FileResponse:
         updated_at=f.updated_at,
         starred_at=f.starred_at,
         trashed_at=f.trashed_at,
+        source_kind=f.source_kind,
+        source_file_id=f.source_file_id,
     )
 
 
@@ -294,6 +296,27 @@ def _file_owner_filter(scope: Scope, user: User):
     return UserFile.user_id == user.id
 
 
+# Drive document assets (images / audio pasted or dropped inside a
+# TipTap document) ride on a ``UserFile`` row so they get the same
+# storage accounting + auth path as anything else uploaded to Drive,
+# but they're implementation detail of the owning document and must
+# never appear in Drive listings. Every listing query (/browse,
+# /recent, /starred, /trash, /search) joins on this filter.
+def _drive_listing_filter():
+    """Exclude per-document inline assets from Drive listings.
+
+    Documents themselves (``source_kind = "document"``) *do* show up
+    — only the hidden asset bucket is filtered out. Rows with a NULL
+    ``source_kind`` are ordinary uploads and pass through untouched.
+    """
+    from sqlalchemy import or_
+
+    return or_(
+        UserFile.source_kind.is_(None),
+        UserFile.source_kind != GeneratedKind.DOCUMENT_ASSET.value,
+    )
+
+
 async def _build_breadcrumbs(
     db: AsyncSession, folder: FileFolder | None
 ) -> list[BreadcrumbEntry]:
@@ -360,6 +383,7 @@ async def browse(
         if parent is not None
         else UserFile.folder_id.is_(None),
         UserFile.trashed_at.is_(None),
+        _drive_listing_filter(),
     )
     file_rows = (
         (
@@ -1415,6 +1439,7 @@ async def list_trash(
     file_filter = and_(
         _file_owner_filter(scope, user),
         UserFile.trashed_at.is_not(None),
+        _drive_listing_filter(),
     )
     file_rows = (
         (
@@ -1592,6 +1617,7 @@ async def list_starred(
         _file_owner_filter(scope, user),
         UserFile.starred_at.is_not(None),
         UserFile.trashed_at.is_(None),
+        _drive_listing_filter(),
     )
     file_rows = (
         (
@@ -1626,6 +1652,7 @@ async def list_recent(
     file_filter = and_(
         _file_owner_filter(scope, user),
         UserFile.trashed_at.is_(None),
+        _drive_listing_filter(),
     )
     rows = (
         (
@@ -1684,6 +1711,7 @@ async def search_files(
         .where(
             _file_owner_filter(scope, user),
             UserFile.trashed_at.is_(None),
+            _drive_listing_filter(),
             tsv_match,
         )
         .order_by(literal(None))  # placeholder, replaced below

@@ -28,5 +28,20 @@ class GeneratedKind(str, Enum):
     # the source again on edit.
     RENDERED_PDF = "rendered_pdf"
 
+    # Drive Document — user-authored rich-text doc backed by a Y.js
+    # CRDT. The file blob on disk holds the rendered HTML snapshot
+    # (kept current by the Hocuspocus snapshot endpoint); the CRDT
+    # itself lives in ``document_state``. These rows *do* show up in
+    # Drive listings.
+    DOCUMENT = "document"
+
+    # Inline media (image / audio) uploaded from inside a document
+    # editor session. ``source_file_id`` points at the owning
+    # ``DOCUMENT`` row so cascading trashes + quota accounting stay
+    # sane. These rows are intentionally *hidden* from Drive listings
+    # — they only resolve via the asset download URL embedded in the
+    # document's HTML.
+    DOCUMENT_ASSET = "document_asset"
+
 
 __all__ = ["GeneratedKind"]

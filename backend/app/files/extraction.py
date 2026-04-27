@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import os
 
+from app.files.generated_kinds import GeneratedKind
 from app.files.models import UserFile
 from app.files.prompt import _extract_pdf_text, _looks_pdf, _looks_textual
 from app.files.storage import read_text
@@ -49,6 +50,27 @@ def extract_content_text(f: UserFile) -> str | None:
     can still land (we'd rather index the filename alone than
     reject the whole file).
     """
+    # Drive Documents store their rendered HTML snapshot as the
+    # blob. Strip tags so FTS indexes the visible text rather than
+    # markup. Keeps ``ts_headline`` snippets readable.
+    # ``getattr`` so fake stand-ins in unit tests don't have to
+    # carry the new column — the fallback just routes through the
+    # generic text / PDF branches below.
+    source_kind = getattr(f, "source_kind", None)
+    if source_kind == GeneratedKind.DOCUMENT.value and (
+        f.mime_type or ""
+    ).lower().startswith("text/html"):
+        try:
+            html_text = read_text(f.storage_path, _CONTENT_TEXT_LIMIT)
+        except OSError:
+            logger.exception(
+                "failed reading document HTML for FTS extraction (%s)", f.id
+            )
+            return None
+        from app.files.document_render import extract_text_from_html
+
+        return extract_text_from_html(html_text) or None
+
     if _looks_textual(f):
         try:
             return read_text(f.storage_path, _CONTENT_TEXT_LIMIT)

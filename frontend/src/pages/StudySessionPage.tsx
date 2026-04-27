@@ -480,7 +480,13 @@ export function StudySessionPage() {
                 session &&
                 !session.confidence_captured_at &&
                 session.min_turns_required !== null &&
-                session.student_turn_count >= session.min_turns_required && (
+                session.student_turn_count >= session.min_turns_required &&
+                // Don't surface the fallback strip while the student is
+                // mid-exercise on the right pane — pairing two
+                // interactions on screen at once is the "what am I
+                // meant to do?" trap. Once they finish the exercise
+                // the right pane flips back and this re-shows.
+                !showWhiteboard && (
                   <FallbackConfidenceStrip sessionId={session.id} />
                 )}
               <div className="px-3 pb-3 pt-1 sm:px-4 sm:pb-4">

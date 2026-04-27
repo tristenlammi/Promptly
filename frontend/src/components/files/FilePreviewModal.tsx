@@ -3,11 +3,13 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import DOMPurify from "dompurify";
 import {
   ChevronLeft,
   ChevronRight,
   Download,
   Loader2,
+  Pencil,
   Share2,
   Star,
   X,
@@ -45,6 +47,9 @@ interface FilePreviewModalProps {
   onToggleStar?: (file: FileItem) => void;
   /** Optional Share trigger — opens the ShareLinkDialog upstream. */
   onShare?: (file: FileItem) => void;
+  /** Optional Edit trigger — only rendered for Drive Documents. The
+   *  parent wires this to open the DocumentEditorModal. */
+  onEdit?: (file: FileItem) => void;
 }
 
 /**
@@ -69,6 +74,7 @@ export function FilePreviewModal({
   onSelect,
   onToggleStar,
   onShare,
+  onEdit,
 }: FilePreviewModalProps) {
   const index = useMemo(() => {
     if (!file || !siblings?.length) return -1;
@@ -114,7 +120,8 @@ export function FilePreviewModal({
 
   if (!open || !file) return null;
 
-  const kind = classifyMime(file.mime_type ?? "", file.filename);
+  const kind = classifyMime(file.mime_type ?? "", file.filename, file.source_kind);
+  const isDocument = kind === "document";
 
   return createPortal(
     <div
@@ -140,6 +147,11 @@ export function FilePreviewModal({
           </div>
         </div>
         <div className="flex items-center gap-0.5 md:gap-1">
+          {isDocument && onEdit && (
+            <PreviewIconButton label="Edit" onClick={() => onEdit(file)}>
+              <Pencil className="h-5 w-5 md:h-4 md:w-4" />
+            </PreviewIconButton>
+          )}
           {onToggleStar && (
             <PreviewIconButton
               label={file.starred_at ? "Unstar" : "Star"}
@@ -233,6 +245,8 @@ function PreviewBody({ file, kind }: { file: FileItem; kind: PreviewKind }) {
       return <ImagePreview file={file} />;
     case "pdf":
       return <PdfPreview file={file} />;
+    case "document":
+      return <DocumentPreview file={file} />;
     case "markdown":
       return <MarkdownPreview file={file} />;
     case "code":
@@ -322,6 +336,76 @@ function PdfPreview({ file }: { file: FileItem }) {
       title={file.filename}
       className="h-full w-full rounded-md border-0 bg-white shadow-2xl"
     />
+  );
+}
+
+// ----------------------------------------------------------------
+// Drive Document — fetch the HTML snapshot written by the Hocuspocus
+// -> backend snapshot pipeline, sanitize with DOMPurify (belt +
+// braces; the backend already sanitizes) and render inside a
+// prose-styled shell. Opens via the Edit button on the header.
+// ----------------------------------------------------------------
+function DocumentPreview({ file }: { file: FileItem }) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get<Blob>(
+          filesApi.downloadUrl(file.id).replace(/^\/api/, ""),
+          { responseType: "blob" }
+        );
+        const body = await res.data.text();
+        if (cancelled) return;
+        // ADD_TAGS covers the TipTap-specific elements we emit
+        // server-side (details/summary, <audio>, YouTube iframe).
+        const safe = DOMPurify.sanitize(body, {
+          ADD_TAGS: ["iframe", "details", "summary", "audio", "source"],
+          ADD_ATTR: [
+            "allow",
+            "allowfullscreen",
+            "frameborder",
+            "scrolling",
+            "controls",
+            "src",
+            "type",
+            "target",
+            "rel",
+            "data-type",
+            "data-checked",
+          ],
+          FORBID_TAGS: ["script", "style"],
+        });
+        setHtml(safe);
+      } catch (e) {
+        if (!cancelled) setErr(extractError(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file.id, file.updated_at]);
+
+  if (err) return <PreviewError>{err}</PreviewError>;
+  if (html === null) return <PreviewLoading />;
+  if (!html.trim()) {
+    return (
+      <div className="flex h-full w-full max-w-4xl flex-col items-center justify-center rounded-md bg-[var(--bg)] px-6 py-10 text-center text-sm text-[var(--text-muted)] shadow-2xl">
+        <div className="mb-2 text-base font-medium text-[var(--text)]">
+          This document is empty
+        </div>
+        <div>Click Edit in the header to start writing.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="h-full w-full max-w-4xl overflow-y-auto rounded-md bg-[var(--bg)] px-6 py-5 text-[var(--text)] shadow-2xl">
+      {/* Reuse the editor's stylesheet so the preview is pixel-identical
+          to what the user just typed — no surprise re-layout when the
+          modal switches from edit to read-only. */}
+      <div className="promptly-doc" dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
   );
 }
 

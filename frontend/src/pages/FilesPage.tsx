@@ -30,11 +30,13 @@ import {
   type SystemFolderKind,
 } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
+import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
+import { documentsApi } from "@/api/documents";
 import {
   downloadAuthed,
   extractError,
@@ -159,6 +161,7 @@ export function FilesPage({
   const [shareFor, setShareFor] = useState<
     { kind: "file" | "folder"; id: string; name: string } | null
   >(null);
+  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
@@ -359,6 +362,10 @@ export function FilesPage({
         onShare={(f) =>
           setShareFor({ kind: "file", id: f.id, name: f.filename })
         }
+        onEdit={(f) => {
+          setEditingDoc(f);
+          setPreview(null);
+        }}
         onToggleStar={undefined}
       />
 
@@ -367,6 +374,14 @@ export function FilesPage({
         resource={shareFor}
         onClose={() => setShareFor(null)}
       />
+
+      {editingDoc && (
+        <DocumentEditorModal
+          file={editingDoc}
+          onClose={() => setEditingDoc(null)}
+          onFileUpdated={(f) => setEditingDoc(f)}
+        />
+      )}
     </>
   );
 }
@@ -531,9 +546,30 @@ function FolderActions({
   onChanged: () => void;
 }) {
   const [showNewFolder, setShowNewFolder] = useState(false);
+  const [creatingDoc, setCreatingDoc] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+  const [activeDocument, setActiveDocument] = useState<FileItem | null>(null);
   const createFolder = useCreateFolder();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const startUploads = useUploadStore((s) => s.startUploads);
+
+  const handleNewDocument = async () => {
+    if (creatingDoc) return;
+    setCreatingDoc(true);
+    setDocError(null);
+    try {
+      const doc = await documentsApi.create({
+        scope,
+        folder_id: parentId,
+      });
+      setActiveDocument(doc);
+      onChanged();
+    } catch (e) {
+      setDocError(extractError(e));
+    } finally {
+      setCreatingDoc(false);
+    }
+  };
 
   // Multi-file: picking five files kicks off five uploads that
   // progress in parallel in the background panel. We intentionally
@@ -563,10 +599,20 @@ function FolderActions({
   };
 
   return (
-    // ``grid grid-cols-2`` on phones gives each button half the row so
-    // the Upload CTA gets a proper tap target without overflowing. On
-    // ``sm+`` we revert to the inline desktop layout.
-    <div className="grid shrink-0 grid-cols-2 items-center gap-2 sm:flex">
+    // Three actions on mobile now (New file / New folder / Upload) so
+    // the row expands to ``grid-cols-3`` on phones. Desktop still gets
+    // the inline flex layout.
+    <div className="grid shrink-0 grid-cols-3 items-center gap-2 sm:flex">
+      <Button
+        size="sm"
+        variant="secondary"
+        leftIcon={<FileText className="h-3.5 w-3.5" />}
+        onClick={handleNewDocument}
+        loading={creatingDoc}
+        className="w-full sm:w-auto"
+      >
+        New file
+      </Button>
       <Button
         size="sm"
         variant="secondary"
@@ -593,6 +639,12 @@ function FolderActions({
         Upload
       </Button>
 
+      {docError && (
+        <div className="col-span-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-500 sm:col-span-1">
+          {docError}
+        </div>
+      )}
+
       <NewFolderModal
         open={showNewFolder}
         onClose={() => setShowNewFolder(false)}
@@ -602,6 +654,17 @@ function FolderActions({
           setShowNewFolder(false);
         }}
       />
+
+      {activeDocument && (
+        <DocumentEditorModal
+          file={activeDocument}
+          onClose={() => {
+            setActiveDocument(null);
+            onChanged();
+          }}
+          onFileUpdated={(updated) => setActiveDocument(updated)}
+        />
+      )}
     </div>
   );
 }

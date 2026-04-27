@@ -243,6 +243,7 @@ from app.chat.project_shares import router as project_shares_router  # noqa: E40
 from app.chat.projects_router import router as chat_projects_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
+from app.files.documents_router import router as documents_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
 from app.files.share_router import router as file_share_router  # noqa: E402
 from app.local_models.router import router as local_models_router  # noqa: E402
@@ -301,6 +302,13 @@ app.include_router(
 app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])
+# Drive Documents API (create doc, mint collab JWT, accept snapshot
+# from Hocuspocus, upload inline assets). Kept at /api/documents
+# because /api/files is the generic CRUD surface and document rows
+# live alongside ordinary files there — the dedicated prefix makes
+# the collab-aware endpoints easy to find + easy to lock down in
+# nginx / rate limits independently.
+app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
 # Public share-link API. Mounted under ``/api/s/*`` so nginx still
 # proxies it to the backend (``/s/*`` alone would collide with the
 # SPA route for the share landing page). Each endpoint is

@@ -24,6 +24,7 @@ from app.custom_models.models import (  # noqa: F401
     KnowledgeChunk,
 )
 from app.files.models import (  # noqa: F401
+    DocumentState,
     FileFolder,
     FileShareGrant,
     FileShareLink,
