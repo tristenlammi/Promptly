@@ -1,11 +1,16 @@
 """ORM models for the Files feature.
 
 Two tables that mirror each other on ownership: `FileFolder` and `UserFile`.
-`user_id IS NULL` means the row lives in the admin-managed shared pool — any
-authenticated user can read + attach from it, but only admins can write.
+Every row is owned by exactly one user (`user_id` is non-null). The legacy
+admin-managed "shared pool" (`user_id IS NULL`) was retired in migration
+``0042_resource_grants``; sharing is now per-resource via `ResourceGrant`,
+which lets any owner grant read (optionally read+copy) access to up to
+`MAX_GRANTS_PER_RESOURCE` other Promptly users.
 
 Folders form a tree via `parent_id`. Files live either at a folder's root
-(when `folder_id` is set) or at the scope root (when `folder_id IS NULL`).
+(when `folder_id` is set) or at the owner's Drive root (when `folder_id`
+IS NULL). System folders (`system_kind`) — Chat Uploads / Generated Files /
+Generated Media — exist for every owner and are intentionally non-shareable.
 """
 from __future__ import annotations
 
@@ -14,12 +19,15 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -268,3 +276,73 @@ class DocumentState(Base):
 
     def __repr__(self) -> str:
         return f"<DocumentState file={self.file_id} v={self.version}>"
+
+
+class ResourceGrant(UUIDPKMixin, CreatedAtMixin, Base):
+    """Per-user access grant on a Drive file or folder.
+
+    Polymorphic via ``(resource_type, resource_id)`` so a single
+    table covers both files and folders — same shape as
+    :class:`FileShareLink`. The unique constraint on
+    ``(resource_type, resource_id, grantee_user_id)`` keeps grants
+    de-duped; the no-self-grant check stops an owner accidentally
+    granting themselves access (which would corrupt the "is the
+    caller the owner?" question elsewhere in the router).
+
+    Cascading semantics:
+
+    * Folder grants implicitly cover every descendant (subfolders +
+      files) at lookup time. We do NOT explode the ACL into a row
+      per descendant — recipients see the subtree by joining
+      against ancestor folder ids on every read.
+    * File grants are leaf-only and apply to that single file.
+    * The owner is identified by ``files.user_id`` /
+      ``file_folders.user_id``. ``granted_by_user_id`` records
+      *who* issued the grant — usually the owner, but kept
+      separately so an admin-issued or migration-seeded grant is
+      distinguishable.
+
+    Quotas: a grant never affects storage accounting. The blob
+    counts against the owner; "Copy to my files" creates a brand-
+    new ``UserFile`` owned by the recipient and bumps **their**
+    quota at copy time.
+
+    Added in migration ``0042_resource_grants``.
+    """
+
+    __tablename__ = "resource_grants"
+
+    resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    grantee_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    granted_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    can_copy: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "resource_type IN ('file', 'folder')",
+            name="resource_grants_resource_type_check",
+        ),
+        CheckConstraint(
+            "grantee_user_id <> granted_by_user_id",
+            name="resource_grants_no_self_grant",
+        ),
+        UniqueConstraint(
+            "resource_type",
+            "resource_id",
+            "grantee_user_id",
+            name="resource_grants_unique",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ResourceGrant {self.resource_type}={self.resource_id} "
+            f"grantee={self.grantee_user_id} can_copy={self.can_copy}>"
+        )

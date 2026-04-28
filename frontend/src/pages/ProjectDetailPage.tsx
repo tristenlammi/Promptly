@@ -24,8 +24,10 @@ import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareProjectDialog } from "@/components/chat/ShareProjectDialog";
+import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { chatApi } from "@/api/chat";
+import { filesApi, type FileItem } from "@/api/files";
 import {
   useArchiveChatProject,
   useChatProject,
@@ -430,6 +432,44 @@ function FilesTab({
   const pin = usePinChatProjectFile(project.id);
   const unpin = useUnpinChatProjectFile(project.id);
 
+  // Preview state. ``previewFile`` is the full ``FileItem`` returned
+  // by ``filesApi.getFile`` — we lazy-fetch it on click so we have
+  // the rich metadata (``source_kind`` etc.) that
+  // ``FilePreviewModal`` needs to route between document /
+  // PDF / code-artifact / image / text previewers correctly. The
+  // pinned-file row only carries the minimal pin-side fields, so a
+  // synthesised stub would mis-route Drive Documents / rendered
+  // PDFs.
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const openPreview = async (fileId: string) => {
+    if (previewLoadingId) return;
+    setPreviewLoadingId(fileId);
+    setPreviewError(null);
+    try {
+      const file = await filesApi.getFile(fileId);
+      setPreviewFile(file);
+    } catch (err) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Couldn't load this file. It may have been removed.";
+      setPreviewError(detail);
+    } finally {
+      setPreviewLoadingId(null);
+    }
+  };
+
+  // Sibling list for Prev/Next inside the preview modal — same
+  // affordance Drive's preview gives. We can't pass our minimal
+  // ``ChatProjectFilePin`` shape, so we only enable navigation
+  // between files we've already fetched and cache; for simplicity
+  // we just hand the modal a single-element list (the open file).
+  // If the user wants to flip between project files they can close
+  // and reopen — keeps this MVP focused.
+  const siblings = previewFile ? [previewFile] : [];
+
   // Project's existing files, reshaped into the ``AttachedFile`` shape
   // the picker uses so it can show "already pinned" state correctly.
   const alreadyAttached = useMemo(
@@ -458,6 +498,15 @@ function FilesTab({
         </Button>
       </div>
 
+      {previewError && (
+        <div
+          role="alert"
+          className="mb-3 rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
+        >
+          {previewError}
+        </div>
+      )}
+
       {project.files.length === 0 ? (
         <div className="rounded-card border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--text-muted)]">
           No files pinned yet. Pin a PDF, image, or text file and every
@@ -465,32 +514,50 @@ function FilesTab({
         </div>
       ) : (
         <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
-          {project.files.map((f) => (
-            <li
-              key={f.file_id}
-              className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <FileText className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-[var(--text)]">
-                    {f.filename}
-                  </div>
-                  <div className="text-xs text-[var(--text-muted)]">
-                    {humanSize(f.size_bytes)} · {f.mime_type}
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => unpin.mutate(f.file_id)}
-                title="Unpin"
-                className="rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
-                disabled={unpin.isPending}
+          {project.files.map((f) => {
+            const loading = previewLoadingId === f.file_id;
+            return (
+              <li
+                key={f.file_id}
+                className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
+                <button
+                  type="button"
+                  onClick={() => openPreview(f.file_id)}
+                  disabled={loading}
+                  title={`Preview ${f.filename}`}
+                  aria-label={`Preview ${f.filename}`}
+                  className={cn(
+                    "group flex min-w-0 flex-1 items-center gap-2 rounded-md text-left",
+                    "transition hover:text-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                    "disabled:cursor-wait"
+                  )}
+                >
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--text-muted)]" />
+                  ) : (
+                    <FileText className="h-4 w-4 shrink-0 text-[var(--text-muted)] transition group-hover:text-[var(--accent)]" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-[var(--text)] group-hover:text-[var(--accent)]">
+                      {f.filename}
+                    </div>
+                    <div className="text-xs text-[var(--text-muted)]">
+                      {humanSize(f.size_bytes)} · {f.mime_type}
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => unpin.mutate(f.file_id)}
+                  title="Unpin"
+                  className="rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
+                  disabled={unpin.isPending}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -515,6 +582,13 @@ function FilesTab({
             }
           }
         }}
+      />
+
+      <FilePreviewModal
+        open={!!previewFile}
+        file={previewFile}
+        siblings={siblings}
+        onClose={() => setPreviewFile(null)}
       />
     </div>
   );

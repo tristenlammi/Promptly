@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ChevronRight,
@@ -20,10 +21,10 @@ import {
   Star,
   Trash2,
   Upload,
-  Users,
 } from "lucide-react";
 
 import {
+  filesApi,
   type FileItem,
   type FileScope,
   type FolderItem,
@@ -34,7 +35,9 @@ import { DocumentEditorModal } from "@/components/files/documents/DocumentEditor
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
+import { GranteesPill } from "@/components/files/GranteesPill";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
+import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
 import { documentsApi } from "@/api/documents";
 import {
@@ -59,7 +62,6 @@ import {
   useUnstarFile,
   useUnstarFolder,
 } from "@/hooks/useFiles";
-import { useAuthStore } from "@/store/authStore";
 import { useUploadStore } from "@/store/uploadStore";
 import { cn } from "@/utils/cn";
 
@@ -112,8 +114,11 @@ interface DropOutcome {
 }
 
 interface FilesPageProps {
-  /** Lock the page to a specific scope — used by the ``/files/shared``
-   *  deep link, which displays only the shared pool. */
+  /** Lock the page to a specific scope. The ``/files/shared`` route
+   *  passes ``"shared"`` here; the default ``/files`` route omits it
+   *  and falls back to ``"mine"``. The runtime scope toggle was
+   *  retired with Drive stage 5 — switching now happens via the top
+   *  sub-nav, so ``forcedScope`` effectively pins every render. */
   forcedScope?: FileScope;
   /** Display title / subtitle overrides. */
   title?: string;
@@ -125,7 +130,6 @@ export function FilesPage({
   title = "Files",
   subtitle = "Upload and organise files you can attach to any chat.",
 }: FilesPageProps = {}) {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const navigate = useNavigate();
   const routeParams = useParams<{ folderId?: string }>();
   const routeFolderId = routeParams.folderId ?? null;
@@ -143,6 +147,7 @@ export function FilesPage({
     setFolderId(routeFolderId);
   }, [routeFolderId]);
 
+  const qc = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useBrowseFiles(
     scope,
     folderId
@@ -161,6 +166,13 @@ export function FilesPage({
   const [shareFor, setShareFor] = useState<
     { kind: "file" | "folder"; id: string; name: string } | null
   >(null);
+  // Drive stage 5: grants modal opens via the *primary* "Share"
+  // action on a row. The existing ``shareFor`` state still drives
+  // the URL-based ShareLinkDialog (now exposed as a secondary
+  // "Share by link" entry in the context menu).
+  const [shareGrantsFor, setShareGrantsFor] = useState<
+    { kind: "file" | "folder"; id: string; name: string } | null
+  >(null);
   const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
 
   const navigateToFolder = useCallback(
@@ -173,16 +185,6 @@ export function FilesPage({
     },
     [navigate]
   );
-
-  const changeScope = (next: FileScope) => {
-    if (forcedScope || next === scope) return;
-    setScope(next);
-    setDropError(null);
-    // Changing scopes always drops you back to the root of the new
-    // scope, otherwise the URL's folder id belongs to the *old*
-    // scope and the backend will 404 it.
-    navigateToFolder(null);
-  };
 
   const handleDropOnto = useCallback(
     async (
@@ -238,23 +240,15 @@ export function FilesPage({
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-4 md:px-6 md:py-6">
-          {!forcedScope && (
-            <div className="mb-4 flex items-center gap-1 rounded-input border border-[var(--border)] bg-[var(--surface)] p-1">
-              <ScopeTab
-                active={scope === "mine"}
-                onClick={() => changeScope("mine")}
-                icon={<FolderClosedIcon className="h-3.5 w-3.5" />}
-                label="My files"
-              />
-              <ScopeTab
-                active={scope === "shared"}
-                onClick={() => changeScope("shared")}
-                icon={<Users className="h-3.5 w-3.5" />}
-                label={isAdmin ? "Shared pool" : "Shared"}
-                hint={!isAdmin ? "read-only" : undefined}
-              />
-            </div>
-          )}
+          {/* Drive stage 5 — the legacy "My files / Shared pool" scope
+              toggle was retired here. Switching between owned files
+              and the peer-to-peer Shared view now happens via the
+              top sub-nav (DriveSubNav) so there's exactly one place
+              to navigate, and "Shared" sits naturally next to its
+              siblings (Recent / Starred / Trash). The deep-linked
+              ``/files`` and ``/files/shared`` routes already round-
+              trip the scope; ``forcedScope`` keeps the wrappers
+              honest. */}
 
           {/* Breadcrumbs + folder actions: stack vertically on phones
               so the breadcrumb trail gets its own line and the Upload
@@ -319,7 +313,8 @@ export function FilesPage({
               onDropOnFolder={handleDropOnto}
               onOpenMove={openMoveModal}
               onPreview={setPreview}
-              onShare={setShareFor}
+              onShare={setShareGrantsFor}
+              onShareLink={setShareFor}
             />
           )}
         </div>
@@ -360,11 +355,29 @@ export function FilesPage({
         onSelect={setPreview}
         onClose={() => setPreview(null)}
         onShare={(f) =>
-          setShareFor({ kind: "file", id: f.id, name: f.filename })
+          setShareGrantsFor({ kind: "file", id: f.id, name: f.filename })
         }
         onEdit={(f) => {
           setEditingDoc(f);
           setPreview(null);
+        }}
+        onCopyToMine={async (f) => {
+          // Drive stage 5 — recipient with ``can_copy`` clones a
+          // shared file into their own drive root. Refetch all
+          // ``files`` queries so the new row appears in My files
+          // immediately.
+          try {
+            await filesApi.copyFileToMine(f.id);
+            void qc.invalidateQueries({ queryKey: ["files"] });
+            void qc.invalidateQueries({ queryKey: ["quota"] });
+            setPreview(null);
+          } catch (e) {
+            // Surface the message via a transient banner-style
+            // alert. We don't have a toast system on this page so
+            // a simple alert covers the rare error case.
+            // eslint-disable-next-line no-alert
+            alert(extractError(e));
+          }
         }}
         onToggleStar={undefined}
       />
@@ -375,6 +388,26 @@ export function FilesPage({
         onClose={() => setShareFor(null)}
       />
 
+      <ShareGrantsModal
+        open={!!shareGrantsFor}
+        resource={
+          shareGrantsFor
+            ? {
+                type: shareGrantsFor.kind,
+                id: shareGrantsFor.id,
+                name: shareGrantsFor.name,
+              }
+            : null
+        }
+        onClose={() => setShareGrantsFor(null)}
+        onChanged={() => {
+          // Pill data lives on file/folder rows; refetch the active
+          // browse view so the chips reflect the latest grants.
+          void qc.invalidateQueries({ queryKey: ["files"] });
+          void qc.invalidateQueries({ queryKey: ["chat-project-files"] });
+        }}
+      />
+
       {editingDoc && (
         <DocumentEditorModal
           file={editingDoc}
@@ -383,40 +416,6 @@ export function FilesPage({
         />
       )}
     </>
-  );
-}
-
-function ScopeTab({
-  active,
-  onClick,
-  icon,
-  label,
-  hint,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  hint?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm transition",
-        active
-          ? "bg-[var(--bg)] text-[var(--text)] shadow-sm"
-          : "text-[var(--text-muted)] hover:text-[var(--text)]"
-      )}
-    >
-      {icon}
-      <span className="font-medium">{label}</span>
-      {hint && (
-        <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">
-          {hint}
-        </span>
-      )}
-    </button>
   );
 }
 
@@ -747,6 +746,7 @@ function ContentGrid({
   onOpenMove,
   onPreview,
   onShare,
+  onShareLink,
 }: {
   data: { folders: FolderItem[]; files: FileItem[]; writable: boolean };
   scope: FileScope;
@@ -758,7 +758,10 @@ function ContentGrid({
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: (file: FileItem) => void;
+  /** Primary share action — opens the peer-to-peer grants modal. */
   onShare: (r: { kind: "file" | "folder"; id: string; name: string }) => void;
+  /** Secondary share action — opens the URL/invite-link dialog. */
+  onShareLink: (r: { kind: "file" | "folder"; id: string; name: string }) => void;
 }) {
   const empty = data.folders.length === 0 && data.files.length === 0;
   if (empty) {
@@ -796,6 +799,9 @@ function ContentGrid({
             onShare={() =>
               onShare({ kind: "folder", id: f.id, name: f.name })
             }
+            onShareLink={() =>
+              onShareLink({ kind: "folder", id: f.id, name: f.name })
+            }
           />
         ))}
         {data.files.map((f) => (
@@ -808,6 +814,9 @@ function ContentGrid({
             onPreview={() => onPreview(f)}
             onShare={() =>
               onShare({ kind: "file", id: f.id, name: f.filename })
+            }
+            onShareLink={() =>
+              onShareLink({ kind: "file", id: f.id, name: f.filename })
             }
           />
         ))}
@@ -825,6 +834,7 @@ function FolderRow({
   onDropOnFolder,
   onOpenMove,
   onShare,
+  onShareLink,
 }: {
   folder: FolderItem;
   scope: FileScope;
@@ -837,6 +847,7 @@ function FolderRow({
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
   onShare: () => void;
+  onShareLink: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -872,8 +883,14 @@ function FolderRow({
             },
         {
           icon: <Share2 className="h-3.5 w-3.5" />,
-          label: "Share",
+          label: "Share with people",
           onClick: onShare,
+          disabled: !writable,
+        },
+        {
+          icon: <Share2 className="h-3.5 w-3.5" />,
+          label: "Share by link",
+          onClick: onShareLink,
           disabled: !writable,
         },
         {
@@ -983,6 +1000,29 @@ function FolderRow({
         )}
       </button>
 
+      {/* Drive stage 5 — peer-to-peer share grants. Sits inline at
+          the right edge (just left of the row menu). Owners get a
+          clickable pill so "manage sharing" is one tap away;
+          grantees see the same pill but non-interactive (they can't
+          change grants they're a recipient of — only the owner can).
+          Clicking deliberately stops propagation so the row's
+          folder-open doesn't also fire. */}
+      {folder.sharing && (
+        <GranteesPill
+          sharing={folder.sharing}
+          variant="compact"
+          className="ml-auto shrink-0"
+          onClick={
+            folder.sharing.role === "owner"
+              ? (e) => {
+                  e.stopPropagation();
+                  onShare();
+                }
+              : undefined
+          }
+        />
+      )}
+
       {userCanMutate && (
         <RowMenu
           open={menuOpen}
@@ -1034,6 +1074,7 @@ function FileRow({
   onOpenMove,
   onPreview,
   onShare,
+  onShareLink,
 }: {
   file: FileItem;
   scope: FileScope;
@@ -1041,6 +1082,7 @@ function FileRow({
   onOpenMove: (s: MoveModalState) => void;
   onPreview: () => void;
   onShare: () => void;
+  onShareLink: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -1080,8 +1122,14 @@ function FileRow({
         },
     {
       icon: <Share2 className="h-3.5 w-3.5" />,
-      label: "Share",
+      label: "Share with people",
       onClick: onShare,
+      disabled: !writable,
+    },
+    {
+      icon: <Share2 className="h-3.5 w-3.5" />,
+      label: "Share by link",
+      onClick: onShareLink,
       disabled: !writable,
     },
     {
@@ -1158,6 +1206,26 @@ function FileRow({
       >
         <Download className="h-4 w-4" />
       </button>
+
+      {/* Drive stage 5 — share-grants pill. Sits just left of the
+          row menu so it lines up with the same indicator on folder
+          rows. Owner → pill opens the grants modal; grantee → read-
+          only (same reason as FolderRow above). */}
+      {file.sharing && (
+        <GranteesPill
+          sharing={file.sharing}
+          variant="compact"
+          className="shrink-0"
+          onClick={
+            file.sharing.role === "owner"
+              ? (e) => {
+                  e.stopPropagation();
+                  onShare();
+                }
+              : undefined
+          }
+        />
+      )}
 
       {writable && (
         <RowMenu
@@ -1428,18 +1496,20 @@ function ConfirmModal({
 }
 
 /**
- * Thin wrapper used by the ``/files/shared`` route — behaves like
- * ``FilesPage`` but pins the scope to "shared" and updates the
- * chrome to reflect that only read-only shared-pool items live
- * here. Keeping this as a wrapper means every Drive surface (incl.
- * trash/star/recent) keeps one canonical implementation.
+ * Thin wrapper used by the ``/files/shared`` route. Pins ``scope``
+ * to ``"shared"`` so the page renders the peer-to-peer Shared view:
+ * folders/files shared *with* the caller (by other Promptly users)
+ * **plus** the caller's own folders/files that have at least one
+ * outstanding grant. Mirrors the wrapper pattern used for Trash /
+ * Starred / Recent so every Drive surface keeps one canonical
+ * implementation.
  */
 export function SharedWithMePage() {
   return (
     <FilesPage
       forcedScope="shared"
       title="Shared"
-      subtitle="Files shared with you by other Promptly users."
+      subtitle="Folders and files shared with you, or by you, with other Promptly users."
     />
   );
 }

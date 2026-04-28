@@ -1,14 +1,13 @@
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 
-import type { FileItem, FileScope } from "@/api/files";
+import type { FileItem } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import {
   DriveEmptyState,
   DriveFileRow,
   DriveFolderRow,
 } from "@/components/files/DriveRows";
-import { DriveScopeTabs } from "@/components/files/DriveScopeTabs";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { TopNav } from "@/components/layout/TopNav";
@@ -24,9 +23,15 @@ import {
 } from "@/hooks/useFiles";
 import { downloadAuthed, extractError } from "@/components/files/helpers";
 
+// Drive stage 5 — Trash is always "mine". The backend ignores the
+// scope parameter (shared resources belong to their owner's trash,
+// not yours), and the top sub-nav is the only navigation between
+// Drive surfaces now, so the legacy "My files / Shared" tab row
+// was retired here.
+const SCOPE = "mine" as const;
+
 export function TrashPage() {
-  const [scope, setScope] = useState<FileScope>("mine");
-  const { data, isLoading } = useTrashContents(scope);
+  const { data, isLoading } = useTrashContents(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   const [emptyOpen, setEmptyOpen] = useState(false);
   const [emptyError, setEmptyError] = useState<string | null>(null);
@@ -44,7 +49,7 @@ export function TrashPage() {
   const onEmpty = async () => {
     setEmptyError(null);
     try {
-      await emptyTrash.mutateAsync({ scope });
+      await emptyTrash.mutateAsync({ scope: SCOPE });
       setEmptyOpen(false);
     } catch (e) {
       setEmptyError(extractError(e));
@@ -75,8 +80,6 @@ export function TrashPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-6 py-6">
-          <DriveScopeTabs scope={scope} onChange={setScope} />
-
           {isLoading && (
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}
@@ -103,9 +106,9 @@ export function TrashPage() {
                     }}
                     actions={{
                       onRestore: () =>
-                        restoreFolder.mutate({ id: f.id, scope }),
+                        restoreFolder.mutate({ id: f.id, scope: SCOPE }),
                       onDeleteForever: () =>
-                        deleteFolder.mutate({ id: f.id, scope }),
+                        deleteFolder.mutate({ id: f.id, scope: SCOPE }),
                     }}
                   />
                 ))}
@@ -116,9 +119,10 @@ export function TrashPage() {
                     actions={{
                       onPreview: () => setPreview(f),
                       onDownload: () => downloadAuthed(f),
-                      onRestore: () => restoreFile.mutate({ id: f.id, scope }),
+                      onRestore: () =>
+                        restoreFile.mutate({ id: f.id, scope: SCOPE }),
                       onDeleteForever: () =>
-                        deleteFile.mutate({ id: f.id, scope }),
+                        deleteFile.mutate({ id: f.id, scope: SCOPE }),
                     }}
                   />
                 ))}

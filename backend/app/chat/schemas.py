@@ -48,6 +48,9 @@ class MessageResponse(BaseModel):
     # micros storage. ``None`` for non-assistant rows and any
     # assistant row from a provider that didn't report a cost.
     cost_usd: float | None = None
+    # Stamped when the assistant reply was hand-corrected via the
+    # in-place edit endpoint. Null on every original-state row.
+    edited_at: datetime | None = None
     # Phase 4b — who actually sent this user message. ``None`` for
     # assistant / system rows. The frontend uses this together with
     # ``ConversationDetail.collaborators`` to render "from Jane"
@@ -342,6 +345,22 @@ class EditMessageRequest(BaseModel):
     # Mirror of SendMessageRequest: edited turns may toggle tool calling
     # on the retry independently of how the original send went.
     tools_enabled: bool = False
+
+
+class PatchAssistantMessageRequest(BaseModel):
+    """Body for ``PATCH /conversations/{cid}/messages/{mid}``.
+
+    Cosmetic, in-place edit of an assistant reply. No re-stream, no
+    truncation, no quota debit — the user is hand-correcting words
+    the model already wrote (typos, remove "[I'll fill this in
+    later]" placeholders, tighten prose). The endpoint accepts only
+    a new ``content`` body; sources / attachments / token metrics
+    stay untouched.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    content: str = Field(min_length=1, max_length=200_000)
 
 
 class RegenerateMessageRequest(BaseModel):

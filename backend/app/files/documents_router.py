@@ -207,40 +207,54 @@ def _color_for_user(user_id: uuid.UUID) -> str:
 # --------------------------------------------------------------------
 # Row helpers — reuse the ACL / scope logic from the main files router
 # --------------------------------------------------------------------
-def _owner_for_scope(user: User, scope: Scope) -> uuid.UUID | None:
+def _owner_for_scope(user: User, scope: Scope) -> uuid.UUID:
+    """Return the ``user_id`` we should stamp on a new document.
+
+    Documents always live in the caller's own pool — sharing
+    happens after creation via the grant-modal flow. ``scope=shared``
+    on creation is a stale concept from the legacy admin pool.
+    """
     if scope == "shared":
-        if user.role != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admins can modify the shared pool",
-            )
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "New documents are created in My files. Use the share modal "
+                "to grant access after creation."
+            ),
+        )
     return user.id
 
 
-def _can_read(owner_id: uuid.UUID | None, user: User) -> bool:
-    return owner_id is None or owner_id == user.id
-
-
 def _can_write(owner_id: uuid.UUID | None, user: User) -> bool:
-    if owner_id is None:
-        return user.role == "admin"
-    return owner_id == user.id
+    """True iff ``user`` owns this row outright.
+
+    Grantees can read documents (handled via
+    :func:`_load_document` walking grants) but cannot mutate
+    them — collaborative editing of someone else's document
+    intentionally requires them to "Copy to my files" first.
+    """
+    return owner_id is not None and owner_id == user.id
 
 
-def _scope_of(owner_id: uuid.UUID | None) -> Scope:
-    return "shared" if owner_id is None else "mine"
+def _scope_of_for_caller(
+    owner_id: uuid.UUID | None, caller: User
+) -> Scope:
+    if owner_id is not None and owner_id == caller.id:
+        return "mine"
+    return "shared"
 
 
 async def _load_document(
     db: AsyncSession, document_id: uuid.UUID, user: User
 ) -> UserFile:
+    """Resolve a document row the caller can at least read.
+
+    Owner gets full access. A peer-to-peer grant on the document
+    (or any ancestor folder) lets the caller open it read-only —
+    the collab token endpoint downgrades them to ``perm="read"``.
+    """
     row = await db.get(UserFile, document_id)
     if row is None or row.source_kind != GeneratedKind.DOCUMENT.value:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-        )
-    if not _can_read(row.user_id, user):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
         )
@@ -248,17 +262,27 @@ async def _load_document(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document is in the trash"
         )
-    return row
+    if row.user_id is not None and row.user_id == user.id:
+        return row
+    # Grantee path — folder cascade is honoured.
+    from app.files.sharing import caller_grants_for_file
+
+    grants = await caller_grants_for_file(db, row, user)
+    if grants:
+        return row
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+    )
 
 
-def _file_to_response(f: UserFile) -> FileResponseSchema:
+def _file_to_response(f: UserFile, *, caller: User) -> FileResponseSchema:
     return FileResponseSchema(
         id=f.id,
         folder_id=f.folder_id,
         filename=f.filename,
         mime_type=f.mime_type,
         size_bytes=f.size_bytes,
-        scope=_scope_of(f.user_id),
+        scope=_scope_of_for_caller(f.user_id, caller),
         created_at=f.created_at,
         updated_at=f.updated_at,
         starred_at=f.starred_at,
@@ -292,11 +316,6 @@ async def create_document(
         if parent_folder is None or not _can_write(parent_folder.user_id, user):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found"
-            )
-        if _scope_of(parent_folder.user_id) != body.scope:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Folder doesn't belong to the requested scope",
             )
         if parent_folder.trashed_at is not None:
             raise HTTPException(
@@ -364,7 +383,7 @@ async def create_document(
         delete_blob(rel_path)
         raise
     await db.refresh(row)
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 # --------------------------------------------------------------------

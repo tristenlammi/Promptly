@@ -7,6 +7,7 @@ import DOMPurify from "dompurify";
 import {
   ChevronLeft,
   ChevronRight,
+  Copy as CopyIcon,
   Download,
   Loader2,
   Pencil,
@@ -22,6 +23,7 @@ import {
 } from "@/api/files";
 import { Button } from "@/components/shared/Button";
 import { CodeArtifactView } from "@/components/codeArtifacts/CodeArtifactView";
+import { GranteesPill } from "@/components/files/GranteesPill";
 import {
   artifactLanguageFromFile,
   type ArtifactLanguage,
@@ -55,6 +57,11 @@ interface FilePreviewModalProps {
   /** Optional Edit trigger — only rendered for Drive Documents. The
    *  parent wires this to open the DocumentEditorModal. */
   onEdit?: (file: FileItem) => void;
+  /** Optional "Copy to my files" trigger. Only renders the action
+   *  when the caller is a grantee with ``can_copy=true`` on this
+   *  file. The parent wires this to ``filesApi.copyFileToMine``
+   *  + a query refetch + toast. */
+  onCopyToMine?: (file: FileItem) => void;
 }
 
 /**
@@ -80,6 +87,7 @@ export function FilePreviewModal({
   onToggleStar,
   onShare,
   onEdit,
+  onCopyToMine,
 }: FilePreviewModalProps) {
   const index = useMemo(() => {
     if (!file || !siblings?.length) return -1;
@@ -127,6 +135,11 @@ export function FilePreviewModal({
 
   const kind = classifyMime(file.mime_type ?? "", file.filename, file.source_kind);
   const isDocument = kind === "document";
+  // Drive stage 5 — viewing a file shared *with* you (role="grantee")
+  // by another Promptly user. The owner banner + copy-to-mine
+  // affordance are conditionally rendered off this.
+  const sharedWithMe = file.sharing?.role === "grantee";
+  const canCopyToMine = sharedWithMe && file.sharing?.can_copy === true;
 
   return createPortal(
     <div
@@ -147,14 +160,48 @@ export function FilePreviewModal({
           >
             {file.filename}
           </h2>
-          <div className="truncate text-[11px] text-white/60">
-            {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 truncate text-[11px] text-white/60">
+            <span>
+              {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
+            </span>
+            {file.sharing && (
+              <GranteesPill
+                sharing={file.sharing}
+                variant="full"
+                // Owner + has the "Share" affordance available?
+                // Then the pill doubles as the fastest way to open
+                // the grants modal from the preview header.
+                onClick={
+                  onShare && !sharedWithMe
+                    ? (e) => {
+                        e.stopPropagation();
+                        onShare(file);
+                      }
+                    : undefined
+                }
+                className="border-white/30 bg-white/15 text-white hover:bg-white/20"
+              />
+            )}
           </div>
         </div>
         <div className="flex items-center gap-0.5 md:gap-1">
-          {isDocument && onEdit && (
+          {/* Owner-only edit affordance — grantees see the doc in
+              read-only mode (the editor would 403 on save anyway). */}
+          {isDocument && onEdit && !sharedWithMe && (
             <PreviewIconButton label="Edit" onClick={() => onEdit(file)}>
               <Pencil className="h-5 w-5 md:h-4 md:w-4" />
+            </PreviewIconButton>
+          )}
+          {/* Copy-to-mine: only shown to grantees whose grant
+              carries ``can_copy``. Owners already have the file in
+              their drive and should use the share modal to
+              duplicate via the standard rename flow. */}
+          {canCopyToMine && onCopyToMine && (
+            <PreviewIconButton
+              label="Copy to my files"
+              onClick={() => onCopyToMine(file)}
+            >
+              <CopyIcon className="h-5 w-5 md:h-4 md:w-4" />
             </PreviewIconButton>
           )}
           {onToggleStar && (
@@ -166,7 +213,9 @@ export function FilePreviewModal({
               <Star className={cn("h-5 w-5 md:h-4 md:w-4", file.starred_at && "fill-current")} />
             </PreviewIconButton>
           )}
-          {onShare && (
+          {/* Share is owner-only on the new model — granting is the
+              owner's prerogative. Hidden for grantees. */}
+          {onShare && !sharedWithMe && (
             <PreviewIconButton label="Share" onClick={() => onShare(file)}>
               <Share2 className="h-5 w-5 md:h-4 md:w-4" />
             </PreviewIconButton>

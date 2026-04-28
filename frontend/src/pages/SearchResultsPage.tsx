@@ -2,10 +2,9 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
 
-import type { FileItem, FileScope } from "@/api/files";
+import type { FileItem } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
-import { DriveScopeTabs } from "@/components/files/DriveScopeTabs";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
@@ -18,11 +17,16 @@ import {
 } from "@/hooks/useFiles";
 import { downloadAuthed } from "@/components/files/helpers";
 
+// Drive stage 5 — search runs against the caller's own files. The
+// legacy "My files / Shared" tab was retired here alongside Recent
+// / Starred / Trash so the sub-nav is the single source of truth
+// for Drive-surface navigation.
+const SCOPE = "mine" as const;
+
 export function SearchResultsPage() {
   const [params] = useSearchParams();
   const q = (params.get("q") ?? "").trim();
-  const [scope, setScope] = useState<FileScope>("mine");
-  const { data, isLoading, isFetching } = useSearchFiles(q, scope);
+  const { data, isLoading, isFetching } = useSearchFiles(q, SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<FileItem | null>(null);
 
@@ -44,8 +48,6 @@ export function SearchResultsPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-6 py-6">
-          <DriveScopeTabs scope={scope} onChange={setScope} />
-
           {!q && (
             <DriveEmptyState
               icon={<Search className="h-5 w-5" />}
@@ -85,11 +87,12 @@ export function SearchResultsPage() {
                       onShare: () => setShareFor(hit.file),
                       onStar: hit.file.starred_at
                         ? undefined
-                        : () => star.mutate({ id: hit.file.id, scope }),
+                        : () => star.mutate({ id: hit.file.id, scope: SCOPE }),
                       onUnstar: hit.file.starred_at
-                        ? () => unstar.mutate({ id: hit.file.id, scope })
+                        ? () => unstar.mutate({ id: hit.file.id, scope: SCOPE })
                         : undefined,
-                      onTrash: () => trash.mutate({ id: hit.file.id, scope }),
+                      onTrash: () =>
+                        trash.mutate({ id: hit.file.id, scope: SCOPE }),
                     }}
                   />
                 ))}
@@ -107,8 +110,8 @@ export function SearchResultsPage() {
         onClose={() => setPreview(null)}
         onShare={setShareFor}
         onToggleStar={(f) => {
-          if (f.starred_at) unstar.mutate({ id: f.id, scope });
-          else star.mutate({ id: f.id, scope });
+          if (f.starred_at) unstar.mutate({ id: f.id, scope: SCOPE });
+          else star.mutate({ id: f.id, scope: SCOPE });
         }}
       />
 

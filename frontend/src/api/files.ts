@@ -11,6 +11,36 @@ export type SystemFolderKind =
   | "generated_files"
   | "generated_media";
 
+/** Compact representation of one grantee on a file/folder.
+ *  Mirrors :class:`GranteeBrief` on the backend. ``grant_id`` is
+ *  ``00000000-...`` when the brief refers to the *owner* — it has
+ *  no underlying ``ResourceGrant`` row but the frontend reuses
+ *  the same shape so the pill / banner can render uniformly. */
+export interface Grantee {
+  grant_id: string;
+  user_id: string;
+  username: string;
+  email: string | null;
+  can_copy: boolean;
+}
+
+/** Per-row sharing summary attached to every file/folder response.
+ *  ``null`` when nobody is on the share list; populated otherwise.
+ *  See ``GrantSummary`` on the backend. */
+export interface GrantSummary {
+  /** ``"owner"`` = caller owns this row; ``"grantee"`` = caller has
+   *  been granted access to someone else's row. */
+  role: "owner" | "grantee";
+  /** Everyone except the caller who currently has access. */
+  grantees: Grantee[];
+  /** True only when ``role === "grantee"`` AND the caller's grant
+   *  carries ``can_copy``. Used to gate the "Copy to my files" UI. */
+  can_copy: boolean;
+  /** Owner brief — only populated when ``role === "grantee"`` so the
+   *  UI can render a "Shared by @alice" chip. */
+  owner: Grantee | null;
+}
+
 export interface FolderItem {
   id: string;
   parent_id: string | null;
@@ -24,6 +54,9 @@ export interface FolderItem {
   starred_at: string | null;
   /** Drive stage 1 — non-null when the folder (or an ancestor) was trashed. */
   trashed_at: string | null;
+  /** Drive stage 5 — peer-to-peer share grants. ``null`` on rows
+   *  with no outstanding grants. */
+  sharing?: GrantSummary | null;
 }
 
 export interface FileItem {
@@ -47,7 +80,40 @@ export interface FileItem {
    *  rendered PDF → its markdown source, or a document asset → its
    *  owning document). */
   source_file_id?: string | null;
+  /** Drive stage 5 — peer-to-peer share grants (see ``FolderItem``). */
+  sharing?: GrantSummary | null;
 }
+
+// --------------------------------------------------------------------
+// Drive stage 5 — share grants DTOs
+// --------------------------------------------------------------------
+export type ShareableResourceType = "file" | "folder";
+
+export interface UserSearchHit {
+  id: string;
+  username: string;
+  email: string | null;
+  already_granted: boolean;
+}
+
+export interface UserSearchResponse {
+  results: UserSearchHit[];
+}
+
+export interface GrantsListResponse {
+  grants: Grantee[];
+  can_share: boolean;
+}
+
+export interface CreateGrantPayload {
+  grantee_user_id: string;
+  can_copy: boolean;
+}
+
+/** Hard cap from the product spec — refused with a 400 on the
+ *  backend if the modal tries to add an 11th. Mirrored here so the
+ *  modal can disable the picker before the round trip. */
+export const MAX_GRANTS_PER_RESOURCE = 10;
 
 // --------------------------------------------------------------------
 // Drive stage 1 — search / list / share-link DTOs
@@ -429,6 +495,98 @@ export const filesApi = {
     const { data } = await apiClient.put<FileSourceContent>(
       `/files/${id}/source`,
       { content }
+    );
+    return data;
+  },
+
+  // ----------------------------------------------------------------
+  // Drive stage 5 — Peer-to-peer share grants
+  // ----------------------------------------------------------------
+  /** Type-ahead user picker for the share modal. ``q`` matches
+   *  username / email by case-insensitive prefix. Pass the
+   *  resource ids so the picker can mark already-granted rows. */
+  async searchUsersForShare(
+    q: string,
+    resource: { type: ShareableResourceType; id: string } | null
+  ): Promise<UserSearchResponse> {
+    const params = new URLSearchParams({ q });
+    if (resource) {
+      params.set("resource_type", resource.type);
+      params.set("resource_id", resource.id);
+    }
+    const { data } = await apiClient.get<UserSearchResponse>(
+      `/files/users/search?${params.toString()}`
+    );
+    return data;
+  },
+
+  async listGrants(
+    type: ShareableResourceType,
+    id: string
+  ): Promise<GrantsListResponse> {
+    const { data } = await apiClient.get<GrantsListResponse>(
+      `/files/${type}/${id}/grants`
+    );
+    return data;
+  },
+
+  async createGrant(
+    type: ShareableResourceType,
+    id: string,
+    payload: CreateGrantPayload
+  ): Promise<GrantsListResponse> {
+    const { data } = await apiClient.post<GrantsListResponse>(
+      `/files/${type}/${id}/grants`,
+      payload
+    );
+    return data;
+  },
+
+  async updateGrant(
+    type: ShareableResourceType,
+    id: string,
+    grantId: string,
+    payload: { can_copy: boolean }
+  ): Promise<GrantsListResponse> {
+    const { data } = await apiClient.patch<GrantsListResponse>(
+      `/files/${type}/${id}/grants/${grantId}`,
+      payload
+    );
+    return data;
+  },
+
+  async revokeGrant(
+    type: ShareableResourceType,
+    id: string,
+    grantId: string
+  ): Promise<GrantsListResponse> {
+    const { data } = await apiClient.delete<GrantsListResponse>(
+      `/files/${type}/${id}/grants/${grantId}`
+    );
+    return data;
+  },
+
+  /** Stop sharing entirely — revoke every grant on this resource in
+   *  a single round-trip. Backend returns the (now-empty) grants
+   *  list so the UI can refresh its pill without a second call. */
+  async revokeAllGrants(
+    type: ShareableResourceType,
+    id: string
+  ): Promise<GrantsListResponse> {
+    const { data } = await apiClient.delete<GrantsListResponse>(
+      `/files/${type}/${id}/grants`
+    );
+    return data;
+  },
+
+  /** Clone a shared file into the caller's Drive root. Backend
+   *  enforces ``can_copy`` and quota; returns the freshly cloned
+   *  file row. */
+  async copyFileToMine(
+    fileId: string
+  ): Promise<{ file: FileItem }> {
+    const { data } = await apiClient.post<{ file: FileItem }>(
+      `/files/files/${fileId}/copy-to-mine`
     );
     return data;
   },

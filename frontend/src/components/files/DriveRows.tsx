@@ -16,6 +16,7 @@ import {
 
 import type { FileItem, FolderItem } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { GranteesPill } from "./GranteesPill";
 import { cn } from "@/utils/cn";
 
 import {
@@ -81,10 +82,14 @@ export function DriveFileRow({
               <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
             )}
           </div>
-          <div className="truncate text-xs text-[var(--text-muted)]">
-            {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
-            {file.updated_at && ` · ${formatRelativeTime(file.updated_at)}`}
-            {extra && " · "}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-muted)]">
+            <span className="truncate">
+              {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
+              {file.updated_at && ` · ${formatRelativeTime(file.updated_at)}`}
+            </span>
+            {file.sharing && (
+              <GranteesPill sharing={file.sharing} variant="compact" />
+            )}
             {extra}
           </div>
         </div>
@@ -164,14 +169,21 @@ export function DriveFolderRow({
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
         <FolderIcon className="h-5 w-5 shrink-0 text-[var(--accent)]" />
-        <div className="flex items-center gap-1.5 truncate text-sm font-medium">
-          <span className="truncate">{folder.name}</span>
-          {folder.starred_at && (
-            <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 truncate text-sm font-medium">
+            <span className="truncate">{folder.name}</span>
+            {folder.starred_at && (
+              <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
+            )}
+          </div>
+          {folder.sharing && (
+            <div className="mt-0.5">
+              <GranteesPill sharing={folder.sharing} variant="compact" />
+            </div>
           )}
         </div>
         {folder.updated_at && (
-          <span className="ml-auto hidden text-xs text-[var(--text-muted)] md:block">
+          <span className="ml-auto hidden shrink-0 text-xs text-[var(--text-muted)] md:block">
             {formatRelativeTime(folder.updated_at)}
           </span>
         )}

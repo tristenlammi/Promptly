@@ -96,6 +96,12 @@ interface MessageBubbleProps {
    *  resolve once the new stream has been kicked off; the bubble exits
    *  edit mode as soon as it does. */
   onEdit?: (newText: string) => Promise<void>;
+  /** ISO timestamp stamped by the in-place assistant-edit endpoint
+   *  on the most recent rewrite. Renders a tiny "edited" pill in
+   *  the meta row so the owner can spot retroactively-rewritten
+   *  replies at a glance. ``null`` / ``undefined`` for every
+   *  original-state row. */
+  editedAt?: string | null;
   /** Regenerate-this-reply hook. Only passed for the most recent
    *  persisted assistant message. Called with ``null`` when the user
    *  clicks the primary "Regenerate" button (reuses the currently
@@ -413,6 +419,7 @@ function MessageBubbleImpl({
   authorLookup,
   currentUserId,
   onEdit,
+  editedAt,
   onBranch,
   onRegenerate,
   onOpenExercise,
@@ -432,7 +439,13 @@ function MessageBubbleImpl({
       ttftMs != null ||
       totalMs != null ||
       (costUsd != null && costUsd > 0));
-  const canEdit = isUser && !!onEdit;
+  // Edit affordance is shown for both user and assistant rows so the
+  // owner can either rewrite-and-resend (user turn) or hand-correct
+  // the AI's output in place (assistant turn). The parent decides
+  // which messages are editable by passing / withholding ``onEdit``;
+  // we never gate on role here. Streaming rows are still excluded
+  // because mutating an in-flight reply would race the SSE pipeline.
+  const canEdit = !!onEdit && !streaming;
   // Copy action shows on every persisted assistant reply with text.
   // Skipped while streaming (content keeps changing) and on user
   // turns (they already have the source via the Edit affordance).
@@ -538,10 +551,23 @@ function MessageBubbleImpl({
               costUsd={costUsd}
             />
           )}
+          {editedAt && !streaming && (
+            <span
+              className={cn(
+                "rounded px-1.5 py-px text-[10px] font-medium",
+                "bg-black/[0.05] text-[var(--text-muted)]",
+                "dark:bg-white/[0.06]"
+              )}
+              title={`Edited ${new Date(editedAt).toLocaleString()}`}
+            >
+              edited
+            </span>
+          )}
         </div>
         {editing && canEdit ? (
           <UserMessageEditor
             initialText={content}
+            variant={isUser ? "user" : "assistant"}
             onCancel={() => setEditing(false)}
             onSave={async (newText) => {
               // Close the editor immediately on submit. If the parent
@@ -669,8 +695,14 @@ function MessageBubbleImpl({
                   "hover:bg-black/[0.04] hover:text-[var(--text)]",
                   "dark:hover:bg-white/[0.06]"
                 )}
-                title="Edit and resend"
-                aria-label="Edit and resend"
+                title={
+                  isUser
+                    ? "Edit and resend"
+                    : "Edit this reply (no re-stream)"
+                }
+                aria-label={
+                  isUser ? "Edit and resend" : "Edit reply in place"
+                }
               >
                 <Pencil className="h-3 w-3" />
                 <span>Edit</span>
@@ -708,12 +740,18 @@ interface UserMessageEditorProps {
   initialText: string;
   onSave: (newText: string) => Promise<void> | void;
   onCancel: () => void;
+  /** ``"user"`` keeps the accent-tinted bubble + "Save & resend"
+   *  copy; ``"assistant"`` paints a neutral surface and labels the
+   *  primary action just "Save" — the patch happens in place
+   *  without re-streaming, which makes "resend" misleading. */
+  variant?: "user" | "assistant";
 }
 
 function UserMessageEditor({
   initialText,
   onSave,
   onCancel,
+  variant = "user",
 }: UserMessageEditorProps) {
   const isMobile = useIsMobile();
   const [text, setText] = useState(initialText);
@@ -768,13 +806,23 @@ function UserMessageEditor({
     }
   };
 
+  const isAssistant = variant === "assistant";
   return (
     <div
       className={cn(
-        "w-full max-w-full rounded-2xl rounded-tr-md",
-        "border border-[var(--accent)]/40",
-        "bg-[var(--accent)]/10 dark:bg-[var(--accent)]/15",
-        "px-3 py-2 shadow-sm"
+        "w-full max-w-full px-3 py-2",
+        isAssistant
+          ? cn(
+              "rounded-xl",
+              "border border-black/10 dark:border-white/10",
+              "bg-black/[0.03] dark:bg-white/[0.04]"
+            )
+          : cn(
+              "rounded-2xl rounded-tr-md",
+              "border border-[var(--accent)]/40",
+              "bg-[var(--accent)]/10 dark:bg-[var(--accent)]/15",
+              "shadow-sm"
+            )
       )}
     >
       <textarea
@@ -787,9 +835,12 @@ function UserMessageEditor({
         className={cn(
           "w-full resize-none bg-transparent text-sm text-[var(--text)]",
           "outline-none placeholder:text-[var(--text-muted)]",
-          "disabled:opacity-60"
+          "disabled:opacity-60",
+          isAssistant && "font-mono leading-relaxed"
         )}
-        placeholder="Edit your message..."
+        placeholder={
+          isAssistant ? "Edit the AI's reply..." : "Edit your message..."
+        }
       />
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
@@ -815,7 +866,13 @@ function UserMessageEditor({
             "disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >
-          {submitting ? "Sending..." : "Save & resend"}
+          {submitting
+            ? isAssistant
+              ? "Saving..."
+              : "Sending..."
+            : isAssistant
+              ? "Save"
+              : "Save & resend"}
         </button>
       </div>
     </div>
@@ -840,7 +897,13 @@ function AttachmentChips({
   return (
     <div
       className={cn(
-        "mt-2 flex flex-wrap gap-2",
+        // ``items-start`` is critical when the same row mixes
+        // image tiles (~200 px tall thumbnails) with PDF/file
+        // chips (~28 px pills). Without it, flex's default
+        // ``align-items: stretch`` blows up the small chips to
+        // match the image's height — the bug that produced the
+        // giant oval PDF pill next to a generated image.
+        "mt-2 flex flex-wrap items-start gap-2",
         align === "end" ? "justify-end" : "justify-start"
       )}
     >

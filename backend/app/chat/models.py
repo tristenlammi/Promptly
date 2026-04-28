@@ -275,6 +275,16 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # Stamped by the in-place edit endpoint so the UI can render a
+    # subtle "edited" badge on retroactively rewritten assistant
+    # replies. NULL on every row that's still in its original state.
+    # The edit-and-resend flow does NOT touch this column (it
+    # rewrites text + re-streams a fresh assistant turn, which is
+    # semantically a regenerated message rather than an edited one).
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<Message id={self.id} role={self.role}>"
 

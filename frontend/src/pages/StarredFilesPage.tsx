@@ -2,14 +2,13 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star } from "lucide-react";
 
-import type { FileItem, FileScope } from "@/api/files";
+import type { FileItem } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import {
   DriveEmptyState,
   DriveFileRow,
   DriveFolderRow,
 } from "@/components/files/DriveRows";
-import { DriveScopeTabs } from "@/components/files/DriveScopeTabs";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
@@ -23,10 +22,15 @@ import {
 } from "@/hooks/useFiles";
 import { downloadAuthed } from "@/components/files/helpers";
 
+// Drive stage 5 — Starred is always "mine". Grantees can preview a
+// shared folder/file but can't star it (stars live on the owner's
+// row; they don't propagate). The sub-nav is the only surface-level
+// navigation now, so the legacy scope tab row was retired here.
+const SCOPE = "mine" as const;
+
 export function StarredFilesPage() {
-  const [scope, setScope] = useState<FileScope>("mine");
   const navigate = useNavigate();
-  const { data, isLoading } = useStarredFiles(scope);
+  const { data, isLoading } = useStarredFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<
     { kind: "file" | "folder"; id: string; name: string } | null
@@ -52,8 +56,6 @@ export function StarredFilesPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-6 py-6">
-          <DriveScopeTabs scope={scope} onChange={setScope} />
-
           {isLoading && (
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}
@@ -75,14 +77,16 @@ export function StarredFilesPage() {
                     folder={f}
                     onOpen={() => navigate(`/files/folder/${f.id}`)}
                     actions={{
-                      onUnstar: () => unstarFolder.mutate({ id: f.id, scope }),
+                      onUnstar: () =>
+                        unstarFolder.mutate({ id: f.id, scope: SCOPE }),
                       onShare: () =>
                         setShareFor({
                           kind: "folder",
                           id: f.id,
                           name: f.name,
                         }),
-                      onTrash: () => trashFolder.mutate({ id: f.id, scope }),
+                      onTrash: () =>
+                        trashFolder.mutate({ id: f.id, scope: SCOPE }),
                     }}
                   />
                 ))}
@@ -93,14 +97,16 @@ export function StarredFilesPage() {
                     actions={{
                       onPreview: () => setPreview(f),
                       onDownload: () => downloadAuthed(f),
-                      onUnstar: () => unstarFile.mutate({ id: f.id, scope }),
+                      onUnstar: () =>
+                        unstarFile.mutate({ id: f.id, scope: SCOPE }),
                       onShare: () =>
                         setShareFor({
                           kind: "file",
                           id: f.id,
                           name: f.filename,
                         }),
-                      onTrash: () => trashFile.mutate({ id: f.id, scope }),
+                      onTrash: () =>
+                        trashFile.mutate({ id: f.id, scope: SCOPE }),
                     }}
                   />
                 ))}
@@ -120,7 +126,7 @@ export function StarredFilesPage() {
           setShareFor({ kind: "file", id: f.id, name: f.filename })
         }
         onToggleStar={(f) => {
-          unstarFile.mutate({ id: f.id, scope });
+          unstarFile.mutate({ id: f.id, scope: SCOPE });
         }}
       />
 

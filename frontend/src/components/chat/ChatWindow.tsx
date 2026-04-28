@@ -19,6 +19,13 @@ interface ChatWindowProps {
    *  (e.g. on a brand-new conversation page that hasn't created a chat
    *  yet), the pencil affordance is hidden entirely. */
   onEditAndResend?: (messageId: string, newText: string) => Promise<void>;
+  /** In-place patch of an assistant reply — owner-only, no
+   *  re-stream. When provided, every persisted assistant bubble
+   *  gets an "Edit" affordance that opens the same textarea
+   *  editor used for user turns. Omitted on chats the caller
+   *  isn't authorised to mutate (collaborators on shared chats,
+   *  or anonymous viewers of a public share link). */
+  onEditAssistant?: (messageId: string, newText: string) => Promise<void>;
   /** Phase 4b — owner + accepted collaborators on the active chat.
    *  When set (i.e. >1 participant), MessageBubble renders "from
    *  Jane" chips so it's clear who said what. ``null`` for solo
@@ -42,6 +49,7 @@ interface ChatWindowProps {
 
 export function ChatWindow({
   onEditAndResend,
+  onEditAssistant,
   participants,
   onBranchFrom,
   onRegenerate,
@@ -249,8 +257,11 @@ export function ChatWindow({
               onEdit={
                 m.id === lastEditableUserId && onEditAndResend
                   ? (newText) => onEditAndResend(m.id, newText)
-                  : undefined
+                  : m.role === "assistant" && onEditAssistant
+                    ? (newText) => onEditAssistant(m.id, newText)
+                    : undefined
               }
+              editedAt={m.edited_at ?? null}
               onBranch={onBranchFrom ? () => onBranchFrom(m.id) : undefined}
               onRegenerate={
                 m.id === lastRegenerableAssistantId && onRegenerate

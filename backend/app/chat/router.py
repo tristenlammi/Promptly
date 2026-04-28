@@ -56,6 +56,7 @@ from app.chat.schemas import (
     MentionCandidate,
     MentionCandidatesResponse,
     MessageResponse,
+    PatchAssistantMessageRequest,
     RegenerateMessageRequest,
     SendMessageRequest,
     SendMessageResponse,
@@ -1171,6 +1172,92 @@ async def edit_and_resend_message(
         stream_id=stream_id,
         user_message=MessageResponse.model_validate(target),
     )
+
+
+@router.patch(
+    "/conversations/{conversation_id}/messages/{message_id}",
+    response_model=MessageResponse,
+)
+async def patch_assistant_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    payload: PatchAssistantMessageRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    """In-place rewrite of an assistant reply.
+
+    Different from :func:`edit_and_resend_message` (which targets
+    user messages and re-streams a fresh reply). This endpoint is
+    purely cosmetic — the owner is hand-correcting words the model
+    already wrote (typos, scrub stray placeholders, tighten prose)
+    without paying tokens for a regeneration.
+
+    Constraints (returned as 4xx, never silent):
+
+    * ``message_id`` must belong to ``conversation_id``.
+    * The target message must have ``role == "assistant"``. User
+      messages have their own dedicated edit-and-resend flow which
+      is the right tool for "I meant to ask something different".
+      System messages are managed by the server (compaction
+      summaries, project prompts, etc.) and aren't user-editable.
+    * Only the conversation **owner** may patch assistant content.
+      Letting collaborators rewrite the AI's words on a chat they
+      don't own would silently mutate the owner's record. They can
+      still edit their own user messages via the existing endpoint.
+
+    Side effects on success:
+
+    * ``messages.content`` is overwritten in place.
+    * ``messages.edited_at`` is stamped to NOW so the UI can show
+      an "edited" badge.
+    * ``messages.sources`` / ``attachments`` / token metrics /
+      cost / ``whiteboard_actions`` are intentionally untouched —
+      we trust the owner to make the new prose match the metadata
+      that's already there. (If they edit out a quoted citation
+      the source list will look orphaned, which is fine.)
+    """
+    # No quota debit and no need for the heavier streaming
+    # ``get_accessible_conversation`` walk — owner-only is the
+    # entire ACL.
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id:
+        # 404 instead of 403 to avoid leaking the existence of a
+        # conversation the caller can't see.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
+
+    target = await db.get(Message, message_id)
+    if target is None or target.conversation_id != conv.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+    if target.role != "assistant":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Only assistant messages can be patched in place. Use "
+                "/edit on user messages."
+            ),
+        )
+
+    new_content = payload.content.strip()
+    if not new_content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Content can't be empty.",
+        )
+    # No-op fast-path so a stray re-save with identical text doesn't
+    # bump the edited_at stamp.
+    if new_content == (target.content or ""):
+        return MessageResponse.model_validate(target)
+
+    target.content = new_content
+    target.edited_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(target)
+    return MessageResponse.model_validate(target)
 
 
 @router.post(

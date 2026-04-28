@@ -1,5 +1,6 @@
 import { apiClient } from "./client";
 import type {
+  ChatMessage,
   ConversationDetail,
   ConversationSearchHit,
   ConversationSummary,
@@ -9,6 +10,17 @@ import type {
   TemporaryMode,
   WebSearchMode,
 } from "./types";
+
+/** Response from ``POST /chat/conversations/{id}/summarise-to-project``.
+ *  Returned to the SummariseToProjectButton modal so it can show the
+ *  resulting filename + offer an "Open project" deep-link. */
+export interface SummariseToProjectResult {
+  file_id: string;
+  filename: string;
+  project_id: string;
+  project_title: string;
+  chars: number;
+}
 
 /** Single-row payload for the ``@``-mention autocomplete in the
  *  composer. Mirrors ``backend/app/chat/schemas.py::MentionCandidate``. */
@@ -282,20 +294,29 @@ export const chatApi = {
    *  other chat in that project picks it up on the next turn. Only
    *  valid for owner-role conversations that already live inside a
    *  project. */
-  async summariseToProject(conversationId: string): Promise<{
-    file_id: string;
-    filename: string;
-    project_id: string;
-    project_title: string;
-    chars: number;
-  }> {
-    const { data } = await apiClient.post<{
-      file_id: string;
-      filename: string;
-      project_id: string;
-      project_title: string;
-      chars: number;
-    }>(`/chat/conversations/${conversationId}/summarise-to-project`);
+  async summariseToProject(
+    conversationId: string
+  ): Promise<SummariseToProjectResult> {
+    const { data } = await apiClient.post<SummariseToProjectResult>(
+      `/chat/conversations/${conversationId}/summarise-to-project`
+    );
+    return data;
+  },
+
+  /** In-place edit of an assistant reply — no re-stream, no
+   *  truncation, no quota debit. Owner-only on the backend. The
+   *  returned ``ChatMessage`` carries the new ``edited_at`` stamp
+   *  so the caller can update the local store and surface the
+   *  "edited" badge without a hard refresh. */
+  async editAssistantMessage(
+    conversationId: string,
+    messageId: string,
+    content: string
+  ): Promise<ChatMessage> {
+    const { data } = await apiClient.patch<ChatMessage>(
+      `/chat/conversations/${conversationId}/messages/${messageId}`,
+      { content }
+    );
     return data;
   },
 

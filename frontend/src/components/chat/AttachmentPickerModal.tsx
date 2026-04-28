@@ -10,7 +10,6 @@ import {
   Image as ImageIcon,
   Loader2,
   Upload,
-  Users,
 } from "lucide-react";
 
 import type { FileItem, FileScope, FolderItem } from "@/api/files";
@@ -18,7 +17,6 @@ import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useBrowseFiles, useUploadFile } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 /** A file already resolved and ready to send. */
@@ -269,7 +267,12 @@ function PickFromFilesTab({
   selected: Record<string, AttachedFile>;
   setSelected: React.Dispatch<React.SetStateAction<Record<string, AttachedFile>>>;
 }) {
-  const [scope, setScope] = useState<FileScope>("mine");
+  // Drive stage 5 — only owned files can be attached to chats. Files
+  // shared with you via grants are deliberately excluded from this
+  // picker because the chat snapshot would point at the owner's
+  // blob; if they later revoke your grant, the attachment 404s.
+  // Recipients with ``can_copy`` should use "Copy to my files" first
+  // and then attach their own clone.
   const [folderId, setFolderId] = useState<string | null>(null);
 
   const toggle = (f: FileItem) => {
@@ -289,30 +292,10 @@ function PickFromFilesTab({
     });
   };
 
-  const switchScope = (s: FileScope) => {
-    setScope(s);
-    setFolderId(null);
-  };
-
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-1 text-xs">
-        <ScopeChip
-          active={scope === "mine"}
-          onClick={() => switchScope("mine")}
-          icon={<FolderIcon className="h-3 w-3" />}
-          label="My files"
-        />
-        <ScopeChip
-          active={scope === "shared"}
-          onClick={() => switchScope("shared")}
-          icon={<Users className="h-3 w-3" />}
-          label="Shared"
-        />
-      </div>
-
       <EmbeddedBrowser
-        scope={scope}
+        scope="mine"
         folderId={folderId}
         onOpenFolder={setFolderId}
         alreadyAttachedIds={alreadyAttachedIds}
@@ -320,33 +303,6 @@ function PickFromFilesTab({
         onToggleFile={toggle}
       />
     </div>
-  );
-}
-
-function ScopeChip({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 transition",
-        active
-          ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-          : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-      )}
-    >
-      {icon}
-      <span className="font-medium">{label}</span>
-    </button>
   );
 }
 
@@ -584,7 +540,7 @@ function MobileHomeActions({
       <MobileActionRow
         icon={<FolderIcon className="h-5 w-5" />}
         label="Choose from Files"
-        hint="Browse your saved files and shared pool"
+        hint="Browse files saved in your Drive"
         onClick={onBrowse}
         disabled={busy}
       />
@@ -678,8 +634,6 @@ function UploadTab({
 }: {
   onUploaded: (f: FileItem) => void;
 }) {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-  const [targetScope, setTargetScope] = useState<FileScope>("mine");
   const inputRef = useRef<HTMLInputElement | null>(null);
   const upload = useUploadFile();
   const [err, setErr] = useState<string | null>(null);
@@ -691,13 +645,14 @@ function UploadTab({
     setErr(null);
     try {
       const result = await upload.mutateAsync({
-        scope: targetScope,
+        scope: "mine",
         file,
         folderId: null,
-        // Files uploaded from the chat picker land in "Chat Uploads"
-        // when going into the user's pool. The shared pool stays
-        // free-form (admins drop them wherever).
-        route: targetScope === "mine" ? "chat" : undefined,
+        // Files uploaded from the chat picker always land in the
+        // owner's "Chat Uploads" system folder. (Drive stage 5
+        // retired the admin-only "save to shared pool" path; sharing
+        // is now per-resource via the Shared tab's grant modal.)
+        route: "chat",
       });
       onUploaded(result);
     } catch (e) {
@@ -711,28 +666,6 @@ function UploadTab({
         Files uploaded here are saved to your Files tab so you can reuse them in
         other chats.
       </p>
-
-      {isAdmin && (
-        <div>
-          <div className="mb-1.5 text-xs font-medium text-[var(--text-muted)]">
-            Save to
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <ScopeChip
-              active={targetScope === "mine"}
-              onClick={() => setTargetScope("mine")}
-              icon={<FolderIcon className="h-3 w-3" />}
-              label="My files"
-            />
-            <ScopeChip
-              active={targetScope === "shared"}
-              onClick={() => setTargetScope("shared")}
-              icon={<Users className="h-3 w-3" />}
-              label="Shared pool"
-            />
-          </div>
-        </div>
-      )}
 
       <button
         onClick={() => inputRef.current?.click()}

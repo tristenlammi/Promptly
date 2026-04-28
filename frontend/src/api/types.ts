@@ -442,6 +442,10 @@ export interface ChatMessage {
   /** Total dollar cost reported by the provider (model + paid tools).
    *  Floats; ``null`` when the provider didn't surface a cost. */
   cost_usd?: number | null;
+  /** Stamped by the in-place edit endpoint when the conversation
+   *  owner hand-corrects an assistant reply. Null on every original-
+   *  state row. The UI uses this to render an "edited" badge. */
+  edited_at?: string | null;
   /** Phase 4b — UUID of the user that actually sent this message.
    *  Populated for ``role === "user"`` rows; ``null`` for assistant
    *  / system rows. The UI looks this up against the conversation's

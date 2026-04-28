@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -15,6 +15,42 @@ Scope = Literal["mine", "shared"]
 FileListView = Literal["mine", "shared", "starred", "recent", "trash", "search"]
 ShareAccessMode = Literal["public", "invite"]
 ShareResourceType = Literal["file", "folder"]
+
+
+class GranteeBrief(BaseModel):
+    """One entry in a resource's grantee pill / share modal list.
+
+    ``can_copy`` is the per-grantee permission flag (false = view only,
+    true = view + "Copy to my files"). The user fields are denormalised
+    on read so the frontend can render avatars / pills without a
+    second round trip.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    grant_id: uuid.UUID
+    user_id: uuid.UUID
+    username: str
+    email: str | None = None
+    can_copy: bool
+
+
+class GrantSummary(BaseModel):
+    """Compact grant info attached to every shareable file/folder row.
+
+    ``role`` tells the client which actions to render: an ``owner``
+    sees the manage-grants modal trigger, a ``grantee`` sees only
+    read-only / copy actions and the read-only badge. ``grantees``
+    lists everyone *other than the caller* who can see this resource
+    so the pill can render names directly. ``owner`` is set on rows
+    where the caller is a grantee (otherwise the caller IS the owner
+    and doesn't need a chip about themselves).
+    """
+
+    role: Literal["owner", "grantee"]
+    grantees: list[GranteeBrief] = Field(default_factory=list)
+    can_copy: bool = False  # only meaningful when role == "grantee"
+    owner: "GranteeBrief | None" = None
 
 
 class FolderResponse(BaseModel):
@@ -35,6 +71,11 @@ class FolderResponse(BaseModel):
     updated_at: datetime | None = None
     starred_at: datetime | None = None
     trashed_at: datetime | None = None
+    # Per-user share grants. ``None`` on rows where neither the
+    # caller nor anyone else has a grant — keeps the wire payload
+    # tiny on the common "private folder" case. See
+    # :class:`GrantSummary` for shape + role semantics.
+    sharing: GrantSummary | None = None
 
 
 class FileResponse(BaseModel):
@@ -60,6 +101,11 @@ class FileResponse(BaseModel):
     # nullable for ordinary uploads.
     source_kind: str | None = None
     source_file_id: uuid.UUID | None = None
+    # Same shape + semantics as ``FolderResponse.sharing``.
+    sharing: GrantSummary | None = None
+
+
+GrantSummary.model_rebuild()
 
 
 class BreadcrumbEntry(BaseModel):
@@ -362,6 +408,65 @@ class CollabTokenUser(BaseModel):
 
 
 CollabTokenResponse.model_rebuild()
+
+
+# --------------------------------------------------------------------
+# Drive stage 5 — peer-to-peer share grants
+# --------------------------------------------------------------------
+class UserSearchResult(BaseModel):
+    """One row from the share-modal user autocomplete."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    username: str
+    email: str | None = None
+    # Convenience flag used by the picker to disable a row that's
+    # already on the grant list — saves the modal a separate diff.
+    already_granted: bool = False
+
+
+class UserSearchResponse(BaseModel):
+    results: list[UserSearchResult]
+
+
+class GrantsListResponse(BaseModel):
+    """``GET /api/files/{file|folder}/{id}/grants`` payload.
+
+    Owner-only endpoint. ``can_share`` is echoed back so the modal
+    can render correctly (in v1 only the owner can manage grants;
+    we still return the field to leave room for a future "delegate
+    grant management" affordance without a wire change).
+    """
+
+    grants: list[GranteeBrief]
+    can_share: bool
+
+
+class CreateGrantRequest(BaseModel):
+    grantee_user_id: uuid.UUID
+    can_copy: bool = False
+
+
+class UpdateGrantRequest(BaseModel):
+    can_copy: bool
+
+
+# Hard cap from the product spec — refused at the API layer rather
+# than the DB so the error message stays readable. Bumping it would
+# need a UX pass on the pill (currently truncates after a few
+# names).
+MAX_GRANTS_PER_RESOURCE: Final[int] = 10
+
+
+class CopyToMineResponse(BaseModel):
+    """``POST /api/files/files/{file_id}/copy-to-mine`` payload.
+
+    Returns the freshly-cloned ``UserFile`` row owned by the caller
+    so the Drive UI can update the listing without a refetch.
+    """
+
+    file: FileResponse
 
 
 class DocumentAssetResponse(BaseModel):

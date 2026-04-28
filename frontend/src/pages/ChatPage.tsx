@@ -62,6 +62,7 @@ export function ChatPage() {
   }, [id, location.search]);
   const setActive = useChatStore((s) => s.setActive);
   const setMessages = useChatStore((s) => s.setMessages);
+  const replaceMessage = useChatStore((s) => s.replaceMessage);
   const upsertConversation = useChatStore((s) => s.upsertConversation);
   const isStreaming = useChatStore((s) => s.isStreaming);
   // Subscribe to message count directly so we can render the live chat pane
@@ -450,6 +451,21 @@ export function ChatPage() {
     [editAndResend, id, selectedModel, webSearchMode, toolsEnabled]
   );
 
+  /** In-place patch of an assistant reply — no re-stream. The
+   *  backend ``PATCH`` endpoint mutates ``content`` + stamps
+   *  ``edited_at`` and returns the new row, which we splice into
+   *  the local store so the bubble updates without a refetch.
+   *  Owner-only on the server, so we don't need to gate this in
+   *  the UI for collaborators. */
+  const handleEditAssistant = useCallback(
+    async (messageId: string, newText: string) => {
+      if (!id) return;
+      const updated = await chatApi.editAssistantMessage(id, messageId, newText);
+      replaceMessage(messageId, updated);
+    },
+    [id, replaceMessage]
+  );
+
   /** Regenerate the most recent assistant reply.
    *
    *  ``override`` comes from the "Try a different model" submenu; when
@@ -617,6 +633,7 @@ export function ChatPage() {
           {(id || isStreaming) && (hasMessages || isStreaming) ? (
             <ChatWindow
               onEditAndResend={handleEditAndResend}
+              onEditAssistant={id ? handleEditAssistant : undefined}
               participants={participants}
               onBranchFrom={id ? handleBranchFrom : undefined}
               onRegenerate={id ? handleRegenerate : undefined}

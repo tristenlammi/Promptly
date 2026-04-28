@@ -2,10 +2,9 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Clock } from "lucide-react";
 
-import type { FileItem, FileScope } from "@/api/files";
+import type { FileItem } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
-import { DriveScopeTabs } from "@/components/files/DriveScopeTabs";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
 import { TopNav } from "@/components/layout/TopNav";
@@ -18,9 +17,14 @@ import {
   useUnstarFile,
 } from "@/hooks/useFiles";
 
+// Drive stage 5 — Recent only reports files *you* touched. Previews
+// of someone else's shared file shouldn't hijack your recents, and
+// the sub-nav already provides cross-surface navigation, so the
+// legacy scope-tab row was retired here.
+const SCOPE = "mine" as const;
+
 export function RecentFilesPage() {
-  const [scope, setScope] = useState<FileScope>("mine");
-  const { data, isLoading } = useRecentFiles(scope);
+  const { data, isLoading } = useRecentFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<FileItem | null>(null);
 
@@ -42,8 +46,6 @@ export function RecentFilesPage() {
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-6 py-6">
-          <DriveScopeTabs scope={scope} onChange={setScope} />
-
           {isLoading && (
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}
@@ -69,9 +71,9 @@ export function RecentFilesPage() {
                       onShare: () => setShareFor(f),
                       onStar: f.starred_at
                         ? undefined
-                        : () => star.mutate({ id: f.id, scope }),
+                        : () => star.mutate({ id: f.id, scope: SCOPE }),
                       onUnstar: f.starred_at
-                        ? () => unstar.mutate({ id: f.id, scope })
+                        ? () => unstar.mutate({ id: f.id, scope: SCOPE })
                         : undefined,
                       onMove:
                         f.folder_id !== undefined
@@ -82,7 +84,7 @@ export function RecentFilesPage() {
                                   : "/files"
                               )
                           : undefined,
-                      onTrash: () => trash.mutate({ id: f.id, scope }),
+                      onTrash: () => trash.mutate({ id: f.id, scope: SCOPE }),
                     }}
                   />
                 ))}
@@ -100,8 +102,8 @@ export function RecentFilesPage() {
         onClose={() => setPreview(null)}
         onShare={setShareFor}
         onToggleStar={(f) => {
-          if (f.starred_at) unstar.mutate({ id: f.id, scope });
-          else star.mutate({ id: f.id, scope });
+          if (f.starred_at) unstar.mutate({ id: f.id, scope: SCOPE });
+          else star.mutate({ id: f.id, scope: SCOPE });
         }}
       />
 

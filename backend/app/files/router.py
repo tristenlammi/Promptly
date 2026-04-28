@@ -41,7 +41,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete as sa_delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,8 +55,26 @@ from app.auth.audit import (
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
-from app.files.models import FileFolder, FileShareGrant, FileShareLink, UserFile
+from app.files.models import (
+    FileFolder,
+    FileShareGrant,
+    FileShareLink,
+    ResourceGrant,
+    UserFile,
+)
 from app.files.quota import StorageQuota, get_quota
+from app.files.sharing import (
+    assert_file_shareable,
+    assert_folder_shareable,
+    build_summary_for_resource,
+    bulk_summaries,
+    caller_grants_for_file,
+    caller_grants_for_folder,
+    expand_folder_subtree,
+    file_ids_caller_is_granted,
+    folder_ids_caller_is_granted,
+    grants_for_resource,
+)
 from app.files.safety import (
     UnsafeUploadError,
     canonical_mime_for,
@@ -70,8 +88,11 @@ from app.files.generated import (
 )
 from app.files.generated_kinds import GeneratedKind
 from app.files.schemas import (
+    MAX_GRANTS_PER_RESOURCE,
     BreadcrumbEntry,
     BrowseResponse,
+    CopyToMineResponse,
+    CreateGrantRequest,
     FileResponse,
     FileSearchHit,
     FileSearchResponse,
@@ -79,6 +100,8 @@ from app.files.schemas import (
     FolderCreateRequest,
     FolderResponse,
     FolderUpdateRequest,
+    GrantsListResponse,
+    GrantSummary,
     RecentFilesResponse,
     Scope,
     ShareAccessMode,
@@ -94,6 +117,9 @@ from app.files.schemas import (
     StarredListResponse,
     StorageQuotaResponse,
     TrashListResponse,
+    UpdateGrantRequest,
+    UserSearchResponse,
+    UserSearchResult,
 )
 from app.files.system_folders import (
     folder_for_chat_upload,
@@ -116,37 +142,61 @@ router = APIRouter()
 # --------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------
-def _scope_of(owner_id: uuid.UUID | None) -> Scope:
-    return "shared" if owner_id is None else "mine"
+def _scope_of_for_caller(
+    owner_id: uuid.UUID | None, caller: User
+) -> Scope:
+    """Return the bucket the caller sees this row in.
+
+    Post-0042 the legacy admin-pool concept is gone: every row has
+    an owner. The "shared" scope now means "appears in the caller's
+    Shared tab" — i.e. they're either a grantee or the owner of a
+    row that has at least one outstanding grant. The caller-aware
+    bucket is decided by whoever calls this; default fallback is
+    ``"mine"`` when the caller is the owner.
+    """
+    if owner_id is not None and owner_id == caller.id:
+        return "mine"
+    return "shared"
 
 
-def _owner_for_scope(user: User, scope: Scope) -> uuid.UUID | None:
-    """Return the `user_id` value we should stamp on a new row in `scope`.
+def _owner_for_scope(user: User, scope: Scope) -> uuid.UUID:
+    """Return the ``user_id`` we should stamp on a new row.
 
-    Non-admins attempting to write into the shared pool get a 403 here —
-    read access is granted everywhere else but writes are admin-only.
+    Writes always go into the caller's own pool now — there's no
+    admin-managed shared pool to write into anymore. The ``scope``
+    argument is kept for API symmetry but ignored: any caller
+    attempting to *create* something under ``scope=shared`` is
+    politely redirected to the new sharing model.
     """
     if scope == "shared":
-        if user.role != "admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admins can modify the shared pool",
-            )
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "The 'Shared' tab now lists folders/files shared with you "
+                "or by you. To create something new, use 'My files' and "
+                "share it from there."
+            ),
+        )
     return user.id
 
 
-def _folder_to_response(folder: FileFolder) -> FolderResponse:
+def _folder_to_response(
+    folder: FileFolder,
+    *,
+    caller: User,
+    sharing: GrantSummary | None = None,
+) -> FolderResponse:
     return FolderResponse(
         id=folder.id,
         parent_id=folder.parent_id,
         name=folder.name,
-        scope=_scope_of(folder.user_id),
+        scope=_scope_of_for_caller(folder.user_id, caller),
         created_at=folder.created_at,
         system_kind=folder.system_kind,
         updated_at=folder.updated_at,
         starred_at=folder.starred_at,
         trashed_at=folder.trashed_at,
+        sharing=sharing,
     )
 
 
@@ -164,19 +214,25 @@ def _assert_not_system_folder(folder: FileFolder, action: str) -> None:
         )
 
 
-def _file_to_response(f: UserFile) -> FileResponse:
+def _file_to_response(
+    f: UserFile,
+    *,
+    caller: User,
+    sharing: GrantSummary | None = None,
+) -> FileResponse:
     return FileResponse(
         id=f.id,
         folder_id=f.folder_id,
         filename=f.filename,
         mime_type=f.mime_type,
         size_bytes=f.size_bytes,
-        scope=_scope_of(f.user_id),
+        scope=_scope_of_for_caller(f.user_id, caller),
         created_at=f.created_at,
         updated_at=f.updated_at,
         starred_at=f.starred_at,
         trashed_at=f.trashed_at,
         source_kind=f.source_kind,
+        sharing=sharing,
         source_file_id=f.source_file_id,
     )
 
@@ -185,19 +241,32 @@ async def _load_readable_folder(
     db: AsyncSession, folder_id: uuid.UUID, user: User
 ) -> FileFolder:
     folder = await db.get(FileFolder, folder_id)
-    if folder is None or not _can_read(folder.user_id, user):
-        # Don't leak the existence of folders in other users' pools.
+    if folder is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found"
         )
-    return folder
+    if folder.user_id == user.id:
+        return folder
+    # Drive stage 5 — peer-to-peer share grants. The caller may be a
+    # grantee on this folder directly, or on any ancestor folder
+    # (folder grants cascade down through the subtree). 404 instead
+    # of 403 so we don't leak the existence of someone else's
+    # private folders.
+    grants = await caller_grants_for_folder(db, folder, user)
+    if grants:
+        return folder
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found"
+    )
 
 
 async def _load_writable_folder(
     db: AsyncSession, folder_id: uuid.UUID, user: User
 ) -> FileFolder:
     folder = await _load_readable_folder(db, folder_id, user)
-    if not _can_write(folder.user_id, user):
+    if folder.user_id != user.id:
+        # Grantees can read but not write — folder-level mutations
+        # (rename, move, trash, upload-into) are owner-only.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have write access to this folder",
@@ -213,7 +282,7 @@ async def _load_readable_file(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
         )
-    if _can_read(row.user_id, user):
+    if row.user_id is not None and row.user_id == user.id:
         return row
     # Project-share side-door: a collaborator on a shared project
     # can read any file pinned to that project (including files
@@ -221,6 +290,12 @@ async def _load_readable_file(
     # this path the chat-preamble download links inside a shared
     # project 404 for anyone but the pin's original owner.
     if await _file_is_accessible_via_project(db, row.id, user):
+        return row
+    # Drive stage 5 — direct file grant or a grant on any ancestor
+    # folder. Both paths route through the same helper which walks
+    # ``folder_id`` up to the root.
+    grants = await caller_grants_for_file(db, row, user)
+    if grants:
         return row
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
@@ -265,7 +340,10 @@ async def _load_writable_file(
     db: AsyncSession, file_id: uuid.UUID, user: User
 ) -> UserFile:
     row = await _load_readable_file(db, file_id, user)
-    if not _can_write(row.user_id, user):
+    if row.user_id is None or row.user_id != user.id:
+        # Grantees never get write — even those with ``can_copy=True``
+        # should clone the file into their own Drive instead of
+        # mutating the owner's row.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have write access to this file",
@@ -273,26 +351,13 @@ async def _load_writable_file(
     return row
 
 
-def _can_read(owner_id: uuid.UUID | None, user: User) -> bool:
-    # Shared pool is readable by everyone; private pools only by their owner.
-    return owner_id is None or owner_id == user.id
-
-
-def _can_write(owner_id: uuid.UUID | None, user: User) -> bool:
-    if owner_id is None:
-        return user.role == "admin"
-    return owner_id == user.id
-
-
-def _owner_filter(scope: Scope, user: User):
-    if scope == "shared":
-        return FileFolder.user_id.is_(None)
+def _owner_filter(user: User):
+    """Filter for caller-owned folders only (used by ``scope=mine``)."""
     return FileFolder.user_id == user.id
 
 
-def _file_owner_filter(scope: Scope, user: User):
-    if scope == "shared":
-        return UserFile.user_id.is_(None)
+def _file_owner_filter(user: User):
+    """Filter for caller-owned files only (used by ``scope=mine``)."""
     return UserFile.user_id == user.id
 
 
@@ -345,40 +410,55 @@ async def browse(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> BrowseResponse:
-    """List folders + files inside a given folder of the selected scope."""
+    """List folders + files inside a given folder of the selected scope.
+
+    ``scope=mine`` returns the caller's own pool exactly as before.
+
+    ``scope=shared`` is the new peer-to-peer model: at root it lists
+    every file/folder the caller has been granted access to **plus**
+    every file/folder the caller owns that has at least one
+    outstanding grant. Drilling into a shared folder traverses its
+    real subtree (folder grants cascade); the breadcrumb stops at
+    the shared root so the caller can't navigate out into the
+    owner's private drive.
+    """
     parent: FileFolder | None = None
     if folder_id is not None:
         parent = await _load_readable_folder(db, folder_id, user)
-        # Scope in the URL must match the folder's actual pool.
-        if _scope_of(parent.user_id) != scope:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Folder doesn't belong to the requested scope",
-            )
+
+    if scope == "mine":
+        return await _browse_mine(db, user, parent)
+    return await _browse_shared(db, user, parent)
+
+
+async def _browse_mine(
+    db: AsyncSession, user: User, parent: FileFolder | None
+) -> BrowseResponse:
+    if parent is not None and parent.user_id != user.id:
+        # The caller can read this folder via a grant, but it's not
+        # in their "My files" view — guide them to the Shared tab.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This folder lives in your Shared tab, not My files.",
+        )
 
     folder_filter = and_(
-        _owner_filter(scope, user),
+        _owner_filter(user),
         (FileFolder.parent_id == parent.id)
         if parent is not None
         else FileFolder.parent_id.is_(None),
-        # Drive stage 1: Trash rows are invisible to /browse. They
-        # only surface via /files/trash.
         FileFolder.trashed_at.is_(None),
     )
     folder_rows = (
-        (
-            await db.execute(
-                select(FileFolder)
-                .where(folder_filter)
-                .order_by(FileFolder.name.asc())
-            )
+        await db.execute(
+            select(FileFolder)
+            .where(folder_filter)
+            .order_by(FileFolder.name.asc())
         )
-        .scalars()
-        .all()
-    )
+    ).scalars().all()
 
     file_filter = and_(
-        _file_owner_filter(scope, user),
+        _file_owner_filter(user),
         (UserFile.folder_id == parent.id)
         if parent is not None
         else UserFile.folder_id.is_(None),
@@ -386,25 +466,287 @@ async def browse(
         _drive_listing_filter(),
     )
     file_rows = (
-        (
-            await db.execute(
-                select(UserFile)
-                .where(file_filter)
-                .order_by(UserFile.filename.asc())
-            )
+        await db.execute(
+            select(UserFile)
+            .where(file_filter)
+            .order_by(UserFile.filename.asc())
         )
-        .scalars()
-        .all()
+    ).scalars().all()
+
+    file_summaries, folder_summaries = await bulk_summaries(
+        db,
+        files=list(file_rows),
+        folders=list(folder_rows),
+        caller=user,
     )
 
     return BrowseResponse(
-        scope=scope,
-        folder=_folder_to_response(parent) if parent else None,
+        scope="mine",
+        folder=_folder_to_response(
+            parent, caller=user,
+            sharing=folder_summaries.get(parent.id) if parent else None,
+        ) if parent else None,
         breadcrumbs=await _build_breadcrumbs(db, parent),
-        folders=[_folder_to_response(f) for f in folder_rows],
-        files=[_file_to_response(f) for f in file_rows],
-        writable=(scope == "mine") or user.role == "admin",
+        folders=[
+            _folder_to_response(
+                f, caller=user, sharing=folder_summaries.get(f.id)
+            )
+            for f in folder_rows
+        ],
+        files=[
+            _file_to_response(
+                f, caller=user, sharing=file_summaries.get(f.id)
+            )
+            for f in file_rows
+        ],
+        writable=True,
     )
+
+
+async def _browse_shared(
+    db: AsyncSession, user: User, parent: FileFolder | None
+) -> BrowseResponse:
+    """Shared tab listing.
+
+    Root view (parent is None): assemble the union of:
+
+    * folders the caller is a grantee on (top-level folder grants,
+      not their descendants — those live one click in)
+    * files the caller is a grantee on (direct file grants only)
+    * folders the caller owns that have ANY grant on them
+    * files the caller owns that have ANY grant on them
+
+    Inside-folder view: list ``parent``'s direct children. Access
+    to ``parent`` was already verified by ``_load_readable_folder``
+    above.
+    """
+    if parent is None:
+        return await _shared_root(db, user)
+    return await _shared_inside(db, user, parent)
+
+
+async def _shared_root(db: AsyncSession, user: User) -> BrowseResponse:
+    # 1) Caller is a grantee on these folder ids.
+    grantee_folder_ids = await folder_ids_caller_is_granted(db, user)
+    grantee_folders: list[FileFolder] = []
+    if grantee_folder_ids:
+        rows = (
+            await db.execute(
+                select(FileFolder).where(
+                    FileFolder.id.in_(grantee_folder_ids),
+                    FileFolder.trashed_at.is_(None),
+                )
+            )
+        ).scalars().all()
+        grantee_folders = list(rows)
+
+    # 2) Caller is a grantee on these file ids.
+    grantee_file_ids = await file_ids_caller_is_granted(db, user)
+    grantee_files: list[UserFile] = []
+    if grantee_file_ids:
+        rows = (
+            await db.execute(
+                select(UserFile).where(
+                    UserFile.id.in_(grantee_file_ids),
+                    UserFile.trashed_at.is_(None),
+                    _drive_listing_filter(),
+                )
+            )
+        ).scalars().all()
+        grantee_files = list(rows)
+
+    # 3) Caller-owned folders/files that have at least one grant.
+    owned_shared_folder_ids = (
+        await db.execute(
+            select(ResourceGrant.resource_id)
+            .join(
+                FileFolder,
+                (FileFolder.id == ResourceGrant.resource_id)
+                & (ResourceGrant.resource_type == "folder"),
+            )
+            .where(
+                FileFolder.user_id == user.id,
+                FileFolder.trashed_at.is_(None),
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    owned_shared_folders: list[FileFolder] = []
+    if owned_shared_folder_ids:
+        rows = (
+            await db.execute(
+                select(FileFolder).where(
+                    FileFolder.id.in_(owned_shared_folder_ids)
+                )
+            )
+        ).scalars().all()
+        owned_shared_folders = list(rows)
+
+    owned_shared_file_ids = (
+        await db.execute(
+            select(ResourceGrant.resource_id)
+            .join(
+                UserFile,
+                (UserFile.id == ResourceGrant.resource_id)
+                & (ResourceGrant.resource_type == "file"),
+            )
+            .where(
+                UserFile.user_id == user.id,
+                UserFile.trashed_at.is_(None),
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    owned_shared_files: list[UserFile] = []
+    if owned_shared_file_ids:
+        rows = (
+            await db.execute(
+                select(UserFile).where(
+                    UserFile.id.in_(owned_shared_file_ids),
+                    _drive_listing_filter(),
+                )
+            )
+        ).scalars().all()
+        owned_shared_files = list(rows)
+
+    # Merge + de-dupe (an owner who's also a grantee on someone
+    # else's grant of their own row shouldn't ever happen, but
+    # defensively...).
+    folders_by_id: dict[uuid.UUID, FileFolder] = {}
+    for f in grantee_folders + owned_shared_folders:
+        folders_by_id[f.id] = f
+    files_by_id: dict[uuid.UUID, UserFile] = {}
+    for f in grantee_files + owned_shared_files:
+        files_by_id[f.id] = f
+
+    folder_list = sorted(folders_by_id.values(), key=lambda f: f.name.lower())
+    file_list = sorted(files_by_id.values(), key=lambda f: f.filename.lower())
+
+    file_summaries, folder_summaries = await bulk_summaries(
+        db, files=file_list, folders=folder_list, caller=user
+    )
+
+    return BrowseResponse(
+        scope="shared",
+        folder=None,
+        # The Drive UI's <Breadcrumbs/> already renders the
+        # scope-aware home anchor ("My files" / "Shared"), so the
+        # backend doesn't need to emit a synthetic root entry — that
+        # used to double-render as "Shared > Shared".
+        breadcrumbs=[],
+        folders=[
+            _folder_to_response(
+                f, caller=user, sharing=folder_summaries.get(f.id)
+            )
+            for f in folder_list
+        ],
+        files=[
+            _file_to_response(
+                f, caller=user, sharing=file_summaries.get(f.id)
+            )
+            for f in file_list
+        ],
+        writable=False,
+    )
+
+
+async def _shared_inside(
+    db: AsyncSession, user: User, parent: FileFolder
+) -> BrowseResponse:
+    # Direct children only — folder grants cascade so descendants
+    # of ``parent`` are readable too.
+    folder_rows = (
+        await db.execute(
+            select(FileFolder)
+            .where(
+                FileFolder.parent_id == parent.id,
+                FileFolder.trashed_at.is_(None),
+            )
+            .order_by(FileFolder.name.asc())
+        )
+    ).scalars().all()
+    file_rows = (
+        await db.execute(
+            select(UserFile)
+            .where(
+                UserFile.folder_id == parent.id,
+                UserFile.trashed_at.is_(None),
+                _drive_listing_filter(),
+            )
+            .order_by(UserFile.filename.asc())
+        )
+    ).scalars().all()
+
+    file_summaries, folder_summaries = await bulk_summaries(
+        db, files=list(file_rows), folders=list(folder_rows), caller=user
+    )
+
+    # Breadcrumbs: walk up from ``parent`` but only as far as the
+    # caller can read. The first ancestor they can't reach is
+    # outside their share — chop it.
+    crumbs = await _shared_breadcrumbs(db, user, parent)
+
+    return BrowseResponse(
+        scope="shared",
+        folder=_folder_to_response(
+            parent, caller=user,
+            sharing=(
+                await build_summary_for_resource(
+                    db,
+                    resource_type="folder",
+                    resource_id=parent.id,
+                    owner_user_id=parent.user_id,
+                    caller=user,
+                )
+                if parent.user_id is not None
+                else None
+            ),
+        ),
+        breadcrumbs=crumbs,
+        folders=[
+            _folder_to_response(
+                f, caller=user, sharing=folder_summaries.get(f.id)
+            )
+            for f in folder_rows
+        ],
+        files=[
+            _file_to_response(
+                f, caller=user, sharing=file_summaries.get(f.id)
+            )
+            for f in file_rows
+        ],
+        writable=parent.user_id == user.id,
+    )
+
+
+async def _shared_breadcrumbs(
+    db: AsyncSession, user: User, parent: FileFolder
+) -> list[BreadcrumbEntry]:
+    """Breadcrumbs for a folder reached through the Shared tab.
+
+    Walks up from ``parent`` and includes every ancestor the caller
+    can read (owner = always; grantee = grant on this folder or any
+    further ancestor). The first ancestor without read access caps
+    the chain — we don't expose folders the caller couldn't have
+    landed on directly. The synthetic "Shared" home anchor is
+    rendered by the frontend's ``<Breadcrumbs/>`` component, so we
+    deliberately don't prepend it here (otherwise it would double
+    up as "Shared > Shared").
+    """
+    chain: list[FileFolder] = []
+    cursor: FileFolder | None = parent
+    hops = 0
+    while cursor is not None and hops < 64:
+        if cursor.user_id != user.id:
+            grants = await caller_grants_for_folder(db, cursor, user)
+            if not grants:
+                break
+        chain.append(cursor)
+        if cursor.parent_id is None:
+            break
+        cursor = await db.get(FileFolder, cursor.parent_id)
+        hops += 1
+    return [BreadcrumbEntry(id=f.id, name=f.name) for f in reversed(chain)]
 
 
 # --------------------------------------------------------------------
@@ -420,12 +762,10 @@ async def create_folder(
 
     parent: FileFolder | None = None
     if payload.parent_id is not None:
+        # ``_load_writable_folder`` already enforces ownership, so
+        # the legacy "scope mismatch" check is redundant — every
+        # writable folder lives in the caller's own pool.
         parent = await _load_writable_folder(db, payload.parent_id, user)
-        if _scope_of(parent.user_id) != payload.scope:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Parent folder doesn't belong to the requested scope",
-            )
 
     folder = FileFolder(
         user_id=owner_id,
@@ -442,7 +782,7 @@ async def create_folder(
             detail="A folder with that name already exists here",
         )
     await db.refresh(folder)
-    return _folder_to_response(folder)
+    return _folder_to_response(folder, caller=user)
 
 
 @router.patch("/folders/{folder_id}", response_model=FolderResponse)
@@ -462,12 +802,11 @@ async def update_folder(
         _assert_not_system_folder(folder, "move")
         new_parent: FileFolder | None = None
         if payload.parent_id is not None:
+            # Both folder and new_parent must be caller-owned —
+            # ``_load_writable_folder`` already enforces that on
+            # both ends, so a legacy scope-mismatch check is no
+            # longer needed.
             new_parent = await _load_writable_folder(db, payload.parent_id, user)
-            if _scope_of(new_parent.user_id) != _scope_of(folder.user_id):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot move between scopes",
-                )
             if await _would_create_cycle(db, moving=folder, new_parent=new_parent):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -484,7 +823,7 @@ async def update_folder(
             detail="A folder with that name already exists here",
         )
     await db.refresh(folder)
-    return _folder_to_response(folder)
+    return _folder_to_response(folder, caller=user)
 
 
 async def _would_create_cycle(
@@ -628,12 +967,10 @@ async def upload_file(
 
     parent_folder: FileFolder | None = None
     if folder_id is not None:
+        # ``_load_writable_folder`` enforces caller-owns the folder.
+        # Uploads always land in the caller's own pool — sharing
+        # is granted afterwards by the share-modal flow.
         parent_folder = await _load_writable_folder(db, folder_id, user)
-        if _scope_of(parent_folder.user_id) != scope:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Folder doesn't belong to the requested scope",
-            )
     # If ``route`` requested an auto-routed destination we resolve it
     # *after* every validation step has passed (see step 7b below) so a
     # rejected upload doesn't leave an empty system folder behind.
@@ -857,7 +1194,7 @@ async def upload_file(
         # still represents the clean persisted row.
         await db.rollback()
 
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 @router.get("/{file_id}", response_model=FileResponse)
@@ -867,7 +1204,38 @@ async def get_file(
     user: User = Depends(get_current_user),
 ) -> FileResponse:
     row = await _load_readable_file(db, file_id, user)
-    return _file_to_response(row)
+    # Build a grant summary so the preview modal / share-modal
+    # opener gets the pill data without a second round trip. We
+    # combine the file's own grants with any ancestor folder
+    # grants that cover it (otherwise a grantee viewing a file
+    # inside a shared folder would see "(no grants)" on a row
+    # that's clearly shared).
+    sharing = await _file_sharing_summary(db, row, user)
+    return _file_to_response(row, caller=user, sharing=sharing)
+
+
+async def _file_sharing_summary(
+    db: AsyncSession, row: UserFile, caller: User
+) -> GrantSummary | None:
+    """Best-effort sharing summary for a single file.
+
+    Combines direct file grants with the deepest ancestor folder
+    grant chain so the preview banner reflects the actual chain
+    of access. ``owner_user_id`` is taken from the file row when
+    set, otherwise from the deepest ancestor folder we found.
+    """
+    direct = await grants_for_resource(
+        db, resource_type="file", resource_id=row.id
+    )
+    summary = await build_summary_for_resource(
+        db,
+        resource_type="file",
+        resource_id=row.id,
+        owner_user_id=row.user_id or caller.id,
+        caller=caller,
+        direct_grants=direct,
+    )
+    return summary
 
 
 def _safe_download_mime(stored_mime: str, filename: str) -> str:
@@ -969,7 +1337,7 @@ async def _resolve_source_pair(
             detail="Source for this file is no longer available",
         )
     source = await db.get(UserFile, rendered.source_file_id)
-    if source is None or not _can_write(source.user_id, user):
+    if source is None or source.user_id is None or source.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Source for this file is no longer available",
@@ -1193,17 +1561,16 @@ async def update_file(
     if payload.folder_id is not None or payload.move_to_root:
         new_folder: FileFolder | None = None
         if payload.folder_id is not None:
+            # Both the file and the destination must be caller-owned;
+            # ``_load_writable_folder`` + ``_load_writable_file``
+            # cover that. Legacy scope-mismatch check retired with
+            # the admin pool.
             new_folder = await _load_writable_folder(db, payload.folder_id, user)
-            if _scope_of(new_folder.user_id) != _scope_of(row.user_id):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot move between scopes",
-                )
         row.folder_id = new_folder.id if new_folder else None
 
     await db.commit()
     await db.refresh(row)
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1305,7 +1672,7 @@ async def trash_file(
     row.trashed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(row)
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 @router.post("/{file_id}/restore", response_model=FileResponse)
@@ -1318,7 +1685,7 @@ async def restore_file(
     row.trashed_at = None
     await db.commit()
     await db.refresh(row)
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 @router.post("/folders/{folder_id}/trash", response_model=FolderResponse)
@@ -1354,7 +1721,7 @@ async def trash_folder(
     )
     await db.commit()
     await db.refresh(folder)
-    return _folder_to_response(folder)
+    return _folder_to_response(folder, caller=user)
 
 
 @router.post("/folders/{folder_id}/restore", response_model=FolderResponse)
@@ -1377,7 +1744,7 @@ async def restore_folder(
 
     if folder.trashed_at is None:
         # Already live — idempotent.
-        return _folder_to_response(folder)
+        return _folder_to_response(folder, caller=user)
 
     window_low = folder.trashed_at - timedelta(seconds=5)
     window_high = folder.trashed_at + timedelta(seconds=5)
@@ -1405,7 +1772,7 @@ async def restore_folder(
     )
     await db.commit()
     await db.refresh(folder)
-    return _folder_to_response(folder)
+    return _folder_to_response(folder, caller=user)
 
 
 @router.get("/trash", response_model=TrashListResponse)
@@ -1421,7 +1788,7 @@ async def list_trash(
     trash when they pass ``scope=shared``.
     """
     folder_filter = and_(
-        _owner_filter(scope, user),
+        _owner_filter(user),
         FileFolder.trashed_at.is_not(None),
     )
     folder_rows = (
@@ -1437,7 +1804,7 @@ async def list_trash(
     )
 
     file_filter = and_(
-        _file_owner_filter(scope, user),
+        _file_owner_filter(user),
         UserFile.trashed_at.is_not(None),
         _drive_listing_filter(),
     )
@@ -1454,8 +1821,8 @@ async def list_trash(
     )
 
     return TrashListResponse(
-        folders=[_folder_to_response(f) for f in folder_rows],
-        files=[_file_to_response(f) for f in file_rows],
+        folders=[_folder_to_response(f, caller=user) for f in folder_rows],
+        files=[_file_to_response(f, caller=user) for f in file_rows],
     )
 
 
@@ -1483,7 +1850,7 @@ async def empty_trash(
         (
             await db.execute(
                 select(UserFile).where(
-                    _file_owner_filter(scope, user),
+                    _file_owner_filter(user),
                     UserFile.trashed_at.is_not(None),
                 )
             )
@@ -1495,7 +1862,7 @@ async def empty_trash(
         (
             await db.execute(
                 select(FileFolder).where(
-                    _owner_filter(scope, user),
+                    _owner_filter(user),
                     FileFolder.trashed_at.is_not(None),
                 )
             )
@@ -1542,7 +1909,7 @@ async def star_file(
         row.starred_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(row)
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 @router.delete("/{file_id}/star", response_model=FileResponse)
@@ -1555,7 +1922,7 @@ async def unstar_file(
     row.starred_at = None
     await db.commit()
     await db.refresh(row)
-    return _file_to_response(row)
+    return _file_to_response(row, caller=user)
 
 
 @router.post("/folders/{folder_id}/star", response_model=FolderResponse)
@@ -1574,7 +1941,7 @@ async def star_folder(
         folder.starred_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(folder)
-    return _folder_to_response(folder)
+    return _folder_to_response(folder, caller=user)
 
 
 @router.delete("/folders/{folder_id}/star", response_model=FolderResponse)
@@ -1587,7 +1954,7 @@ async def unstar_folder(
     folder.starred_at = None
     await db.commit()
     await db.refresh(folder)
-    return _folder_to_response(folder)
+    return _folder_to_response(folder, caller=user)
 
 
 @router.get("/starred", response_model=StarredListResponse)
@@ -1597,7 +1964,7 @@ async def list_starred(
     user: User = Depends(get_current_user),
 ) -> StarredListResponse:
     folder_filter = and_(
-        _owner_filter(scope, user),
+        _owner_filter(user),
         FileFolder.starred_at.is_not(None),
         FileFolder.trashed_at.is_(None),
     )
@@ -1614,7 +1981,7 @@ async def list_starred(
     )
 
     file_filter = and_(
-        _file_owner_filter(scope, user),
+        _file_owner_filter(user),
         UserFile.starred_at.is_not(None),
         UserFile.trashed_at.is_(None),
         _drive_listing_filter(),
@@ -1631,8 +1998,8 @@ async def list_starred(
         .all()
     )
     return StarredListResponse(
-        folders=[_folder_to_response(f) for f in folder_rows],
-        files=[_file_to_response(f) for f in file_rows],
+        folders=[_folder_to_response(f, caller=user) for f in folder_rows],
+        files=[_file_to_response(f, caller=user) for f in file_rows],
     )
 
 
@@ -1650,7 +2017,7 @@ async def list_recent(
     renames / moves / re-renders, not just fresh uploads.
     """
     file_filter = and_(
-        _file_owner_filter(scope, user),
+        _file_owner_filter(user),
         UserFile.trashed_at.is_(None),
         _drive_listing_filter(),
     )
@@ -1666,7 +2033,7 @@ async def list_recent(
         .scalars()
         .all()
     )
-    return RecentFilesResponse(files=[_file_to_response(f) for f in rows])
+    return RecentFilesResponse(files=[_file_to_response(f, caller=user) for f in rows])
 
 
 # --------------------------------------------------------------------
@@ -1709,7 +2076,7 @@ async def search_files(
     stmt = (
         select(UserFile, rank_expr.label("rank"), headline_expr.label("snippet"))
         .where(
-            _file_owner_filter(scope, user),
+            _file_owner_filter(user),
             UserFile.trashed_at.is_(None),
             _drive_listing_filter(),
             tsv_match,
@@ -1749,7 +2116,7 @@ async def search_files(
             breadcrumb = folder_name_by_id[f.folder_id]
         hits.append(
             FileSearchHit(
-                file=_file_to_response(f),
+                file=_file_to_response(f, caller=user),
                 rank=float(rank or 0),
                 snippet=snippet,
                 breadcrumb=breadcrumb,
@@ -1757,6 +2124,459 @@ async def search_files(
         )
 
     return FileSearchResponse(query=q, hits=hits)
+
+
+# --------------------------------------------------------------------
+# Drive stage 5 — Peer-to-peer share grants
+# --------------------------------------------------------------------
+async def _resolve_grant_target(
+    db: AsyncSession,
+    *,
+    resource_type: str,
+    resource_id: uuid.UUID,
+    caller: User,
+) -> tuple[str, uuid.UUID]:
+    """Owner-only guard for grant CRUD.
+
+    Loads the underlying file/folder, asserts the caller owns it,
+    and that it's eligible to be shared. Returns the (type, id)
+    tuple normalised so the caller can use it directly when
+    inserting into ``resource_grants``.
+    """
+    if resource_type == "folder":
+        folder = await db.get(FileFolder, resource_id)
+        if folder is None or folder.user_id != caller.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Folder not found",
+            )
+        assert_folder_shareable(folder)
+        return ("folder", folder.id)
+    if resource_type == "file":
+        row = await db.get(UserFile, resource_id)
+        if row is None or row.user_id != caller.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found",
+            )
+        assert_file_shareable(row)
+        return ("file", row.id)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="resource_type must be 'file' or 'folder'",
+    )
+
+
+async def _grants_list_response(
+    db: AsyncSession,
+    *,
+    resource_type: str,
+    resource_id: uuid.UUID,
+) -> GrantsListResponse:
+    grants = await grants_for_resource(
+        db, resource_type=resource_type, resource_id=resource_id
+    )
+    if not grants:
+        return GrantsListResponse(grants=[], can_share=True)
+    user_ids = {g.grantee_user_id for g in grants}
+    rows = (
+        await db.execute(select(User).where(User.id.in_(user_ids)))
+    ).scalars().all()
+    by_id = {u.id: u for u in rows}
+    out: list = []
+    for g in grants:
+        u = by_id.get(g.grantee_user_id)
+        if u is None:
+            # User was deleted out from under us; the row will be
+            # cascade-cleaned next time the FK fires, but we skip
+            # it here so the modal doesn't render a ghost row.
+            continue
+        out.append(
+            {
+                "grant_id": g.id,
+                "user_id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "can_copy": g.can_copy,
+            }
+        )
+    return GrantsListResponse(
+        grants=out,  # type: ignore[arg-type]
+        can_share=True,
+    )
+
+
+@router.get("/users/search", response_model=UserSearchResponse)
+async def search_users_for_share(
+    q: str = Query(min_length=1, max_length=80),
+    resource_type: str | None = Query(default=None),
+    resource_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> UserSearchResponse:
+    """Type-ahead user picker for the share modal.
+
+    Matches by ``username`` or ``email`` (case-insensitive prefix).
+    Excludes the caller themselves. When ``resource_type`` and
+    ``resource_id`` are passed, marks rows that already have a
+    grant on that resource so the picker can disable them.
+    """
+    needle = f"{q.lower()}%"
+    rows = (
+        await db.execute(
+            select(User)
+            .where(
+                User.id != user.id,
+                (
+                    func.lower(User.username).like(needle)
+                    | func.lower(User.email).like(needle)
+                ),
+            )
+            .order_by(User.username.asc())
+            .limit(10)
+        )
+    ).scalars().all()
+    granted_ids: set[uuid.UUID] = set()
+    if resource_type and resource_id:
+        # No ownership check here — the search endpoint is read-only
+        # and only the caller's own resources will produce grants
+        # they care about. Matching against any resource_id is fine
+        # because we're only marking pre-granted rows for UX.
+        existing = (
+            await db.execute(
+                select(ResourceGrant.grantee_user_id).where(
+                    ResourceGrant.resource_type == resource_type,
+                    ResourceGrant.resource_id == resource_id,
+                )
+            )
+        ).scalars().all()
+        granted_ids = set(existing)
+    return UserSearchResponse(
+        results=[
+            UserSearchResult(
+                id=u.id,
+                username=u.username,
+                email=u.email,
+                already_granted=u.id in granted_ids,
+            )
+            for u in rows
+        ]
+    )
+
+
+@router.get(
+    "/{resource_type}/{resource_id}/grants",
+    response_model=GrantsListResponse,
+)
+async def list_grants(
+    resource_type: str,
+    resource_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GrantsListResponse:
+    """List the active grants on a resource. Owner-only."""
+    rt, rid = await _resolve_grant_target(
+        db,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        caller=user,
+    )
+    return await _grants_list_response(
+        db, resource_type=rt, resource_id=rid
+    )
+
+
+@router.post(
+    "/{resource_type}/{resource_id}/grants",
+    response_model=GrantsListResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_grant(
+    resource_type: str,
+    resource_id: uuid.UUID,
+    payload: CreateGrantRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GrantsListResponse:
+    rt, rid = await _resolve_grant_target(
+        db,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        caller=user,
+    )
+    if payload.grantee_user_id == user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You can't grant access to yourself.",
+        )
+    grantee = await db.get(User, payload.grantee_user_id)
+    if grantee is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    # Cap enforcement: refuse the 11th grant on a single resource.
+    existing = await grants_for_resource(
+        db, resource_type=rt, resource_id=rid
+    )
+    if len(existing) >= MAX_GRANTS_PER_RESOURCE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"This resource already has the maximum of "
+                f"{MAX_GRANTS_PER_RESOURCE} grants. Revoke one before "
+                f"adding another."
+            ),
+        )
+    grant = ResourceGrant(
+        resource_type=rt,
+        resource_id=rid,
+        grantee_user_id=grantee.id,
+        granted_by_user_id=user.id,
+        can_copy=payload.can_copy,
+    )
+    db.add(grant)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        # Unique-constraint violation = grantee already on the list.
+        # Surface that as a friendly 409 instead of a 500.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That user already has access to this resource.",
+        )
+    return await _grants_list_response(
+        db, resource_type=rt, resource_id=rid
+    )
+
+
+@router.patch(
+    "/{resource_type}/{resource_id}/grants/{grant_id}",
+    response_model=GrantsListResponse,
+)
+async def update_grant(
+    resource_type: str,
+    resource_id: uuid.UUID,
+    grant_id: uuid.UUID,
+    payload: UpdateGrantRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GrantsListResponse:
+    rt, rid = await _resolve_grant_target(
+        db,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        caller=user,
+    )
+    grant = await db.get(ResourceGrant, grant_id)
+    if (
+        grant is None
+        or grant.resource_type != rt
+        or grant.resource_id != rid
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Grant not found"
+        )
+    grant.can_copy = payload.can_copy
+    await db.commit()
+    return await _grants_list_response(
+        db, resource_type=rt, resource_id=rid
+    )
+
+
+@router.delete(
+    "/{resource_type}/{resource_id}/grants/{grant_id}",
+    response_model=GrantsListResponse,
+)
+async def revoke_grant(
+    resource_type: str,
+    resource_id: uuid.UUID,
+    grant_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GrantsListResponse:
+    rt, rid = await _resolve_grant_target(
+        db,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        caller=user,
+    )
+    grant = await db.get(ResourceGrant, grant_id)
+    if (
+        grant is None
+        or grant.resource_type != rt
+        or grant.resource_id != rid
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Grant not found"
+        )
+    await db.delete(grant)
+    await db.commit()
+    return await _grants_list_response(
+        db, resource_type=rt, resource_id=rid
+    )
+
+
+@router.delete(
+    "/{resource_type}/{resource_id}/grants",
+    response_model=GrantsListResponse,
+)
+async def revoke_all_grants(
+    resource_type: str,
+    resource_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GrantsListResponse:
+    """Bulk 'Unshare' — drop every grant on this resource.
+
+    Exposed so the "Stop sharing" button in the grants modal can do
+    the nuclear option in a single round-trip instead of firing N
+    DELETEs back to back. Owner-only (same guard as per-grant CRUD).
+    Idempotent: returns an empty list whether or not anything was
+    actually deleted, so the UI can just blindly refresh.
+    """
+    rt, rid = await _resolve_grant_target(
+        db,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        caller=user,
+    )
+    await db.execute(
+        sa_delete(ResourceGrant)
+        .where(ResourceGrant.resource_type == rt)
+        .where(ResourceGrant.resource_id == rid)
+    )
+    await db.commit()
+    return await _grants_list_response(
+        db, resource_type=rt, resource_id=rid
+    )
+
+
+# --------------------------------------------------------------------
+# Drive stage 5 — Copy-to-my-files for grantees
+# --------------------------------------------------------------------
+@router.post(
+    "/files/{file_id}/copy-to-mine",
+    response_model=CopyToMineResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def copy_file_to_mine(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CopyToMineResponse:
+    """Clone a shared file the caller has ``can_copy`` access to.
+
+    Allowed paths:
+
+    * Direct file grant with ``can_copy=true`` on this row.
+    * Folder grant with ``can_copy=true`` on any ancestor folder.
+
+    Owners are deliberately allowed too (it's a no-op-ish duplicate
+    of their own file under the same name + " (copy)"), so the UI
+    can show the affordance uniformly.
+
+    The clone:
+
+    * Lands in the caller's Drive root (``folder_id=None``).
+    * Counts against the caller's storage quota.
+    * Does not inherit any ``source_kind`` / ``source_file_id``
+      provenance — it's an ordinary file from the recipient's
+      perspective. This avoids surprising "edit source" affordances
+      on the copy.
+    * Has no grants of its own (recipient-owned, recipient-private
+      until they explicitly share it).
+    """
+    src = await db.get(UserFile, file_id)
+    if src is None or src.trashed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+
+    is_owner = src.user_id is not None and src.user_id == user.id
+    if not is_owner:
+        grants = await caller_grants_for_file(db, src, user)
+        if not grants:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found",
+            )
+        if not any(g.can_copy for g in grants):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "This file is shared read-only. Ask the owner for "
+                    "copy access."
+                ),
+            )
+
+    # Quota check before we touch the disk.
+    quota = await get_quota(db, user)
+    if not quota.can_fit(src.size_bytes):
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Copying this file would exceed your storage quota.",
+        )
+
+    # New row + new blob path under the caller's bucket. Reuse the
+    # source extension so the canonical mime survives the copy.
+    new_id = uuid.uuid4()
+    ext = os.path.splitext(src.storage_path)[1]
+    rel_path = storage_path_for(user.id, new_id, ext)
+    ensure_bucket(user.id)
+    src_abs = absolute_path(src.storage_path)
+    dest_abs = absolute_path(rel_path)
+    dest_abs.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # ``shutil.copyfile`` keeps mtime alone (we want the new row
+        # to look fresh anyway) and copies in 64K chunks under the
+        # hood — fine for the 40 MB cap.
+        from shutil import copyfile
+
+        copyfile(src_abs, dest_abs)
+    except (OSError, ValueError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to copy file blob: {e}",
+        )
+
+    # Pick a sensible filename. " (copy)" suffix mirrors the
+    # standard cloud-drive convention.
+    base, ext_part = os.path.splitext(src.filename)
+    new_name = f"{base} (copy){ext_part}" if base else src.filename
+
+    clone = UserFile(
+        id=new_id,
+        user_id=user.id,
+        folder_id=None,
+        filename=new_name,
+        original_filename=src.original_filename,
+        mime_type=src.mime_type,
+        size_bytes=src.size_bytes,
+        storage_path=rel_path,
+        # Provenance reset: copies are ordinary user uploads from
+        # the recipient's POV. ``content_text`` is copied so FTS
+        # works on the clone too without re-extraction.
+        content_text=src.content_text,
+    )
+    db.add(clone)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        # Roll back the on-disk write before re-raising.
+        try:
+            dest_abs.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A file with this name already exists in your Drive root.",
+        )
+    await db.refresh(clone)
+    return CopyToMineResponse(
+        file=_file_to_response(clone, caller=user),
+    )
 
 
 # --------------------------------------------------------------------
@@ -1795,7 +2615,7 @@ async def _assert_share_owner_of_file(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
         )
-    if not _can_write(row.user_id, user):
+    if row.user_id is None or row.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the file owner can manage share links",
@@ -1816,7 +2636,7 @@ async def _assert_share_owner_of_folder(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found"
         )
-    if not _can_write(folder.user_id, user):
+    if folder.user_id is None or folder.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the folder owner can manage share links",
@@ -2019,7 +2839,12 @@ async def resolve_attachments(
         # attach flow. Treat them as "not found" rather than 403
         # so a stale message-compose path gets a clear "Unknown
         # attachment" error.
-        if row is None or row.trashed_at is not None or not _can_read(row.user_id, user):
+        if (
+            row is None
+            or row.trashed_at is not None
+            or row.user_id is None
+            or row.user_id != user.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown or inaccessible attachment: {file_id}",
