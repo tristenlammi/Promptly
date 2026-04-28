@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import {
   Ban,
   BarChart3,
@@ -631,36 +631,41 @@ function Pill({
   );
 }
 
-const IconButton = ({
-  ref,
-  onClick,
-  title,
-  ariaLabel,
-  children,
-  active,
-}: {
-  ref?: React.Ref<HTMLButtonElement>;
+// `forwardRef` is load-bearing here. React 18 silently drops a ``ref``
+// prop unless the recipient component is wrapped in ``forwardRef``,
+// which meant the ActionMenu trigger above used to end up with a dead
+// ``triggerRef`` whose ``.current`` was always null. That in turn left
+// ``pos`` null, so the portal menu never rendered — the 3-dots button
+// appeared inert. Do not "simplify" this back to a plain function
+// component that accepts ``ref`` in its props.
+interface IconButtonProps {
   onClick: () => void;
   title: string;
   ariaLabel: string;
   children: React.ReactNode;
   active?: boolean;
-}) => (
-  <button
-    ref={ref}
-    type="button"
-    onClick={onClick}
-    title={title}
-    aria-label={ariaLabel}
-    className={cn(
-      "rounded-md p-1.5 transition",
-      active
-        ? "bg-black/[0.06] text-[var(--text)] dark:bg-white/[0.08]"
-        : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-    )}
-  >
-    {children}
-  </button>
+}
+
+const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
+  function IconButton({ onClick, title, ariaLabel, children, active }, ref) {
+    return (
+      <button
+        ref={ref}
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-label={ariaLabel}
+        className={cn(
+          "rounded-md p-1.5 transition",
+          active
+            ? "bg-black/[0.06] text-[var(--text)] dark:bg-white/[0.08]"
+            : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+        )}
+      >
+        {children}
+      </button>
+    );
+  }
 );
 
 function formatRelative(when: Date): string {
