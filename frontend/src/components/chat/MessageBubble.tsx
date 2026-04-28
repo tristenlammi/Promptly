@@ -15,6 +15,7 @@ import {
   FileText,
   GitBranch,
   Image as ImageIcon,
+  PanelRight as PanelRightIcon,
   Pencil,
   Puzzle,
   RefreshCw,
@@ -30,6 +31,11 @@ import type {
   Source,
   ToolInvocation,
 } from "@/api/types";
+import { useCodeArtifactStore } from "@/stores/codeArtifactStore";
+import {
+  normaliseLanguage,
+  shouldShowOpenButton,
+} from "@/components/codeArtifacts/previewable";
 import { useEditorStore } from "@/store/editorStore";
 import { useModelStore } from "@/store/modelStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -124,7 +130,7 @@ function CopyButton({ text }: { text: string }) {
         }
       }}
       className={cn(
-        "absolute right-2 top-2 inline-flex items-center gap-1 rounded-md px-2 py-1",
+        "inline-flex items-center gap-1 rounded-md px-2 py-1",
         "bg-white/10 text-xs text-white/80 opacity-0 transition",
         "hover:bg-white/20 hover:text-white group-hover:opacity-100",
         "focus:opacity-100"
@@ -134,6 +140,44 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
       {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+/** Button that opens a fenced code block in the right-hand Code
+ *  Artifact side panel. Only rendered when the block is long enough
+ *  or the language has a live preview (HTML / SVG / Markdown /
+ *  JSON / CSV) — see {@link shouldShowOpenButton}. */
+function OpenInPanelButton({
+  source,
+  rawLanguage,
+}: {
+  source: string;
+  rawLanguage: string;
+}) {
+  const language = normaliseLanguage(rawLanguage);
+  if (!shouldShowOpenButton(source, language)) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        useCodeArtifactStore.getState().openArtifact({
+          source,
+          language,
+          filenameStem: "artifact",
+        });
+      }}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-2 py-1",
+        "bg-white/10 text-xs text-white/80 opacity-0 transition",
+        "hover:bg-white/20 hover:text-white group-hover:opacity-100",
+        "focus:opacity-100"
+      )}
+      aria-label="Open in panel"
+      title="Open in side panel"
+    >
+      <PanelRightIcon className="h-3 w-3" />
+      Open
     </button>
   );
 }
@@ -220,17 +264,48 @@ function MentionChip({
   );
 }
 
-// Wrap <pre> to add a copy button.
+/** Recursively reduce a ReactNode subtree to its plain text content.
+ *
+ *  We need this because once ``rehype-highlight`` runs over a fenced
+ *  code block, the inner ``<code>`` no longer holds a single string
+ *  — it holds a tree of ``<span>`` tokens with whitespace text
+ *  nodes between them. ``String(arr)`` on that gives you literally
+ *  ``"[object Object],[object Object],…"`` which is what showed up
+ *  in the artifact panel's preview. Walking the tree gets the
+ *  original source back faithfully (including newlines, since they
+ *  survive as bare text siblings between the colour spans).
+ */
+function extractTextFromNode(node: unknown): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractTextFromNode).join("");
+  if (typeof node === "object" && "props" in (node as Record<string, unknown>)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return extractTextFromNode((node as any).props?.children);
+  }
+  return "";
+}
+
+// Wrap <pre> to add Copy + (when eligible) Open-in-panel buttons.
 const markdownComponents: Components = {
   pre({ children, ...props }) {
-    const code =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((children as any)?.props?.children ?? "") as string;
-    const text = typeof code === "string" ? code : String(code);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const codeChild = children as any;
+    const text = extractTextFromNode(codeChild?.props?.children);
+    // ReactMarkdown tags the inner <code> with ``className="language-<x>"``
+    // when the fence declared one. Parse that out so we know which
+    // previewer (if any) to route the Open button into.
+    const className: string = codeChild?.props?.className ?? "";
+    const match = /language-(\S+)/.exec(className);
+    const rawLang = match?.[1] ?? "";
     return (
       <div className="group relative">
         <pre {...props}>{children}</pre>
-        <CopyButton text={text} />
+        <div className="absolute right-2 top-2 flex items-center gap-1">
+          <OpenInPanelButton source={text} rawLanguage={rawLang} />
+          <CopyButton text={text} />
+        </div>
       </div>
     );
   },

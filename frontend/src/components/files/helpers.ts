@@ -47,6 +47,7 @@ export type PreviewKind =
   | "image"
   | "pdf"
   | "document"
+  | "code_artifact"
   | "markdown"
   | "text"
   | "code"
@@ -62,16 +63,34 @@ export function classifyMime(
   // gets the sanitized-body treatment + an Edit button.
   if (sourceKind === "document") return "document";
   const lower = (filename ?? "").toLowerCase();
-  if (mime?.startsWith("image/")) return "image";
-  if (mime === "application/pdf" || lower.endsWith(".pdf")) return "pdf";
-  if (mime === "text/markdown" || lower.endsWith(".md") || lower.endsWith(".markdown"))
-    return "markdown";
+  const m = (mime ?? "").toLowerCase();
+
+  // Code artifact types get the Preview/Code tabbed view —
+  // identical UX to the chat side panel. Classify these *before*
+  // the generic image/markdown/text fall-throughs so (for example)
+  // ``image/svg+xml`` renders in the live-preview tab instead of
+  // being shown as an opaque bitmap.
   if (
-    mime?.startsWith("text/") ||
-    mime === "application/json" ||
-    mime === "application/xml" ||
-    mime === "application/x-yaml" ||
-    mime === "application/javascript"
+    m === "text/html" ||
+    m === "image/svg+xml" ||
+    lower.endsWith(".svg") ||
+    lower.endsWith(".html") ||
+    lower.endsWith(".htm")
+  ) {
+    return "code_artifact";
+  }
+  if (m === "application/json" || lower.endsWith(".json")) return "code_artifact";
+  if (m === "text/csv" || lower.endsWith(".csv")) return "code_artifact";
+
+  if (m.startsWith("image/")) return "image";
+  if (m === "application/pdf" || lower.endsWith(".pdf")) return "pdf";
+  if (m === "text/markdown" || lower.endsWith(".md") || lower.endsWith(".markdown"))
+    return "code_artifact";
+  if (
+    m.startsWith("text/") ||
+    m === "application/xml" ||
+    m === "application/x-yaml" ||
+    m === "application/javascript"
   ) {
     // Distinguish "pure prose" from "code-like" text so the preview
     // only enables syntax highlighting when it's useful.

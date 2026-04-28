@@ -61,6 +61,29 @@ def build_tools_system_prompt(categories: set[str]) -> str:
             "diagram, or wants to edit an attached image, call "
             "`generate_image`. Don't say you can't generate images."
         )
+        # Without this explicit steer, models that have an artefact
+        # tool advertised will try to use it for HTML / code too —
+        # they'll save a ``.txt`` file with HTML inside (confusing
+        # and un-previewable) instead of returning the code inline
+        # where the Code Artifact side panel can catch it.
+        guidelines.append(
+            "- If the user asks for code — HTML pages, CSS, "
+            "JavaScript, Python scripts, SQL, shell scripts, JSON, "
+            "CSV, SVG, Markdown, etc. — return it INLINE in your "
+            "reply as a fenced markdown code block with the correct "
+            "language tag (e.g. ```html, ```python, ```json). Do "
+            "NOT try to save code to a file or call any artefact "
+            "tool for it. The host app renders an 'Open in panel' "
+            "button on every fenced block that lets the user live-"
+            "preview, edit, and save it to their Drive themselves."
+        )
+        guidelines.append(
+            "- When the user asks for a 'website' or 'web page' or "
+            "'landing page', emit a single complete HTML document "
+            "(```html fence, include <!doctype>, inline any CSS in "
+            "a <style> block unless they ask for separate files). "
+            "The side panel's live preview renders it as a real page."
+        )
     if "search" in categories:
         guidelines.append(
             "- If the user asks about anything that may have changed "

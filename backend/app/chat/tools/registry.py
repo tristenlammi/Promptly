@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.chat.tools.attach_demo import AttachDemoFileTool
 from app.chat.tools.base import Tool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
@@ -19,9 +18,19 @@ from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
 from app.chat.tools.web_search import WebSearchTool
 
+# NOTE: ``AttachDemoFileTool`` used to sit between ``EchoTool`` and
+# ``GeneratePdfTool``. It was the Phase A1 smoke-test for the
+# attachment plumbing and has been retired from the registry because
+# models were invoking it for real user requests (e.g. "build me a
+# website") — the tool hard-forces a ``.txt`` extension, so HTML ended
+# up as an un-previewable text blob. Code output belongs inline as a
+# markdown fence (caught by the Code Artifact side panel) and
+# documents belong in ``generate_pdf``; there is no longer any user
+# need for a generic "attach an arbitrary text file" tool. The class
+# is kept in ``attach_demo.py`` purely as reference + in case a future
+# test wants to re-register it locally.
 REGISTRY: list[Tool] = [
     EchoTool(),
-    AttachDemoFileTool(),
     GeneratePdfTool(),
     GenerateImageTool(),
     WebSearchTool(),

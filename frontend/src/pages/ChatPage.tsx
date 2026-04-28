@@ -22,6 +22,7 @@ import { EmptyState } from "@/components/chat/EmptyState";
 import { InputBar } from "@/components/chat/InputBar";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
+import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
 import {
   useBranchConversation,
   useConversationQuery,
@@ -578,68 +579,81 @@ export function ChatPage() {
           </div>
         }
       />
-      <div className="flex min-h-0 flex-1 flex-col">
-        {effectiveTemporaryMode && (
-          <TemporaryChatBanner
-            mode={effectiveTemporaryMode}
-            expiresAt={conversation?.expires_at ?? null}
-          />
-        )}
-        {conversation?.parent_conversation_id && (
-          <BranchBanner
-            parentId={conversation.parent_conversation_id}
-            parentMessageId={conversation.parent_message_id ?? null}
-          />
-        )}
-        {conversation?.project_id && (
-          <ProjectBreadcrumb projectId={conversation.project_id} />
-        )}
-        {/* Context-window UI (pill + warning banner) is desktop-only
-            — the mobile header has no space for the pill and the
-            banner chews up precious vertical room above the chat.
-            Users can still run into long conversations on mobile, but
-            they'll just see a 5xx-style provider refusal once the
-            window overflows; a noisy banner is the worse tradeoff. */}
-        {id && isOwner && !isMobile && (
-          <ContextWarningBanner
-            conversationId={id}
-            onCompact={handleCompact}
-          />
-        )}
-        {(id || isStreaming) && (hasMessages || isStreaming) ? (
-          <ChatWindow
-            onEditAndResend={handleEditAndResend}
-            participants={participants}
-            onBranchFrom={id ? handleBranchFrom : undefined}
-            onRegenerate={id ? handleRegenerate : undefined}
-          />
-        ) : (
-          <div className="flex flex-1 items-center justify-center">
-            <EmptyState
-              hasModel={Boolean(selectedModel)}
-              onSuggestion={(s) => handleSend(s)}
+      {/* Horizontal split — chat column on the left, artifact panel
+          (when open) on the right with a draggable resizer between
+          them. ``min-w-0`` on the chat column is critical: without
+          it, long lines of code in assistant replies would force
+          the column to its content width and squeeze the panel to
+          zero. */}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {effectiveTemporaryMode && (
+            <TemporaryChatBanner
+              mode={effectiveTemporaryMode}
+              expiresAt={conversation?.expires_at ?? null}
             />
-          </div>
-        )}
-        <InputBar
-          streaming={isStreaming}
-          disabled={!selectedModel}
-          onSend={handleSend}
-          onCancel={cancel}
-          webSearchMode={webSearchMode}
-          onWebSearchModeChange={handleWebSearchModeChange}
-          toolsEnabled={toolsEnabled}
-          onToolsChange={handleToolsChange}
-          footer={footerText}
-          autoFocus
-          currentConversationId={id ?? null}
-          projectId={conversation?.project_id ?? null}
-          placeholder={
-            selectedModel
-              ? "Message Promptly... (@ to reference a chat)"
-              : "Configure a model in the Models tab first"
-          }
-        />
+          )}
+          {conversation?.parent_conversation_id && (
+            <BranchBanner
+              parentId={conversation.parent_conversation_id}
+              parentMessageId={conversation.parent_message_id ?? null}
+            />
+          )}
+          {conversation?.project_id && (
+            <ProjectBreadcrumb projectId={conversation.project_id} />
+          )}
+          {/* Context-window UI (pill + warning banner) is desktop-only
+              — the mobile header has no space for the pill and the
+              banner chews up precious vertical room above the chat.
+              Users can still run into long conversations on mobile, but
+              they'll just see a 5xx-style provider refusal once the
+              window overflows; a noisy banner is the worse tradeoff. */}
+          {id && isOwner && !isMobile && (
+            <ContextWarningBanner
+              conversationId={id}
+              onCompact={handleCompact}
+            />
+          )}
+          {(id || isStreaming) && (hasMessages || isStreaming) ? (
+            <ChatWindow
+              onEditAndResend={handleEditAndResend}
+              participants={participants}
+              onBranchFrom={id ? handleBranchFrom : undefined}
+              onRegenerate={id ? handleRegenerate : undefined}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center">
+              <EmptyState
+                hasModel={Boolean(selectedModel)}
+                onSuggestion={(s) => handleSend(s)}
+              />
+            </div>
+          )}
+          <InputBar
+            streaming={isStreaming}
+            disabled={!selectedModel}
+            onSend={handleSend}
+            onCancel={cancel}
+            webSearchMode={webSearchMode}
+            onWebSearchModeChange={handleWebSearchModeChange}
+            toolsEnabled={toolsEnabled}
+            onToolsChange={handleToolsChange}
+            footer={footerText}
+            autoFocus
+            currentConversationId={id ?? null}
+            projectId={conversation?.project_id ?? null}
+            placeholder={
+              selectedModel
+                ? "Message Promptly... (@ to reference a chat)"
+                : "Configure a model in the Models tab first"
+            }
+          />
+        </div>
+        {/* Code Artifact split-pane companion. Renders nothing when
+            closed, so the chat column owns the full width by default.
+            When open it self-mounts a draggable resizer + the panel
+            aside as siblings of the chat column. */}
+        <CodeArtifactPanel />
       </div>
       {/* Phase A3: side-panel Markdown editor for AI-generated PDFs.
           Renders into the same DOM tree but its fixed positioning takes

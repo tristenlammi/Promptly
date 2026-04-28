@@ -21,6 +21,11 @@ import {
   type FileItem,
 } from "@/api/files";
 import { Button } from "@/components/shared/Button";
+import { CodeArtifactView } from "@/components/codeArtifacts/CodeArtifactView";
+import {
+  artifactLanguageFromFile,
+  type ArtifactLanguage,
+} from "@/components/codeArtifacts/previewable";
 import { cn } from "@/utils/cn";
 
 import {
@@ -247,6 +252,8 @@ function PreviewBody({ file, kind }: { file: FileItem; kind: PreviewKind }) {
       return <PdfPreview file={file} />;
     case "document":
       return <DocumentPreview file={file} />;
+    case "code_artifact":
+      return <CodeArtifactPreview file={file} />;
     case "markdown":
       return <MarkdownPreview file={file} />;
     case "code":
@@ -504,6 +511,40 @@ function TruncatedBanner() {
   return (
     <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
       Preview truncated — download the file to see the full contents.
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Code artifact — the same Preview/Code tabbed experience the chat
+// side panel uses. Previewable languages (HTML, SVG, Markdown,
+// JSON, CSV) land here so that a file saved from a chat artifact
+// panel re-opens in Drive with an identical UI. The code editor
+// is mounted read-only: edits in the Drive preview modal would be
+// misleading without a Save action (writes to Drive files use the
+// dedicated upload / update APIs), and read-only is exactly what
+// the rest of the modal's text/code/document surfaces already do.
+// ----------------------------------------------------------------
+function CodeArtifactPreview({ file }: { file: FileItem }) {
+  const { text, err, truncated } = useTextContent(file);
+  const language = useMemo<ArtifactLanguage>(() => {
+    const resolved = artifactLanguageFromFile(file.mime_type, file.filename);
+    return resolved ?? "plain";
+  }, [file.mime_type, file.filename]);
+
+  if (err) return <PreviewError>{err}</PreviewError>;
+  if (text === null) return <PreviewLoading />;
+
+  return (
+    <div className="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-md bg-[var(--bg)] text-[var(--text)] shadow-2xl">
+      {truncated && (
+        <div className="shrink-0 px-3 pt-3">
+          <TruncatedBanner />
+        </div>
+      )}
+      <div className="min-h-0 flex-1">
+        <CodeArtifactView source={text} language={language} readOnly />
+      </div>
     </div>
   );
 }
