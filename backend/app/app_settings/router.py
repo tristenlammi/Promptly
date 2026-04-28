@@ -17,8 +17,12 @@ Security notes
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from pydantic import BaseModel
 
 from app.admin.schemas import AppSettingsResponse, AppSettingsUpdate
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
@@ -26,9 +30,66 @@ from app.auth.audit import EVENT_APP_SETTINGS_CHANGED, record_event, safe_dict
 from app.auth.deps import require_admin
 from app.auth.models import User
 from app.auth.utils import encrypt_secret
+from app.config import get_settings
+from app.cors_dynamic import invalidate_cache as invalidate_cors_cache
 from app.database import get_db
 
 router = APIRouter()
+
+
+def _normalise_origin(raw: str) -> str:
+    """Validate & canonicalise a single CORS origin string.
+
+    Accepts ``scheme://host[:port]`` (no path, no trailing slash). The
+    set of allowed schemes is intentionally narrow because anything
+    else either makes no sense as an Origin header value (``file:``,
+    ``mailto:``) or is a footgun (``javascript:``).
+
+    Raises ``HTTPException(400)`` with a precise message so a bad
+    paste in the wizard surfaces inline rather than silently breaking
+    CORS at runtime.
+    """
+    value = (raw or "").strip()
+    if not value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Public origin cannot be blank.",
+        )
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Public origin must start with http:// or https:// (got '{value}').",
+        )
+    if not parsed.hostname:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Public origin '{value}' is missing a hostname.",
+        )
+    if parsed.path and parsed.path != "/":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Public origin '{value}' must be just scheme://host[:port] "
+                "with no path."
+            ),
+        )
+    if parsed.query or parsed.fragment:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Public origin '{value}' must not contain query or fragment.",
+        )
+    # Canonical form: lowercase scheme + host, drop default port,
+    # drop trailing slash.
+    host = parsed.hostname.lower()
+    port = parsed.port
+    if port is None or (parsed.scheme == "http" and port == 80) or (
+        parsed.scheme == "https" and port == 443
+    ):
+        netloc = host
+    else:
+        netloc = f"{host}:{port}"
+    return f"{parsed.scheme}://{netloc}"
 
 
 def _to_response(row: AppSettings) -> AppSettingsResponse:
@@ -46,6 +107,7 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         default_storage_cap_bytes=row.default_storage_cap_bytes,
         default_daily_token_budget=row.default_daily_token_budget,
         default_monthly_token_budget=row.default_monthly_token_budget,
+        public_origins=list(row.public_origins or []),
         updated_at=row.updated_at,
     )
 
@@ -157,6 +219,25 @@ async def update_app_settings(
                 diff[field_name] = new_val
             setattr(row, field_name, new_val)
 
+    # ----- Public CORS origins -----
+    # Validated and de-duplicated; cache flushed below so the next
+    # request from the new origin succeeds without waiting for the
+    # CORS TTL to expire.
+    cors_changed = False
+    if "public_origins" in fields and payload.public_origins is not None:
+        normalised: list[str] = []
+        seen: set[str] = set()
+        for raw in payload.public_origins:
+            origin = _normalise_origin(raw)
+            if origin in seen:
+                continue
+            seen.add(origin)
+            normalised.append(origin)
+        if list(row.public_origins or []) != normalised:
+            diff["public_origins"] = normalised
+            row.public_origins = normalised
+            cors_changed = True
+
     if diff:
         await record_event(
             db,
@@ -171,4 +252,49 @@ async def update_app_settings(
         )
     await db.commit()
     await db.refresh(row)
+    if cors_changed:
+        # The dynamic CORS middleware caches the resolved origin set
+        # for ~15 s; flush it so the just-saved origin starts working
+        # on the very next request rather than after the cache expires.
+        invalidate_cors_cache()
     return _to_response(row)
+
+
+# --------------------------------------------------------------------
+# Wizard helpers
+# --------------------------------------------------------------------
+class OriginPreviewRequest(BaseModel):
+    """Tiny payload used by the wizard's "Public URL" step.
+
+    The frontend POSTs the URL the operator typed and gets back a
+    canonicalised version plus any non-fatal warnings (e.g. plain HTTP
+    on a non-localhost origin) so it can render the warning *before*
+    the operator commits the save. Doing the check here rather than
+    in the frontend keeps the rules in a single place — the same
+    helper is used by the PATCH path so a later admin edit is held
+    to the same standard.
+    """
+
+    public_origin: str
+
+
+class OriginPreviewResponse(BaseModel):
+    canonical: str
+    warnings: list[str]
+
+
+@router.post("/preview-origin", response_model=OriginPreviewResponse)
+async def preview_origin(
+    payload: OriginPreviewRequest,
+    _: User = Depends(require_admin),
+) -> OriginPreviewResponse:
+    """Validate + canonicalise a candidate public origin without persisting.
+
+    Used by the wizard so the operator can see the canonical form (e.g.
+    ``HTTPS://Example.com:443`` becomes ``https://example.com``) and
+    any HTTPS / cookie warnings before clicking "Save". Fully read-only
+    — saving still happens via the normal PATCH path.
+    """
+    canonical = _normalise_origin(payload.public_origin)
+    warnings = get_settings().validate_wizard_safety(public_origin=canonical)
+    return OriginPreviewResponse(canonical=canonical, warnings=warnings)

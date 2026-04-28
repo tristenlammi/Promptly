@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -9,6 +10,10 @@ from typing import Any, TypedDict
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Used by ``apply_captures`` to log per-action handler failures without
+# tearing down the live SSE stream that's mid-flight to the browser.
+logger = logging.getLogger("promptly.study")
 
 from app.models_config.provider import ChatMessage
 from app.redis_client import redis
@@ -202,12 +207,20 @@ student already told you.
    exercise for review — that's for the current unit's objectives.
 
 7. **Metacognition — before marking complete.**
-   Before you consider the unit done, ask them to self-rate: "on a
-   1–10 scale, how confident are you that you could explain this to
-   a friend tomorrow?" and "which bit felt fuzziest?". Use their
-   answer to plug the last gap or to confirm you're genuinely done.
-   Skipping this step and rubber-stamping the unit is a red flag —
-   students often nod along without actually owning the material.
+   Before you consider the unit done, capture a self-rating from
+   the student. **Use the confidence widget for this — emit
+   ``<request_confidence/>`` (see Principle #10) and let the inline
+   1-5 slider collect the rating.** The widget already asks "How
+   confident do you feel about this?" and offers an optional
+   "one thing that's still fuzzy" text field, so the student gets
+   both the rating and the open-ended reflection in a single,
+   one-click UI. **Do NOT also type out a confidence question in
+   chat** — asking "on a 1-10 scale how confident are you?" while
+   the widget is on screen confuses the student about which scale
+   to use and which input to actually answer in. Pick the widget,
+   trust it, move on once it submits. Skipping this step and
+   rubber-stamping the unit is a red flag — students often nod
+   along without actually owning the material.
 
 8. **Worked-example fading.**
    New objective → you do ONE worked example end-to-end, narrating
@@ -237,6 +250,18 @@ student already told you.
     turns on new material, weave in ONE review question from the
     "Due for review" block above before returning to new content.
 
+    **When NOT to ask for confidence.** A confidence rating is only
+    meaningful AFTER the student has been exposed to actual material
+    on this unit — i.e. you have explained at least one concept from
+    the objectives and they have either practised it or tried to
+    answer a real diagnostic about it. **Never ask for confidence on
+    your first reply, never ask during the warm-up, and never ask on
+    a question the student couldn't possibly know the answer to
+    without prior teaching.** A 1-5 slider after "let's start" with
+    no content shown is just confusing — it has nothing to anchor
+    against. Wait until at least the second or third turn, after
+    real engagement.
+
     **UI markers.** When you need a confidence rating from the
     student, include the literal token ``<request_confidence/>``
     anywhere in your message — the frontend strips it from the
@@ -245,7 +270,26 @@ student already told you.
     When you want the student to do the teach-back step, include
     ``<request_teachback/>`` — this toggles a "your turn, explain
     it back" banner in the chat. Both markers are idempotent; emit
-    at most ONE per message and never both at once.
+    at most ONE per message and never both at once. **Do not emit
+    ``<request_confidence/>`` on your very first reply of a unit —
+    the frontend will suppress the widget there anyway, so emitting
+    it just clutters your context.**
+
+    **Widget OR chat — never both.** When you emit
+    ``<request_confidence/>``, the student already sees a 1-5
+    slider with the question "How confident do you feel about
+    this?" pre-baked into it. **Do not also type out a confidence
+    question in your chat text** ("on a 1-10 scale, how confident
+    are you…?"). Two asks for the same data — especially with
+    different scales (1-10 in chat vs 1-5 in the widget) — is the
+    fastest way to make the student answer "what now?" instead of
+    rating anything. Pick ONE channel: the widget if you want it
+    captured into durable state (which you almost always do), or
+    chat alone if you're just casually probing how they're feeling
+    (and don't emit the marker in that case). Never both at once.
+    Same rule for teach-back: if you emit ``<request_teachback/>``,
+    let the banner do the talking — don't also write "now explain
+    it back to me" in chat.
 
 11. **Transfer prompts — anchor every unit to the student's world.**
     Close each unit with a transfer question: "where else have you
@@ -310,7 +354,10 @@ emit ``mark_complete`` alongside any other action.
 
 - ``capture_confidence`` — record a confidence rating. Emit this
   whenever the student gives you a 1-5 number (Principle #10).
-  Required at least once before ``mark_complete``.
+  Required at least once before ``mark_complete``. **Only meaningful
+  after some teaching has actually happened — never request a
+  rating on the warm-up turn or before any concept from this unit
+  has been covered.**
   ``{{"type": "capture_confidence", "level": 1-5,
     "objective_index": 0 | null, "note": "optional short note"}}``
 
@@ -324,26 +371,50 @@ emit ``mark_complete`` alongside any other action.
 - ``mark_complete`` — FINAL action. The server runs a hard gate
   before accepting it. Required conditions: overall mastery ≥ 80,
   every objective ≥ 75, ``teachback_passed`` emitted, at least one
-  ``capture_confidence`` recorded, enough student turns on record,
-  and a ``summarise_unit`` reflection written. If any condition is
-  missing the gate **silently rejects** the action — the unit stays
-  open, the student sees no error, and on your next turn an
-  "Internal tutor note" appears in your context listing the unmet
-  items. Read that note, do the missing step, and try again. **Never
-  apologise to the student or mention "the system rejected"
-  anything** — they don't know about the gate; from their point of
-  view you simply moved on to the next teaching step.
+  ``capture_confidence`` recorded, and a ``summarise_unit`` reflection
+  written. If any condition is missing the gate **silently rejects**
+  the action — the unit stays open, the student sees no error, and on
+  your next turn an "Internal tutor note" appears in your context
+  listing the unmet items. Read that note, do the missing step, and
+  try again. **Never apologise to the student or mention "the system
+  rejected" anything** — they don't know about the gate; from their
+  point of view you simply moved on to the next teaching step.
+
+  **Closing-language ban.** The chat text on the same turn you emit
+  `mark_complete` MUST be neutral wrap-up language, NOT celebratory.
+  Phrases like "you're done", "next unit", "you've completed", or any
+  preview of Unit N+1 are FORBIDDEN until the gate has actually
+  accepted the action — i.e. until your next reply where the context
+  does NOT contain an "Internal tutor note" about rejection. See the
+  "How to mark the unit complete" section below for the full two-turn
+  protocol.
 
 ## Teaching flow you MUST follow
 
-1. **Warm-up + interest probe.** Open with a friendly check-in
-   ("before we jump in, what do you already know about <unit
-   topic>?"). On your first or second reply, add the interest probe
-   from principle #3. Max one or two questions — don't interrogate.
-2. **Calibrate with a diagnostic.** A pointed Q&A in chat OR a short
-   whiteboard exercise to confirm their actual level. Do NOT skip
-   even if they claim expertise — confident-but-wrong is the worst
-   failure mode.
+1. **Warm-up — ONE focus per reply.** Your very first reply opens
+   the conversation. Pick ONE of these two purposes for it; never
+   both:
+   - **Personal warm-up:** a single light question about the
+     student's world / hobbies / day-to-day, used to seed the
+     analogy bank (only when the learner-profile block above is
+     empty — otherwise skip and reuse what's already on file).
+   - **Knowledge baseline:** a single open question about what they
+     already know about the unit topic ("before we jump in, what
+     does <topic> mean to you so far?").
+
+   Mixing the two in one reply ("tell me about your job, AND also,
+   does Layer 3 mean anything to you?") feels like an interrogation
+   and forces the student to context-switch. Pick one, send it,
+   wait for the answer, *then* on the next reply move on. If the
+   profile block is already populated, skip the personal warm-up
+   entirely — go straight to the knowledge baseline.
+
+2. **Calibrate with a diagnostic — separate reply.** ONLY after
+   the warm-up reply has been answered. A pointed Q&A in chat OR a
+   short whiteboard exercise to confirm their actual level. Do NOT
+   skip even if they claim expertise — confident-but-wrong is the
+   worst failure mode. Do NOT pile the diagnostic on top of the
+   warm-up in one reply.
 3. **Teach adaptively, objective by objective.** Pick ONE learning
    objective at a time. Explain it in 3–6 sentences, anchored in
    their analogy if you have one. Then let them practise (see
@@ -358,7 +429,8 @@ emit ``mark_complete`` alongside any other action.
    - They've demonstrated every listed learning objective at least
      once without major help.
    - They passed a teach-back in their own words.
-   - Their self-rated confidence is ≥ 7/10 on the topic.
+   - Their self-rated confidence (via the widget, on the 1-5 scale)
+     is ≥ 4/5 on the topic.
    - You are genuinely confident they could handle this material cold
      in the final exam.
 
@@ -401,10 +473,20 @@ session — everything the student needs happens inside this chat and
 the whiteboard panel.
 
 ## How to mark the unit complete
-Emit a `<unit_action>` block in your reply. **Do this only once, when
-you are genuinely ready to mark the unit complete.** Also congratulate
-the student in chat text — the action block is machine-read; the chat
-text is what they see. Exact format:
+
+There is a **strict two-turn protocol** for closing a unit. Read this
+carefully — getting it wrong is the single most common way the tutor
+misleads a student.
+
+### Turn N — the close-attempt turn
+
+When you genuinely believe every gate condition is met (every objective
+≥ 75, teach-back recorded, confidence captured, reflection written),
+emit BOTH actions in one reply:
+
+<unit_action>
+{{"type": "summarise_unit", "summary": "...", "objectives_summary": {{...}}, "concepts_anchored": [...]}}
+</unit_action>
 
 <unit_action>
 {{"type": "mark_complete", "mastery_score": 0-100,
@@ -413,6 +495,56 @@ text is what they see. Exact format:
 
 The `mastery_score` is your honest read — 70 is the minimum pass bar.
 Below 70 means you should NOT emit the action; keep teaching instead.
+
+**The chat text on this turn MUST be neutral, NOT celebratory.** The
+gate may silently reject `mark_complete`, and if it does and you've
+already written "Great work, you're done, on to Unit N+1!", you have
+just lied to the student. Write something forward-looking but
+non-committal instead — e.g. "Let's pull this together with one final
+check" or "Quick wrap-up question before we close this out". Save the
+real congratulations for turn N+1.
+
+### Turn N+1 — the celebration turn (only if accepted)
+
+The system tells you, on your NEXT context, whether the gate accepted
+`mark_complete`. There are exactly two cases:
+
+- **Accepted** — your context will NOT contain an "Internal tutor
+  note: the completion gate didn't accept mark_complete yet" line. In
+  this case, and ONLY in this case, your next reply may be the
+  celebration: congratulate the student warmly, deliver the transfer
+  prompt (Principle #11), and preview the next unit by name
+  (Principle #12 — "Bridging narrative"). This is the ONE place where
+  closing language is allowed.
+
+- **Rejected** — your context WILL contain an "Internal tutor note:
+  the completion gate didn't accept mark_complete yet" line followed by
+  the unmet conditions. In this case you MUST NOT use any closing or
+  next-unit language. Treat the rejection as a teaching signal: the
+  unmet condition is the missing step. Do that step (run the
+  teach-back, ask for confidence, etc.), then re-attempt
+  `mark_complete` on a later turn. Never apologise to the student or
+  reference "the gate" or "the system" — they don't know about it;
+  from their point of view you simply moved on to the next teaching
+  step.
+
+### The closing-language ban — in detail
+
+Until `mark_complete` has been **accepted** (i.e. you've made it to a
+turn N+1 with no rejection note), the following phrases and any close
+paraphrase are FORBIDDEN in your chat text:
+
+- "you've completed", "you're done", "you've finished", "unit
+  complete", "you've mastered the material", "you've cleared all the
+  hurdles".
+- "next unit", "on to Unit N+1", "moving on to <next topic>", "see you
+  in the next unit".
+- "great work, that's a wrap", "we're done here", "goodbye", "well
+  done — we're finished".
+
+Wrap-up language is fine ("let's pull this together", "one quick final
+check", "before we close out") — it signals momentum without
+declaring victory the gate hasn't yet ratified.
 
 ## How to tell the system the diagnostic is done
 If you just ran the Unit-1 calibration diagnostic (see the "Calibration
@@ -590,7 +722,8 @@ whether to type back or to attempt the puzzle, and ends up doing the
   NOT ask the student a question in chat in a Mode B turn — the
   exercise IS the question. Asking a separate chat question on top
   of an exercise will be punished by the server gate.** No "and also,
-  on a scale of 1–10…" tacked on after the exercise.
+  rate your confidence…" or any other follow-on question tacked on
+  after the exercise.
 
 If you find yourself wanting to ask a question AND show an exercise,
 pick whichever advances learning more right now and save the other
@@ -1805,6 +1938,10 @@ async def evaluate_completion_gate(
         session is not None and session.confidence_captured_at is not None
     )
     turn_count = int(session.student_turn_count) if session is not None else 0
+    # Retained for analytics / readiness display only — see the comment
+    # below where the turn-floor block used to enforce it. The actual
+    # value is still seeded by the router on the first user message of
+    # each session so historical sessions remain comparable.
     min_turns = session.min_turns_required if session is not None else None
 
     # 3. Teach-back.
@@ -1821,16 +1958,18 @@ async def evaluate_completion_gate(
             "then emit `capture_confidence`"
         )
 
-    # 5. Minimum student turns.
-    if (
-        session is not None
-        and min_turns is not None
-        and turn_count < min_turns
-    ):
-        unmet.append(
-            f"student has sent {turn_count} turns; "
-            f"unit requires at least {min_turns} before completion"
-        )
+    # 5. (removed) Minimum student turns.
+    # Previously: ``turn_count < min_turns`` blocked completion to stop a
+    # rushed tutor from closing a unit in 3 messages. In practice this
+    # gate punished engaged students who genuinely demonstrated mastery
+    # in fewer turns — they'd see all-green per-objective scores,
+    # teach-back ✓, confidence ✓, reflection ✓, and yet the unit stayed
+    # "in progress" because their efficient session hadn't crossed an
+    # arbitrary `4 + 2 * n_objectives` floor. The other five conditions
+    # already measure understanding directly; the turn count was a proxy
+    # we no longer need. ``min_turns_required`` is still seeded on the
+    # session row for analytics and is still surfaced to readiness API
+    # consumers, but it no longer blocks the gate.
 
     # 6. Reflection presence — readiness-check version. The
     # write-path in ``handle_unit_action`` will auto-stub from the
@@ -2262,17 +2401,35 @@ async def handle_summarise_unit(
                 anchors.append(text[:200])
 
     now = datetime.now(timezone.utc)
-    existing_stmt = select(StudyUnitReflection).where(
-        StudyUnitReflection.unit_id == unit.id,
-        StudyUnitReflection.session_id == (session.id if session else None),
+    # Older builds didn't have a UNIQUE (unit_id, session_id) constraint
+    # on ``study_unit_reflections``, so a session that re-emitted
+    # ``summarise_unit`` (typical when the gate rejected ``mark_complete``
+    # and the tutor retried) ended up with multiple rows for the same
+    # pair. Using ``scalar_one_or_none`` here would raise
+    # ``MultipleResultsFound`` on those legacy rows and that exception
+    # bubbled all the way out of the SSE stream — the browser saw
+    # ``ERR_INCOMPLETE_CHUNKED_ENCODING``. Order by ``created_at`` desc,
+    # update the most recent row, and self-heal by deleting the older
+    # duplicates so the next call sees a clean (now-effectively-unique)
+    # set.
+    existing_stmt = (
+        select(StudyUnitReflection)
+        .where(
+            StudyUnitReflection.unit_id == unit.id,
+            StudyUnitReflection.session_id == (session.id if session else None),
+        )
+        .order_by(StudyUnitReflection.created_at.desc())
     )
-    existing = (await db.execute(existing_stmt)).scalar_one_or_none()
-    if existing is not None:
-        existing.summary = summary[:4000]
+    existing_rows = (await db.execute(existing_stmt)).scalars().all()
+    if existing_rows:
+        latest = existing_rows[0]
+        latest.summary = summary[:4000]
         if objectives_summary:
-            existing.objectives_summary = objectives_summary
+            latest.objectives_summary = objectives_summary
         if anchors:
-            existing.concepts_anchored = anchors
+            latest.concepts_anchored = anchors
+        for stale in existing_rows[1:]:
+            await db.delete(stale)
         return True
 
     db.add(
@@ -2632,114 +2789,163 @@ async def apply_captures(
         "reflection_written": False,
     }
     for cap in captures:
-        payload = parse_action_payload(cap.body)
-        if payload is None:
-            continue
-        if cap.tag == "unit_action" and unit is not None:
-            action_type = str(payload.get("type", "")).lower()
-            if action_type == "insert_prerequisites":
-                # Capture the pre-insert calibration source so we can
-                # tell "user skipped" from "tutor already set" after
-                # the handler flips the project forward.
-                pre_source = project.calibration_source
-                pre_warned = project.calibration_warning_sent_at is not None
-                inserted = await handle_insert_prerequisites(
-                    db=db, project=project, before_unit=unit, payload=payload
-                )
-                if inserted:
-                    result["units_inserted"].extend(inserted)
-                    reason = str(payload.get("reason") or "").strip()[:500]
-                    if reason and not result["reason"]:
-                        result["reason"] = reason
-                    # The handler now always flips ``calibrated`` when
-                    # an insert succeeds (see comment in
-                    # handle_insert_prerequisites). Surface that so the
-                    # SSE layer can emit a project_calibrated event
-                    # and the skip banner disappears live.
-                    result["project_calibrated"] = True
-                    # Honesty nudge: if the student skipped the warm-up
-                    # and the tutor JUST found a real gap, surface
-                    # exactly one banner about it. Gated by the
-                    # one-shot timestamp so repeated inserts don't
-                    # re-fire the nudge.
-                    if pre_source == "skipped" and not pre_warned:
-                        project.calibration_warning_sent_at = datetime.now(
-                            timezone.utc
-                        )
-                        batch = inserted[0].get("prereq_batch_id")
-                        result["calibration_warning"] = {
-                            "reason": result["reason"],
-                            "batch_id": batch,
-                        }
+        try:
+            payload = parse_action_payload(cap.body)
+            if payload is None:
                 continue
-            if action_type == "set_calibrated":
-                if await handle_set_calibrated(db=db, project=project, payload=payload):
-                    result["project_calibrated"] = True
-                continue
-            if action_type == "save_learner_profile":
-                if await handle_save_learner_profile(
-                    db=db, project=project, payload=payload
-                ):
-                    result["learner_profile_updated"] = True
-                continue
-            if action_type == "update_objective_mastery":
-                if await handle_update_objective_mastery(
-                    db=db,
-                    project=project,
-                    unit=unit,
-                    payload=payload,
-                    session=session,
-                ):
-                    result["mastery_updated"] = True
-                continue
-            if action_type == "log_misconception":
-                if await handle_log_misconception(
-                    db=db, project=project, unit=unit, payload=payload
-                ):
-                    result["misconceptions_changed"] = True
-                continue
-            if action_type == "resolve_misconception":
-                if await handle_resolve_misconception(
-                    db=db, project=project, payload=payload
-                ):
-                    result["misconceptions_changed"] = True
-                continue
-            if action_type == "teachback_passed" and session is not None:
-                await handle_teachback_passed(
-                    db=db, session=session, payload=payload
-                )
-                continue
-            if action_type == "capture_confidence" and session is not None:
-                await handle_capture_confidence(
-                    db=db, session=session, payload=payload
-                )
-                continue
-            if action_type == "summarise_unit":
-                if await handle_summarise_unit(
-                    db=db, unit=unit, session=session, payload=payload
-                ):
-                    result["reflection_written"] = True
-                continue
-            if action_type == "mark_complete":
-                gate = await handle_unit_action(
-                    db=db,
-                    project=project,
-                    unit=unit,
-                    session=session,
-                    payload=payload,
-                )
-                if isinstance(gate, dict):
-                    if gate["passed"]:
-                        result["unit_completed"] = True
-                    else:
-                        result["mark_complete_rejected"] = gate
-                continue
-        elif cap.tag == "exam_action" and exam is not None:
-            applied = await handle_exam_action(
-                db=db, project=project, exam=exam, payload=payload
+            await _apply_single_capture(
+                db=db,
+                cap=cap,
+                payload=payload,
+                project=project,
+                unit=unit,
+                session=session,
+                exam=exam,
+                result=result,
             )
-            if applied:
-                result["exam_applied"] = True
-                result["exam_passed"] = bool(exam.passed)
-                result["exam_score"] = exam.score
+        except Exception:
+            # A handler crashed (e.g. legacy data violating an invariant
+            # the handler now assumes). DO NOT let it tear down the SSE
+            # stream — the browser would see ERR_INCOMPLETE_CHUNKED_ENCODING
+            # and the user would see a generic "Network Error" toast with
+            # no obvious cause. Log with full context, skip the action,
+            # and keep streaming. The transcript and assistant message
+            # are still durable; the only loss is this one side-effect.
+            logger.exception(
+                "study.apply_captures handler failed",
+                extra={
+                    "capture_tag": cap.tag,
+                    "project_id": str(project.id),
+                    "unit_id": str(unit.id) if unit else None,
+                    "session_id": str(session.id) if session else None,
+                },
+            )
+            continue
     return result
+
+
+async def _apply_single_capture(
+    *,
+    db: AsyncSession,
+    cap: Capture,
+    payload: dict[str, Any],
+    project: StudyProject,
+    unit: StudyUnit | None,
+    session: StudySession | None,
+    exam: StudyExam | None,
+    result: dict[str, Any],
+) -> None:
+    """Apply one parsed capture in-place against ``result``.
+
+    Extracted from ``apply_captures`` so the outer loop can wrap each
+    iteration in a try/except without ballooning the indentation. Any
+    exception raised here is caught by the caller, logged, and silently
+    skipped so the SSE stream survives.
+    """
+    if cap.tag == "unit_action" and unit is not None:
+        action_type = str(payload.get("type", "")).lower()
+        if action_type == "insert_prerequisites":
+            # Capture the pre-insert calibration source so we can
+            # tell "user skipped" from "tutor already set" after
+            # the handler flips the project forward.
+            pre_source = project.calibration_source
+            pre_warned = project.calibration_warning_sent_at is not None
+            inserted = await handle_insert_prerequisites(
+                db=db, project=project, before_unit=unit, payload=payload
+            )
+            if inserted:
+                result["units_inserted"].extend(inserted)
+                reason = str(payload.get("reason") or "").strip()[:500]
+                if reason and not result["reason"]:
+                    result["reason"] = reason
+                # The handler now always flips ``calibrated`` when
+                # an insert succeeds (see comment in
+                # handle_insert_prerequisites). Surface that so the
+                # SSE layer can emit a project_calibrated event
+                # and the skip banner disappears live.
+                result["project_calibrated"] = True
+                # Honesty nudge: if the student skipped the warm-up
+                # and the tutor JUST found a real gap, surface
+                # exactly one banner about it. Gated by the
+                # one-shot timestamp so repeated inserts don't
+                # re-fire the nudge.
+                if pre_source == "skipped" and not pre_warned:
+                    project.calibration_warning_sent_at = datetime.now(
+                        timezone.utc
+                    )
+                    batch = inserted[0].get("prereq_batch_id")
+                    result["calibration_warning"] = {
+                        "reason": result["reason"],
+                        "batch_id": batch,
+                    }
+            return
+        if action_type == "set_calibrated":
+            if await handle_set_calibrated(db=db, project=project, payload=payload):
+                result["project_calibrated"] = True
+            return
+        if action_type == "save_learner_profile":
+            if await handle_save_learner_profile(
+                db=db, project=project, payload=payload
+            ):
+                result["learner_profile_updated"] = True
+            return
+        if action_type == "update_objective_mastery":
+            if await handle_update_objective_mastery(
+                db=db,
+                project=project,
+                unit=unit,
+                payload=payload,
+                session=session,
+            ):
+                result["mastery_updated"] = True
+            return
+        if action_type == "log_misconception":
+            if await handle_log_misconception(
+                db=db, project=project, unit=unit, payload=payload
+            ):
+                result["misconceptions_changed"] = True
+            return
+        if action_type == "resolve_misconception":
+            if await handle_resolve_misconception(
+                db=db, project=project, payload=payload
+            ):
+                result["misconceptions_changed"] = True
+            return
+        if action_type == "teachback_passed" and session is not None:
+            await handle_teachback_passed(
+                db=db, session=session, payload=payload
+            )
+            return
+        if action_type == "capture_confidence" and session is not None:
+            await handle_capture_confidence(
+                db=db, session=session, payload=payload
+            )
+            return
+        if action_type == "summarise_unit":
+            if await handle_summarise_unit(
+                db=db, unit=unit, session=session, payload=payload
+            ):
+                result["reflection_written"] = True
+            return
+        if action_type == "mark_complete":
+            gate = await handle_unit_action(
+                db=db,
+                project=project,
+                unit=unit,
+                session=session,
+                payload=payload,
+            )
+            if isinstance(gate, dict):
+                if gate["passed"]:
+                    result["unit_completed"] = True
+                else:
+                    result["mark_complete_rejected"] = gate
+            return
+    elif cap.tag == "exam_action" and exam is not None:
+        applied = await handle_exam_action(
+            db=db, project=project, exam=exam, payload=payload
+        )
+        if applied:
+            result["exam_applied"] = True
+            result["exam_passed"] = bool(exam.passed)
+            result["exam_score"] = exam.score

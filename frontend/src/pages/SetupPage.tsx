@@ -1,33 +1,44 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
   Cloud,
+  Globe,
   HardDrive,
   ShieldCheck,
   Sparkles,
   Check,
 } from "lucide-react";
 
+import { adminApi, type OriginPreview } from "@/api/admin";
 import { authApi } from "@/api/auth";
 import { customModelsApi } from "@/api/customModels";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
 
 /**
- * First-run wizard shown when GET /auth/setup-status returns
+ * First-run wizard shown when ``GET /auth/setup-status`` returns
  * ``requires_setup: true``.
  *
  * Step 1 — create the initial admin account (auto-logs in).
- * Step 2 — pick how Custom-Model knowledge gets embedded (local
- *   Ollama vs API model). Persists to ``app_settings``.
+ * Step 2 — declare the public URL the operator wants to reach
+ *          Promptly on. Persists to ``app_settings.public_origins``
+ *          which feeds the dynamic CORS middleware on every request.
+ *          Skippable for "I'll set this up later" / "I'm only using
+ *          this on localhost".
+ * Step 3 — pick how Custom-Model knowledge gets embedded (local
+ *          Ollama vs API model). Persists to ``app_settings``.
  *
- * The user can skip step 2 entirely; Custom Models just won't be
- * usable until an embedding provider is configured from the admin
- * panel later.
+ * The user can skip steps 2 and 3 entirely; CORS will continue to
+ * accept localhost requests, and Custom Models just won't be usable
+ * until an embedding provider is configured from the admin panel
+ * later.
  */
+type Step = 1 | 2 | 3;
+const TOTAL_STEPS: Step = 3;
+
 export function SetupPage() {
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<Step>(1);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -59,7 +70,9 @@ export function SetupPage() {
       setUser(res.user);
       setAccessToken(res.access_token);
       setStatus("authenticated");
-      // Do NOT navigate yet — we still need the embedding choice.
+      // Account is created and we're logged in — advance to the
+      // public-URL step so CORS gets configured before the operator
+      // ever tries to load Promptly from a public hostname.
       setStep(2);
     } catch (err) {
       setError(extractError(err, "Setup failed"));
@@ -84,12 +97,14 @@ export function SetupPage() {
             <p className="text-xs text-[var(--text-muted)]">
               {step === 1
                 ? "Create the first administrator account to get started."
-                : "One last thing — how should knowledge libraries be embedded?"}
+                : step === 2
+                  ? "Where will people reach Promptly?"
+                  : "One last thing — how should knowledge libraries be embedded?"}
             </p>
           </div>
         </div>
 
-        <StepDots current={step} total={2} />
+        <StepDots current={step} total={TOTAL_STEPS} />
 
         {step === 1 && (
           <AccountStep
@@ -107,7 +122,9 @@ export function SetupPage() {
           />
         )}
 
-        {step === 2 && <EmbeddingStep onDone={finish} />}
+        {step === 2 && <PublicUrlStep onContinue={() => setStep(3)} />}
+
+        {step === 3 && <EmbeddingStep onDone={finish} />}
       </div>
     </div>
   );
@@ -216,7 +233,165 @@ function AccountStep({
 }
 
 // --------------------------------------------------------------------
-// Step 2 — embedding provider
+// Step 2 — public URL / CORS
+// --------------------------------------------------------------------
+
+function PublicUrlStep({ onContinue }: { onContinue: () => void }) {
+  // Default to wherever the operator is currently loading the page
+  // from. On first install that's almost always ``http://localhost:8087``,
+  // which is exactly what the always-allowed defaults already cover —
+  // saving it is harmless and the operator can skip if they're not
+  // ready to commit a real public hostname yet.
+  const initial = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const origin = window.location.origin;
+    return origin.startsWith("http") ? origin : "";
+  }, []);
+  const [value, setValue] = useState(initial);
+  const [preview, setPreview] = useState<OriginPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Debounced preview — every keystroke would hammer the API but
+  // ~400 ms after the operator stops typing is plenty quick for the
+  // warning chip to feel live.
+  useEffect(() => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setPreview(null);
+      setPreviewError(null);
+      return;
+    }
+    const handle = window.setTimeout(async () => {
+      try {
+        const result = await adminApi.previewOrigin(trimmed);
+        setPreview(result);
+        setPreviewError(null);
+      } catch (err) {
+        setPreview(null);
+        setPreviewError(extractError(err, "Couldn't validate that URL."));
+      }
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [value]);
+
+  const save = async () => {
+    setSaveError(null);
+    if (!preview) {
+      setSaveError("Enter a valid URL first.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminApi.updateAppSettings({ public_origins: [preview.canonical] });
+      onContinue();
+    } catch (err) {
+      setSaveError(extractError(err, "Couldn't save the public URL."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const skip = async () => {
+    // "Skip" = leave public_origins empty; localhost stays allowed by
+    // the always-on defaults so the install is still reachable. The
+    // admin can come back later via Admin → Settings.
+    setSaving(false);
+    setSkipping(true);
+    try {
+      onContinue();
+    } finally {
+      setSkipping(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+        Enter the URL people will use to reach Promptly. This is what gets
+        added to the CORS allow-list so logins work from a real domain.
+        Localhost is always allowed — you only need this for a public
+        hostname (e.g. a Cloudflare Tunnel or your own DNS name).
+      </p>
+
+      <LabeledInput
+        label="Public URL"
+        value={value}
+        onChange={setValue}
+        placeholder="https://chat.example.com"
+        autoFocus
+      />
+
+      {previewError && (
+        <div
+          role="alert"
+          className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+        >
+          {previewError}
+        </div>
+      )}
+
+      {preview && preview.canonical !== value.trim() && (
+        <div className="flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--text-muted)]">
+          <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            Will be saved as{" "}
+            <span className="font-mono text-[var(--text)]">
+              {preview.canonical}
+            </span>
+          </span>
+        </div>
+      )}
+
+      {preview?.warnings.map((warning, i) => (
+        <div
+          key={i}
+          role="status"
+          className="rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+        >
+          {warning}
+        </div>
+      ))}
+
+      {saveError && (
+        <div
+          role="alert"
+          className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+        >
+          {saveError}
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <Button
+          type="button"
+          variant="secondary"
+          className="flex-1"
+          onClick={skip}
+          disabled={saving}
+          loading={skipping}
+        >
+          Skip for now
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          className="flex-1"
+          onClick={save}
+          disabled={!preview || skipping}
+          loading={saving}
+        >
+          Save and continue
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// Step 3 — embedding provider
 // --------------------------------------------------------------------
 
 function EmbeddingStep({ onDone }: { onDone: () => void }) {

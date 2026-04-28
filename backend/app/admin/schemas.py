@@ -125,6 +125,13 @@ class AppSettingsResponse(BaseModel):
     default_daily_token_budget: int | None = None
     default_monthly_token_budget: int | None = None
 
+    # ----- Public origins (CORS allow-list, wizard-driven) -----
+    # The fully-qualified origins the operator wants the API to
+    # accept cross-origin requests from, in addition to the always-
+    # allowed localhost defaults. Empty array on a fresh install —
+    # the first-run wizard's "Public URL" step writes the first entry.
+    public_origins: list[str] = Field(default_factory=list)
+
     updated_at: datetime
 
 
@@ -156,6 +163,14 @@ class AppSettingsUpdate(BaseModel):
     default_storage_cap_bytes: int | None = Field(default=None, ge=0)
     default_daily_token_budget: int | None = Field(default=None, ge=0)
     default_monthly_token_budget: int | None = Field(default=None, ge=0)
+
+    # ----- Public origins (CORS allow-list) -----
+    # Set from the first-run wizard's "Public URL" step and editable
+    # later under Admin → Settings. The list-shape lets a deployment
+    # with multiple ingress hostnames (e.g. an internal alias plus a
+    # public DNS name) accept both. The router validates each entry
+    # is a fully-qualified scheme://host[:port] before persisting.
+    public_origins: list[str] | None = Field(default=None, max_length=20)
 
 
 class AdminUserCreate(BaseModel):

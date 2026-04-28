@@ -170,6 +170,13 @@ export interface AppSettings {
   default_storage_cap_bytes: number | null;
   default_daily_token_budget: number | null;
   default_monthly_token_budget: number | null;
+  /**
+   * CORS allow-list of fully-qualified origins (scheme://host[:port])
+   * the API will accept cross-origin requests from. Set from the
+   * first-run wizard's "Public URL" step. Localhost is always allowed
+   * regardless of what's listed here.
+   */
+  public_origins: string[];
   updated_at: string;
 }
 
@@ -652,6 +659,14 @@ export interface StudyUnitSummary {
   completed_at: string | null;
   last_studied_at: string | null;
   session_id: string | null;
+  /** Short, user-facing label describing why an in-progress unit isn't
+   *  yet completable, e.g. "Teach-back pending", "Confidence rating
+   *  pending", "1/3 objectives mastered". ``null`` for not-started,
+   *  completed, or fully ready in-progress units. The unit card
+   *  surfaces this under the "In progress" chip so students aren't
+   *  left guessing why a unit with all-green metrics still hasn't
+   *  closed. */
+  gate_blocker: string | null;
   created_at: string;
   updated_at: string;
 }

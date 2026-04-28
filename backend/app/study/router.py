@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
@@ -118,6 +119,50 @@ logger = logging.getLogger("promptly.study")
 router = APIRouter()
 
 EXAM_DEFAULT_TIME_LIMIT_SECONDS = 1200  # 20 minutes
+
+
+# Phrases the system prompt forbids in chat text on a turn that emits
+# ``mark_complete``. Used by the leak detector below to flag rejected
+# turns where the model wrote celebratory / next-unit language anyway,
+# leaving the student staring at "On to Unit 2!" while the unit
+# silently stays open. The pattern is deliberately broad — false
+# positives here are harmless (the worst case is a slightly more
+# emphatic internal nudge to the model) while false negatives are
+# what we're actually trying to prevent.
+#
+# Word boundaries are explicit (``\b``) so common English text doesn't
+# trip a match — e.g. "I'm done thinking" wouldn't false-positive on
+# "you're done", but "you're done" would.
+_CLOSING_LANGUAGE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p, re.IGNORECASE)
+    for p in (
+        r"\byou'?ve\s+(?:completed|finished|cleared|mastered|nailed)\b",
+        r"\byou'?re\s+(?:done|finished|all\s+set|ready\s+to\s+move\s+on)\b",
+        r"\bunit\s+complete\b",
+        r"\bthat'?s\s+a\s+wrap\b",
+        r"\bwe'?re\s+(?:done|finished)\s+(?:here|with\s+this\s+unit)\b",
+        # "next unit" / "in the next unit" / "on to Unit N+1"
+        r"\b(?:in\s+the\s+|on\s+to\s+the?\s+)?next\s+unit\b",
+        r"\bon\s+to\s+unit\s+\d+\b",
+        r"\bmoving\s+on\s+to\s+(?:unit\s+\d+|the\s+next)\b",
+        r"\bsee\s+you\s+(?:in\s+the\s+next\s+unit|next\s+time)\b",
+    )
+)
+
+
+def _has_closing_language(chat_text: str) -> bool:
+    """True if ``chat_text`` contains language the prompt bans on a
+    rejected ``mark_complete`` turn.
+
+    Used by the SSE generator's leak-detector branch to decide whether
+    to append an extra "you also leaked closing language" callout to
+    the standard rejection nudge. Pure function, no side effects, safe
+    to call on every turn (the rejection nudge itself is gated, so we
+    only invoke this when ``mark_complete`` was actually rejected).
+    """
+    if not chat_text:
+        return False
+    return any(p.search(chat_text) for p in _CLOSING_LANGUAGE_PATTERNS)
 
 
 # ====================================================================
@@ -255,15 +300,79 @@ async def _project_unit_counts(
     return total, done
 
 
-def _unit_summary(unit: StudyUnit) -> StudyUnitSummary:
+def _unit_summary(
+    unit: StudyUnit,
+    *,
+    gate_blocker: str | None = None,
+) -> StudyUnitSummary:
     """Build a ``StudyUnitSummary`` with the derived ``days_since_studied``
-    field filled in. Pulled out so the detail endpoint and the unit
-    ``enter`` endpoint share the same computation."""
+    and (optionally) ``gate_blocker`` fields filled in. Pulled out so
+    the detail endpoint and the unit ``enter`` endpoint share the same
+    computation. ``gate_blocker`` is only computed by callers that have
+    the session/mastery/reflection data already loaded — the cheaper
+    callers (e.g. the unit-enter response) just leave it ``None``."""
     payload = {
         col.name: getattr(unit, col.name) for col in unit.__table__.columns
     }
     payload["days_since_studied"] = days_since_studied(unit)
+    payload["gate_blocker"] = gate_blocker
     return StudyUnitSummary.model_validate(payload)
+
+
+# Per-objective floor mirrored from ``study.config.PER_OBJECTIVE_FLOOR``
+# so the blocker helper can decide "objective mastered" without doing a
+# config import dance — kept tight and obvious.
+_PER_OBJECTIVE_FLOOR_FOR_BLOCKER = 75
+
+
+def _compute_gate_blocker(
+    *,
+    unit: StudyUnit,
+    session: StudySession | None,
+    mastery_rows: list[StudyObjectiveMastery],
+    has_reflection: bool,
+) -> str | None:
+    """Return the single most informative "why is this unit stuck?" label.
+
+    Mirrors the conditions ``evaluate_completion_gate`` checks but
+    works on already-loaded in-memory data so the topic listing
+    endpoint can fill ``gate_blocker`` for every in-progress unit
+    without N+1 queries. Returns ``None`` for not-started, completed,
+    or fully-ready in-progress units (in which case the card just
+    shows the standard "In progress" chip with no extra hint).
+
+    The order of checks here is the order the student sees on the
+    card — we surface the FIRST unmet condition rather than a list,
+    because the card has limited vertical space and the next teaching
+    step is the only one the user actually needs to know about.
+    Sequence intentionally puts hard-to-fix items (per-objective
+    mastery) before easy ones (reflection).
+    """
+    if unit.status != "in_progress":
+        return None
+
+    objectives = list(unit.learning_objectives or [])
+    if objectives:
+        scored_by_idx = {row.objective_index: row for row in mastery_rows}
+        mastered = sum(
+            1
+            for idx in range(len(objectives))
+            if (row := scored_by_idx.get(idx)) is not None
+            and row.mastery_score >= _PER_OBJECTIVE_FLOOR_FOR_BLOCKER
+        )
+        if mastered < len(objectives):
+            return f"{mastered}/{len(objectives)} objectives mastered"
+
+    if session is not None and session.teachback_passed_at is None:
+        return "Teach-back pending"
+
+    if session is not None and session.confidence_captured_at is None:
+        return "Confidence rating pending"
+
+    if not has_reflection:
+        return "Reflection pending"
+
+    return None
 
 
 async def _project_summary(
@@ -320,6 +429,46 @@ async def _project_detail(
     )
     exams = list(exams_res.scalars().all())
 
+    # Batch-load the data needed to compute ``gate_blocker`` for any
+    # in-progress unit — one query for mastery, one for reflections —
+    # so the listing stays a constant number of round trips regardless
+    # of unit count. Only run when the project has at least one
+    # in-progress unit; an all-completed plan shouldn't pay the cost.
+    in_progress_unit_ids = [u.id for u in units if u.status == "in_progress"]
+    mastery_by_unit: dict[uuid.UUID, list[StudyObjectiveMastery]] = {}
+    reflection_unit_ids: set[uuid.UUID] = set()
+    if in_progress_unit_ids:
+        mastery_res = await db.execute(
+            select(StudyObjectiveMastery).where(
+                StudyObjectiveMastery.unit_id.in_(in_progress_unit_ids)
+            )
+        )
+        for row in mastery_res.scalars().all():
+            mastery_by_unit.setdefault(row.unit_id, []).append(row)
+        refl_res = await db.execute(
+            select(StudyUnitReflection.unit_id)
+            .where(StudyUnitReflection.unit_id.in_(in_progress_unit_ids))
+            .distinct()
+        )
+        reflection_unit_ids = {row for row in refl_res.scalars().all()}
+
+    # Build a per-unit session lookup so the blocker helper can read
+    # ``teachback_passed_at`` / ``confidence_captured_at`` without
+    # another round trip.
+    session_by_unit: dict[uuid.UUID, StudySession] = {}
+    for s in sessions:
+        if s.unit_id is not None:
+            session_by_unit[s.unit_id] = s
+
+    def _summary_for(u: StudyUnit) -> StudyUnitSummary:
+        blocker = _compute_gate_blocker(
+            unit=u,
+            session=session_by_unit.get(u.id),
+            mastery_rows=mastery_by_unit.get(u.id, []),
+            has_reflection=u.id in reflection_unit_ids,
+        )
+        return _unit_summary(u, gate_blocker=blocker)
+
     total_units = len(units)
     completed_units = sum(1 for u in units if u.status == "completed")
     has_in_progress_exam = any(e.status == "in_progress" for e in exams)
@@ -338,7 +487,7 @@ async def _project_detail(
             **_project_fields(project),
             "total_units": total_units,
             "completed_units": completed_units,
-            "units": [_unit_summary(u) for u in units],
+            "units": [_summary_for(u) for u in units],
             "sessions": [StudySessionSummary.model_validate(s) for s in sessions],
             "exams": [StudyExamSummary.model_validate(e) for e in exams],
             "final_exam_unlocked": final_exam_unlocked,
@@ -1763,6 +1912,32 @@ async def _stream_generator(
                 "Address each item before emitting mark_complete again. "
                 "Don't mention this note in chat — just continue teaching."
             )
+            # Belt-and-braces leak detector — the system prompt forbids
+            # the model from writing celebratory / next-unit language on
+            # the same turn it emits ``mark_complete``, because the gate
+            # may reject and the student would be left looking at "Great
+            # work, on to Unit 2!" while the unit silently stays open.
+            # If the model violated that rule on this rejected turn,
+            # surface the leak in the nudge so it self-corrects on the
+            # next reply (and ideally walks back what it just said
+            # without ever drawing attention to "the system" or "the
+            # gate").
+            if _has_closing_language(full_chat):
+                nudge += (
+                    "\n\n**You also used closing/celebratory language**"
+                    " in your chat reply on this same turn (e.g."
+                    " 'next unit', 'you're done', or a preview of the"
+                    " next unit by name) even though the gate rejected"
+                    " mark_complete. The student now sees a celebration"
+                    " that isn't real. On your next reply, smoothly"
+                    " walk it back by treating the unmet conditions as"
+                    " the next teaching step — DO NOT apologise, do"
+                    " NOT mention 'the gate' or 'the system', do NOT"
+                    " say 'I jumped ahead'. Just pick up the missing"
+                    " step (run the teach-back, ask for the confidence"
+                    " rating, etc.) as if it were always part of the"
+                    " plan."
+                )
             db.add(
                 StudyMessage(
                     session_id=session.id,

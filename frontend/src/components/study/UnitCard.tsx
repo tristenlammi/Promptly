@@ -171,6 +171,23 @@ export function UnitCard({
         </div>
       )}
 
+      {/* Honest "what's still pending" hint on in-progress units. The
+          backend computes a single most-informative blocker
+          (``gate_blocker``) per unit so the student isn't left
+          wondering why a fully-green-looking card refuses to close.
+          Only renders when a blocker exists — fully-ready in-progress
+          units (all 5 conditions met but tutor hasn't emitted
+          mark_complete yet) still show the bare "In progress" chip. */}
+      {unit.status === "in_progress" && unit.gate_blocker && (
+        <div
+          className="mt-2 inline-flex items-center gap-1 self-start rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+          title="The tutor will close this unit automatically once all conditions are met."
+        >
+          <Clock className="h-2.5 w-2.5" />
+          {unit.gate_blocker}
+        </div>
+      )}
+
       <div className="mt-auto flex items-end justify-between gap-2 pt-3">
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="text-[10px] text-[var(--text-muted)]">

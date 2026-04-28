@@ -87,15 +87,13 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - SINGLE_USER_MODE=${SINGLE_USER_MODE:-false}
       - SEARXNG_URL=http://searxng:8080
-      - ALLOWED_ORIGINS=http://localhost,https://${DOMAIN}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
-      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
-      - DEFAULT_SEARCH_PROVIDER=${DEFAULT_SEARCH_PROVIDER:-searxng}
-      - SEARCH_RESULT_COUNT=${SEARCH_RESULT_COUNT:-5}
-      - SEARCH_CONCURRENT_REQUESTS=${SEARCH_CONCURRENT_REQUESTS:-3}
+      # CORS allow-list and provider/search API keys are now configured
+      # through the first-run wizard and Admin → Settings — not via
+      # ``.env``. The legacy ``ALLOWED_ORIGINS`` / provider env vars are
+      # still honoured by ``app.config`` if set, but the install scripts
+      # no longer seed them. See ``app.cors_dynamic`` for the resolution
+      # order ("always-allowed localhost ∪ env ALLOWED_ORIGINS ∪ DB
+      # public_origins").
       # Internal-only Ollama URL — the container is reachable on
       # the ``promptly`` network at the well-known port (host port
       # mapping uses 11435 to dodge any host-side Ollama install).

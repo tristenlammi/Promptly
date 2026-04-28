@@ -188,54 +188,86 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Heuristic: anything that isn't local dev counts as production.
 
-        Used to decide whether to enforce the security checks in
-        ``validate_production_safety`` and whether to expose the
-        OpenAPI docs.
+        Used to gate doc-exposure and to decide whether the wizard
+        should warn about insecure cookie settings on a non-localhost
+        public origin.
         """
         if self.DEBUG:
             return False
         return self.DOMAIN.strip().lower() not in {"", "localhost", "127.0.0.1"}
 
-    def validate_production_safety(self) -> list[str]:
-        """Return a list of fatal-config errors for the current settings.
+    def validate_boot_safety(self) -> list[str]:
+        """Return a list of fatal-config errors that prevent boot.
 
-        The application's lifespan calls this on startup and refuses to
-        boot if anything comes back. We collect *all* errors at once
-        rather than failing fast so an operator can fix everything in
-        a single restart instead of playing whack-a-mole.
+        Trimmed down from the old ``validate_production_safety`` to
+        cover only the things that genuinely have to be set before the
+        backend can serve the first request. ``DOMAIN`` /
+        ``ALLOWED_ORIGINS`` / ``COOKIE_SECURE`` are no longer in scope
+        — they're handled by the first-run wizard's
+        ``validate_wizard_safety`` check at the moment the operator
+        saves a public origin, with the result surfaced in the wizard
+        UI as a warning rather than a refused boot.
+
+        Currently boot-fatal:
+          * ``SECRET_KEY`` is the dev placeholder
+          * ``SECRET_KEY`` is shorter than 32 chars
+
+        Both are guaranteed to be satisfied by the install script
+        (``./install.sh`` / ``install.ps1``) which seeds a 64-hex-char
+        value the moment ``.env`` is created. The check exists to
+        catch hand-edited ``.env`` files that lost the seed.
         """
-        if not self.is_production:
-            return []
-
         errors: list[str] = []
 
         if self.SECRET_KEY == _INSECURE_SECRET_PLACEHOLDER:
             errors.append(
                 "SECRET_KEY is still the development placeholder. "
-                "Set a long random value (e.g. `python -c \"import secrets; "
-                "print(secrets.token_urlsafe(64))\"`) before deploying."
+                "Re-run ./install.sh (or ./install.ps1 on Windows) to seed "
+                "a strong value, or set one manually in .env."
             )
         if len(self.SECRET_KEY) < 32:
             errors.append(
                 "SECRET_KEY is shorter than 32 chars — too weak for JWT signing "
                 "and at-rest encryption. Use 64+ random URL-safe chars."
             )
-        if not self.allowed_origins_list:
-            errors.append(
-                "ALLOWED_ORIGINS is empty. Set it to the public origin of the "
-                "frontend (e.g. https://chat.example.com) before deploying."
-            )
-        if any(o == "*" for o in self.allowed_origins_list):
-            errors.append(
-                "ALLOWED_ORIGINS contains '*'. Wildcard CORS is incompatible "
-                "with credentials — list explicit origins instead."
-            )
-        if not self.COOKIE_SECURE:
-            errors.append(
-                "COOKIE_SECURE is False in a production environment. The "
-                "refresh-token cookie would travel over plain HTTP."
-            )
         return errors
+
+    # Backwards-compat alias for any third-party code (or older
+    # ``main.py`` snapshots) that still imports the old name. Safe to
+    # remove once a deployment cycle has rolled forward.
+    def validate_production_safety(self) -> list[str]:
+        return self.validate_boot_safety()
+
+    def validate_wizard_safety(
+        self, *, public_origin: str | None
+    ) -> list[str]:
+        """Return non-fatal warnings for the wizard's "public URL" step.
+
+        The wizard surfaces these alongside the save action so the
+        operator can choose to proceed anyway (e.g. they're behind a
+        Cloudflare Tunnel that handles TLS, so HTTP-on-the-origin is
+        intentional). None of them refuse the save — that decision is
+        the operator's, not the framework's.
+        """
+        warnings: list[str] = []
+        if public_origin and public_origin.startswith("http://"):
+            host = public_origin[len("http://") :].split("/", 1)[0].lower()
+            host_only = host.split(":", 1)[0]
+            if host_only not in {"localhost", "127.0.0.1", "::1"}:
+                warnings.append(
+                    "Your public URL is plain HTTP. For anything past local "
+                    "testing, front Promptly with HTTPS (Cloudflare Tunnel, "
+                    "Caddy, Traefik, or nginx + Let's Encrypt). The "
+                    "auth cookie is set Secure=true by default and won't "
+                    "survive a plain HTTP origin."
+                )
+        if not self.COOKIE_SECURE:
+            warnings.append(
+                "COOKIE_SECURE is False in your .env. The refresh-token "
+                "cookie will travel over plain HTTP — only safe in local "
+                "dev. Set COOKIE_SECURE=true for any public deployment."
+            )
+        return warnings
 
 
 @lru_cache

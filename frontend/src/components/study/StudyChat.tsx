@@ -59,6 +59,20 @@ export function StudyChat({
   const exerciseInProgress =
     activeExercise !== null && activeExercise.status !== "reviewed";
 
+  // A confidence rating only makes sense AFTER the student has been
+  // exposed to actual unit material — rating "how confident am I?"
+  // when the AI has just said hello produces a 1-5 number with
+  // nothing to anchor against. Hard-floor the widget at "the
+  // student has answered at least one warm-up / diagnostic reply",
+  // i.e. there are at least 2 user messages on record. The system
+  // prompt also tells the model not to ask this early; this is just
+  // a belt-and-braces guard against rogue first-turn markers.
+  const userMessageCount = useMemo(
+    () => messages.filter((m) => m.role === "user").length,
+    [messages]
+  );
+  const confidenceTooEarly = userMessageCount < 2;
+
   // Quick lookup: exercise id → status (so we can flip the button
   // label between "Open" and "Revisit" without an extra API round-trip).
   const exerciseStatusById = useMemo(() => {
@@ -159,6 +173,7 @@ export function StudyChat({
                 )}
               {isMarkerAnchor &&
                 !exerciseInProgress &&
+                !confidenceTooEarly &&
                 lastAssistantMarkers?.requestConfidence &&
                 !confidenceCaptured &&
                 activeSessionId && (

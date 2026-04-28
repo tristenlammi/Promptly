@@ -8,11 +8,11 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.config import InsecureProductionConfig, get_settings
+from app.cors_dynamic import DynamicCORSMiddleware
 from app.database import engine
 from app.logging_setup import (
     RequestContextMiddleware,
@@ -37,15 +37,18 @@ logger = logging.getLogger("promptly")
 settings = get_settings()
 
 # ----------------------------------------------------------------
-# Production safety checks (fail-fast).
+# Boot-time safety checks (fail-fast).
 #
 # Run at module import time so a misconfigured deployment can't even
-# start uvicorn — the worker process exits with a clear traceback
-# pointing at every fixable problem at once.
+# start uvicorn. The list is deliberately small now that DOMAIN /
+# CORS / cookies are wizard-driven — only things that genuinely have
+# to be set before the first HTTP request can be served (i.e. a
+# strong SECRET_KEY) belong here. Everything else surfaces in the
+# setup wizard as a warning the operator can act on with a click.
 # ----------------------------------------------------------------
-_config_errors = settings.validate_production_safety()
+_config_errors = settings.validate_boot_safety()
 if _config_errors:
-    msg = "Refusing to start with insecure production configuration:\n  - " + "\n  - ".join(
+    msg = "Refusing to start with insecure configuration:\n  - " + "\n  - ".join(
         _config_errors
     )
     logger.critical(msg)
@@ -142,11 +145,14 @@ async def _capture_unhandled_error(request: Request, exc: Exception) -> JSONResp
 app.add_middleware(RequestContextMiddleware)
 
 app.add_middleware(
-    CORSMiddleware,
-    # No "*" fallback — production refuses to boot without ALLOWED_ORIGINS,
-    # and dev defaults to "http://localhost". Wildcard CORS + credentials
-    # is browser-rejected anyway and would mask real config bugs.
-    allow_origins=settings.allowed_origins_list,
+    DynamicCORSMiddleware,
+    # Origins resolve dynamically per request from a combination of
+    # always-allowed localhost defaults, the legacy ``ALLOWED_ORIGINS``
+    # env var, and the DB-stored ``app_settings.public_origins`` set
+    # by the first-run wizard / Admin → Settings. See
+    # ``app.cors_dynamic`` for the resolution order. No wildcards
+    # anywhere — wildcard + credentials is browser-rejected and would
+    # mask real config bugs.
     allow_credentials=True,
     # Explicit method list rather than "*". Anything new we add must be
     # mentioned here, which is a useful forcing function when reviewing

@@ -27,9 +27,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.config import get_settings
 from app.database import get_db
 from app.notifications.dispatch import notify_user
 from app.notifications.models import PushPreferences, PushSubscription
@@ -54,20 +54,26 @@ router = APIRouter()
 
 
 @router.get("/public-key", response_model=PublicKeyResponse)
-async def get_public_key() -> PublicKeyResponse:
+async def get_public_key(
+    db: AsyncSession = Depends(get_db),
+) -> PublicKeyResponse:
     """Return the server's VAPID application-server key.
 
-    503 if the operator hasn't configured VAPID keys yet — the
-    frontend uses the 503 to hide the Subscribe button and show a
-    "ask your admin to set up push" hint instead of silently
-    failing."""
-    settings = get_settings()
-    if not settings.VAPID_PUBLIC_KEY:
+    Reads from the ``app_settings`` row, where the bootstrap
+    auto-generates a keypair on first boot if none was pre-set. 503
+    only if both DB and env are empty (which shouldn't happen on a
+    healthy install — see ``provision_vapid_keys``); the frontend uses
+    the 503 to hide the Subscribe button and show a "ask your admin to
+    set up push" hint instead of silently failing.
+    """
+    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+    public_key = row.vapid_public_key if row else None
+    if not public_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Push notifications aren't configured on this server.",
         )
-    return PublicKeyResponse(public_key=settings.VAPID_PUBLIC_KEY)
+    return PublicKeyResponse(public_key=public_key)
 
 
 # ---------------------------------------------------------------------

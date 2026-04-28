@@ -35,7 +35,7 @@ from uuid import UUID
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.database import SessionLocal
 from app.notifications.models import PushPreferences, PushSubscription
 
@@ -131,14 +131,24 @@ async def notify_user(
 async def _dispatch(
     *, user_id: UUID, category: Category, payload: PushPayload
 ) -> None:
-    settings = get_settings()
-    if not settings.VAPID_PUBLIC_KEY or not settings.VAPID_PRIVATE_KEY:
-        # VAPID not configured — stay quiet at WARN level so a prod
-        # misconfiguration surfaces in logs without spamming at ERROR.
-        logger.warning("push dispatch skipped: VAPID keys not configured")
-        return
-
     async with _session_maker() as db:
+        # Read VAPID material from the DB rather than ``settings`` —
+        # the bootstrap auto-generates a keypair on first boot and
+        # admins can rotate via Admin → Settings without touching
+        # ``.env``. Static env vars are still mirrored into the same
+        # column at boot if set, so existing deployments behave
+        # identically.
+        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        vapid_private = app_settings_row.vapid_private_key if app_settings_row else None
+        vapid_contact = (
+            app_settings_row.vapid_contact if app_settings_row else None
+        ) or "mailto:admin@localhost"
+        if not vapid_private:
+            # Should never happen on a healthy install; log loud enough
+            # to surface in Admin → Console without spamming.
+            logger.warning("push dispatch skipped: VAPID private key not configured")
+            return
+
         prefs = await _get_prefs(db, user_id)
         if not _should_send(prefs, category):
             return
@@ -168,8 +178,8 @@ async def _dispatch(
                 p256dh=sub.p256dh,
                 auth=sub.auth,
                 payload_json=payload.to_json(),
-                vapid_private_key=settings.VAPID_PRIVATE_KEY,
-                vapid_contact=settings.VAPID_CONTACT,
+                vapid_private_key=vapid_private,
+                vapid_contact=vapid_contact,
             )
             for sub in subs
         ]

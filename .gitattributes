@@ -1,0 +1,15 @@
+# Force LF line endings on shell scripts so they execute correctly
+# inside Linux containers regardless of the contributor's local
+# Git ``core.autocrlf`` setting. CRLF in a script header turns
+# ``#!/usr/bin/env bash\r`` into a not-found path and bash dies
+# without printing anything useful.
+*.sh           text eol=lf
+*.bash         text eol=lf
+backend/entrypoint.sh text eol=lf
+scripts/*.sh   text eol=lf
+install.sh     text eol=lf
+
+# Keep PowerShell scripts in their native CRLF — Windows expects it
+# and PS handles LF too, but CRLF is the documented default for the
+# tooling and makes diffs against PS-edited copies stable.
+*.ps1          text eol=crlf

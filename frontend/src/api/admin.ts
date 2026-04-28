@@ -90,6 +90,18 @@ export interface AppSettingsPatch {
   default_storage_cap_bytes?: number | null;
   default_daily_token_budget?: number | null;
   default_monthly_token_budget?: number | null;
+  /**
+   * CORS allow-list of fully-qualified origins (scheme://host[:port])
+   * the API will accept cross-origin requests from. Set from the
+   * first-run wizard's "Public URL" step and editable later under
+   * Admin → Settings. Localhost is always allowed regardless.
+   */
+  public_origins?: string[];
+}
+
+export interface OriginPreview {
+  canonical: string;
+  warnings: string[];
 }
 
 export const adminApi = {
@@ -181,6 +193,19 @@ export const adminApi = {
     const { data } = await apiClient.patch<AppSettings>(
       "/admin/app-settings",
       patch
+    );
+    return data;
+  },
+  /**
+   * Wizard helper: validate a candidate public-origin string and get
+   * back the canonicalised form plus any non-fatal warnings (e.g.
+   * "your URL is plain HTTP — set up TLS first"). Read-only — saving
+   * still happens via ``updateAppSettings({ public_origins: [...] })``.
+   */
+  async previewOrigin(public_origin: string): Promise<OriginPreview> {
+    const { data } = await apiClient.post<OriginPreview>(
+      "/admin/app-settings/preview-origin",
+      { public_origin }
     );
     return data;
   },

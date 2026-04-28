@@ -81,6 +81,14 @@ class StudyUnitSummary(BaseModel):
     completed_at: datetime | None = None
     last_studied_at: datetime | None = None
     session_id: uuid.UUID | None = None
+    # Short, user-facing label describing why the unit isn't yet
+    # completable — only set when ``status == 'in_progress'`` AND the
+    # gate has at least one unmet condition. ``None`` for not-started,
+    # completed, or fully ready in-progress units. Examples:
+    # "Teach-back pending", "Confidence rating pending", "Reflection
+    # pending", "1/3 objectives mastered". Lets the unit card replace
+    # a silent "In progress" chip with an honest blocker hint.
+    gate_blocker: str | None = None
     created_at: datetime
     updated_at: datetime
 

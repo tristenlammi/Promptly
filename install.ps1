@@ -1,26 +1,38 @@
 # ============================================================
 # Promptly - one-shot install (Windows / PowerShell)
 #
-# Mirrors scripts/setup.sh for Windows hosts running Docker
-# Desktop. Use the .sh script on Linux servers.
+# This is the *only* script you need to run. Everything else
+# (admin account, public domain, model providers, push notifications)
+# is configured through the first-run wizard in your browser after
+# this completes.
 #
 # Usage from the repo root:
-#   .\scripts\setup.ps1                    # local install
-#   .\scripts\setup.ps1 chat.example.com   # production install
+#   .\install.ps1              # full stack
+#   .\install.ps1 -Minimal     # core only - skips SearXNG and the
+#                              # bundled Ollama container
+#
+# If PowerShell refuses to run the script with an
+# "execution policy" error, do this once in the same window:
+#
+#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+#
+# That only unblocks scripts in the *current* PowerShell session,
+# so you don't need to permanently weaken your machine policy.
 # ============================================================
+[CmdletBinding()]
 param(
-    [string]$Domain = ""
+    [switch]$Minimal
 )
 
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RootDir   = Resolve-Path (Join-Path $ScriptDir "..")
-Set-Location $RootDir
+Set-Location $ScriptDir
 
 function Write-Section($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)      { Write-Host "  OK  $msg" -ForegroundColor Green }
 function Write-Skip($msg)    { Write-Host "  SKIP $msg" -ForegroundColor Yellow }
+function Write-Fail($msg)    { Write-Host "  ERR $msg" -ForegroundColor Red }
 
 # ---------- 1. prerequisite checks ----------
 Write-Section "Checking prerequisites"
@@ -29,6 +41,9 @@ catch { throw "Docker is not running or not installed. Install Docker Desktop fr
 
 try { docker compose version | Out-Null }
 catch { throw "docker compose v2 is not available. Update Docker Desktop." }
+
+try { docker info 2>$null | Out-Null }
+catch { throw "The Docker daemon isn't reachable. Start Docker Desktop and try again." }
 
 Write-Ok "Docker and docker compose v2 detected"
 
@@ -61,47 +76,60 @@ Set-IfPlaceholder ([ref]$envText) "SECRET_KEY"        (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "SEARXNG_SECRET"    (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "POSTGRES_PASSWORD" (New-HexSecret 24)
 
-# ---------- 3. domain ----------
-if ($Domain -ne "") {
-    Write-Section "Setting DOMAIN to $Domain"
-    if ($envText -match "(?m)^DOMAIN=.*$") {
-        $envText = [regex]::Replace($envText, "(?m)^DOMAIN=.*$", "DOMAIN=$Domain")
-    } else {
-        $envText = $envText.TrimEnd() + "`nDOMAIN=$Domain`n"
-    }
-}
-
 # Persist .env in LF mode (the Linux containers parse it).
 $envText = $envText -replace "`r`n", "`n"
-[System.IO.File]::WriteAllText((Join-Path $RootDir ".env"), $envText)
+[System.IO.File]::WriteAllText((Join-Path $ScriptDir ".env"), $envText)
 
-# ---------- 4. build + start ----------
+# ---------- 3. build + start ----------
 Write-Section "Building images (first run can take 3-5 minutes)"
 docker compose build
 if ($LASTEXITCODE -ne 0) { throw "docker compose build failed" }
 
 Write-Section "Starting the stack"
-docker compose up -d
+if ($Minimal) {
+    Write-Skip "--minimal: skipping searxng and ollama"
+    docker compose up -d nginx frontend backend collab postgres redis
+} else {
+    docker compose up -d
+}
 if ($LASTEXITCODE -ne 0) { throw "docker compose up failed" }
 
-# ---------- 5. wait for backend health ----------
+# ---------- 4. wait for backend health ----------
 Write-Section "Waiting for the backend to become healthy"
-for ($i = 1; $i -le 60; $i++) {
+$healthy = $false
+for ($i = 1; $i -le 90; $i++) {
     Start-Sleep -Seconds 2
     $json = docker compose ps --format json backend 2>$null
     if ($json -match '"Health":"healthy"') {
+        Write-Host ""
         Write-Ok "backend is healthy"
+        $healthy = $true
         break
+    }
+    if ($json -match '"Health":"unhealthy"') {
+        Write-Host ""
+        Write-Fail "backend reports unhealthy. Last 40 lines of logs:"
+        docker compose logs --tail=40 backend
+        exit 1
     }
     Write-Host "." -NoNewline
 }
-Write-Host ""
 
-# ---------- 6. final report ----------
-$domainLine = (Get-Content ".env" | Where-Object { $_ -match "^DOMAIN=" } | Select-Object -First 1)
-$portLine   = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
-$useDomain  = if ($domainLine) { $domainLine.Substring(7) } else { "localhost" }
-$usePort    = if ($portLine)   { $portLine.Substring(16) } else { "8087" }
+if (-not $healthy) {
+    Write-Host ""
+    Write-Fail "backend never became healthy after 3 minutes."
+    Write-Fail "Last 60 lines of backend logs:"
+    docker compose logs --tail=60 backend
+    Write-Host ""
+    Write-Fail "Common fixes:"
+    Write-Fail "    * 'docker compose ps' to see which container is unhealthy."
+    Write-Fail "    * 'docker compose down -v; .\install.ps1' for a clean wipe."
+    exit 1
+}
+
+# ---------- 5. final report ----------
+$portLine = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
+$usePort  = if ($portLine) { $portLine.Substring(16) } else { "8087" }
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
@@ -109,19 +137,13 @@ Write-Host " Promptly is up. " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Open in your browser:"
-if ($useDomain -eq "localhost" -or $useDomain -eq "") {
-    if ($usePort -eq "80") { Write-Host "    http://localhost" }
-    else                   { Write-Host "    http://localhost:$usePort" }
-} else {
-    if ($usePort -eq "80") { Write-Host "    http://$useDomain" }
-    else                   { Write-Host "    http://${useDomain}:$usePort" }
-    Write-Host ""
-    Write-Host "  (Front it with Cloudflare Tunnel, Caddy, or a TLS-terminating"
-    Write-Host "   reverse proxy for HTTPS - see README.md > 'TLS termination'.)"
-}
+if ($usePort -eq "80") { Write-Host "    http://localhost" }
+else                   { Write-Host "    http://localhost:$usePort" }
 Write-Host ""
-Write-Host "  The first visit will launch the setup wizard to create"
-Write-Host "  the bootstrap admin account."
+Write-Host "  The first visit will launch the setup wizard:"
+Write-Host "    1. Create the bootstrap admin account."
+Write-Host "    2. (Optional) Set the public URL people will reach Promptly on."
+Write-Host "    3. (Optional) Pick how knowledge libraries get embedded."
 Write-Host ""
 Write-Host "  Useful commands:"
 Write-Host "    docker compose logs -f backend     # tail backend logs"
