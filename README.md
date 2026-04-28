@@ -44,4 +44,4 @@ Please open a private GitHub security advisory rather than a public issue for an
 
 ## License
 
-No formal license declared yet. If you want to use this commercially, open an issue and we'll talk.
+[MIT](LICENSE) — do whatever you like, just keep the copyright notice.
