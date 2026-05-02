@@ -323,6 +323,19 @@ class ResourceGrant(UUIDPKMixin, CreatedAtMixin, Base):
     can_copy: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Stage 5.1: write access. Currently only meaningful on
+    # ``resource_type='file'`` rows that point at a Drive Document
+    # (``UserFile.source_kind == 'document'``). The router refuses
+    # ``can_edit=true`` on folder grants and on non-document files
+    # so we never end up with a stored permission that the rest of
+    # the stack can't honour. ``can_copy`` and ``can_edit`` are
+    # independent booleans (not a single enum) so a future
+    # "Editor + copy" tier doesn't need another migration — the UI
+    # currently presents them as mutually-exclusive radios but the
+    # storage layer leaves room.
+    can_edit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -344,5 +357,6 @@ class ResourceGrant(UUIDPKMixin, CreatedAtMixin, Base):
     def __repr__(self) -> str:
         return (
             f"<ResourceGrant {self.resource_type}={self.resource_id} "
-            f"grantee={self.grantee_user_id} can_copy={self.can_copy}>"
+            f"grantee={self.grantee_user_id} "
+            f"can_copy={self.can_copy} can_edit={self.can_edit}>"
         )

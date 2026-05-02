@@ -165,6 +165,45 @@ def effective_can_copy(grants: Iterable[ResourceGrant]) -> bool:
     return any(g.can_copy for g in grants)
 
 
+def effective_can_edit(grants: Iterable[ResourceGrant]) -> bool:
+    """True if any grant in the iterable carries ``can_edit=true``.
+
+    Stage 5.1: write access for grantees on Drive Documents. The
+    router refuses to *issue* ``can_edit=true`` on folders or
+    non-document files, so this never returns true for a folder
+    cascade in practice — but the helper takes the same shape as
+    :func:`effective_can_copy` so callers can use it uniformly.
+    """
+    return any(g.can_edit for g in grants)
+
+
+async def caller_can_write_file(
+    db: AsyncSession, row: UserFile, user: User
+) -> bool:
+    """True if ``user`` may mutate ``row`` (collab edit, manual save, …).
+
+    Collapses the ownership + grant lookups into one yes/no the
+    document router can ask without re-importing the sharing
+    helpers everywhere. Logic:
+
+    * Owner (row.user_id == user.id) → always writable.
+    * Grantee with ``can_edit=true`` on the file or any ancestor
+      folder → writable.
+    * Anyone else → not writable (they can still *read* if they
+      have any grant — that path goes through
+      :func:`caller_grants_for_file`).
+
+    Note: the issuance path (router) refuses ``can_edit=true`` on
+    folder grants so in practice the folder-cascade branch is
+    a defensive read; if the data is consistent with the API
+    contract it'll never trigger.
+    """
+    if row.user_id is not None and row.user_id == user.id:
+        return True
+    grants = await caller_grants_for_file(db, row, user)
+    return effective_can_edit(grants)
+
+
 # --------------------------------------------------------------------
 # Render summary
 # --------------------------------------------------------------------
@@ -180,6 +219,7 @@ def _user_brief(
         username=username,
         email=email,
         can_copy=grant.can_copy,
+        can_edit=grant.can_edit,
     )
 
 
@@ -246,9 +286,11 @@ async def build_summary_for_resource(
     # Pill omits the caller themselves (you don't see your own name).
     grantees: list[GranteeBrief] = []
     caller_can_copy = False
+    caller_can_edit = False
     for g in grants:
         if g.grantee_user_id == caller.id:
             caller_can_copy = g.can_copy
+            caller_can_edit = g.can_edit
             continue
         u = users.get(g.grantee_user_id)
         if u is None:
@@ -263,20 +305,23 @@ async def build_summary_for_resource(
         if owner is not None:
             # The owner isn't a grantee — but we reuse the brief shape
             # so the frontend pill / banner can render uniformly. The
-            # ``grant_id`` is synthetic (zero UUID) and ``can_copy`` is
-            # always true for the owner.
+            # ``grant_id`` is synthetic (zero UUID); both permission
+            # flags are always true for the owner since they have
+            # full control implicitly.
             owner_brief = GranteeBrief(
                 grant_id=uuid.UUID(int=0),
                 user_id=owner.id,
                 username=owner.username,
                 email=owner.email,
                 can_copy=True,
+                can_edit=True,
             )
 
     return GrantSummary(
         role=role,  # type: ignore[arg-type]
         grantees=grantees,
         can_copy=caller_can_copy if role == "grantee" else False,
+        can_edit=caller_can_edit if role == "grantee" else False,
         owner=owner_brief,
     )
 
@@ -379,9 +424,11 @@ def _summary_from_cache(
     )
     grantees: list[GranteeBrief] = []
     caller_can_copy = False
+    caller_can_edit = False
     for g in grants:
         if g.grantee_user_id == caller.id:
             caller_can_copy = g.can_copy
+            caller_can_edit = g.can_edit
             continue
         u = users.get(g.grantee_user_id)
         if u is None:
@@ -397,11 +444,13 @@ def _summary_from_cache(
                 username=owner.username,
                 email=owner.email,
                 can_copy=True,
+                can_edit=True,
             )
     return GrantSummary(
         role=role,  # type: ignore[arg-type]
         grantees=grantees,
         can_copy=caller_can_copy if role == "grantee" else False,
+        can_edit=caller_can_edit if role == "grantee" else False,
         owner=owner_brief,
     )
 

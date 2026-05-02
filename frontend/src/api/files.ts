@@ -22,6 +22,13 @@ export interface Grantee {
   username: string;
   email: string | null;
   can_copy: boolean;
+  /** Drive stage 5.1 — write access. Currently only meaningful on
+   *  Drive Documents (the backend refuses ``can_edit=true`` on
+   *  folder grants and on non-document files). When ``true``, the
+   *  grantee gets a real-time collaborative editing seat instead
+   *  of read-only access. Defaulted to ``false`` for compatibility
+   *  with rows persisted before migration 0043. */
+  can_edit?: boolean;
 }
 
 /** Per-row sharing summary attached to every file/folder response.
@@ -36,6 +43,10 @@ export interface GrantSummary {
   /** True only when ``role === "grantee"`` AND the caller's grant
    *  carries ``can_copy``. Used to gate the "Copy to my files" UI. */
   can_copy: boolean;
+  /** True only when ``role === "grantee"`` AND the caller's grant
+   *  (on the file or any ancestor folder) carries ``can_edit``. The
+   *  document editor flips out of read-only mode when this is set. */
+  can_edit?: boolean;
   /** Owner brief — only populated when ``role === "grantee"`` so the
    *  UI can render a "Shared by @alice" chip. */
   owner: Grantee | null;
@@ -117,6 +128,17 @@ export interface GrantsListResponse {
 export interface CreateGrantPayload {
   grantee_user_id: string;
   can_copy: boolean;
+  /** Optional — defaults to ``false`` server-side. Backend rejects
+   *  ``true`` for folders or non-document files with a 400 so the
+   *  share modal can rely on the spec for which resources accept it. */
+  can_edit?: boolean;
+}
+
+export interface UpdateGrantPayload {
+  can_copy: boolean;
+  /** Optional. ``undefined`` means "leave as-is", ``true``/``false``
+   *  overwrite. Same validation rules as :type:`CreateGrantPayload`. */
+  can_edit?: boolean | null;
 }
 
 /** Hard cap from the product spec — refused with a 400 on the
@@ -555,7 +577,7 @@ export const filesApi = {
     type: ShareableResourceType,
     id: string,
     grantId: string,
-    payload: { can_copy: boolean }
+    payload: UpdateGrantPayload
   ): Promise<GrantsListResponse> {
     const { data } = await apiClient.patch<GrantsListResponse>(
       `/files/${type}/${id}/grants/${grantId}`,

@@ -80,12 +80,18 @@ export function DocumentEditorModal({
   }, [lastSavedAt]);
 
   // True when the caller is a grantee viewing a doc owned by
-  // someone else. Drives the read-only chrome: the rename input
-  // becomes a static label, the manual-save button is hidden (the
-  // backend would 403 anyway), and the toolbar quietly degrades to
-  // a "view only" mode through the existing ``readOnly`` plumbing
-  // on the collab provider.
+  // someone else. Drives the rename-input chrome (filename is
+  // owner-only metadata even for editor-grantees).
   const sharedWithMe = file.sharing?.role === "grantee";
+  // True when the caller may write to the document body — owner
+  // outright, or a grantee whose grant carries ``can_edit=true``.
+  // Drives the editor's ``editable`` prop, the manual-save button,
+  // image-paste/drop uploads, and the Cmd/Ctrl+S keybind. When
+  // false the toolbar quietly disables typing through TipTap's
+  // built-in read-only mode and the collab token endpoint mints a
+  // ``perm=read`` JWT so the Hocuspocus server rejects updates
+  // even if a malicious client tried to flip ``editable`` on.
+  const canEdit = !sharedWithMe || (file.sharing?.can_edit ?? false);
 
   // "Saved" ticks back to "idle" on a short timer — pure UX
   // cosmetics so the user sees the confirmation breath before it
@@ -114,6 +120,16 @@ export function DocumentEditorModal({
   // can show "Uploading…" without each paste needing its own toast.
   const [pasteUploading, setPasteUploading] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // ``canEdit`` is captured into the editorProps closure when the
+  // editor is created and we deliberately don't rebuild the editor
+  // every time the flag flips (would lose cursor position). Read
+  // through a ref instead so paste / drop handlers always see the
+  // current value.
+  const canEditRef = useRef(canEdit);
+  useEffect(() => {
+    canEditRef.current = canEdit;
+  }, [canEdit]);
 
   // Drains a list of File objects through the assets endpoint and
   // inserts each as an Image node at ``insertPos``. Images upload
@@ -158,6 +174,12 @@ export function DocumentEditorModal({
     {
       extensions,
       autofocus: "end",
+      // Read-only grantees can't type; TipTap honours this by
+      // disabling input + visually muting toolbar buttons through
+      // the ``editor.isEditable`` getter the toolbar reads. The
+      // collab token is *also* minted as ``perm=read`` for them so
+      // even a hand-modified client can't smuggle writes through.
+      editable: canEdit,
       editorProps: {
         attributes: {
           class: cn(
@@ -177,6 +199,10 @@ export function DocumentEditorModal({
         // image hits the per-document assets bucket and comes back
         // as a signed URL we can embed.
         handlePaste: (_view, event) => {
+          // Read-only grantees can't upload assets — the backend
+          // 403s and silently dropping the paste here keeps the
+          // editor honest about its state.
+          if (!canEditRef.current) return false;
           const items = event.clipboardData?.items;
           if (!items || items.length === 0) return false;
           const images: File[] = [];
@@ -197,6 +223,7 @@ export function DocumentEditorModal({
         // node inside the editor — leave that to ProseMirror.
         handleDrop: (view, event, _slice, moved) => {
           if (moved) return false;
+          if (!canEditRef.current) return false;
           const files = event.dataTransfer?.files;
           if (!files || files.length === 0) return false;
           const images = Array.from(files).filter((f) =>
@@ -229,6 +256,18 @@ export function DocumentEditorModal({
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  // ``useEditor`` captures ``editable`` at create time. If a
+  // grantee's permission changes mid-session (e.g. owner promotes
+  // them to Editor while the modal is open) we need to flip the
+  // live instance too — otherwise the toolbar stays visually
+  // disabled until the editor is rebuilt.
+  useEffect(() => {
+    if (!editor) return;
+    if (editor.isEditable !== canEdit) {
+      editor.setEditable(canEdit);
+    }
+  }, [editor, canEdit]);
 
   // ------------------------------------------------------------------
   // Offline fallback — seed the editor from the saved HTML blob
@@ -423,6 +462,7 @@ export function DocumentEditorModal({
   const handleManualSave = useCallback(async () => {
     const ed = editorRef.current;
     if (!ed || manualSaving) return;
+    if (!canEdit) return;  // read-only grantee shortcut
     setManualSaving(true);
     setManualSaveError(null);
     try {
@@ -452,7 +492,7 @@ export function DocumentEditorModal({
     } finally {
       setManualSaving(false);
     }
-  }, [file.id, manualSaving, onFileUpdated, queryClient]);
+  }, [canEdit, file.id, manualSaving, onFileUpdated, queryClient]);
 
   // Download in the requested format. ``html`` returns the on-disk
   // blob verbatim, ``md`` runs it through markdownify on the
@@ -617,16 +657,16 @@ export function DocumentEditorModal({
           lastSavedAt={lastSavedAt}
         />
 
-        {/* Manual save — visible for owners only. Grantees see the
-            doc in read-only mode (the editor's collab token comes
-            back as ``perm=read`` and the manual-save endpoint
-            returns 403 for non-owners), so the affordance would be
-            confusing. The collab pipeline still drives the autosave
-            dot; this button is the "I'm done" affordance + the
-            bulletproof fallback when the WS path is misbehaving
-            (typical prod symptom: file silently stays at 0 bytes).
-            Cmd/Ctrl + S also fires it. */}
-        {!sharedWithMe && (
+        {/* Manual save — visible for owners and editor-grantees.
+            Read-only grantees never see it (the manual-save
+            endpoint 403s for them and the editor's collab token
+            comes back as ``perm=read``), so the affordance would
+            be confusing. The collab pipeline still drives the
+            autosave dot; this button is the "I'm done" affordance
+            + the bulletproof fallback when the WS path is
+            misbehaving (typical prod symptom: file silently stays
+            at 0 bytes). Cmd/Ctrl + S also fires it. */}
+        {canEdit && (
           <button
             type="button"
             onClick={() => void handleManualSave()}
@@ -777,7 +817,7 @@ export function DocumentEditorModal({
           // no reason to freeze the toolbar during a transient
           // "connecting" state — doing so makes the editor feel broken
           // on every cold open.
-          disabled={!editor || Boolean(error)}
+          disabled={!editor || Boolean(error) || !canEdit}
         />
       </div>
 

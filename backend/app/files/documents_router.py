@@ -230,10 +230,13 @@ def _owner_for_scope(user: User, scope: Scope) -> uuid.UUID:
 def _can_write(owner_id: uuid.UUID | None, user: User) -> bool:
     """True iff ``user`` owns this row outright.
 
-    Grantees can read documents (handled via
-    :func:`_load_document` walking grants) but cannot mutate
-    them — collaborative editing of someone else's document
-    intentionally requires them to "Copy to my files" first.
+    Used for ownership-only write paths (creating a new document
+    inside a parent folder — that's tied to the *folder's* owner,
+    not the document, so grant-based edit access doesn't apply).
+    For document-level write checks (collab token, manual save,
+    asset upload) use :func:`caller_can_write_file` from
+    :mod:`app.files.sharing` instead — that one honours
+    ``can_edit`` grants.
     """
     return owner_id is not None and owner_id == user.id
 
@@ -398,7 +401,9 @@ async def get_collab_token(
     user: User = Depends(get_current_user),
 ) -> CollabTokenResponse:
     row = await _load_document(db, document_id, user)
-    perm = "write" if _can_write(row.user_id, user) else "read"
+    from app.files.sharing import caller_can_write_file
+
+    perm = "write" if await caller_can_write_file(db, row, user) else "read"
     token, exp = _mint_collab_token(document_id=row.id, user=user, perm=perm)
     return CollabTokenResponse(
         token=token,
@@ -524,11 +529,14 @@ async def manual_save_document(
 
     Re-runs the same sanitiser as the collab snapshot endpoint so a
     hostile client can't smuggle extra HTML through the side door.
-    Owner-only: grantees see the editor in read-only mode and the
-    Save button is hidden.
+    Available to the owner and any grantee whose grant carries
+    ``can_edit=true``; read-only grantees still get a 403 here and
+    the Save button stays hidden in the UI for them.
     """
     row = await _load_document(db, document_id, user)
-    if not _can_write(row.user_id, user):
+    from app.files.sharing import caller_can_write_file
+
+    if not await caller_can_write_file(db, row, user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have write access to this document",
@@ -762,7 +770,9 @@ async def upload_document_asset(
     as its ``src``.
     """
     document = await _load_document(db, document_id, user)
-    if not _can_write(document.user_id, user):
+    from app.files.sharing import caller_can_write_file
+
+    if not await caller_can_write_file(db, document, user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have write access to this document",
@@ -792,9 +802,24 @@ async def upload_document_asset(
         )
 
     # Storage cap pre-check — document assets count against the
-    # owning user's quota.
+    # *owner's* quota (the asset row is created with
+    # ``user_id=document.user_id``). When the uploader is the owner
+    # this is just ``user``; when an editor-grantee uploads, we
+    # have to fetch the owner record so the cap check matches the
+    # bucket the bytes will actually land in.
     if document.user_id is not None:
-        quota = await get_quota(db, user)
+        owner = (
+            user
+            if document.user_id == user.id
+            else await db.get(User, document.user_id)
+        )
+        if owner is None:
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document owner is missing",
+            )
+        quota = await get_quota(db, owner)
         if quota.cap_bytes is not None and quota.used_bytes >= quota.cap_bytes:
             await file.close()
             raise HTTPException(

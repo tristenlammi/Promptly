@@ -2198,12 +2198,49 @@ async def _grants_list_response(
                 "username": u.username,
                 "email": u.email,
                 "can_copy": g.can_copy,
+                "can_edit": g.can_edit,
             }
         )
     return GrantsListResponse(
         grants=out,  # type: ignore[arg-type]
         can_share=True,
     )
+
+
+async def _assert_can_edit_allowed(
+    db: AsyncSession,
+    *,
+    resource_type: str,
+    resource_id: uuid.UUID,
+    can_edit: bool,
+) -> None:
+    """Reject ``can_edit=true`` on resources that don't support it.
+
+    Stage 5.1 scopes write access to Drive Documents only. Folder
+    grants and grants on non-document files (PDFs, images, ad-hoc
+    uploads) get a 400 if the caller asks for editor mode — the
+    UI hides the option for these but a hand-rolled API call would
+    otherwise persist a flag the rest of the stack ignores.
+    """
+    if not can_edit:
+        return
+    if resource_type != "file":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Editor mode isn't available for folders. Share the "
+                "individual document instead."
+            ),
+        )
+    row = await db.get(UserFile, resource_id)
+    if row is None or row.source_kind != "document":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Editor mode is only available on Drive Documents. "
+                "Other file types stay read-only."
+            ),
+        )
 
 
 @router.get("/users/search", response_model=UserSearchResponse)
@@ -2327,12 +2364,19 @@ async def create_grant(
                 f"adding another."
             ),
         )
+    await _assert_can_edit_allowed(
+        db,
+        resource_type=rt,
+        resource_id=rid,
+        can_edit=payload.can_edit,
+    )
     grant = ResourceGrant(
         resource_type=rt,
         resource_id=rid,
         grantee_user_id=grantee.id,
         granted_by_user_id=user.id,
         can_copy=payload.can_copy,
+        can_edit=payload.can_edit,
     )
     db.add(grant)
     try:
@@ -2378,6 +2422,16 @@ async def update_grant(
             status_code=status.HTTP_404_NOT_FOUND, detail="Grant not found"
         )
     grant.can_copy = payload.can_copy
+    if payload.can_edit is not None:
+        # Validate before mutating so a rejected toggle doesn't
+        # leave behind a partially-applied update.
+        await _assert_can_edit_allowed(
+            db,
+            resource_type=rt,
+            resource_id=rid,
+            can_edit=payload.can_edit,
+        )
+        grant.can_edit = payload.can_edit
     await db.commit()
     return await _grants_list_response(
         db, resource_type=rt, resource_id=rid

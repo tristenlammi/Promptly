@@ -20,10 +20,18 @@ ShareResourceType = Literal["file", "folder"]
 class GranteeBrief(BaseModel):
     """One entry in a resource's grantee pill / share modal list.
 
-    ``can_copy`` is the per-grantee permission flag (false = view only,
-    true = view + "Copy to my files"). The user fields are denormalised
-    on read so the frontend can render avatars / pills without a
-    second round trip.
+    Two per-grantee permission flags:
+
+    * ``can_copy`` — false = view only, true = view + "Copy to my
+      files". Always meaningful regardless of resource type.
+    * ``can_edit`` — false = read-only, true = full collaborative
+      edit access. Currently only honoured on Drive Document files
+      (``source_kind="document"``); the router refuses ``can_edit=true``
+      on folder grants and on non-document files so a stored ``true``
+      always corresponds to something a grantee can actually do.
+
+    The user fields are denormalised on read so the frontend can
+    render avatars / pills without a second round trip.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -33,6 +41,7 @@ class GranteeBrief(BaseModel):
     username: str
     email: str | None = None
     can_copy: bool
+    can_edit: bool = False
 
 
 class GrantSummary(BaseModel):
@@ -40,16 +49,23 @@ class GrantSummary(BaseModel):
 
     ``role`` tells the client which actions to render: an ``owner``
     sees the manage-grants modal trigger, a ``grantee`` sees only
-    read-only / copy actions and the read-only badge. ``grantees``
-    lists everyone *other than the caller* who can see this resource
-    so the pill can render names directly. ``owner`` is set on rows
-    where the caller is a grantee (otherwise the caller IS the owner
-    and doesn't need a chip about themselves).
+    read-only / copy / edit actions and the appropriate badge.
+    ``grantees`` lists everyone *other than the caller* who can see
+    this resource so the pill can render names directly. ``owner``
+    is set on rows where the caller is a grantee (otherwise the
+    caller IS the owner and doesn't need a chip about themselves).
+
+    ``can_copy`` and ``can_edit`` reflect the *caller's* effective
+    permission when ``role == "grantee"`` — they collapse the
+    direct + ancestor-folder grants down to a single yes/no the UI
+    can gate on. They're meaningless and stay ``false`` when
+    ``role == "owner"`` (the owner already has both implicitly).
     """
 
     role: Literal["owner", "grantee"]
     grantees: list[GranteeBrief] = Field(default_factory=list)
     can_copy: bool = False  # only meaningful when role == "grantee"
+    can_edit: bool = False  # only meaningful when role == "grantee"
     owner: "GranteeBrief | None" = None
 
 
@@ -476,10 +492,21 @@ class GrantsListResponse(BaseModel):
 class CreateGrantRequest(BaseModel):
     grantee_user_id: uuid.UUID
     can_copy: bool = False
+    # Stage 5.1: write access. The router enforces "Editor mode is
+    # only valid on a Drive Document file" — folder grants and
+    # non-document file grants are rejected with a 400 if this is
+    # ``true``. Defaulting to ``false`` keeps every existing client
+    # call site working unchanged.
+    can_edit: bool = False
 
 
 class UpdateGrantRequest(BaseModel):
     can_copy: bool
+    # Optional so partial updates (just ``can_copy`` changes) still
+    # round-trip without forcing the modal to re-send the edit
+    # flag. ``None`` means "leave can_edit alone"; ``True`` /
+    # ``False`` overwrite the stored value.
+    can_edit: bool | None = None
 
 
 # Hard cap from the product spec — refused at the API layer rather

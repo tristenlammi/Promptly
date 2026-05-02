@@ -172,7 +172,14 @@ export function FilesPage({
   // the URL-based ShareLinkDialog (now exposed as a secondary
   // "Share by link" entry in the context menu).
   const [shareGrantsFor, setShareGrantsFor] = useState<
-    { kind: "file" | "folder"; id: string; name: string } | null
+    {
+      kind: "file" | "folder";
+      id: string;
+      name: string;
+      /** Stage 5.1 — only Drive Documents accept ``can_edit`` grants;
+       *  everything else hides the Editor option in the role picker. */
+      supportsEdit?: boolean;
+    } | null
   >(null);
   const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
 
@@ -368,7 +375,12 @@ export function FilesPage({
         onSelect={setPreview}
         onClose={() => setPreview(null)}
         onShare={(f) =>
-          setShareGrantsFor({ kind: "file", id: f.id, name: f.filename })
+          setShareGrantsFor({
+            kind: "file",
+            id: f.id,
+            name: f.filename,
+            supportsEdit: isDocumentFile(f),
+          })
         }
         onEdit={(f) => {
           setEditingDoc(f);
@@ -409,6 +421,7 @@ export function FilesPage({
                 type: shareGrantsFor.kind,
                 id: shareGrantsFor.id,
                 name: shareGrantsFor.name,
+                supports_edit: shareGrantsFor.supportsEdit ?? false,
               }
             : null
         }
@@ -771,8 +784,15 @@ function ContentGrid({
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: (file: FileItem) => void;
-  /** Primary share action — opens the peer-to-peer grants modal. */
-  onShare: (r: { kind: "file" | "folder"; id: string; name: string }) => void;
+  /** Primary share action — opens the peer-to-peer grants modal.
+   *  ``supportsEdit`` is forwarded so the modal knows whether to
+   *  surface the "Editor" tier; only Drive Documents accept it. */
+  onShare: (r: {
+    kind: "file" | "folder";
+    id: string;
+    name: string;
+    supportsEdit?: boolean;
+  }) => void;
   /** Secondary share action — opens the URL/invite-link dialog. */
   onShareLink: (r: { kind: "file" | "folder"; id: string; name: string }) => void;
 }) {
@@ -826,7 +846,12 @@ function ContentGrid({
             onOpenMove={onOpenMove}
             onPreview={() => onPreview(f)}
             onShare={() =>
-              onShare({ kind: "file", id: f.id, name: f.filename })
+              onShare({
+                kind: "file",
+                id: f.id,
+                name: f.filename,
+                supportsEdit: isDocumentFile(f),
+              })
             }
             onShareLink={() =>
               onShareLink({ kind: "file", id: f.id, name: f.filename })
