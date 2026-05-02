@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
-import { AlertTriangle, Check, Loader2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Download,
+  FileCode,
+  FileDown,
+  FileText,
+  Loader2,
+  Save,
+  X,
+} from "lucide-react";
 
 import { filesApi, type FileItem } from "@/api/files";
-import { documentsApi } from "@/api/documents";
+import { documentsApi, type DocumentDownloadFormat } from "@/api/documents";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/utils/cn";
 
@@ -52,6 +63,14 @@ export function DocumentEditorModal({
   const [filename, setFilename] = useState(file.filename);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [renameError, setRenameError] = useState<string | null>(null);
+
+  // True when the caller is a grantee viewing a doc owned by
+  // someone else. Drives the read-only chrome: the rename input
+  // becomes a static label, the manual-save button is hidden (the
+  // backend would 403 anyway), and the toolbar quietly degrades to
+  // a "view only" mode through the existing ``readOnly`` plumbing
+  // on the collab provider.
+  const sharedWithMe = file.sharing?.role === "grantee";
 
   // "Saved" ticks back to "idle" on a short timer — pure UX
   // cosmetics so the user sees the confirmation breath before it
@@ -312,6 +331,127 @@ export function DocumentEditorModal({
     }
   }, [filename, file.filename, file.id, onFileUpdated, queryClient]);
 
+  // Owner-only manual save. Bypasses the Hocuspocus snapshot path
+  // entirely — captures whatever the editor currently renders and
+  // ships it straight to the backend. Crucial as a fallback when
+  // the WS pipeline is misbehaving (Cloudflare tunnel, stopped
+  // collab container, proxy buffering): on prod those manifest as
+  // the file silently staying at 0 bytes because no snapshot ever
+  // fires. The button is also generally useful as an explicit
+  // "I'm done" affordance.
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualSaveError, setManualSaveError] = useState<string | null>(null);
+  const handleManualSave = useCallback(async () => {
+    const ed = editorRef.current;
+    if (!ed || manualSaving) return;
+    setManualSaving(true);
+    setManualSaveError(null);
+    try {
+      const html = ed.getHTML();
+      const updated = await documentsApi.manualSave(file.id, html);
+      onFileUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ["drive"] });
+      // Flip the indicator into "saved" briefly even if the collab
+      // path was the one that actually persisted last — matches
+      // user expectation that pressing Save = green tick.
+      setSaveStatus("saved");
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current);
+      }
+      savedTimerRef.current = window.setTimeout(() => {
+        setSaveStatus("idle");
+      }, 1800);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed";
+      setManualSaveError(msg);
+      window.setTimeout(() => setManualSaveError(null), 5000);
+    } finally {
+      setManualSaving(false);
+    }
+  }, [file.id, manualSaving, onFileUpdated, queryClient]);
+
+  // Download in the requested format. ``html`` returns the on-disk
+  // blob verbatim, ``md`` runs it through markdownify on the
+  // server, ``pdf`` renders via xhtml2pdf. We do the file-save dance
+  // client-side via a temporary blob URL so the browser's native
+  // "Save as" picker fires for every format consistently.
+  const [downloading, setDownloading] = useState<DocumentDownloadFormat | null>(
+    null
+  );
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const handleDownload = useCallback(
+    async (format: DocumentDownloadFormat) => {
+      if (downloading) return;
+      setDownloadMenuOpen(false);
+      setDownloading(format);
+      setDownloadError(null);
+      try {
+        const { blob, filename } = await documentsApi.download(
+          file.id,
+          format
+        );
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Defer the revoke so Safari's download path has time to
+        // grab the blob before the URL is invalidated.
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Download failed";
+        setDownloadError(msg);
+        window.setTimeout(() => setDownloadError(null), 5000);
+      } finally {
+        setDownloading(null);
+      }
+    },
+    [downloading, file.id]
+  );
+
+  // Close the download menu on outside click / Escape so it doesn't
+  // hang open when the user moves on.
+  const downloadMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!downloadMenuOpen) return;
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (
+        target &&
+        downloadMenuRef.current &&
+        !downloadMenuRef.current.contains(target)
+      ) {
+        setDownloadMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDownloadMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [downloadMenuOpen]);
+
+  // Cmd/Ctrl + S → manual save. Mirrors every desktop editor a
+  // user would have muscle memory for and makes the "I want to be
+  // sure that's persisted" flow keyboard-driven.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void handleManualSave();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleManualSave]);
+
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       // Tap on the backdrop (not a click that bubbled from the card)
@@ -373,11 +513,107 @@ export function DocumentEditorModal({
               (e.target as HTMLInputElement).blur();
             }
           }}
-          className="min-w-0 flex-1 truncate rounded-md bg-transparent px-2 py-1 text-sm font-semibold outline-none focus:bg-black/5 dark:focus:bg-white/5"
+          // Grantees can read the doc but not rename it — make the
+          // input static so a click doesn't put the user in an edit
+          // state that would fail the moment they hit blur.
+          readOnly={sharedWithMe}
+          className={cn(
+            "min-w-0 flex-1 truncate rounded-md bg-transparent px-2 py-1 text-sm font-semibold outline-none",
+            sharedWithMe
+              ? "cursor-default"
+              : "focus:bg-black/5 dark:focus:bg-white/5"
+          )}
           aria-label="Document title"
         />
 
-        <SaveIndicator status={saveStatus} error={error} />
+        <SaveIndicator
+          status={saveStatus}
+          error={error}
+          collabOffline={collabStatus === "disconnected"}
+        />
+
+        {/* Manual save — visible for owners only. Grantees see the
+            doc in read-only mode (the editor's collab token comes
+            back as ``perm=read`` and the manual-save endpoint
+            returns 403 for non-owners), so the affordance would be
+            confusing. The collab pipeline still drives the autosave
+            dot; this button is the "I'm done" affordance + the
+            bulletproof fallback when the WS path is misbehaving
+            (typical prod symptom: file silently stays at 0 bytes).
+            Cmd/Ctrl + S also fires it. */}
+        {!sharedWithMe && (
+          <button
+            type="button"
+            onClick={() => void handleManualSave()}
+            disabled={manualSaving || Boolean(error)}
+            aria-label="Save document now"
+            title="Save now (⌘/Ctrl + S)"
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm transition",
+              "text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10",
+              "disabled:cursor-not-allowed disabled:opacity-50"
+            )}
+          >
+            {manualSaving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Save</span>
+          </button>
+        )}
+
+        {/* Format-aware download menu. Three options (HTML / MD /
+            PDF) all hit ``GET /api/documents/:id/download`` which
+            picks the renderer based on ``?format=``. */}
+        <div ref={downloadMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setDownloadMenuOpen((v) => !v)}
+            disabled={Boolean(downloading) || Boolean(error)}
+            aria-haspopup="menu"
+            aria-expanded={downloadMenuOpen}
+            aria-label="Download document"
+            title="Download as…"
+            className={cn(
+              "inline-flex h-9 items-center gap-1 rounded-md px-2 text-sm transition",
+              "text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10",
+              "disabled:cursor-not-allowed disabled:opacity-50"
+            )}
+          >
+            {downloading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            <ChevronDown className="h-3 w-3" />
+          </button>
+          {downloadMenuOpen && (
+            <div
+              role="menu"
+              className={cn(
+                "absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-lg border border-[var(--border)]",
+                "bg-[var(--bg)] shadow-lg"
+              )}
+            >
+              <DownloadMenuItem
+                icon={<FileCode className="h-4 w-4" />}
+                label="HTML (.html)"
+                onClick={() => void handleDownload("html")}
+              />
+              <DownloadMenuItem
+                icon={<FileText className="h-4 w-4" />}
+                label="Markdown (.md)"
+                onClick={() => void handleDownload("md")}
+              />
+              <DownloadMenuItem
+                icon={<FileDown className="h-4 w-4" />}
+                label="PDF (.pdf)"
+                onClick={() => void handleDownload("pdf")}
+              />
+            </div>
+          )}
+        </div>
 
         <Collaborators avatars={collaborators} self={user} />
 
@@ -406,6 +642,42 @@ export function DocumentEditorModal({
       {pasteUploading && !pasteError && (
         <div className="border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)]">
           Uploading image…
+        </div>
+      )}
+
+      {manualSaveError && (
+        <div className="border-b border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-500">
+          Save failed: {manualSaveError}
+        </div>
+      )}
+
+      {downloadError && (
+        <div className="border-b border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-500">
+          Download failed: {downloadError}
+        </div>
+      )}
+
+      {/* Loud collab-down banner — when the WebSocket pipeline
+          fails (which on prod tends to be a Cloudflare/proxy WS
+          issue, or a stopped collab container), the inline "Offline"
+          chip is easy to miss and the user thinks autosave is
+          working. Surface it explicitly so they reach for the
+          Save button. */}
+      {collabStatus === "disconnected" && !error && (
+        <div className="flex items-start gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div>
+            <strong className="font-semibold">Live sync offline.</strong>{" "}
+            Autosave is paused. Press{" "}
+            <kbd className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px]">
+              ⌘/Ctrl
+            </kbd>{" "}
+            +{" "}
+            <kbd className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px]">
+              S
+            </kbd>{" "}
+            (or the Save button) to persist your changes.
+          </div>
         </div>
       )}
 
@@ -458,24 +730,34 @@ export function DocumentEditorModal({
 function SaveIndicator({
   status,
   error,
+  collabOffline,
 }: {
   status: SaveStatus;
   error: string | null;
+  collabOffline: boolean;
 }) {
   if (error) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-1 text-xs text-red-500">
+      <span
+        title={error}
+        className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-1 text-xs text-red-500"
+      >
         <AlertTriangle className="h-3.5 w-3.5" /> Error
       </span>
     );
   }
 
+  // ``offline`` from the explicit collab-disconnect signal beats
+  // the live-edit "syncing" state — there's no sync happening when
+  // the WS is down, so showing a spinning "syncing…" is misleading.
+  const effective: SaveStatus = collabOffline ? "offline" : status;
+
   const styles =
-    status === "offline"
-      ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-300"
-      : status === "syncing"
+    effective === "offline"
+      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+      : effective === "syncing"
         ? "text-[var(--muted)]"
-        : status === "saved"
+        : effective === "saved"
           ? "text-emerald-600 dark:text-emerald-400"
           : "text-[var(--muted)]";
   return (
@@ -485,22 +767,52 @@ function SaveIndicator({
         styles
       )}
       aria-live="polite"
+      title={
+        effective === "offline"
+          ? "Live collaboration offline — autosave paused. Use the Save button."
+          : undefined
+      }
     >
-      {status === "syncing" || status === "idle" ? (
+      {effective === "syncing" || effective === "idle" ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : status === "saved" ? (
+      ) : effective === "saved" ? (
         <Check className="h-3.5 w-3.5" />
       ) : (
         <AlertTriangle className="h-3.5 w-3.5" />
       )}
-      {status === "offline"
-        ? "Offline"
-        : status === "syncing"
+      {effective === "offline"
+        ? "Offline — Save manually"
+        : effective === "syncing"
           ? "Syncing…"
-          : status === "saved"
+          : effective === "saved"
             ? "All changes saved"
             : "Ready"}
     </span>
+  );
+}
+
+function DownloadMenuItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm",
+        "text-[var(--text)] transition hover:bg-[var(--accent)]/10"
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }
 

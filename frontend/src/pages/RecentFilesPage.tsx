@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Clock } from "lucide-react";
 
-import type { FileItem } from "@/api/files";
+import { isDocumentFile, type FileItem } from "@/api/files";
+import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
@@ -26,7 +27,15 @@ const SCOPE = "mine" as const;
 export function RecentFilesPage() {
   const { data, isLoading } = useRecentFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
+  // Drive Documents jump straight into the editor on click — every
+  // other file type still falls back to the generic preview modal.
+  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<FileItem | null>(null);
+
+  const openFile = (f: FileItem) => {
+    if (isDocumentFile(f)) setEditingDoc(f);
+    else setPreview(f);
+  };
 
   const star = useStarFile();
   const unstar = useUnstarFile();
@@ -66,7 +75,7 @@ export function RecentFilesPage() {
                     key={f.id}
                     file={f}
                     actions={{
-                      onPreview: () => setPreview(f),
+                      onPreview: () => openFile(f),
                       onDownload: () => downloadAuthed(f),
                       onShare: () => setShareFor(f),
                       onStar: f.starred_at
@@ -116,6 +125,14 @@ export function RecentFilesPage() {
         }
         onClose={() => setShareFor(null)}
       />
+
+      {editingDoc && (
+        <DocumentEditorModal
+          file={editingDoc}
+          onClose={() => setEditingDoc(null)}
+          onFileUpdated={(f) => setEditingDoc(f)}
+        />
+      )}
     </>
   );
 }

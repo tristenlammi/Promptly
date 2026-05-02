@@ -24,10 +24,11 @@ import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareProjectDialog } from "@/components/chat/ShareProjectDialog";
+import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { chatApi } from "@/api/chat";
-import { filesApi, type FileItem } from "@/api/files";
+import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
 import {
   useArchiveChatProject,
   useChatProject,
@@ -441,6 +442,11 @@ function FilesTab({
   // synthesised stub would mis-route Drive Documents / rendered
   // PDFs.
   const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+  // Drive Documents jump straight into the editor on click — every
+  // other pinned file type still falls back to the generic preview
+  // modal. We have to lazy-fetch the row first because the pinned
+  // ``ChatProjectFilePin`` shape doesn't carry ``source_kind``.
+  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -450,7 +456,11 @@ function FilesTab({
     setPreviewError(null);
     try {
       const file = await filesApi.getFile(fileId);
-      setPreviewFile(file);
+      if (isDocumentFile(file) && !file.trashed_at) {
+        setEditingDoc(file);
+      } else {
+        setPreviewFile(file);
+      }
     } catch (err) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -590,6 +600,14 @@ function FilesTab({
         siblings={siblings}
         onClose={() => setPreviewFile(null)}
       />
+
+      {editingDoc && (
+        <DocumentEditorModal
+          file={editingDoc}
+          onClose={() => setEditingDoc(null)}
+          onFileUpdated={(f) => setEditingDoc(f)}
+        />
+      )}
     </div>
   );
 }

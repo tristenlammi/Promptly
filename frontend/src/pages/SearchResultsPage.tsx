@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
 
-import type { FileItem } from "@/api/files";
+import { isDocumentFile, type FileItem } from "@/api/files";
+import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
@@ -28,7 +29,14 @@ export function SearchResultsPage() {
   const q = (params.get("q") ?? "").trim();
   const { data, isLoading, isFetching } = useSearchFiles(q, SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
+  // Drive Documents jump straight into the editor on click.
+  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<FileItem | null>(null);
+
+  const openFile = (f: FileItem) => {
+    if (isDocumentFile(f)) setEditingDoc(f);
+    else setPreview(f);
+  };
 
   const star = useStarFile();
   const unstar = useUnstarFile();
@@ -82,7 +90,7 @@ export function SearchResultsPage() {
                       />
                     }
                     actions={{
-                      onPreview: () => setPreview(hit.file),
+                      onPreview: () => openFile(hit.file),
                       onDownload: () => downloadAuthed(hit.file),
                       onShare: () => setShareFor(hit.file),
                       onStar: hit.file.starred_at
@@ -124,6 +132,14 @@ export function SearchResultsPage() {
         }
         onClose={() => setShareFor(null)}
       />
+
+      {editingDoc && (
+        <DocumentEditorModal
+          file={editingDoc}
+          onClose={() => setEditingDoc(null)}
+          onFileUpdated={(f) => setEditingDoc(f)}
+        />
+      )}
     </>
   );
 }

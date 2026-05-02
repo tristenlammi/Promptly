@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Star } from "lucide-react";
 
-import type { FileItem } from "@/api/files";
+import { isDocumentFile, type FileItem } from "@/api/files";
+import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import {
   DriveEmptyState,
@@ -32,9 +33,17 @@ export function StarredFilesPage() {
   const navigate = useNavigate();
   const { data, isLoading } = useStarredFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
+  // Drive Documents jump straight into the editor on click — every
+  // other file type still falls back to the generic preview modal.
+  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<
     { kind: "file" | "folder"; id: string; name: string } | null
   >(null);
+
+  const openFile = (f: FileItem) => {
+    if (isDocumentFile(f)) setEditingDoc(f);
+    else setPreview(f);
+  };
 
   const unstarFile = useUnstarFile();
   const unstarFolder = useUnstarFolder();
@@ -95,7 +104,7 @@ export function StarredFilesPage() {
                     key={f.id}
                     file={f}
                     actions={{
-                      onPreview: () => setPreview(f),
+                      onPreview: () => openFile(f),
                       onDownload: () => downloadAuthed(f),
                       onUnstar: () =>
                         unstarFile.mutate({ id: f.id, scope: SCOPE }),
@@ -135,6 +144,14 @@ export function StarredFilesPage() {
         resource={shareFor}
         onClose={() => setShareFor(null)}
       />
+
+      {editingDoc && (
+        <DocumentEditorModal
+          file={editingDoc}
+          onClose={() => setEditingDoc(null)}
+          onFileUpdated={(f) => setEditingDoc(f)}
+        />
+      )}
     </>
   );
 }

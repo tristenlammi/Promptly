@@ -66,6 +66,11 @@ markdown==3.7
 # the PDF-signing feature, so the older release is functionally
 # identical for our purposes.
 xhtml2pdf==0.2.11
+# HTML -> Markdown converter for Drive-document downloads. Pure-python
+# wrapper around BeautifulSoup; we already pull bs4 transitively via
+# bleach/xhtml2pdf, so adding markdownify doesn't materially grow the
+# image. Used by the documents router's ``?format=md`` download path.
+markdownify==0.13.1
 # Magic-byte sniffing for upload safety. Pure-python (no system
 # libmagic dependency), so it runs identically in the slim container
 # image. Used to refuse a ``.exe`` renamed to ``.png`` and to recover

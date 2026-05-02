@@ -283,6 +283,76 @@ def test_sanitize_document_html_strips_script() -> None:
     assert "<p>safe</p>" in clean
 
 
+# ---------------------------------------------------------------------------
+# Manual save / format-aware download helpers
+# ---------------------------------------------------------------------------
+
+
+def test_document_download_filename_strips_html_extension() -> None:
+    """``<title>.html`` round-trips with the requested extension.
+
+    The stored blob always lives at ``<title>.html`` (we coerce the
+    extension on create + rename), so the download path needs to
+    swap that suffix out cleanly rather than producing names like
+    ``Notes.html.md`` in the user's browser save dialog.
+    """
+
+    fn = documents_router._document_download_filename
+    assert fn("Notes.html", extension=".md") == "Notes.md"
+    assert fn("notes.html", extension=".pdf") == "notes.pdf"
+    # ``.htm`` shorthand also recognised — older Drive blobs predate
+    # the ``.html`` enforcement on rename, so this keeps them safe.
+    assert fn("legacy.htm", extension=".pdf") == "legacy.pdf"
+    # No html suffix at all → keep the title verbatim and append.
+    assert fn("Quarterly Plan", extension=".md") == "Quarterly Plan.md"
+    # Empty title falls back to a sensible default rather than an
+    # extension-only filename like ``.md`` which most browsers will
+    # mangle.
+    assert fn("", extension=".pdf") == "document.pdf"
+
+
+def test_html_to_markdown_basic_blocks() -> None:
+    """Heading + paragraph + list + emphasis survive the round trip."""
+
+    html_in = (
+        "<h1>Title</h1>"
+        "<p>Hello <strong>world</strong> with <em>emphasis</em>.</p>"
+        "<ul><li>one</li><li>two</li></ul>"
+    )
+    md = documents_router._html_to_markdown(html_in)
+    # ATX heading (``#``-prefixed) chosen for readability + diff
+    # stability — the test pins both the marker and the asterisk
+    # bold/italic style so a future config change has to be
+    # explicit.
+    assert "# Title" in md
+    assert "**world**" in md
+    assert "*emphasis*" in md
+    assert "- one" in md
+    assert "- two" in md
+
+
+def test_html_to_markdown_empty_input() -> None:
+    assert documents_router._html_to_markdown("") == ""
+
+
+def test_html_to_pdf_returns_pdf_bytes() -> None:
+    """xhtml2pdf produces bytes that start with the PDF magic.
+
+    The renderer is a black box for this test — we only confirm we
+    got back a non-empty body that the browser would recognise as
+    a PDF, so the download endpoint can hand it out without
+    parsing.
+    """
+
+    pdf = documents_router._html_to_pdf_bytes(
+        "<p>Hello world</p>", title="Greeting"
+    )
+    assert pdf.startswith(b"%PDF"), "xhtml2pdf output is not a PDF"
+    # A non-trivial body (xhtml2pdf still emits a few KB even for
+    # one paragraph because of fonts + structure).
+    assert len(pdf) > 500
+
+
 def test_sanitize_document_html_pins_youtube_host() -> None:
     """Iframe srcs outside the YouTube allowlist get stripped.
 

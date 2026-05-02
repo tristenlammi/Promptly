@@ -84,6 +84,15 @@ export interface FileItem {
   sharing?: GrantSummary | null;
 }
 
+/** Drive Document detection — ``true`` for the user-created TipTap
+ *  documents created via "New file". The classification feeds the
+ *  click router (documents jump straight into the editor instead of
+ *  the generic preview iframe) and the Save / format-aware download
+ *  affordances that only make sense on documents. */
+export function isDocumentFile(file: Pick<FileItem, "source_kind">): boolean {
+  return file.source_kind === "document";
+}
+
 // --------------------------------------------------------------------
 // Drive stage 5 — share grants DTOs
 // --------------------------------------------------------------------

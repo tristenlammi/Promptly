@@ -25,6 +25,7 @@ import {
 
 import {
   filesApi,
+  isDocumentFile,
   type FileItem,
   type FileScope,
   type FolderItem,
@@ -312,7 +313,19 @@ export function FilesPage({
               onOpenFolder={navigateToFolder}
               onDropOnFolder={handleDropOnto}
               onOpenMove={openMoveModal}
-              onPreview={setPreview}
+              // Drive Documents jump straight into the editor on
+              // click (matches Notion / Google Docs muscle memory)
+              // — every other file type still gets the generic
+              // preview modal. Trashed docs deliberately stay in
+              // preview because the editor would 404 on the read
+              // path anyway.
+              onPreview={(f) => {
+                if (isDocumentFile(f) && !f.trashed_at) {
+                  setEditingDoc(f);
+                } else {
+                  setPreview(f);
+                }
+              }}
               onShare={setShareGrantsFor}
               onShareLink={setShareFor}
             />

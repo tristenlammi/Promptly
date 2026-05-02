@@ -410,6 +410,36 @@ class CollabTokenUser(BaseModel):
 CollabTokenResponse.model_rebuild()
 
 
+class ManualDocumentSaveRequest(BaseModel):
+    """``POST /api/documents/{id}/save`` payload.
+
+    Lets the user-side "Save" button persist the editor's current
+    HTML straight to the file blob, bypassing the Hocuspocus collab
+    snapshot path. Two reasons we want this even though the collab
+    service writes snapshots automatically:
+
+    1. **Fallback when collab is broken.** Cloudflare tunnels, lazy
+       proxies, or a stopped collab container all manifest as the
+       file silently staying at 0 bytes. A manual save lets the
+       owner force a write without waiting on the WS pipeline.
+    2. **Explicit "I'm done" affordance.** Closing the laptop on a
+       half-typed paragraph shouldn't gamble on whether the 3-second
+       collab debounce flushed before the network died.
+
+    The body is the editor's full ``editor.getHTML()`` output. The
+    backend re-sanitises with the same allowlist as the collab
+    snapshot path so a hostile client can't smuggle in extra HTML
+    by going around Hocuspocus.
+    """
+
+    # Cap matches the per-document content guard the snapshot path
+    # already enforces in spirit (Y.Docs over a few MB of inline
+    # text aren't a great experience anyway). 4 MB of plain HTML is
+    # comfortably more than the editor will ever produce in a
+    # legitimate session.
+    html: str = Field(default="", max_length=4 * 1024 * 1024)
+
+
 # --------------------------------------------------------------------
 # Drive stage 5 — peer-to-peer share grants
 # --------------------------------------------------------------------

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import logging
 import os
 import time
@@ -80,6 +81,7 @@ from app.files.schemas import (
     DocumentAssetResponse,
     DocumentCreateRequest,
     FileResponse as FileResponseSchema,
+    ManualDocumentSaveRequest,
     Scope,
 )
 from app.files.storage import (
@@ -495,6 +497,246 @@ async def write_snapshot(
 
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------
+# POST /api/documents/{id}/save — owner-side manual snapshot
+# --------------------------------------------------------------------
+@router.post(
+    "/{document_id}/save",
+    response_model=FileResponseSchema,
+)
+async def manual_save_document(
+    document_id: uuid.UUID,
+    body: ManualDocumentSaveRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FileResponseSchema:
+    """Persist the editor's current HTML straight to the file blob.
+
+    Authenticated by the standard user JWT (not the internal collab
+    bearer) so the owner can save explicitly without waiting on the
+    Hocuspocus debounce. Useful as both an explicit "Save now"
+    affordance AND a fallback when the WS pipeline is misbehaving
+    (Cloudflare tunnel, stopped collab container, etc.) — the
+    typical symptom there is the file silently staying at 0 bytes
+    because the collab snapshot path never fires.
+
+    Re-runs the same sanitiser as the collab snapshot endpoint so a
+    hostile client can't smuggle extra HTML through the side door.
+    Owner-only: grantees see the editor in read-only mode and the
+    Save button is hidden.
+    """
+    row = await _load_document(db, document_id, user)
+    if not _can_write(row.user_id, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have write access to this document",
+        )
+
+    html_text = sanitize_document_html(body.html or "")
+    plain_text = extract_text_from_html(html_text)
+
+    abs_path = absolute_path(row.storage_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as f:
+        f.write(html_text)
+    try:
+        size = abs_path.stat().st_size
+    except OSError:
+        size = len(html_text.encode("utf-8"))
+
+    row.size_bytes = size
+    row.content_text = plain_text or None
+    row.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(row)
+    return _file_to_response(row, caller=user)
+
+
+# --------------------------------------------------------------------
+# GET /api/documents/{id}/download — format-aware download
+# --------------------------------------------------------------------
+def _document_download_filename(stored: str, *, extension: str) -> str:
+    """Pick a download filename for the given format.
+
+    The stored filename is ``<title>.html`` (we coerce ``.html`` on
+    create + rename). Strip the trailing ``.html`` (if any) and tack
+    on the requested extension so the browser's "Save as" dialog
+    pre-fills the right name.
+    """
+    base = stored
+    lower = base.lower()
+    if lower.endswith(".html"):
+        base = base[: -len(".html")]
+    elif lower.endswith(".htm"):
+        base = base[: -len(".htm")]
+    base = base or "document"
+    return f"{base}{extension}"
+
+
+def _html_to_markdown(html_text: str) -> str:
+    """Convert sanitised document HTML to GitHub-flavoured Markdown."""
+    if not html_text:
+        return ""
+    # ``markdownify`` defaults to "underscore for emphasis", which
+    # diffs noisily against editors that emit ``*`` (most of them).
+    # Pinning the literal asterisk keeps the output stable across
+    # users + platforms. ``heading_style="ATX"`` produces ``#``
+    # prefixes which are far more readable than the default
+    # underline style.
+    from markdownify import markdownify as md  # local import: optional dep
+
+    return md(
+        html_text,
+        heading_style="ATX",
+        strong_em_symbol="*",
+        bullets="-",
+    )
+
+
+def _html_to_pdf_bytes(html_text: str, *, title: str) -> bytes:
+    """Render document HTML to a PDF byte string via ``xhtml2pdf``.
+
+    ``xhtml2pdf`` already powers chat's PDF artefact pipeline, so we
+    reuse it here to avoid pulling another rendering stack into the
+    image. CSS support is intentionally minimal — we wrap the body
+    in a small print-friendly stylesheet so headings + lists render
+    sensibly without inheriting the app's dark theme.
+    """
+    from io import BytesIO
+
+    from xhtml2pdf import pisa  # local import: optional dep
+
+    # Wrap the body in a minimal HTML shell. We deliberately don't
+    # link any of the app's CSS — xhtml2pdf is a print renderer, and
+    # ``var(--accent)`` etc. would just resolve to nothing. The
+    # inline stylesheet below mirrors the document preview's
+    # ``.promptly-doc`` class but uses absolute units so the PDF
+    # looks the same regardless of the viewer's zoom level.
+    safe_title = html.escape(title) if title else "Document"
+    page_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{safe_title}</title>
+<style>
+@page {{ size: A4; margin: 18mm 18mm 22mm 18mm; }}
+body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #111; }}
+h1, h2, h3, h4, h5, h6 {{ font-weight: 700; margin: 1.1em 0 0.4em; line-height: 1.2; }}
+h1 {{ font-size: 22pt; }}
+h2 {{ font-size: 17pt; }}
+h3 {{ font-size: 14pt; }}
+h4 {{ font-size: 12pt; }}
+p {{ margin: 0 0 0.6em; }}
+ul, ol {{ margin: 0 0 0.6em 1.2em; padding: 0; }}
+li {{ margin: 0.2em 0; }}
+blockquote {{ margin: 0.8em 0; padding: 0 0 0 12pt; border-left: 3pt solid #ccc; color: #444; }}
+code {{ font-family: "Courier New", monospace; font-size: 10pt; background: #f3f3f3; padding: 1pt 3pt; }}
+pre {{ background: #f7f7f7; padding: 8pt 10pt; font-size: 10pt; white-space: pre-wrap; }}
+table {{ border-collapse: collapse; width: 100%; margin: 0.6em 0; }}
+th, td {{ border: 0.6pt solid #aaa; padding: 4pt 6pt; vertical-align: top; }}
+th {{ background: #f0f0f0; font-weight: 700; }}
+hr {{ border: 0; border-top: 0.6pt solid #ccc; margin: 0.8em 0; }}
+img {{ max-width: 100%; }}
+a {{ color: #2563eb; text-decoration: none; }}
+</style>
+</head>
+<body>{html_text}</body>
+</html>"""
+
+    out = BytesIO()
+    # ``encoding`` is forwarded to xhtml2pdf so non-ASCII chars
+    # (em-dashes, quotes, emoji-stripped fallbacks) survive the
+    # render without ``?`` placeholders.
+    pisa_status = pisa.CreatePDF(src=page_html, dest=out, encoding="utf-8")
+    if pisa_status.err:
+        # xhtml2pdf reports parse errors via the status object
+        # rather than raising. Surface as a 500 — we already
+        # sanitised the HTML upstream, so this should be very rare
+        # (usually a malformed table or unsupported CSS).
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to render document as PDF",
+        )
+    return out.getvalue()
+
+
+@router.get("/{document_id}/download")
+async def download_document(
+    document_id: uuid.UUID,
+    format: str = Query(
+        default="html",
+        pattern="^(html|md|pdf)$",
+        description="Output format: html (default), md, or pdf.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Download the document in the requested format.
+
+    Routes off the *current* HTML blob on disk (so the export sees
+    whatever was last persisted by the collab snapshot or manual
+    save). ``format=html`` returns the blob as-is; ``md`` runs it
+    through ``markdownify``; ``pdf`` renders via xhtml2pdf. Every
+    response carries a ``Content-Disposition: attachment`` so the
+    browser saves the file rather than rendering it inline (avoids
+    a half-styled HTML page taking over the tab).
+    """
+    row = await _load_document(db, document_id, user)
+    abs_path = absolute_path(row.storage_path)
+
+    # Read the on-disk HTML, treating "missing" or "empty" as a
+    # legitimate empty-document case — the backend creates files at
+    # 0 bytes on POST /api/documents and the user may simply have
+    # not typed anything yet (or, as the bug we're partly working
+    # around, the collab snapshot path never wrote them out).
+    try:
+        html_text = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
+    except OSError:
+        html_text = ""
+
+    fmt = format.lower()
+    if fmt == "md":
+        body = _html_to_markdown(html_text).encode("utf-8")
+        filename = _document_download_filename(row.filename, extension=".md")
+        media_type = "text/markdown; charset=utf-8"
+    elif fmt == "pdf":
+        body = _html_to_pdf_bytes(html_text, title=row.filename)
+        filename = _document_download_filename(row.filename, extension=".pdf")
+        media_type = "application/pdf"
+    else:
+        body = html_text.encode("utf-8")
+        filename = _document_download_filename(row.filename, extension=".html")
+        media_type = "text/html; charset=utf-8"
+
+    # Minimal RFC 5987 escape so a non-ASCII filename round-trips.
+    # Falls back to a plain ASCII name when nothing exotic is in the
+    # title — keeps the header readable.
+    ascii_safe = filename.encode("ascii", "replace").decode("ascii")
+    disposition = f'attachment; filename="{ascii_safe}"'
+    if filename != ascii_safe:
+        from urllib.parse import quote
+
+        disposition = (
+            f'attachment; filename="{ascii_safe}"; '
+            f"filename*=UTF-8''{quote(filename)}"
+        )
+
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": disposition,
+            "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
+            # Don't cache the export — the underlying document
+            # changes constantly while editing, and a cached HTML/MD
+            # would lie about the current state.
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 # --------------------------------------------------------------------
