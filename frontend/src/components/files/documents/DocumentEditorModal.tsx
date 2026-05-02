@@ -63,6 +63,21 @@ export function DocumentEditorModal({
   const [filename, setFilename] = useState(file.filename);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [renameError, setRenameError] = useState<string | null>(null);
+  // Wall-clock timestamp of the last successful manual save. Drives
+  // the persistent "Saved Xs ago" chip so a user on a broken-WS
+  // production deployment gets durable feedback that their click
+  // worked — without this they'd just see the same "Offline" chip
+  // before and after the click and reasonably conclude the button
+  // did nothing.
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  // Re-render the "Xs ago" chip on a slow tick so the relative
+  // time stays current without making React part of every keystroke.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!lastSavedAt) return;
+    const id = window.setInterval(() => forceTick((n) => n + 1), 15_000);
+    return () => window.clearInterval(id);
+  }, [lastSavedAt]);
 
   // True when the caller is a grantee viewing a doc owned by
   // someone else. Drives the read-only chrome: the rename input
@@ -215,6 +230,70 @@ export function DocumentEditorModal({
     editorRef.current = editor;
   }, [editor]);
 
+  // ------------------------------------------------------------------
+  // Offline fallback — seed the editor from the saved HTML blob
+  // ------------------------------------------------------------------
+  // When the collab WebSocket fails (typical prod symptom: a
+  // Cloudflare tunnel that hasn't been told to upgrade WS, a stopped
+  // collab container, or an aggressively-buffering reverse proxy)
+  // the Y.Doc never receives the previously-saved state. The editor
+  // stays empty, the user can't see what they wrote earlier, and a
+  // manual Save would clobber the on-disk blob with the empty
+  // editor content.
+  //
+  // To make the offline path actually usable we fetch the HTML blob
+  // a couple of seconds after we determine the WS isn't coming up
+  // and apply it via ``editor.commands.setContent``. y-prosemirror
+  // mirrors that into the local Y.Doc, so subsequent edits + manual
+  // saves persist correctly. Guards:
+  //
+  //   * Only seed once per modal lifetime (``seededRef``) so we
+  //     can't fight a slow-but-eventually-successful WS.
+  //   * Only seed when the editor is empty — if the WS DID briefly
+  //     deliver content before going down, we leave that alone.
+  //   * Soft-fail on fetch errors. The user can still type from
+  //     scratch; the manual save endpoint doesn't depend on this.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (!editor) return;
+    if (collabStatus === "connected") return;
+    // Fire once we hit a *terminal* disconnect — "connecting" is
+    // the WS's normal state during the first handshake, so a 2s
+    // timer there would seed too eagerly. Hocuspocus reports
+    // "disconnected" after each failed connect attempt, which is
+    // the cue we want.
+    if (collabStatus !== "disconnected") return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (cancelled || seededRef.current) return;
+      try {
+        const { blob } = await documentsApi.download(file.id, "html");
+        const html = (await blob.text()).trim();
+        if (cancelled || seededRef.current) return;
+        // Editor may have raced ahead with user keystrokes by now;
+        // never overwrite local edits.
+        if (!editor.isEmpty) return;
+        if (!html) return;
+        // ``setContent(..., false)`` doesn't emit a transaction-meta
+        // ``addToHistory`` flag, which keeps the seed out of the
+        // user-visible undo stack — backspace shouldn't undo "open
+        // the document".
+        editor.commands.setContent(html, false);
+        seededRef.current = true;
+      } catch (err) {
+        // Soft-fail; an empty editor is still usable.
+        console.warn("[doc] offline seed failed", err);
+      }
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [collabStatus, editor, file.id]);
+
   // Collab-status → save-indicator mapping.
   useEffect(() => {
     if (collabStatus === "disconnected") {
@@ -351,9 +430,14 @@ export function DocumentEditorModal({
       const updated = await documentsApi.manualSave(file.id, html);
       onFileUpdated?.(updated);
       await queryClient.invalidateQueries({ queryKey: ["drive"] });
-      // Flip the indicator into "saved" briefly even if the collab
-      // path was the one that actually persisted last — matches
-      // user expectation that pressing Save = green tick.
+      // The timestamp drives a *durable* "Saved Xs ago" chip even
+      // when the collab WS is down. Without it, the SaveIndicator
+      // would re-render straight back to "Offline — Save manually"
+      // and the user would reasonably think the click did nothing.
+      setLastSavedAt(new Date());
+      // Flash the green tick briefly too so the click feels
+      // responsive — the relative-time chip takes over once the
+      // tick fades.
       setSaveStatus("saved");
       if (savedTimerRef.current !== null) {
         window.clearTimeout(savedTimerRef.current);
@@ -530,6 +614,7 @@ export function DocumentEditorModal({
           status={saveStatus}
           error={error}
           collabOffline={collabStatus === "disconnected"}
+          lastSavedAt={lastSavedAt}
         />
 
         {/* Manual save — visible for owners only. Grantees see the
@@ -668,7 +753,8 @@ export function DocumentEditorModal({
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div>
             <strong className="font-semibold">Live sync offline.</strong>{" "}
-            Autosave is paused. Press{" "}
+            Loaded the last saved version. Autosave is paused —
+            press{" "}
             <kbd className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px]">
               ⌘/Ctrl
             </kbd>{" "}
@@ -731,10 +817,18 @@ function SaveIndicator({
   status,
   error,
   collabOffline,
+  lastSavedAt,
 }: {
   status: SaveStatus;
   error: string | null;
   collabOffline: boolean;
+  /** Wall-clock timestamp of the last successful manual save, or
+   *  ``null`` if the user hasn't manually saved this session.
+   *  Drives the persistent "Saved Xs ago" chip so a click on the
+   *  Save button has visible feedback even when the collab WS is
+   *  offline (which would otherwise pin the indicator to
+   *  "Offline — Save manually" forever). */
+  lastSavedAt: Date | null;
 }) {
   if (error) {
     return (
@@ -747,10 +841,18 @@ function SaveIndicator({
     );
   }
 
-  // ``offline`` from the explicit collab-disconnect signal beats
-  // the live-edit "syncing" state — there's no sync happening when
-  // the WS is down, so showing a spinning "syncing…" is misleading.
-  const effective: SaveStatus = collabOffline ? "offline" : status;
+  // The freshly-saved tick + the persistent "Saved Xs ago" chip
+  // both override the offline-collab signal — pressing Save needs
+  // visible feedback regardless of whether the WS is healthy. Only
+  // when neither is active do we fall back to the offline chip /
+  // raw status.
+  const showFreshTick = status === "saved";
+  const effective: SaveStatus =
+    showFreshTick || lastSavedAt
+      ? "saved"
+      : collabOffline
+        ? "offline"
+        : status;
 
   const styles =
     effective === "offline"
@@ -760,6 +862,21 @@ function SaveIndicator({
         : effective === "saved"
           ? "text-emerald-600 dark:text-emerald-400"
           : "text-[var(--muted)]";
+
+  // Pick the visible label.
+  let label: string;
+  if (effective === "offline") {
+    label = "Offline — Save manually";
+  } else if (effective === "syncing") {
+    label = "Syncing…";
+  } else if (effective === "saved") {
+    label = showFreshTick
+      ? "All changes saved"
+      : `Saved ${formatRelative(lastSavedAt!)}`;
+  } else {
+    label = "Ready";
+  }
+
   return (
     <span
       className={cn(
@@ -770,7 +887,9 @@ function SaveIndicator({
       title={
         effective === "offline"
           ? "Live collaboration offline — autosave paused. Use the Save button."
-          : undefined
+          : effective === "saved" && lastSavedAt
+            ? `Last saved at ${lastSavedAt.toLocaleTimeString()}`
+            : undefined
       }
     >
       {effective === "syncing" || effective === "idle" ? (
@@ -780,15 +899,23 @@ function SaveIndicator({
       ) : (
         <AlertTriangle className="h-3.5 w-3.5" />
       )}
-      {effective === "offline"
-        ? "Offline — Save manually"
-        : effective === "syncing"
-          ? "Syncing…"
-          : effective === "saved"
-            ? "All changes saved"
-            : "Ready"}
+      {label}
     </span>
   );
+}
+
+/** Loose relative-time formatter for the "Saved Xs ago" chip.
+ *  Caps at 24h — past that we'd rather render the absolute time so
+ *  a stale tab doesn't quietly read "Saved 17h ago" forever. */
+function formatRelative(when: Date): string {
+  const sec = Math.max(0, Math.floor((Date.now() - when.getTime()) / 1000));
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `at ${when.toLocaleTimeString()}`;
 }
 
 function DownloadMenuItem({
