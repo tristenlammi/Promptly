@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -402,6 +402,53 @@ function computeAuthorLabel(
   return authorLookup[authorUserId] ?? "Friend";
 }
 
+/** Apply the "show failures only when nothing else worked" rule to
+ *  the live list of tool invocations before rendering.
+ *
+ *  Per tool name:
+ *    - Pending invocations always render (in-flight UX).
+ *    - If at least one ``ok`` invocation exists, every ``error`` entry
+ *      for that tool is dropped. Most failed chips in practice come
+ *      from the per-turn cap kicking in after several successful
+ *      searches — the user has already got useful results, so the red
+ *      X-chips are pure noise and look like a duplicate bug.
+ *    - If *every* invocation of that tool errored, keep exactly one
+ *      chip (the most recent failure) so the user still sees that the
+ *      tool couldn't do its job. That preserves the "complete failure
+ *      surfaces clearly" guarantee.
+ *
+ *  Order is preserved within each retained group; the final array is
+ *  rebuilt in the same order tools were started so the chip strip
+ *  matches the model's actual call sequence.
+ */
+export function consolidateToolInvocations(
+  invocations: ToolInvocation[] | null | undefined,
+): ToolInvocation[] {
+  if (!invocations || invocations.length === 0) return [];
+  const byName = new Map<string, ToolInvocation[]>();
+  for (const inv of invocations) {
+    const bucket = byName.get(inv.name);
+    if (bucket) bucket.push(inv);
+    else byName.set(inv.name, [inv]);
+  }
+  const keep = new Set<string>();
+  for (const group of byName.values()) {
+    const hasSuccess = group.some((t) => t.status === "ok");
+    let lastErrorId: string | null = null;
+    for (const t of group) {
+      if (t.status === "pending" || t.status === "ok") {
+        keep.add(t.id);
+      } else if (t.status === "error") {
+        lastErrorId = t.id;
+      }
+    }
+    if (!hasSuccess && lastErrorId !== null) {
+      keep.add(lastErrorId);
+    }
+  }
+  return invocations.filter((t) => keep.has(t.id));
+}
+
 function MessageBubbleImpl({
   role,
   content,
@@ -430,7 +477,11 @@ function MessageBubbleImpl({
   // Phase A1: assistant rows can carry attachments too (artefacts
   // produced by tool calls). The chip UI is identical across roles.
   const hasAttachments = !!attachments && attachments.length > 0;
-  const hasToolInvocations = !!toolInvocations && toolInvocations.length > 0;
+  const displayedToolInvocations = useMemo(
+    () => consolidateToolInvocations(toolInvocations),
+    [toolInvocations],
+  );
+  const hasToolInvocations = displayedToolInvocations.length > 0;
   const hasStats =
     !isUser &&
     !streaming &&
@@ -621,7 +672,7 @@ function MessageBubbleImpl({
         )}
         {hasToolInvocations && (
           <div className="mt-2 flex flex-col gap-1.5">
-            {toolInvocations!.map((t) => (
+            {displayedToolInvocations.map((t) => (
               <ToolStatusBlock key={t.id} invocation={t} />
             ))}
           </div>

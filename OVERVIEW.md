@@ -2,7 +2,7 @@
 
 > Single-source reference for **what Promptly is, what it does, and how it's built**. `README.md` is the operator runbook (deploy + day-2 ops); this document is the product + architecture map. Update it whenever a feature lands, gets reworked, or gets removed.
 >
-> **Last updated:** 2026-04-22 (clarified project-scope sharing semantics: system prompt + pinned files shared, conversation history is not)
+> **Last updated:** 2026-05-12 (chat tool limits: `chat_max_web_searches_per_turn` admin setting (migration `0045_app_settings_search_cap`) + frontend consolidation of failed tool chips when a same-tool call already succeeded; also recommitted the previously-uncommitted `0044_fix_fts_filename_hyphens` migration so the chain validates from a fresh install — note Alembic revision ids are capped at 32 chars by `alembic_version.version_num varchar(32)`)
 
 ---
 
@@ -234,7 +234,7 @@ Split-pane page: chat on the left, an interactive **whiteboard / exercise iframe
 
 ## 6. Database schema (high level)
 
-All tables are created by Alembic (`backend/alembic/versions/`), currently at migration **0029**. Ownership is enforced by FK + row-level queries, not Postgres RLS.
+All tables are created by Alembic (`backend/alembic/versions/`), currently at migration **0045**. Ownership is enforced by FK + row-level queries, not Postgres RLS.
 
 | Table | What it holds | Key columns |
 |---|---|---|
@@ -249,7 +249,7 @@ All tables are created by Alembic (`backend/alembic/versions/`), currently at mi
 | `study_projects` / `study_units` / `study_sessions` / `study_exams` / `study_messages` / `whiteboard_exercises` / `study_notes` | Study mode state | topic plan, unit mastery, exam runs, whiteboard payloads |
 | `model_providers` | Admin-configured providers + enabled models | `kind`, `name`, `base_url`, `api_key_enc`, `enabled_models` JSON |
 | `search_providers` | Enabled search backends + keys | `kind`, `api_key_enc`, `enabled` |
-| `app_settings` | Singleton-ish global settings | theme default, default provider, feature flags |
+| `app_settings` | Singleton-ish global settings | theme default, default provider, feature flags, `chat_max_web_searches_per_turn` |
 | `usage_daily` | Per-user per-day rollups | `user_id`, `day`, `messages`, `prompt_tokens`, `completion_tokens`, `cost_usd` |
 | `error_events` | Captured errors for admin console | level, stack, route, method, status_code, request_id |
 | `push_subscriptions` + `push_preferences` | Web push | endpoint, p256dh, auth, per-event toggles |

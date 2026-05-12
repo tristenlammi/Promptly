@@ -177,6 +177,13 @@ export interface AppSettings {
    * regardless of what's listed here.
    */
   public_origins: string[];
+  /**
+   * Per-turn cap on ``web_search`` tool invocations during a single
+   * assistant reply. Defaults to 5 (matches ``MAX_TOOL_HOPS`` on the
+   * backend). Admins can tune this under Admin → Settings → Chat
+   * tool limits when a chatty model keeps overshooting.
+   */
+  chat_max_web_searches_per_turn: number;
   updated_at: string;
 }
 

@@ -97,6 +97,11 @@ export interface AppSettingsPatch {
    * Admin → Settings. Localhost is always allowed regardless.
    */
   public_origins?: string[];
+  /**
+   * Per-turn cap on ``web_search`` tool invocations. Backend enforces
+   * a 1..20 range; the form clamps before sending so a typo can't 422.
+   */
+  chat_max_web_searches_per_turn?: number;
 }
 
 export interface OriginPreview {

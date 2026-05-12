@@ -132,6 +132,12 @@ class AppSettingsResponse(BaseModel):
     # the first-run wizard's "Public URL" step writes the first entry.
     public_origins: list[str] = Field(default_factory=list)
 
+    # ----- Chat tool limits -----
+    # Per-turn cap on ``web_search`` tool invocations. Lives here so
+    # admins can tune it without redeploying when a chatty model keeps
+    # overshooting the default.
+    chat_max_web_searches_per_turn: int
+
     updated_at: datetime
 
 
@@ -171,6 +177,13 @@ class AppSettingsUpdate(BaseModel):
     # public DNS name) accept both. The router validates each entry
     # is a fully-qualified scheme://host[:port] before persisting.
     public_origins: list[str] | None = Field(default=None, max_length=20)
+
+    # ----- Chat tool limits -----
+    # Range bounded to 1..20: 0 would break web search entirely (use
+    # the per-conversation ``web_search_mode = "off"`` instead) and
+    # anything above ~10 is almost certainly a runaway loop chewing
+    # through the user's search-API quota.
+    chat_max_web_searches_per_turn: int | None = Field(default=None, ge=1, le=20)
 
 
 class AdminUserCreate(BaseModel):

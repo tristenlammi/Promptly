@@ -26,6 +26,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.auth.audit import (
     EVENT_BUDGET_EXCEEDED,
     EVENT_TOOL_FAILED,
@@ -1948,6 +1949,7 @@ async def _dispatch_tools(
     on_sources=None,  # noqa: ANN001 — callable: list[dict] -> None | None
     on_cost=None,  # noqa: ANN001 — callable: float -> None | None
     invocation_counts: dict[str, int] | None = None,
+    per_tool_caps: dict[str, int] | None = None,
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -2053,14 +2055,24 @@ async def _dispatch_tools(
             )
             continue
 
-        # 3) Per-turn cap (e.g. generate_image budget). Counted before
-        #    the call so a refusal still bumps the counter — the model
-        #    can't get around the cap by spamming retries.
-        if tool.max_per_turn is not None and invocation_counts is not None:
+        # 3) Per-turn cap (e.g. ``web_search`` budget, ``generate_image``
+        #    budget). Counted before the call so a refusal still bumps
+        #    the counter — the model can't get around the cap by spamming
+        #    retries. ``per_tool_caps`` overrides the tool-class default
+        #    (used by the chat stream to honour the admin-configured
+        #    ``chat_max_web_searches_per_turn``); falls back to the
+        #    static ``Tool.max_per_turn`` attribute when no override is
+        #    in scope.
+        effective_cap: int | None = None
+        if per_tool_caps is not None and name in per_tool_caps:
+            effective_cap = per_tool_caps[name]
+        elif tool.max_per_turn is not None:
+            effective_cap = tool.max_per_turn
+        if effective_cap is not None and invocation_counts is not None:
             spent = invocation_counts.get(name, 0)
-            if spent >= tool.max_per_turn:
+            if spent >= effective_cap:
                 err_msg = (
-                    f"Tool '{name}' is limited to {tool.max_per_turn} "
+                    f"Tool '{name}' is limited to {effective_cap} "
                     "call(s) per turn. Ask the user to send another "
                     "message if more are needed."
                 )
@@ -2072,6 +2084,11 @@ async def _dispatch_tools(
                     tool_name=name,
                     detail={"error": "per_turn_cap"},
                 )
+                # ``error_kind`` lets the frontend recognise this as a
+                # benign overshoot rather than a real provider failure
+                # — the consolidation rule in MessageBubble uses it to
+                # suppress these chips when at least one call of the
+                # same tool already succeeded this turn.
                 yield (
                     sse_yield(
                         {
@@ -2080,6 +2097,7 @@ async def _dispatch_tools(
                             "name": name,
                             "ok": False,
                             "error": err_msg,
+                            "error_kind": "per_turn_cap",
                         }
                     ),
                     {
@@ -2526,6 +2544,20 @@ async def _stream_generator(
         # the entire tool-calling loop (not just within a single hop).
         tool_invocation_counts: dict[str, int] = {}
 
+        # Admin-tunable per-tool caps loaded once for this stream so
+        # both the forced "always" web_search and the regular tool
+        # loop see the same value, even if an admin edits the setting
+        # mid-stream. Falls back to the tool-class default
+        # (``Tool.max_per_turn``) inside ``_dispatch_tools`` when this
+        # dict is missing an entry — keeps behaviour stable if the
+        # singleton row is somehow unreadable.
+        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        per_tool_caps: dict[str, int] = {}
+        if app_settings_row is not None:
+            per_tool_caps["web_search"] = (
+                app_settings_row.chat_max_web_searches_per_turn
+            )
+
         def _record_tool_cost(c: float) -> None:
             # Mutates the enclosing ``cost_usd`` accumulator without
             # ``nonlocal`` boilerplate at every call site.
@@ -2597,6 +2629,7 @@ async def _stream_generator(
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
                     invocation_counts=tool_invocation_counts,
+                    per_tool_caps=per_tool_caps,
                 ):
                     yield sse_event
                     if tool_history_msg is not None:
@@ -2829,6 +2862,7 @@ async def _stream_generator(
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
                     invocation_counts=tool_invocation_counts,
+                    per_tool_caps=per_tool_caps,
                 ):
                     # Always forward the SSE event. ``tool_history_msg``
                     # is None for "started" pre-events (which have no

@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Gauge, Loader2, Mail, ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  Gauge,
+  Globe,
+  Loader2,
+  Mail,
+  ShieldAlert,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -66,7 +75,134 @@ export function AppSettingsPanel() {
         onSubmit={(patch) => update.mutateAsync(patch)}
         busy={update.isPending}
       />
+      <ChatToolLimitsCard
+        settings={data}
+        onSubmit={(patch) => update.mutateAsync(patch)}
+        busy={update.isPending}
+      />
     </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// Chat tool limits — per-turn cap on the web_search tool
+// --------------------------------------------------------------------
+const WEB_SEARCH_CAP_MIN = 1;
+const WEB_SEARCH_CAP_MAX = 20;
+
+function ChatToolLimitsCard({ settings, onSubmit, busy }: CardSubmit) {
+  const initial = String(settings.chat_max_web_searches_per_turn);
+  const [value, setValue] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Resync when the source-of-truth changes (after save / refetch).
+  useEffect(() => {
+    setValue(initial);
+  }, [initial]);
+
+  const dirty = value !== initial;
+
+  const handleSave = async () => {
+    setError(null);
+    const trimmed = value.trim();
+    const parsed = Number(trimmed);
+    if (
+      trimmed === "" ||
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < WEB_SEARCH_CAP_MIN ||
+      parsed > WEB_SEARCH_CAP_MAX
+    ) {
+      setError(
+        `Cap must be a whole number between ${WEB_SEARCH_CAP_MIN} and ${WEB_SEARCH_CAP_MAX}.`,
+      );
+      return;
+    }
+    try {
+      await onSubmit({ chat_max_web_searches_per_turn: parsed });
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  return (
+    <Card
+      title="Chat tool limits"
+      icon={<Globe className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">
+              {error}
+            </span>
+          )}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setValue(initial);
+                setError(null);
+              }}
+              disabled={busy}
+            >
+              Discard
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={!dirty || busy}
+            loading={busy}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
+        Hard cap on how many times a single assistant reply can call the{" "}
+        <code className="rounded bg-black/[0.05] px-1 py-0.5 text-[11px] dark:bg-white/[0.06]">
+          web_search
+        </code>{" "}
+        tool. Raise this if you see the model running out of searches on
+        research-heavy questions; lower it to protect your search-API
+        quota from runaway loops. Calls past the cap are silently
+        suppressed in the chat UI when at least one earlier search
+        succeeded.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field
+          label={`Web searches / turn (${WEB_SEARCH_CAP_MIN}\u2013${WEB_SEARCH_CAP_MAX})`}
+          value={value}
+          onChange={(v) => {
+            setValue(v);
+            setError(null);
+            setSavedAt(null);
+          }}
+          placeholder="5"
+          type="number"
+          step={1}
+          min={WEB_SEARCH_CAP_MIN}
+          disabled={busy}
+        />
+      </div>
+    </Card>
   );
 }
 

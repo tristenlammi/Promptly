@@ -18,11 +18,16 @@ The tool returns a single ``ToolResult`` whose:
 * ``meta`` — provider type + query, surfaced on the ``tool_finished``
   SSE event so the UI can show "searched Brave for 'foo'" on the chip.
 
-Per-turn cap: 3 invocations. A single chat turn that searches more
-than three times is almost always a runaway loop — the model is
-better off summarising what it has and asking the user for help. The
-hard cap matches the existing per-turn budget pattern set by
-``GenerateImageTool``.
+Per-turn cap: 5 invocations by default, admin-tunable via
+``app_settings.chat_max_web_searches_per_turn`` (1..20). A single
+chat turn that searches more than a handful of times is almost
+always a runaway loop — the model is better off summarising what it
+has and asking the user for help. The hard cap matches the existing
+per-turn budget pattern set by ``GenerateImageTool``. The class
+attribute below is the fallback used when the singleton
+``app_settings`` row is somehow unreadable; the live value is
+loaded once per stream in :func:`app.chat.router._stream_generator`
+and passed in via ``per_tool_caps``.
 """
 from __future__ import annotations
 
@@ -86,10 +91,13 @@ class WebSearchTool(Tool):
         "required": ["query"],
         "additionalProperties": False,
     }
-    # Three searches per turn is enough for "search, refine, double-
-    # check" patterns without letting a confused model burn the user's
-    # search-API quota in one turn.
-    max_per_turn = 3
+    # Fallback per-turn cap used when no ``per_tool_caps`` override is
+    # in scope (i.e. ``app_settings`` couldn't be read). Five searches
+    # per turn matches :data:`MAX_TOOL_HOPS` so the per-tool cap and
+    # the global hop limit hit at the same point — neither is the
+    # silently-binding constraint by accident. Admins can tune this
+    # under Admin → Settings → Chat tool limits.
+    max_per_turn = 5
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         query = args.get("query")

@@ -108,6 +108,7 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         default_daily_token_budget=row.default_daily_token_budget,
         default_monthly_token_budget=row.default_monthly_token_budget,
         public_origins=list(row.public_origins or []),
+        chat_max_web_searches_per_turn=row.chat_max_web_searches_per_turn,
         updated_at=row.updated_at,
     )
 
@@ -218,6 +219,19 @@ async def update_app_settings(
             if getattr(row, field_name) != new_val:
                 diff[field_name] = new_val
             setattr(row, field_name, new_val)
+
+    # ----- Chat tool limits -----
+    # Integer scalar — same tri-state convention as the other ints:
+    # omitted = unchanged. Pydantic already enforced the 1..20 range
+    # on the way in, so the router just persists.
+    if (
+        "chat_max_web_searches_per_turn" in fields
+        and payload.chat_max_web_searches_per_turn is not None
+    ):
+        new_val = payload.chat_max_web_searches_per_turn
+        if row.chat_max_web_searches_per_turn != new_val:
+            diff["chat_max_web_searches_per_turn"] = new_val
+        row.chat_max_web_searches_per_turn = new_val
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next
