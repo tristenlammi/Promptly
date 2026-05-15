@@ -53,18 +53,35 @@ function normaliseOllamaTag(name: string): string {
  * Custom Models tab inside the admin Models page.
  *
  * Surfaces admin-curated assistants (personality + base model +
- * knowledge library). The top of the panel shows the workspace-level
- * embedding configuration because that choice is what makes the
- * "knowledge library" actually useful — without it, files can be
- * attached but never embedded.
+ * knowledge library). The embedding configuration — which makes
+ * each assistant's knowledge library actually useful — moved out
+ * of this panel into the ``Defaults`` tab, alongside the global
+ * default chat model and the vision relay. A small status nudge
+ * stays here so admins discover where to configure it.
  */
-export function CustomModelsPanel() {
+export function CustomModelsPanel({
+  onJumpToDefaults,
+}: {
+  /** Optional jump-to-Defaults handler. When provided, the inline
+   *  embedding banner becomes a button that switches tabs without
+   *  forcing a full page navigation; without it the banner is a
+   *  passive hint. Wired by ``ModelsPanel`` which owns the tab
+   *  state. */
+  onJumpToDefaults?: () => void;
+}) {
   const { data: models, isLoading } = useCustomModels();
+  const { data: embeddingConfig } = useEmbeddingConfig();
   const [drawerId, setDrawerId] = useState<"new" | string | null>(null);
+
+  const embeddingConfigured =
+    !!embeddingConfig?.embedding_provider_id &&
+    !!embeddingConfig?.embedding_model_id;
 
   return (
     <div className="space-y-4">
-      <EmbeddingConfigCard />
+      {!embeddingConfigured && (
+        <EmbeddingMissingBanner onJumpToDefaults={onJumpToDefaults} />
+      )}
 
       <div className="flex items-center justify-between">
         <div>
@@ -115,10 +132,56 @@ export function CustomModelsPanel() {
 }
 
 // --------------------------------------------------------------------
-// Embedding config status card
+// Inline "no embedding configured" banner — lightweight nudge that
+// replaces the full-fat ``EmbeddingConfigCard`` here. The card itself
+// lives on the Defaults tab now; this banner exists so admins on the
+// Custom Models tab don't wonder why their uploads aren't getting
+// embedded.
 // --------------------------------------------------------------------
 
-function EmbeddingConfigCard() {
+function EmbeddingMissingBanner({
+  onJumpToDefaults,
+}: {
+  onJumpToDefaults?: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-amber-700 dark:text-amber-300">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium">
+          No embedding model configured
+        </div>
+        <div className="mt-0.5 text-xs">
+          Custom models can be created, but file uploads in their knowledge
+          libraries won't be embedded until an embedding model is picked
+          under <span className="font-semibold">Models → Defaults</span>.
+        </div>
+      </div>
+      {onJumpToDefaults && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onJumpToDefaults}
+          className="shrink-0"
+        >
+          Open Defaults
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// Embedding config status card
+// --------------------------------------------------------------------
+//
+// Exported so the Admin → Models → Defaults tab can render the same
+// card without forking the implementation — historically this lived
+// only inside the Custom Models panel because that's where embeddings
+// are *used*, but the picker itself belongs alongside the other
+// "default model for role X" knobs (default chat model, vision relay).
+
+export function EmbeddingConfigCard() {
   const { data, isLoading } = useEmbeddingConfig();
   const { data: providers } = useProviders();
   const test = useTestEmbeddingConfig();

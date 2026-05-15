@@ -202,7 +202,40 @@ export interface AppSettings {
   vision_relay_provider_id: string | null;
   vision_relay_model_id: string | null;
   vision_relay_configured: boolean;
+  /**
+   * Workspace-wide fallback chat model used when a user creates a
+   * new chat and has no personal default set on their Account page.
+   * Both fields NULL = "no admin default — fall through to the
+   * catalog's first available model" (historical behaviour).
+   * ``default_chat_configured`` is a server-computed convenience
+   * boolean (both halves set) so the UI doesn't repeat the
+   * and-check everywhere.
+   */
+  default_chat_provider_id: string | null;
+  default_chat_model_id: string | null;
+  default_chat_configured: boolean;
   updated_at: string;
+}
+
+/** Subset of ``app_settings`` exposed at ``GET /api/workspace-defaults``
+ *  for non-admin users. Read by:
+ *
+ *  * ``modelStore`` — to fall back to the admin's default chat model
+ *    when the user has no personal default.
+ *  * ``InputBar`` — to soften the "this model can't read images"
+ *    warning into an informational chip when a vision relay is
+ *    configured (and suppress it altogether if the relay model name
+ *    is the same as the chat model — pathological case but possible).
+ *
+ *  The vision-relay model id is non-sensitive: it already appears on
+ *  the relay chips that render during a streamed turn, so exposing
+ *  it here doesn't leak anything new.
+ */
+export interface WorkspaceDefaults {
+  default_chat_provider_id: string | null;
+  default_chat_model_id: string | null;
+  vision_relay_provider_id: string | null;
+  vision_relay_model_id: string | null;
 }
 
 // ---- Admin analytics ----

@@ -242,6 +242,9 @@ async def health() -> JSONResponse:
 # ---- Router registration ----
 from app.admin.router import router as admin_router  # noqa: E402
 from app.app_settings.router import router as app_settings_router  # noqa: E402
+from app.app_settings.public_router import (  # noqa: E402
+    router as workspace_defaults_router,
+)
 from app.auth.router import router as auth_router  # noqa: E402
 from app.chat.compare_router import router as chat_compare_router  # noqa: E402
 from app.chat.project_shares import invite_router as project_invite_router  # noqa: E402
@@ -264,6 +267,15 @@ app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(
     app_settings_router, prefix="/api/admin/app-settings", tags=["admin"]
+)
+# Non-admin read of the workspace-wide model defaults — every
+# authenticated user needs to see this so the chat picker can
+# initialise to the admin's default for users who haven't picked
+# a personal preference yet.
+app.include_router(
+    workspace_defaults_router,
+    prefix="/api/workspace-defaults",
+    tags=["workspace-defaults"],
 )
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(

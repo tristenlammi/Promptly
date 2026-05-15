@@ -508,6 +508,37 @@ async def create_conversation(
                 update={"provider_id": project.default_provider_id}
             )
 
+    # Workspace-wide default chat model — final defensive fallback for
+    # callers (e.g. older clients, scripted API access) that POST a
+    # create-conversation payload without an explicit model pair.
+    # Precedence is:
+    #
+    #   1. payload.model_id / payload.provider_id  (already set above)
+    #   2. project defaults                        (handled in the
+    #                                               ``project_id`` block)
+    #   3. app_settings.default_chat_*_id          (THIS block)
+    #
+    # The personal default lives client-side on ``users.settings`` and
+    # is folded into the payload by the frontend before the POST, so
+    # by the time it reaches here a non-NULL payload pair has *already*
+    # honoured the personal default. This admin fallback only fires
+    # when both the personal default and the project defaults were
+    # empty — i.e. a fresh user starting a top-level chat with no
+    # preferences set anywhere.
+    if payload.model_id is None or payload.provider_id is None:
+        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        if app_settings_row is not None and app_settings_row.default_chat_configured:
+            if payload.model_id is None:
+                payload = payload.model_copy(
+                    update={"model_id": app_settings_row.default_chat_model_id}
+                )
+            if payload.provider_id is None:
+                payload = payload.model_copy(
+                    update={
+                        "provider_id": app_settings_row.default_chat_provider_id
+                    }
+                )
+
     conv = Conversation(
         user_id=user.id,
         title=payload.title,

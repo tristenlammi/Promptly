@@ -57,6 +57,43 @@ export default function App() {
     useModelStore.getState().setDefault(provider, model);
   }, [userSettings]);
 
+  // Also mirror the admin-configured workspace defaults — the default
+  // chat model (used as a picker fallback) and the vision relay
+  // (used by the composer to soften the "model can't read images"
+  // warning when a relay is configured). Fetched once on login (any-
+  // role endpoint); failures are swallowed because a non-fatal config
+  // read shouldn't gate the chat UI from loading.
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { workspaceDefaultsApi } = await import(
+          "@/api/workspaceDefaults"
+        );
+        const data = await workspaceDefaultsApi.get();
+        if (cancelled) return;
+        const store = useModelStore.getState();
+        store.setAdminDefault(
+          data.default_chat_provider_id ?? null,
+          data.default_chat_model_id ?? null,
+        );
+        store.setVisionRelay(
+          data.vision_relay_provider_id ?? null,
+          data.vision_relay_model_id ?? null,
+        );
+      } catch {
+        // No retry — the workspace defaults are a nice-to-have, not
+        // load-bearing. The fallback chain still has "first available"
+        // beneath it, and the composer's vision warning still works
+        // (it just doesn't know about the relay).
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
   // Keep the html.dark class in sync with the persisted theme on mount.
   useEffect(() => {
     applyTheme();

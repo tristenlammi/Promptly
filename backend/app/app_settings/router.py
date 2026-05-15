@@ -112,6 +112,9 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         vision_relay_provider_id=row.vision_relay_provider_id,
         vision_relay_model_id=row.vision_relay_model_id,
         vision_relay_configured=row.vision_relay_configured,
+        default_chat_provider_id=row.default_chat_provider_id,
+        default_chat_model_id=row.default_chat_model_id,
+        default_chat_configured=row.default_chat_configured,
         updated_at=row.updated_at,
     )
 
@@ -276,6 +279,43 @@ async def update_app_settings(
             diff["vision_relay_model_id"] = new_mid
         row.vision_relay_provider_id = new_pid
         row.vision_relay_model_id = new_mid
+
+    # ----- Default chat model -----
+    # Same paired semantics as the vision-relay block above. Repeating
+    # the validation rather than abstracting it keeps the two settings
+    # independently maintainable — neither is so complex that a shared
+    # helper would actually pay off, and the explicit copy makes diffs
+    # for either field grep-friendly.
+    dpid_set = "default_chat_provider_id" in fields
+    dmid_set = "default_chat_model_id" in fields
+    if dpid_set != dmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "default_chat_provider_id and default_chat_model_id must "
+                "be sent together — pass both to set a default, or both "
+                "as null to clear."
+            ),
+        )
+    if dpid_set and dmid_set:
+        new_pid = payload.default_chat_provider_id
+        new_mid = payload.default_chat_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "default_chat_provider_id and default_chat_model_id "
+                    "must both be set or both be null."
+                ),
+            )
+        if row.default_chat_provider_id != new_pid:
+            diff["default_chat_provider_id"] = (
+                str(new_pid) if new_pid else None
+            )
+        if row.default_chat_model_id != new_mid:
+            diff["default_chat_model_id"] = new_mid
+        row.default_chat_provider_id = new_pid
+        row.default_chat_model_id = new_mid
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

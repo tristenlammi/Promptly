@@ -16,6 +16,8 @@ import { cn } from "@/utils/cn";
 import type { AppSettings } from "@/api/types";
 import type { AppSettingsPatch } from "@/api/admin";
 
+import { SettingsCard } from "./SettingsCard";
+
 /**
  * Admin view + editor for the global ``app_settings`` row.
  *
@@ -84,6 +86,11 @@ export function AppSettingsPanel() {
   );
 }
 
+// Vision-relay card lives in ``DefaultsTab.tsx`` (Admin → Models →
+// Defaults) where it sits alongside the global default-chat-model
+// and embedding-model pickers — the three "which model for role X"
+// knobs stay collocated.
+
 // --------------------------------------------------------------------
 // Chat tool limits — per-turn cap on the web_search tool
 // --------------------------------------------------------------------
@@ -134,7 +141,7 @@ function ChatToolLimitsCard({ settings, onSubmit, busy }: CardSubmit) {
   }, [savedAt]);
 
   return (
-    <Card
+    <SettingsCard
       title="Chat tool limits"
       icon={<Globe className="h-4 w-4" />}
       footer={
@@ -202,7 +209,7 @@ function ChatToolLimitsCard({ settings, onSubmit, busy }: CardSubmit) {
           disabled={busy}
         />
       </div>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -333,7 +340,7 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
   }, [savedAt]);
 
   return (
-    <Card
+    <SettingsCard
       title="Default quotas"
       icon={<Gauge className="h-4 w-4" />}
       footer={
@@ -409,7 +416,7 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
           disabled={busy}
         />
       </div>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -453,7 +460,7 @@ function AuthCard({ settings, onSubmit, busy }: CardSubmit) {
   };
 
   return (
-    <Card
+    <SettingsCard
       title="Authentication"
       icon={<ShieldCheck className="h-4 w-4" />}
       footer={
@@ -531,7 +538,7 @@ function AuthCard({ settings, onSubmit, busy }: CardSubmit) {
           </span>
         </div>
       )}
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -645,7 +652,7 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
     : "Not set";
 
   return (
-    <Card
+    <SettingsCard
       title="SMTP server"
       icon={<Mail className="h-4 w-4" />}
       headerExtra={
@@ -785,46 +792,14 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
           disabled={busy}
         />
       </div>
-    </Card>
+    </SettingsCard>
   );
 }
 
 // --------------------------------------------------------------------
-// Tiny presentational helpers — kept local so AppSettingsPanel is
-// self-contained. If we end up reusing them elsewhere we can promote.
+// Tiny presentational helpers — local to this file (the shared
+// ``SettingsCard`` is imported from ``./SettingsCard``).
 // --------------------------------------------------------------------
-function Card({
-  title,
-  icon,
-  headerExtra,
-  footer,
-  children,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  headerExtra?: React.ReactNode;
-  footer?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
-      <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-        <div className="flex items-center gap-2">
-          {icon && <span className="text-[var(--text-muted)]">{icon}</span>}
-          <h3 className="text-sm font-semibold">{title}</h3>
-        </div>
-        {headerExtra}
-      </header>
-      <div className="px-4 py-4">{children}</div>
-      {footer && (
-        <footer className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
-          {footer}
-        </footer>
-      )}
-    </section>
-  );
-}
-
 function Field({
   label,
   value,

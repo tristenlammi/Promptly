@@ -13,10 +13,30 @@ interface ModelState {
   selectedModelId: string | null;
   /** User-level "every new chat starts here" preference, mirrored
    *  from ``user.settings.default_*`` after auth load. ``null`` means
-   *  the user has not picked a default — in which case ``setAvailable``
-   *  falls back to the first available model the way it always has. */
+   *  the user has not picked a default — in which case the fallback
+   *  chain consults the admin default below, then the first available
+   *  model. */
   defaultProviderId: string | null;
   defaultModelId: string | null;
+  /** Workspace-wide default chat model picked by the admin under
+   *  ``Admin → Models → Defaults``. Mirrored from
+   *  ``GET /api/workspace-defaults`` after auth load. Used as the
+   *  *second* fallback (after the user's personal default and before
+   *  the catalog's first-available model) so a fresh user without a
+   *  personal default lands on the admin's preferred starting model
+   *  rather than whatever the catalog returns first. ``null`` on
+   *  either half = "no admin default — fall through". */
+  adminDefaultProviderId: string | null;
+  adminDefaultModelId: string | null;
+  /** Vision relay model picked by the admin under
+   *  ``Admin → Models → Defaults``. Mirrored from the same
+   *  workspace-defaults call. The chat composer reads this so it can
+   *  soften the "this model can't read images" warning into an
+   *  informational chip when an image is queued against a non-vision
+   *  model and a relay is configured. Half-null = "no relay — images
+   *  on non-vision models really do get dropped". */
+  visionRelayProviderId: string | null;
+  visionRelayModelId: string | null;
 
   setAvailable: (models: AvailableModel[]) => void;
   setSelection: (providerId: string | null, modelId: string | null) => void;
@@ -24,12 +44,27 @@ interface ModelState {
    *  the preferences panel after a successful PATCH. Setting either
    *  id to ``null`` clears the default. */
   setDefault: (providerId: string | null, modelId: string | null) => void;
+  /** Mirror of the admin's workspace default — called by the auth
+   *  bootstrap (which hits ``GET /api/workspace-defaults`` after
+   *  login) and by the admin Defaults card after a successful PATCH
+   *  so the picker reflects the change immediately. */
+  setAdminDefault: (
+    providerId: string | null,
+    modelId: string | null,
+  ) => void;
+  /** Mirror of the admin's vision-relay pick. Called by the auth
+   *  bootstrap alongside ``setAdminDefault`` and by the relay card
+   *  after a successful PATCH. */
+  setVisionRelay: (
+    providerId: string | null,
+    modelId: string | null,
+  ) => void;
   /** Snap the active selection back to the user's default. Called
    *  when the chat route lands on ``/chat`` (no conversation id yet)
    *  so a fresh chat always starts on the preferred model regardless
-   *  of what the previous chat happened to be using. Falls back to
-   *  the first available model if no default is configured or the
-   *  configured default is no longer in the available list. */
+   *  of what the previous chat happened to be using. Three-step
+   *  fallback when the personal default is missing or unavailable:
+   *  admin default → first available → blank. */
   applyDefault: () => void;
 }
 
@@ -41,6 +76,10 @@ export const useModelStore = create<ModelState>()(
       selectedModelId: null,
       defaultProviderId: null,
       defaultModelId: null,
+      adminDefaultProviderId: null,
+      adminDefaultModelId: null,
+      visionRelayProviderId: null,
+      visionRelayModelId: null,
 
       setAvailable: (available) => {
         set({ available });
@@ -49,30 +88,33 @@ export const useModelStore = create<ModelState>()(
           selectedModelId,
           defaultProviderId,
           defaultModelId,
+          adminDefaultProviderId,
+          adminDefaultModelId,
         } = get();
-        // If the previously-selected model was removed, prefer the
-        // user's default; only fall back to the first available
-        // model if the default is also gone.
+        // If the previously-selected model was removed, walk the
+        // fallback chain: personal default → admin default →
+        // first available.
         const stillValid = available.some(
           (m) =>
             m.provider_id === selectedProviderId &&
             m.model_id === selectedModelId
         );
         if (stillValid) return;
-        const defaultEntry = available.find(
+        const personalEntry = available.find(
           (m) =>
             m.provider_id === defaultProviderId &&
             m.model_id === defaultModelId
         );
-        if (defaultEntry) {
+        const adminEntry = available.find(
+          (m) =>
+            m.provider_id === adminDefaultProviderId &&
+            m.model_id === adminDefaultModelId,
+        );
+        const target = personalEntry ?? adminEntry ?? available[0] ?? null;
+        if (target) {
           set({
-            selectedProviderId: defaultEntry.provider_id,
-            selectedModelId: defaultEntry.model_id,
-          });
-        } else if (available.length > 0) {
-          set({
-            selectedProviderId: available[0].provider_id,
-            selectedModelId: available[0].model_id,
+            selectedProviderId: target.provider_id,
+            selectedModelId: target.model_id,
           });
         } else {
           set({ selectedProviderId: null, selectedModelId: null });
@@ -82,26 +124,36 @@ export const useModelStore = create<ModelState>()(
         set({ selectedProviderId, selectedModelId }),
       setDefault: (defaultProviderId, defaultModelId) =>
         set({ defaultProviderId, defaultModelId }),
+      setAdminDefault: (adminDefaultProviderId, adminDefaultModelId) =>
+        set({ adminDefaultProviderId, adminDefaultModelId }),
+      setVisionRelay: (visionRelayProviderId, visionRelayModelId) =>
+        set({ visionRelayProviderId, visionRelayModelId }),
       applyDefault: () => {
         const {
           available,
           defaultProviderId,
           defaultModelId,
+          adminDefaultProviderId,
+          adminDefaultModelId,
           selectedProviderId,
           selectedModelId,
         } = get();
-        // Resolve the default against the currently-loaded list. If
-        // the user's preferred model isn't installed any more, fall
-        // back to the first available so a "new chat" still has a
-        // working selection rather than going blank.
+        // Three-step fallback chain. Each step is gated on the model
+        // actually existing in the currently-loaded catalog so a
+        // stale id (e.g. provider deleted since the bootstrap) doesn't
+        // produce a blank picker.
+        const personalEntry = available.find(
+          (m) =>
+            m.provider_id === defaultProviderId &&
+            m.model_id === defaultModelId,
+        );
+        const adminEntry = available.find(
+          (m) =>
+            m.provider_id === adminDefaultProviderId &&
+            m.model_id === adminDefaultModelId,
+        );
         const target =
-          available.find(
-            (m) =>
-              m.provider_id === defaultProviderId &&
-              m.model_id === defaultModelId
-          ) ??
-          available[0] ??
-          null;
+          personalEntry ?? adminEntry ?? available[0] ?? null;
         if (!target) return;
         if (
           target.provider_id === selectedProviderId &&

@@ -149,6 +149,15 @@ class AppSettingsResponse(BaseModel):
     vision_relay_model_id: str | None = None
     vision_relay_configured: bool
 
+    # ----- Global default chat model -----
+    # Workspace-wide fallback for newly-created conversations when the
+    # creating user has no personal default. Mirror of the vision-relay
+    # pair: both fields nullable individually; the API constrains them
+    # to move together so the row can't end up half-configured.
+    default_chat_provider_id: uuid.UUID | None = None
+    default_chat_model_id: str | None = None
+    default_chat_configured: bool
+
     updated_at: datetime
 
 
@@ -207,6 +216,15 @@ class AppSettingsUpdate(BaseModel):
     # admin wants to either enable or disable the relay.
     vision_relay_provider_id: uuid.UUID | None = None
     vision_relay_model_id: str | None = Field(default=None, max_length=255)
+
+    # ----- Global default chat model -----
+    # Same paired semantics as vision relay: both fields must move
+    # together (the router 400s on a single-half PATCH) so the
+    # singleton row can't end up half-configured. Omit both to leave
+    # unchanged; pass both with values to set; pass both as null to
+    # clear.
+    default_chat_provider_id: uuid.UUID | None = None
+    default_chat_model_id: str | None = Field(default=None, max_length=255)
 
 
 class AdminUserCreate(BaseModel):

@@ -110,6 +110,13 @@ export interface AppSettingsPatch {
    */
   vision_relay_provider_id?: string | null;
   vision_relay_model_id?: string | null;
+  /**
+   * Global default chat model — same paired semantics as vision
+   * relay: send both halves together to set or both as null to
+   * clear. Omit both to leave unchanged.
+   */
+  default_chat_provider_id?: string | null;
+  default_chat_model_id?: string | null;
 }
 
 export interface OriginPreview {

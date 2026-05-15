@@ -163,6 +163,25 @@ export function InputBar({
         m.model_id === s.selectedModelId
     ) ?? null
   );
+  const visionRelayProviderId = useModelStore((s) => s.visionRelayProviderId);
+  const visionRelayModelId = useModelStore((s) => s.visionRelayModelId);
+  const relayConfigured = !!visionRelayProviderId && !!visionRelayModelId;
+  // Resolve the relay's *display* name from the catalog so the chip
+  // can say something like "described by GPT-4o" instead of leaking
+  // the raw model slug. Catalog lookup falls through gracefully — if
+  // the model isn't in the user's list (e.g. an admin pointed the
+  // relay at a custom-models entry the user can't see), we show the
+  // bare id rather than nothing.
+  const relayModel = useModelStore((s) =>
+    s.available.find(
+      (m) =>
+        m.provider_id === visionRelayProviderId &&
+        m.model_id === visionRelayModelId,
+    ) ?? null,
+  );
+  const relayLabel = relayConfigured
+    ? relayModel?.display_name || visionRelayModelId
+    : null;
 
   const dropAllowed = allowAttachments && !disabled && !streaming;
 
@@ -170,11 +189,36 @@ export function InputBar({
   // currently-selected model can't read images. The backend will also
   // emit a vision_warning post-send, but catching it client-side avoids
   // a wasted round-trip and lets the user pick a different model first.
+  //
+  // Two flavours of chip:
+  //
+  // 1. **Relay configured** — informational indigo chip explaining
+  //    that the image will be captioned by the relay model before
+  //    the chat model sees it. This is the "everything's fine, just
+  //    so you know" case — no action needed, and the user can still
+  //    pick a native-vision model if they want a higher-fidelity
+  //    response.
+  // 2. **Relay NOT configured** — amber warning explaining that the
+  //    image will be silently dropped. Original behaviour, preserved
+  //    so installs that haven't opted into the relay still see the
+  //    accurate "your image is going nowhere" message.
   const hasImageAttachment = attachments.some((a) =>
     (a.mime_type || "").toLowerCase().startsWith("image/")
   );
   const visionMismatch =
     hasImageAttachment && selectedModel !== null && !selectedModel.supports_vision;
+  // Edge case: the admin pointed the relay at the *same* model the
+  // user happens to be chatting with. Don't show a chip at all —
+  // it'd be confusing ("X can't read images, but X will translate
+  // for X") and the relay code path would no-op anyway.
+  const relayIsSelectedModel =
+    relayConfigured &&
+    selectedModel !== null &&
+    visionRelayProviderId === selectedModel.provider_id &&
+    visionRelayModelId === selectedModel.model_id;
+  const showVisionDrop = visionMismatch && !relayConfigured;
+  const showVisionRelay =
+    visionMismatch && relayConfigured && !relayIsSelectedModel;
 
   // Auto-grow the textarea up to ~8 lines.
   useEffect(() => {
@@ -489,7 +533,7 @@ export function InputBar({
               ))}
             </div>
           )}
-          {visionMismatch && (
+          {showVisionDrop && (
             <div
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
@@ -502,6 +546,26 @@ export function InputBar({
                 {selectedModel?.display_name ?? "This model"} can't read
                 images. Pick a vision-capable model to have it actually
                 see your attachment.
+              </span>
+            </div>
+          )}
+          {showVisionRelay && (
+            <div
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
+                // Indigo + Eye glyph mirrors the in-stream relay chip
+                // so users can visually link the pre-send heads-up
+                // with the chip that lights up during the turn.
+                "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300"
+              )}
+              role="status"
+              title={`Image will be described by ${relayLabel} before ${selectedModel?.display_name ?? "the model"} responds.`}
+            >
+              <Eye className="h-3 w-3 shrink-0" />
+              <span className="leading-snug">
+                {selectedModel?.display_name ?? "This model"} can't see
+                images natively, so they'll be described by{" "}
+                <span className="font-medium">{relayLabel}</span> first.
               </span>
             </div>
           )}
