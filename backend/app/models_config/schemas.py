@@ -14,6 +14,16 @@ ProviderType = Literal[
     "gemini",
     "ollama",
     "openai_compatible",
+    # First-class DeepSeek provider. The hosted ``api.deepseek.com``
+    # endpoint is OpenAI-compatible at the wire level, so this could
+    # technically be configured as ``openai_compatible``. The dedicated
+    # type lets us (a) pre-fill the base URL in the Add Provider UI,
+    # (b) light up the vision badge on ``deepseek-vl*`` IDs (forward-
+    # looking — only matters when the operator self-hosts VL2 via vLLM
+    # since the hosted API is text-only), and (c) own a place for
+    # DeepSeek-specific request shaping (``thinking`` + ``reasoning_effort``
+    # — see ``ChatRouter.stream_chat_events``).
+    "deepseek",
 ]
 
 

@@ -43,6 +43,24 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         String(8), nullable=False, default="off", server_default="off"
     )
 
+    # DeepSeek-only reasoning knob. The chat router attaches
+    # ``thinking`` + ``reasoning_effort`` request fields to the
+    # outbound payload when the active provider is DeepSeek and this
+    # column is non-NULL; otherwise it stays out of the wire shape so
+    # non-DeepSeek providers don't choke on unknown params.
+    #   * NULL    — fall back to the provider's API-side default. Also
+    #               the right state for every non-DeepSeek conversation.
+    #   * "off"   — send ``thinking: {"type": "disabled"}`` (fast,
+    #               non-thinking V4).
+    #   * "low" / "medium" / "high" — send ``thinking: enabled`` plus
+    #               the matching ``reasoning_effort`` value.
+    # Free-form ``varchar(8)`` instead of a Postgres ENUM so a future
+    # DeepSeek API revision (or a different provider that adopts the
+    # same shape) can introduce new effort levels without DDL.
+    reasoning_effort: Mapped[str | None] = mapped_column(
+        String(8), nullable=True, default=None
+    )
+
     # When True the user has renamed the conversation themselves and the
     # server must not auto-regenerate the title after subsequent turns. Set
     # by the title-PATCH endpoint; cleared only if we reset the conversation.

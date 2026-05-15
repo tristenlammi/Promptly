@@ -300,6 +300,12 @@ async def _send_across_columns(
             "temperature": 0.7,
             "max_tokens": None,
             "tools_enabled": False,
+            # Compare columns don't expose the reasoning dropdown — fair
+            # comparison means every column gets the same defaults. The
+            # per-conversation value (if a column happens to be on a
+            # DeepSeek model) still applies, but the user can't override
+            # for the compare turn.
+            "reasoning_effort": conv.reasoning_effort,
         }
         await enqueue_stream(stream_id, ctx)
         out.append(

@@ -18,6 +18,9 @@ Everything you need to run Promptly on a private server long-term — Unraid ins
   - [Logs](#logs)
   - [Common operational tasks](#common-operational-tasks)
 - [What's in the repo](#whats-in-the-repo)
+- [Provider playbooks](#provider-playbooks)
+  - [DeepSeek (hosted)](#deepseek-hosted)
+  - [DeepSeek-VL2 (self-hosted, for vision)](#deepseek-vl2-self-hosted-for-vision)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -262,6 +265,92 @@ docker compose exec backend alembic history --verbose
 - **`nginx/`** — Public-facing reverse proxy. Routes `/api/*` to the backend, `/api/collab/*` to the collab server, everything else to the frontend.
 - **`searxng/`** — Self-hosted SearXNG metasearch instance for the web-search tool. No tracking, no Google Programmable Search dependency by default.
 - **`docker-compose.yml`** — Production compose. Backend, frontend, collab, postgres, redis and searxng are not exposed on host ports; only nginx is.
+
+---
+
+## Provider playbooks
+
+Recipes for the model providers that need a bit more than "paste an API key into Admin → Models". The list grows as new providers gain first-class support — generic OpenAI-compatible endpoints all share the same one-line config and don't need their own section.
+
+### DeepSeek (hosted)
+
+[DeepSeek](https://platform.deepseek.com/) ships an OpenAI-compatible chat endpoint at `https://api.deepseek.com`. As of 2026-05 the hosted API is **text-only** — `deepseek-v4-flash` and `deepseek-v4-pro` (plus the legacy `deepseek-chat` / `deepseek-reasoner` aliases) do not accept image attachments. For vision see the next section.
+
+**Add the provider:**
+
+1. **Admin → Models → Add provider**.
+2. Pick the **DeepSeek** tile. The base URL (`https://api.deepseek.com`) pre-fills automatically.
+3. Paste your DeepSeek API key and **Save**.
+4. Use **Test connection** to confirm the catalog fetch works, then enable the models you actually want surfaced in the chat picker via **Select models**.
+
+**Reasoning controls:** DeepSeek's chat-completions endpoint takes two non-OpenAI fields that no other supported provider uses:
+
+- `thinking: {"type": "enabled" | "disabled"}` — turns on the model's reasoning trace.
+- `reasoning_effort: "low" | "medium" | "high"` — only meaningful while thinking is enabled.
+
+Promptly collapses both knobs into a single per-conversation picker, surfaced as a brain chip next to the web-search chip in the composer. The chip only appears when the active model lives on a DeepSeek provider — for every other model the request fields stay out of the wire shape so nothing 400s.
+
+| Picker value | Wire effect |
+|---|---|
+| (unset) | No `thinking` / `reasoning_effort` fields sent — DeepSeek's API default kicks in (currently "thinking enabled, medium effort" on V4). |
+| Off | `thinking: {type: "disabled"}` — fastest, no reasoning trace. |
+| Low / Medium / High | `thinking: {type: "enabled"}` + `reasoning_effort: <value>`. |
+
+The chosen value persists on the conversation row so the next plain send keeps the same effort without re-specifying.
+
+### DeepSeek-VL2 (self-hosted, for vision)
+
+The DeepSeek vision-language family (`deepseek-vl`, **`deepseek-vl2`**) is open-weight on Hugging Face. There is **no hosted DeepSeek API endpoint that accepts image attachments today** — the only legitimate path to use DeepSeek for vision is to run VL2 yourself behind an OpenAI-compatible server. [vLLM](https://docs.vllm.ai/) is the cleanest option because its `/chat/completions` handler natively understands OpenAI-style image content parts, which is exactly what Promptly sends.
+
+#### Hardware sizing
+
+| VL2 variant | Total params | Active params | Approx VRAM | Throughput on a single 3090/4090 |
+|---|---|---|---|---|
+| `deepseek-ai/deepseek-vl2-tiny` | 3B | 1B | ~7 GB | snappy, on-CPU is fine for low traffic |
+| `deepseek-ai/deepseek-vl2-small` | 16B (MoE) | 2.4B | ~12 GB | comfortable |
+| `deepseek-ai/deepseek-vl2` | 27B (MoE) | 4.5B | ~24 GB | tight on a 24 GB card; needs `--max-model-len` tuning |
+
+#### Run vLLM with VL2
+
+The GPU box does not need to live on the Promptly host. As long as Promptly can reach the vLLM port over the network, it works.
+
+```bash
+docker run --gpus all \
+  -p 18000:8000 \
+  -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+  --ipc=host \
+  vllm/vllm-openai:latest \
+  --model deepseek-ai/deepseek-vl2-small \
+  --trust-remote-code \
+  --served-model-name deepseek-vl2-small \
+  --max-model-len 8192
+```
+
+A few notes worth knowing:
+
+- `--trust-remote-code` is required because DeepSeek-VL2 ships its preprocessor + chat template as Python in the model repo.
+- `--served-model-name` controls the id Promptly will see in the model picker. Keep it `deepseek-vl*` so Promptly's vision heuristic flags it as multimodal — anything matching `deepseek-vl` or `vl2` lights up the "Vision" badge.
+- Drop `--max-model-len` if your card has the headroom; the default (128k) is generous but eats more KV cache.
+- `--ipc=host` is the standard fix for the "shared memory too small" error you'll hit otherwise.
+
+Health-check the endpoint before pointing Promptly at it:
+
+```bash
+curl http://your-gpu-box:18000/v1/models
+# expect: {"object": "list", "data": [{"id": "deepseek-vl2-small", ...}]}
+```
+
+#### Wire it into Promptly
+
+1. **Admin → Models → Add provider**.
+2. Pick **OpenAI-compatible** (not the DeepSeek tile — that points at `api.deepseek.com`, which can't reach your vLLM).
+3. Name it something obvious like `DeepSeek-VL2 (local)`.
+4. Set the base URL to `http://your-gpu-box:18000/v1` (note the `/v1` — vLLM's OpenAI router lives under that prefix).
+5. API key: vLLM ignores it by default. Type any non-empty string (e.g. `vllm`); leave the keyless toggle alone since the picker doesn't expose vLLM as keyless.
+6. **Save**, then **Test connection** — you should see "1 model" come back.
+7. Open **Select models**, enable the VL2 entry. The "Vision" badge appears automatically because the model id matches the `deepseek-vl*` pattern.
+
+Once enabled, the model shows up in the chat picker like any other vision model, and the paperclip → image flow in the composer sends image content parts straight through to vLLM. Reasoning controls don't apply to VL2 (the vision family doesn't expose the `thinking` knob), so the brain chip is hidden when VL2 is selected.
 
 ---
 

@@ -17,6 +17,14 @@ MessageRole = Literal["user", "assistant", "system"]
 # send/edit message payloads as a per-turn override.
 WebSearchMode = Literal["off", "auto", "always"]
 
+# DeepSeek-only reasoning knob. ``None`` on the wire means "use provider
+# default" (and is the right value for every non-DeepSeek conversation);
+# ``"off"`` disables thinking explicitly; ``"low"`` / ``"medium"`` /
+# ``"high"`` enable thinking at the matching effort. The chat router
+# only attaches these to the outbound request when the active provider
+# is DeepSeek — sending them on other providers would 400 the call.
+ReasoningEffort = Literal["off", "low", "medium", "high"]
+
 # Temporary-chat lifecycle modes (Phase Z1). See ``Conversation.temporary_mode``
 # for full semantics. Used both on the create payload and on the listing
 # responses so the frontend can render the right badge / chrome.
@@ -113,6 +121,10 @@ class ConversationSummary(BaseModel):
     pinned: bool
     starred: bool
     web_search_mode: WebSearchMode
+    # DeepSeek-only knob. ``None`` for chats that haven't picked a
+    # reasoning effort (the default for every non-DeepSeek model); the
+    # frontend hides the reasoning chip when it sees ``None``.
+    reasoning_effort: ReasoningEffort | None = None
     created_at: datetime
     updated_at: datetime
     # Phase 4b — caller's relationship to the conversation. ``"owner"``
@@ -161,6 +173,9 @@ class ConversationCreate(BaseModel):
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
     web_search_mode: WebSearchMode = "off"
+    # DeepSeek-only. ``None`` defers to the provider's own default,
+    # which is the right behaviour for every non-DeepSeek model.
+    reasoning_effort: ReasoningEffort | None = None
     # Phase Z1 — opt into temporary lifecycle at creation time. ``None``
     # produces a normal permanent chat. The router computes ``expires_at``
     # itself; the client only picks the mode.
@@ -179,6 +194,12 @@ class ConversationUpdate(BaseModel):
     pinned: bool | None = None
     starred: bool | None = None
     web_search_mode: WebSearchMode | None = None
+    # ``None`` here means "leave unchanged" (consistent with every
+    # other field on this PATCH). The frontend dropdown only writes
+    # explicit values (``"off"`` / ``"low"`` / ``"medium"`` / ``"high"``);
+    # the conversation row starts NULL for fresh chats and the chat
+    # router treats NULL as "use the provider's API default".
+    reasoning_effort: ReasoningEffort | None = None
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
     # Phase P1 — move this chat into / out of a project. ``None`` in
@@ -201,6 +222,12 @@ class SendMessageRequest(BaseModel):
     # overrides it for this turn AND persists back onto the conversation
     # so the next plain send picks the same mode without re-specifying.
     web_search_mode: WebSearchMode | None = None
+    # Same override-then-persist semantics as ``web_search_mode``. The
+    # chat router only forwards the underlying ``thinking`` +
+    # ``reasoning_effort`` request fields to the upstream when the
+    # active provider type is ``deepseek``; for every other provider
+    # this stays out of the wire shape so it can't 400 the call.
+    reasoning_effort: ReasoningEffort | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
     # IDs of files from /api/files the user picked via the paperclip modal.
@@ -340,6 +367,10 @@ class EditMessageRequest(BaseModel):
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
     web_search_mode: WebSearchMode | None = None
+    # Same override-then-persist pattern as ``web_search_mode``. Edited
+    # turns may flip the reasoning effort on the retry independently of
+    # how the original send was configured.
+    reasoning_effort: ReasoningEffort | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
     # Mirror of SendMessageRequest: edited turns may toggle tool calling
@@ -382,6 +413,8 @@ class RegenerateMessageRequest(BaseModel):
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
     web_search_mode: WebSearchMode | None = None
+    # Same override-then-persist pattern as ``web_search_mode``.
+    reasoning_effort: ReasoningEffort | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
     tools_enabled: bool = False

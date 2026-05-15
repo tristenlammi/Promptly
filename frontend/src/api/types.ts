@@ -21,6 +21,12 @@ export type UserRole = "admin" | "user";
  *  ``app/chat/schemas.py`` — keep the sets in lockstep. */
 export type WebSearchMode = "off" | "auto" | "always";
 
+/** DeepSeek-only reasoning knob. Mirrors the backend `ReasoningEffort`
+ *  literal in `app/chat/schemas.py`. `null` on the wire (and `undefined`
+ *  in TS-land) means "use the provider's API default" — and is the right
+ *  value for every non-DeepSeek conversation. */
+export type ReasoningEffort = "off" | "low" | "medium" | "high";
+
 export interface UserSettings {
   /** Initial state of the per-chat Tools toggle. Defaults to ON. */
   default_tools_enabled?: boolean;
@@ -324,7 +330,12 @@ export type ProviderType =
   | "anthropic"
   | "gemini"
   | "ollama"
-  | "openai_compatible";
+  | "openai_compatible"
+  // First-class DeepSeek. Wire-compatible with `openai_compatible` —
+  // the dedicated tile in AddProviderModal pre-fills the base URL,
+  // and the chat client attaches DeepSeek's `thinking` +
+  // `reasoning_effort` request fields when reasoning is enabled.
+  | "deepseek";
 
 /**
  * Compact summary of the model's upstream endpoint data policies.
@@ -470,6 +481,10 @@ export interface ConversationSummary {
   /** Three-mode web-search preference (Phase D1). Replaces the
    *  legacy ``web_search`` boolean. */
   web_search_mode: WebSearchMode;
+  /** DeepSeek-only knob. `null`/`undefined` means "no override —
+   *  let the provider's API default kick in"; only set for DeepSeek
+   *  conversations where the user has explicitly picked an effort. */
+  reasoning_effort?: ReasoningEffort | null;
   created_at: string;
   updated_at: string;
   /** Phase 4b — caller's relationship to the chat. ``"owner"`` is

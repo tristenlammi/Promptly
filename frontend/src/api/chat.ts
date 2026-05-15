@@ -5,6 +5,7 @@ import type {
   ConversationSearchHit,
   ConversationSummary,
   InviteRow,
+  ReasoningEffort,
   SendMessageResponse,
   ShareRow,
   TemporaryMode,
@@ -37,6 +38,8 @@ export interface CreateConversationPayload {
   model_id?: string | null;
   provider_id?: string | null;
   web_search_mode?: WebSearchMode;
+  /** DeepSeek-only knob. Omit / `null` for any non-DeepSeek chat. */
+  reasoning_effort?: ReasoningEffort | null;
   /** Phase Z1 — request a temporary chat. ``null`` / undefined produces
    *  a normal permanent chat. The server computes ``expires_at`` from
    *  the chosen mode; the client only picks the policy. */
@@ -51,6 +54,7 @@ export interface UpdateConversationPayload {
   pinned?: boolean;
   starred?: boolean;
   web_search_mode?: WebSearchMode;
+  reasoning_effort?: ReasoningEffort;
   model_id?: string | null;
   provider_id?: string | null;
   /** Phase P1 — move this chat into / out of a project. Pass a project
@@ -67,6 +71,9 @@ export interface SendMessagePayload {
    *  any explicit value overrides for this turn AND persists onto the
    *  conversation, so the next plain send keeps the same mode. */
   web_search_mode?: WebSearchMode | null;
+  /** DeepSeek-only. Same override-then-persist semantics as
+   *  `web_search_mode`. Omit to use the conversation's stored value. */
+  reasoning_effort?: ReasoningEffort | null;
   temperature?: number | null;
   max_tokens?: number | null;
   /** IDs of files picked via the paperclip modal. */
@@ -85,6 +92,7 @@ export interface EditMessagePayload {
   provider_id?: string | null;
   model_id?: string | null;
   web_search_mode?: WebSearchMode | null;
+  reasoning_effort?: ReasoningEffort | null;
   temperature?: number | null;
   max_tokens?: number | null;
   tools_enabled?: boolean;
@@ -98,6 +106,7 @@ export interface RegenerateMessagePayload {
   provider_id?: string | null;
   model_id?: string | null;
   web_search_mode?: WebSearchMode | null;
+  reasoning_effort?: ReasoningEffort | null;
   temperature?: number | null;
   max_tokens?: number | null;
   tools_enabled?: boolean;

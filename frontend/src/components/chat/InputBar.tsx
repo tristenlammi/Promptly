@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 import { filesApi } from "@/api/files";
-import type { WebSearchMode } from "@/api/types";
+import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useModelStore } from "@/store/modelStore";
@@ -34,6 +34,7 @@ import {
   MentionAutocomplete,
   type MentionPickState,
 } from "./MentionAutocomplete";
+import { ReasoningEffortToggle } from "./ReasoningEffortToggle";
 import { ToolsToggle } from "./ToolsToggle";
 import { WebSearchToggle } from "./WebSearchToggle";
 
@@ -48,6 +49,11 @@ interface InputBarProps {
    *  expose web search at all. */
   webSearchMode?: WebSearchMode;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
+  /** DeepSeek-only reasoning picker. Both props must be present for the
+   *  picker to render — surfaces hide it for non-DeepSeek models so it
+   *  doesn't take up composer real estate where it would no-op. */
+  reasoningEffort?: ReasoningEffort | null;
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   toolsEnabled?: boolean;
   onToolsChange?: (enabled: boolean) => void;
   footer?: React.ReactNode;
@@ -90,6 +96,8 @@ export function InputBar({
   placeholder = "Message Promptly...",
   webSearchMode = "off",
   onWebSearchModeChange,
+  reasoningEffort = null,
+  onReasoningEffortChange,
   toolsEnabled = false,
   onToolsChange,
   footer,
@@ -550,6 +558,13 @@ export function InputBar({
                 <WebSearchToggle
                   mode={webSearchMode}
                   onChange={onWebSearchModeChange}
+                  disabled={disabled || streaming}
+                />
+              )}
+              {onReasoningEffortChange && (
+                <ReasoningEffortToggle
+                  effort={reasoningEffort}
+                  onChange={onReasoningEffortChange}
                   disabled={disabled || streaming}
                 />
               )}

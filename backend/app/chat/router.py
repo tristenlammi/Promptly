@@ -514,6 +514,10 @@ async def create_conversation(
         model_id=payload.model_id,
         provider_id=payload.provider_id,
         web_search_mode=payload.web_search_mode,
+        # ``None`` here (the schema default) maps to a NULL column,
+        # which the chat router treats as "use provider default" —
+        # the right behaviour for every non-DeepSeek chat.
+        reasoning_effort=payload.reasoning_effort,
         temporary_mode=payload.temporary_mode,
         expires_at=expires_at,
         project_id=project_id,
@@ -586,6 +590,8 @@ async def update_conversation(
         conv.starred = payload.starred
     if payload.web_search_mode is not None:
         conv.web_search_mode = payload.web_search_mode
+    if payload.reasoning_effort is not None:
+        conv.reasoning_effort = payload.reasoning_effort
     if payload.model_id is not None:
         conv.model_id = payload.model_id
     if payload.provider_id is not None:
@@ -922,6 +928,11 @@ async def send_message(
     conv.provider_id = provider_id
     if payload.web_search_mode is not None:
         conv.web_search_mode = payload.web_search_mode
+    # Same override-then-persist semantics as ``web_search_mode``.
+    # ``None`` keeps whatever the conversation already had so the
+    # dropdown only writes back when the user actually picks a value.
+    if payload.reasoning_effort is not None:
+        conv.reasoning_effort = payload.reasoning_effort
     conv.updated_at = datetime.now(timezone.utc)
     # Phase Z1 — slide the 1-hour TTL forward on every send. Ephemeral
     # chats keep their original 24h backstop (the frontend deletes
@@ -961,6 +972,11 @@ async def send_message(
         if payload.web_search_mode is not None
         else (conv.web_search_mode or "off")
     )
+    effective_reasoning = (
+        payload.reasoning_effort
+        if payload.reasoning_effort is not None
+        else conv.reasoning_effort
+    )
     stream_id = uuid.uuid4()
     ctx: StreamContext = {
         "conversation_id": str(conv.id),
@@ -971,6 +987,7 @@ async def send_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        "reasoning_effort": effective_reasoning,
     }
     await enqueue_stream(stream_id, ctx)
 
@@ -1146,6 +1163,8 @@ async def edit_and_resend_message(
     conv.provider_id = provider_id
     if payload.web_search_mode is not None:
         conv.web_search_mode = payload.web_search_mode
+    if payload.reasoning_effort is not None:
+        conv.reasoning_effort = payload.reasoning_effort
     conv.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -1155,6 +1174,11 @@ async def edit_and_resend_message(
         payload.web_search_mode
         if payload.web_search_mode is not None
         else (conv.web_search_mode or "off")
+    )
+    effective_reasoning = (
+        payload.reasoning_effort
+        if payload.reasoning_effort is not None
+        else conv.reasoning_effort
     )
     stream_id = uuid.uuid4()
     ctx: StreamContext = {
@@ -1166,6 +1190,7 @@ async def edit_and_resend_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        "reasoning_effort": effective_reasoning,
     }
     await enqueue_stream(stream_id, ctx)
 
@@ -1434,6 +1459,8 @@ async def regenerate_assistant_message(
     conv.provider_id = provider_id
     if payload.web_search_mode is not None:
         conv.web_search_mode = payload.web_search_mode
+    if payload.reasoning_effort is not None:
+        conv.reasoning_effort = payload.reasoning_effort
     conv.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -1443,6 +1470,11 @@ async def regenerate_assistant_message(
         payload.web_search_mode
         if payload.web_search_mode is not None
         else (conv.web_search_mode or "off")
+    )
+    effective_reasoning = (
+        payload.reasoning_effort
+        if payload.reasoning_effort is not None
+        else conv.reasoning_effort
     )
     stream_id = uuid.uuid4()
     ctx: StreamContext = {
@@ -1454,6 +1486,7 @@ async def regenerate_assistant_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        "reasoning_effort": effective_reasoning,
     }
     await enqueue_stream(stream_id, ctx)
 
@@ -2767,6 +2800,11 @@ async def _stream_generator(
                     max_tokens=ctx["max_tokens"],
                     tools=tools_payload,
                     include_usage=True,
+                    # ``.get`` so stream contexts written by older
+                    # backend builds (the Redis TTL is 60s, but
+                    # there's a window during deploy where pre-update
+                    # contexts could still be consumed) parse cleanly.
+                    reasoning_effort=ctx.get("reasoning_effort"),
                 ):
                     # Note: we used to bail on ``request.is_disconnected``
                     # here, which meant closing the tab dropped the reply

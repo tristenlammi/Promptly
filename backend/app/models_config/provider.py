@@ -15,8 +15,15 @@ Supported provider types
                       No API key required.
 ``openai_compatible`` Generic catch-all for self-hosted OpenAI-shaped
                       endpoints (vLLM, LocalAI, LM Studio, …).
+``deepseek``          DeepSeek's hosted API (``api.deepseek.com``).
+                      OpenAI-compatible at the wire level — the
+                      dedicated type exists so the chat router can
+                      attach DeepSeek's ``thinking`` + ``reasoning_effort``
+                      request fields when the conversation has reasoning
+                      enabled, and so the Add Provider UI can pre-fill
+                      the base URL.
 
-All five non-openrouter types are driven through the OpenAI SDK because
+All six non-openrouter types are driven through the OpenAI SDK because
 they all expose an OpenAI-shaped ``/v1/chat/completions`` endpoint.
 Only the catalog (``list_models``) and credential check
 (``test_connection``) branches need per-type logic — the streaming and
@@ -90,6 +97,13 @@ DEFAULT_BASE_URLS: dict[str, str | None] = {
     # when Promptly itself runs in Docker; admins override via base_url.
     "ollama": "http://localhost:11434/v1",
     "openai_compatible": None,
+    # DeepSeek's hosted API. The OpenAI SDK appends ``/chat/completions``
+    # to this base, which matches DeepSeek's documented path exactly —
+    # no ``/v1`` segment is needed (and adding one returns 404). The
+    # ``/anthropic`` sibling endpoint isn't used; we drive everything
+    # through the OpenAI-compat shape because that's what every other
+    # provider in this file does.
+    "deepseek": "https://api.deepseek.com",
 }
 
 SUPPORTED_PROVIDER_TYPES: frozenset[str] = frozenset(DEFAULT_BASE_URLS)
@@ -507,8 +521,22 @@ def _detect_vision_by_id(provider_type: str, model_id: str) -> bool:
         keywords = (
             "llava", "bakllava", "moondream", "qwen2-vl", "qwen-vl",
             "minicpm-v", "vision", "llama3.2-vision", "llama-3.2-vision",
+            # DeepSeek-VL2 hosted via Ollama (community ports exist).
+            "deepseek-vl",
         )
         return any(k in mid for k in keywords)
+    if provider_type == "deepseek":
+        # DeepSeek's hosted ``api.deepseek.com`` chat-completions
+        # endpoint is text-only as of 2026-05 — the V4 family (and the
+        # legacy ``deepseek-chat`` / ``deepseek-reasoner``) do not
+        # accept image content parts and silently drop them. Vision
+        # only lights up for the open-weight ``deepseek-vl*`` family,
+        # which an operator would typically host themselves behind
+        # vLLM. We surface the badge regardless of where the model is
+        # actually served so the future case (DeepSeek adds vision to
+        # the hosted API, or the operator points the deepseek provider
+        # at their own VL2 deployment) just works.
+        return "deepseek-vl" in mid or "vl2" in mid
     # openrouter / openai_compatible / anything else → let the richer
     # catalog logic decide (openrouter) or default off.
     return False
@@ -704,6 +732,7 @@ class ModelRouter:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         include_usage: bool = False,
+        reasoning_effort: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a chat completion as structured events.
 
@@ -752,6 +781,31 @@ class ModelRouter:
                 create_kwargs["tool_choice"] = tool_choice
         if include_usage:
             create_kwargs["stream_options"] = {"include_usage": True}
+
+        # DeepSeek-specific request shaping. ``thinking`` and
+        # ``reasoning_effort`` are non-OpenAI fields that the DeepSeek
+        # API merges into ``/chat/completions``; the OpenAI SDK passes
+        # them through verbatim when we drop them into ``extra_body``.
+        # We only attach them when the active provider is DeepSeek so
+        # other upstreams can't 400 on unknown params. ``None`` means
+        # "let DeepSeek's own default kick in" (currently: thinking
+        # enabled, medium effort on V4); ``"off"`` disables thinking
+        # explicitly; ``"low"``/``"medium"``/``"high"`` enable it at
+        # the matching effort.
+        if provider.type == "deepseek" and reasoning_effort is not None:
+            if reasoning_effort == "off":
+                create_kwargs["extra_body"] = {
+                    "thinking": {"type": "disabled"}
+                }
+            elif reasoning_effort in {"low", "medium", "high"}:
+                create_kwargs["extra_body"] = {
+                    "thinking": {"type": "enabled"},
+                    "reasoning_effort": reasoning_effort,
+                }
+            # Any other value (a stale Redis context written before
+            # this code shipped, say) is treated as "no override" and
+            # silently dropped — better to fall back to the provider
+            # default than to fail the stream on a typo.
 
         try:
             stream = await client.chat.completions.create(**create_kwargs)
@@ -1023,7 +1077,15 @@ class ModelRouter:
             return await self._list_models_openrouter(provider)
         if provider.type == "anthropic":
             return await self._list_models_anthropic(provider)
-        if provider.type in {"openai", "gemini", "ollama", "openai_compatible"}:
+        if provider.type in {
+            "openai",
+            "gemini",
+            "ollama",
+            "openai_compatible",
+            # DeepSeek's ``GET /models`` returns the standard
+            # ``{"data": [{"id": ...}]}`` shape used by everyone else.
+            "deepseek",
+        }:
             return await self._list_models_openai_compat(provider)
         raise ProviderError(
             f"list_models not implemented for {provider.type!r}"

@@ -34,7 +34,12 @@ import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore, useSelectedModel } from "@/store/modelStore";
-import type { ChatMessage, TemporaryMode, WebSearchMode } from "@/api/types";
+import type {
+  ChatMessage,
+  ReasoningEffort,
+  TemporaryMode,
+  WebSearchMode,
+} from "@/api/types";
 import { cn } from "@/utils/cn";
 
 // Defaults applied when the user has never touched the toggles.
@@ -90,6 +95,15 @@ export function ChatPage() {
   const [toolsEnabled, setToolsEnabled] = useState(
     () => userSettings?.default_tools_enabled ?? DEFAULT_TOOLS_ENABLED
   );
+  // DeepSeek-only reasoning state. ``null`` means "no override on this
+  // turn, use whatever the conversation has stored" — for non-DeepSeek
+  // chats this column is always NULL so the chat router doesn't attach
+  // any extra request fields. The dropdown only renders when the
+  // currently-selected model is on a DeepSeek provider; flipping the
+  // selector away from DeepSeek hides the chip but leaves the conv's
+  // stored value untouched (so flipping back picks it up again).
+  const [reasoningEffort, setReasoningEffort] =
+    useState<ReasoningEffort | null>(null);
   // Tracks whether we've already pulled the persisted defaults into local
   // state. Without it, the user object loading after mount would snap the
   // toggles back to defaults the next time ``id`` changes.
@@ -166,6 +180,7 @@ export function ChatPage() {
   // conversation, and the snap below honours it from then on.
   const convModelId = conversation?.model_id ?? null;
   const convProviderId = conversation?.provider_id ?? null;
+  const convReasoningEffort = conversation?.reasoning_effort ?? null;
   useEffect(() => {
     if (!id) {
       useModelStore.getState().applyDefault();
@@ -181,6 +196,22 @@ export function ChatPage() {
       }
     }
   }, [id, convProviderId, convModelId]);
+
+  // Hydrate the reasoning chip from the loaded conversation whenever
+  // we switch into a different chat. We deliberately don't sync the
+  // other direction (local state -> conversation column) here — that
+  // happens on send / via the PATCH in ``handleReasoningEffortChange``
+  // so swapping chats can't accidentally clobber a freshly-picked
+  // value before it's been persisted.
+  useEffect(() => {
+    setReasoningEffort(convReasoningEffort);
+  }, [id, convReasoningEffort]);
+
+  // Show the reasoning chip only when the active model lives on a
+  // DeepSeek provider — for every other provider the request fields
+  // would be silently dropped (or worse, 400 the call). Falls back to
+  // hidden when no model is selected yet.
+  const reasoningSupported = selectedModel?.provider_type === "deepseek";
 
   // Persist a preference flip to the server. Optimistic: update local
   // state + cached user immediately, fire the PATCH, roll back on
@@ -221,6 +252,28 @@ export function ChatPage() {
       void persistPreference("default_tools_enabled", next);
     },
     [persistPreference]
+  );
+
+  // Reasoning effort isn't a user-wide default — it's per-conversation
+  // and only meaningful for DeepSeek models. Picking a value updates
+  // local state immediately so the chip reflects the choice; the
+  // server-side persistence happens on the next send (the chat
+  // router writes through to ``conversations.reasoning_effort``). For
+  // conversations that exist but where the user changes the dropdown
+  // before sending, we also fire a PATCH so the value sticks even if
+  // they navigate away without sending.
+  const handleReasoningEffortChange = useCallback(
+    (next: ReasoningEffort) => {
+      setReasoningEffort(next);
+      if (id) {
+        void chatApi
+          .update(id, { reasoning_effort: next })
+          .catch((err: unknown) => {
+            console.warn("Failed to persist reasoning_effort", err);
+          });
+      }
+    },
+    [id]
   );
 
   // Hydrate the message list from the loaded conversation. Reset when we have
@@ -384,6 +437,13 @@ export function ChatPage() {
             provider_id: selectedModel.provider_id,
             model_id: selectedModel.model_id,
             web_search_mode: webSearchMode,
+            // Only seed reasoning_effort on creation when the user has
+            // a DeepSeek model selected — for every other provider we
+            // leave the column NULL so the API default applies.
+            reasoning_effort:
+              reasoningSupported && reasoningEffort
+                ? reasoningEffort
+                : undefined,
             temporary_mode: pendingTemporaryMode,
           });
           upsertConversation(conv);
@@ -418,6 +478,10 @@ export function ChatPage() {
           provider_id: selectedModel.provider_id,
           model_id: selectedModel.model_id,
           web_search_mode: webSearchMode,
+          reasoning_effort:
+            reasoningSupported && reasoningEffort
+              ? reasoningEffort
+              : undefined,
           attachment_ids: attachments.map((a) => a.id),
           tools_enabled: toolsEnabled,
         },
@@ -431,6 +495,8 @@ export function ChatPage() {
       sendMessage,
       upsertConversation,
       webSearchMode,
+      reasoningSupported,
+      reasoningEffort,
       toolsEnabled,
       pendingTemporaryMode,
       queryClient,
@@ -445,10 +511,20 @@ export function ChatPage() {
         provider_id: selectedModel.provider_id,
         model_id: selectedModel.model_id,
         web_search_mode: webSearchMode,
+        reasoning_effort:
+          reasoningSupported && reasoningEffort ? reasoningEffort : undefined,
         tools_enabled: toolsEnabled,
       });
     },
-    [editAndResend, id, selectedModel, webSearchMode, toolsEnabled]
+    [
+      editAndResend,
+      id,
+      selectedModel,
+      webSearchMode,
+      reasoningSupported,
+      reasoningEffort,
+      toolsEnabled,
+    ]
   );
 
   /** In-place patch of an assistant reply — no re-stream. The
@@ -484,10 +560,20 @@ export function ChatPage() {
         provider_id,
         model_id,
         web_search_mode: webSearchMode,
+        reasoning_effort:
+          reasoningSupported && reasoningEffort ? reasoningEffort : undefined,
         tools_enabled: toolsEnabled,
       });
     },
-    [regenerate, id, selectedModel, webSearchMode, toolsEnabled]
+    [
+      regenerate,
+      id,
+      selectedModel,
+      webSearchMode,
+      reasoningSupported,
+      reasoningEffort,
+      toolsEnabled,
+    ]
   );
 
   // Context-window compaction — destructive (middle of the chat
@@ -653,6 +739,13 @@ export function ChatPage() {
             onCancel={cancel}
             webSearchMode={webSearchMode}
             onWebSearchModeChange={handleWebSearchModeChange}
+            reasoningEffort={reasoningEffort}
+            // Wire the reasoning picker only for DeepSeek models — for
+            // every other provider the picker stays hidden so it can't
+            // mislead the user about which knobs apply.
+            onReasoningEffortChange={
+              reasoningSupported ? handleReasoningEffortChange : undefined
+            }
             toolsEnabled={toolsEnabled}
             onToolsChange={handleToolsChange}
             footer={footerText}

@@ -61,6 +61,14 @@ const PROVIDER_SPECS: ProviderSpec[] = [
     hint: "No API key required",
   },
   {
+    value: "deepseek",
+    label: "DeepSeek",
+    defaultName: "DeepSeek",
+    baseUrlHint: "https://api.deepseek.com",
+    apiKeyPlaceholder: "sk-...",
+    hint: "Text + reasoning (V4)",
+  },
+  {
     value: "openai_compatible",
     label: "OpenAI-compatible",
     defaultName: "Custom",

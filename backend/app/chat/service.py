@@ -35,6 +35,16 @@ class StreamContext(TypedDict):
     # ride on ``web_search_mode``, *not* this flag, so a user can have
     # search-only or artefacts-only modes without enabling both.
     tools_enabled: bool
+    # DeepSeek-only reasoning knob. ``None`` (the default for every
+    # non-DeepSeek conversation, and for fresh DeepSeek chats that
+    # haven't explicitly picked a value yet) means "don't attach the
+    # ``thinking`` / ``reasoning_effort`` request fields and let the
+    # provider's API default kick in". Non-NULL values map onto the
+    # DeepSeek wire shape — see ``ChatRouter.stream_chat_events``.
+    # Typed as a free-form ``str`` here (not the Literal) so the Redis
+    # JSON round-trip on the stream-context handoff stays exact; the
+    # router validates the value before sending it upstream.
+    reasoning_effort: str | None
 
 
 async def enqueue_stream(stream_id: uuid.UUID, ctx: StreamContext) -> None:
