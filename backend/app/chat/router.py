@@ -1934,10 +1934,24 @@ async def _load_message_attachments(
 # Hard ceiling on the number of model<->tool round-trips we'll do for a
 # single user turn. Each hop is one full streaming call against the
 # provider, so an unbounded loop is *expensive* — both in tokens and in
-# wall-clock time. Five is enough headroom for a tool that needs to
-# call a follow-up tool to refine its output, while still capping total
-# cost at a predictable multiple of a single chat turn.
-MAX_TOOL_HOPS = 5
+# wall-clock time.
+#
+# Sized at 8 since the previous cap of 5 fell over on image-research
+# turns where the model legitimately wanted to chain ~5 searches
+# (e.g. "what game is this screenshot from?" → identify motif →
+# verify name → cross-check details → confirm). The cap is a defence
+# against *unbounded* loops, not a constraint on legitimate
+# exploration, so a few extra hops are well worth the predictable
+# cost.
+#
+# The *last* hop is run with ``tools=None`` (forced finish) so the
+# model has no escape hatch to keep calling tools forever — it has to
+# emit text, synthesising from whatever it has already gathered. That
+# converts the historical "abort with red error chip + empty assistant
+# bubble" failure mode into a normal best-effort reply. The
+# error-chip path stays in place for the pathological case where the
+# model produces neither text nor tool-calls on the forced hop.
+MAX_TOOL_HOPS = 8
 
 
 def _build_tool_calls_payload(
@@ -3001,6 +3015,32 @@ async def _stream_generator(
                 pending_calls: dict[int, dict[str, str]] = {}
                 hop_finish: str | None = None
 
+                # Forced-finish on the final hop: send the request
+                # WITHOUT tools so the model is forced to synthesise a
+                # text reply from whatever it has already gathered.
+                # Without this the model can keep calling tools until
+                # the budget runs out, which renders as an empty
+                # bubble + a red "model exceeded N-hop limit" chip —
+                # exactly the failure mode this branch exists to
+                # avoid. Tools-on hops still flow through the normal
+                # path so the model can chain searches naturally for
+                # the first ``MAX_TOOL_HOPS - 1`` iterations.
+                is_final_hop = hop == MAX_TOOL_HOPS - 1
+                hop_tools = None if is_final_hop else tools_payload
+                # If we're forcing a finish, surface a heads-up SSE
+                # event so the frontend can render a subtle "wrapping
+                # up" affordance instead of leaving the user staring
+                # at a long tool-call run with no obvious next step.
+                # Not an error — just a transition cue.
+                if is_final_hop and tools_payload:
+                    yield _sse(
+                        {
+                            "event": "tool_loop_wrapping_up",
+                            "hops_used": hop,
+                            "max_hops": MAX_TOOL_HOPS,
+                        }
+                    )
+
                 async for ev in model_router.stream_chat_events(
                     provider=provider,
                     model_id=ctx["model_id"],
@@ -3008,7 +3048,7 @@ async def _stream_generator(
                     system=system_prompt,
                     temperature=ctx["temperature"],
                     max_tokens=ctx["max_tokens"],
-                    tools=tools_payload,
+                    tools=hop_tools,
                     include_usage=True,
                     # ``.get`` so stream contexts written by older
                     # backend builds (the Redis TTL is 60s, but
@@ -3143,15 +3183,24 @@ async def _stream_generator(
                     if tool_history_msg is not None:
                         running_history.append(tool_history_msg)
             else:
-                # MAX_TOOL_HOPS exhausted without the model producing a
-                # final text turn — treat as a soft error so the user
-                # isn't left looking at an empty bubble.
+                # We hit ``MAX_TOOL_HOPS`` without ever breaking out
+                # via the "no more tool calls" path. With the
+                # forced-finish hop above this should only happen if
+                # the model produces a tool-call response on the
+                # tools-stripped final hop (pathological — the SDK
+                # generally won't even allow that since the schema
+                # said no tools). Render a soft error so the user
+                # isn't left looking at an empty bubble; the bubble
+                # below will still get persisted with whatever text
+                # was collected along the way, so partial answers
+                # aren't lost.
                 yield _sse(
                     {
                         "event": "tool_error",
                         "error": (
-                            f"Model exceeded the {MAX_TOOL_HOPS}-hop tool "
-                            "limit without finishing. Stopping."
+                            f"Model couldn't finish within {MAX_TOOL_HOPS} "
+                            "tool hops. Try a more focused question or "
+                            "ask the model to summarise what it found."
                         ),
                     }
                 )
