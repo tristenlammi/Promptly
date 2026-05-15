@@ -257,6 +257,16 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
 
+    # DeepSeek thinking-mode chain-of-thought. Captured from
+    # ``delta.reasoning_content`` on streamed responses and replayed
+    # to DeepSeek on subsequent turns — the API 400s on tool-call
+    # follow-up turns when this is missing (see migration
+    # ``0049_msgs_reasoning`` for the docs link). Other providers
+    # don't emit it (column stays NULL) and don't accept it as input
+    # (stripped in ``provider.py`` before send for non-DeepSeek
+    # requests). Populated only on ``role = "assistant"`` rows.
+    reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Populated when the message was generated with web search on — list of
     # {title, url, snippet} dicts rendered as inline citations.
     sources: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)

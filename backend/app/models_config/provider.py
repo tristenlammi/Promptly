@@ -203,6 +203,27 @@ class ToolCallDelta:
 
 
 @dataclass
+class ReasoningDelta:
+    """Chain-of-thought fragment from a thinking-mode response.
+
+    DeepSeek's thinking mode streams two parallel channels on every
+    chunk: ``delta.content`` (the user-facing reply) and
+    ``delta.reasoning_content`` (the internal chain-of-thought).
+    The chat router accumulates both — the visible reply hits the
+    SSE stream as usual, the reasoning is persisted on the message
+    so it can be replayed on follow-up turns when DeepSeek demands
+    it (tool-call multi-turn case). See migration
+    ``0049_msgs_reasoning`` for the API behaviour.
+
+    Providers that don't emit reasoning channels simply never yield
+    this event — the surface degrades cleanly on OpenAI / Anthropic /
+    Gemini.
+    """
+
+    text: str
+
+
+@dataclass
 class FinishEvent:
     """End-of-turn marker.
 
@@ -239,7 +260,9 @@ class UsageEvent:
     cost_usd: float | None = None
 
 
-StreamEvent = Union[TextDelta, ToolCallDelta, FinishEvent, UsageEvent]
+StreamEvent = Union[
+    TextDelta, ReasoningDelta, ToolCallDelta, FinishEvent, UsageEvent
+]
 
 
 def _serialize_part(part: ContentPart) -> dict[str, Any]:
@@ -255,17 +278,33 @@ def _serialize_part(part: ContentPart) -> dict[str, Any]:
 class ChatMessage:
     role: str  # 'system' | 'user' | 'assistant'
     content: str | list[ContentPart] = field(default="")
+    # DeepSeek thinking-mode chain-of-thought (assistant rows only).
+    # Captured from streamed ``delta.reasoning_content`` and persisted
+    # on the ``Message`` ORM row; round-tripped back to DeepSeek on
+    # follow-up turns because the API 400s on tool-call multi-turn
+    # conversations when it's missing. ``None`` means "no reasoning
+    # captured" — the message dict won't carry the field on the wire,
+    # which is exactly what we want for non-DeepSeek providers and
+    # for DeepSeek-but-thinking-disabled turns.
+    reasoning_content: str | None = None
 
     def to_openai(self) -> dict[str, Any]:
         # Plain-string fast path keeps every legacy caller wire-identical
         # to the pre-refactor behaviour.
         if isinstance(self.content, str):
-            return {"role": self.role, "content": self.content}
-        # Multimodal path: emit the typed array shape.
-        return {
-            "role": self.role,
-            "content": [_serialize_part(p) for p in self.content],
-        }
+            base: dict[str, Any] = {"role": self.role, "content": self.content}
+        else:
+            # Multimodal path: emit the typed array shape.
+            base = {
+                "role": self.role,
+                "content": [_serialize_part(p) for p in self.content],
+            }
+        if self.reasoning_content:
+            # Only set when non-empty — DeepSeek docs don't say
+            # ``""`` is illegal, but skipping it altogether matches
+            # how the API itself omits the field on plain replies.
+            base["reasoning_content"] = self.reasoning_content
+        return base
 
     def is_multimodal(self) -> bool:
         return not isinstance(self.content, str)
@@ -768,6 +807,19 @@ class ModelRouter:
             else:
                 payload_messages.append(m)
 
+        # ``reasoning_content`` is a DeepSeek-only field — it's required
+        # on tool-call multi-turn DeepSeek conversations (the API 400s
+        # without it) and at-best ignored / at-worst rejected by every
+        # other provider's strict schema validator. Strip it from
+        # every outbound message for non-DeepSeek providers so an
+        # admin swapping the provider on a thinking-mode conversation
+        # doesn't break the stream. The companion ``thinking`` /
+        # ``reasoning_effort`` ``extra_body`` block below is already
+        # DeepSeek-gated the same way.
+        if provider.type != "deepseek":
+            for msg in payload_messages:
+                msg.pop("reasoning_content", None)
+
         create_kwargs: dict[str, Any] = dict(
             model=model_id,
             messages=payload_messages,
@@ -848,6 +900,18 @@ class ModelRouter:
                 token = getattr(delta, "content", None)
                 if token:
                     yield TextDelta(text=token)
+
+                # DeepSeek thinking-mode chain-of-thought stream. The
+                # OpenAI SDK surfaces unknown delta fields as plain
+                # attributes (model_dump-friendly), so ``reasoning_content``
+                # comes through transparently. We emit it as a separate
+                # event so the chat router can accumulate + persist it
+                # without conflating it with the user-visible content
+                # buffer. Other providers never emit this field so the
+                # ``getattr`` returns None and the branch is a no-op.
+                reasoning_token = getattr(delta, "reasoning_content", None)
+                if reasoning_token:
+                    yield ReasoningDelta(text=reasoning_token)
 
                 # Tool-call deltas — multiple per stream, indexed.
                 tool_calls = getattr(delta, "tool_calls", None) or []

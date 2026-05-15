@@ -115,6 +115,7 @@ from app.models_config.provider import (
     FinishEvent,
     ImagePart,
     ProviderError,
+    ReasoningDelta,
     TextDelta,
     TextPart,
     ToolCallDelta,
@@ -2666,6 +2667,18 @@ async def _stream_generator(
                     triggering_warnings.extend(_img_warnings)
                 image_parts = images
 
+            # Hydrate DeepSeek thinking-mode chain-of-thought on
+            # assistant rows. NULL on non-DeepSeek providers and on
+            # turns where thinking was off — the dataclass field
+            # stays ``None`` and ``to_openai`` skips it. The
+            # provider stream-prep strips it again for non-DeepSeek
+            # providers as a belt-and-braces safety net.
+            reasoning = (
+                getattr(m, "reasoning_content", None)
+                if m.role == "assistant"
+                else None
+            )
+
             if image_parts:
                 # Multimodal turn: TextPart first so the question reads
                 # naturally above the image(s) in the model's context.
@@ -2673,13 +2686,25 @@ async def _stream_generator(
                 if full_text:
                     content_parts.append(TextPart(text=full_text))
                 content_parts.extend(image_parts)
-                history.append(ChatMessage(role=m.role, content=content_parts))
+                history.append(
+                    ChatMessage(
+                        role=m.role,
+                        content=content_parts,
+                        reasoning_content=reasoning,
+                    )
+                )
             else:
                 # Plain text turn — keep the legacy str path so wire
                 # format stays byte-identical to pre-Phase 4 behaviour.
                 if not full_text:
                     continue
-                history.append(ChatMessage(role=m.role, content=full_text))
+                history.append(
+                    ChatMessage(
+                        role=m.role,
+                        content=full_text,
+                        reasoning_content=reasoning,
+                    )
+                )
 
         # Forward any vision-related warnings (non-vision model + image
         # attachment with no relay configured, oversized image, etc.)
@@ -2729,6 +2754,15 @@ async def _stream_generator(
         running_history: list[ChatMessage | dict[str, Any]] = list(history)
 
         collected_text: list[str] = []
+        # DeepSeek thinking-mode chain-of-thought, accumulated across
+        # hops the same way ``collected_text`` is. Persisted on the
+        # final assistant message so we can replay it on follow-up
+        # turns — DeepSeek 400s on tool-call multi-turn conversations
+        # when the prior assistant's ``reasoning_content`` is missing
+        # (see migration ``0049_msgs_reasoning``). Other providers
+        # never emit it; this stays an empty list and the column
+        # ends up NULL.
+        collected_reasoning: list[str] = []
         assistant_attachment_snaps: list[dict[str, Any]] = []
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
@@ -2956,6 +2990,13 @@ async def _stream_generator(
                 # Accumulators for the *current* hop. Tool-call deltas
                 # come back fragmented per ``index``; we merge by index.
                 hop_text_parts: list[str] = []
+                # DeepSeek thinking-mode chain-of-thought for this
+                # hop. Captured separately so we can attach it to
+                # the assistant turn appended to ``running_history``
+                # when this hop ends in a tool call (the API requires
+                # ``reasoning_content`` on assistant turns of tool-
+                # call multi-turn DeepSeek conversations).
+                hop_reasoning_parts: list[str] = []
                 # Each entry: {"id": str, "name": str, "arguments": str}
                 pending_calls: dict[int, dict[str, str]] = {}
                 hop_finish: str | None = None
@@ -2986,6 +3027,17 @@ async def _stream_generator(
                             first_token_at = time.monotonic()
                         hop_text_parts.append(ev.text)
                         yield _sse({"delta": ev.text})
+
+                    elif isinstance(ev, ReasoningDelta):
+                        # Accumulate-only: no SSE forward today so the
+                        # UI doesn't have to render a thinking pane
+                        # for a feature shipping the same week. The
+                        # chain-of-thought still gets persisted +
+                        # replayed which is what fixes the DeepSeek
+                        # 400. A future patch can add a streaming
+                        # "thoughts" channel without changing the
+                        # persistence layer.
+                        hop_reasoning_parts.append(ev.text)
 
                     elif isinstance(ev, ToolCallDelta):
                         slot = pending_calls.setdefault(
@@ -3018,6 +3070,9 @@ async def _stream_generator(
                 hop_text = "".join(hop_text_parts)
                 if hop_text:
                     collected_text.append(hop_text)
+                hop_reasoning = "".join(hop_reasoning_parts)
+                if hop_reasoning:
+                    collected_reasoning.append(hop_reasoning)
 
                 # Plain reply — no tool calls. We're done.
                 if hop_finish != "tool_calls" or not pending_calls:
@@ -3042,15 +3097,24 @@ async def _stream_generator(
                 # Append the assistant turn carrying the tool_calls so
                 # the follow-up call has the right conversational shape.
                 tool_calls_payload = _build_tool_calls_payload(pending_calls)
-                running_history.append(
-                    {
-                        "role": "assistant",
-                        # OpenAI's protocol allows null content here
-                        # when the assistant produced only tool calls.
-                        "content": hop_text or None,
-                        "tool_calls": tool_calls_payload,
-                    }
-                )
+                assistant_tool_turn: dict[str, Any] = {
+                    "role": "assistant",
+                    # OpenAI's protocol allows null content here
+                    # when the assistant produced only tool calls.
+                    "content": hop_text or None,
+                    "tool_calls": tool_calls_payload,
+                }
+                # DeepSeek thinking-mode requires ``reasoning_content``
+                # on every assistant turn that participated in a tool
+                # call — without it the next hop's request 400s with
+                # "The reasoning_content in the thinking mode must be
+                # passed back to the API." Always attach when we
+                # captured any; ``provider.py`` strips it for non-
+                # DeepSeek providers so this is harmless cross-
+                # provider.
+                if hop_reasoning:
+                    assistant_tool_turn["reasoning_content"] = hop_reasoning
+                running_history.append(assistant_tool_turn)
 
                 tool_ctx = ToolContext(
                     db=db,
@@ -3133,10 +3197,16 @@ async def _stream_generator(
         if cost_usd is not None:
             cost_micros = max(0, int(round(cost_usd * 1_000_000)))
 
+        reasoning_full = "".join(collected_reasoning) or None
         assistant = Message(
             conversation_id=conv.id,
             role="assistant",
             content=full,
+            # DeepSeek thinking-mode chain-of-thought. NULL on every
+            # other provider; replayed back on follow-up turns to
+            # avoid the "reasoning_content must be passed back" 400
+            # the API throws on multi-turn tool-call conversations.
+            reasoning_content=reasoning_full,
             sources=sources_payload,
             attachments=assistant_attachment_snaps or None,
             prompt_tokens=prompt_tokens,
