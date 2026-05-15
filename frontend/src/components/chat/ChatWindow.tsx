@@ -61,6 +61,9 @@ export function ChatWindow({
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingAttachments = useChatStore((s) => s.streamingAttachments);
   const toolInvocations = useChatStore((s) => s.toolInvocations);
+  const visionRelayInvocations = useChatStore(
+    (s) => s.visionRelayInvocations,
+  );
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamError = useChatStore((s) => s.streamError);
   const streamErrorMeta = useChatStore((s) => s.streamErrorMeta);
@@ -165,7 +168,13 @@ export function ChatWindow({
   // nudge whenever the streaming buffer changes. NO auto-scroll here.
   useEffect(() => {
     setShowJumpToLatest(!isAtBottom() && isStreaming);
-  }, [streamingContent, toolInvocations.length, isStreaming, isAtBottom]);
+  }, [
+    streamingContent,
+    toolInvocations.length,
+    visionRelayInvocations.length,
+    isStreaming,
+    isAtBottom,
+  ]);
 
   const jumpToLatest = () => {
     setShowJumpToLatest(false);
@@ -182,7 +191,8 @@ export function ChatWindow({
     isStreaming &&
     (streamingContent.length > 0 ||
       (streamingAttachments?.length ?? 0) > 0 ||
-      toolInvocations.length > 0);
+      toolInvocations.length > 0 ||
+      visionRelayInvocations.length > 0);
 
   // Find the id of the conversation's most recent user message. Only this
   // one renders the pencil — editing earlier turns is intentionally not
@@ -281,6 +291,7 @@ export function ChatWindow({
             sources={streamingSources}
             attachments={streamingAttachments}
             toolInvocations={toolInvocations}
+            visionRelayInvocations={visionRelayInvocations}
             streaming
           />
         )}

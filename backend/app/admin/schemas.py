@@ -138,6 +138,17 @@ class AppSettingsResponse(BaseModel):
     # overshooting the default.
     chat_max_web_searches_per_turn: int
 
+    # ----- Vision relay -----
+    # The admin-selected vision-capable model used to caption images
+    # bound for non-vision chat models. Both fields are nullable; the
+    # frontend gates the feature on ``vision_relay_configured`` (both
+    # set). The frontend filters the model picker to ``supports_vision``
+    # entries so the admin can only pick a model that can actually
+    # see images.
+    vision_relay_provider_id: uuid.UUID | None = None
+    vision_relay_model_id: str | None = None
+    vision_relay_configured: bool
+
     updated_at: datetime
 
 
@@ -184,6 +195,18 @@ class AppSettingsUpdate(BaseModel):
     # anything above ~10 is almost certainly a runaway loop chewing
     # through the user's search-API quota.
     chat_max_web_searches_per_turn: int | None = Field(default=None, ge=1, le=20)
+
+    # ----- Vision relay -----
+    # Two-field tuple — both must be set together to enable the
+    # feature, or both must be cleared to disable. The router enforces
+    # this invariant (sending only one half is a 400) so we don't end
+    # up with a half-configured row that silently no-ops at runtime.
+    # ``None`` here means "omitted, leave unchanged" — the router uses
+    # ``model_fields_set`` to distinguish that from "explicit null =
+    # clear". The two halves must therefore be sent together when the
+    # admin wants to either enable or disable the relay.
+    vision_relay_provider_id: uuid.UUID | None = None
+    vision_relay_model_id: str | None = Field(default=None, max_length=255)
 
 
 class AdminUserCreate(BaseModel):

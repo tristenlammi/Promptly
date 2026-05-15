@@ -30,6 +30,7 @@ import type {
   MessageAttachmentSnapshot,
   Source,
   ToolInvocation,
+  VisionRelayInvocation,
 } from "@/api/types";
 import { useCodeArtifactStore } from "@/stores/codeArtifactStore";
 import {
@@ -52,6 +53,7 @@ export interface RegenerateOverride {
 
 import { MessageStats } from "./MessageStats";
 import { ToolStatusBlock } from "./ToolStatusBlock";
+import { VisionRelayChip } from "./VisionRelayChip";
 
 interface MessageBubbleProps {
   role: ChatMessage["role"];
@@ -86,6 +88,12 @@ interface MessageBubbleProps {
    *  persisted bubble passes nothing (the chips and reply text are the
    *  permanent record once the turn lands). */
   toolInvocations?: ToolInvocation[] | null;
+  /** Vision-relay captioning calls fired *before* this turn's reply
+   *  began (each image attached to a non-vision chat model gets one).
+   *  Only meaningful on the streaming bubble — once the assistant
+   *  reply commits, the caption text is already baked into the model's
+   *  output and the chips clear. */
+  visionRelayInvocations?: VisionRelayInvocation[] | null;
   promptTokens?: number | null;
   completionTokens?: number | null;
   ttftMs?: number | null;
@@ -456,6 +464,7 @@ function MessageBubbleImpl({
   sources,
   attachments,
   toolInvocations,
+  visionRelayInvocations,
   promptTokens,
   completionTokens,
   ttftMs,
@@ -482,6 +491,8 @@ function MessageBubbleImpl({
     [toolInvocations],
   );
   const hasToolInvocations = displayedToolInvocations.length > 0;
+  const hasVisionRelayInvocations =
+    !!visionRelayInvocations && visionRelayInvocations.length > 0;
   const hasStats =
     !isUser &&
     !streaming &&
@@ -668,6 +679,13 @@ function MessageBubbleImpl({
                 )}
               </>
             )}
+          </div>
+        )}
+        {hasVisionRelayInvocations && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            {visionRelayInvocations!.map((v) => (
+              <VisionRelayChip key={v.id} invocation={v} />
+            ))}
           </div>
         )}
         {hasToolInvocations && (

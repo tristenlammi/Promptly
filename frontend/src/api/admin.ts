@@ -102,6 +102,14 @@ export interface AppSettingsPatch {
    * a 1..20 range; the form clamps before sending so a typo can't 422.
    */
   chat_max_web_searches_per_turn?: number;
+  /**
+   * Vision relay — must be sent as a pair: either both halves with
+   * UUID + model id (enable), or both halves as ``null`` (disable).
+   * The backend 400s on a single-half PATCH so the row can't end up
+   * half-configured. Omit both to leave the current setting alone.
+   */
+  vision_relay_provider_id?: string | null;
+  vision_relay_model_id?: string | null;
 }
 
 export interface OriginPreview {

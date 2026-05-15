@@ -90,6 +90,16 @@ interface SSEPayload {
   ok?: boolean;
   attachments?: MessageAttachmentSnapshot[] | null;
   meta?: Record<string, unknown> | null;
+  // vision_relay_started / vision_relay_finished events. Driven by the
+  // chat router when a non-vision chat model receives an image
+  // attachment and the admin has configured a vision-capable relay
+  // model under Admin → Settings → Vision relay. Each image attached
+  // to the triggering turn produces one started/finished pair.
+  index?: number;
+  filename?: string;
+  relay_provider_name?: string;
+  relay_model_id?: string;
+  caption?: string | null;
   // Assistant performance metrics (attached to the `done` payload).
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
@@ -212,6 +222,24 @@ export function useStreamingChat(): UseStreamingChatResult {
 
         if (data.event === "vision_warning" && data.message) {
           store.addVisionWarning(data.message);
+          continue;
+        }
+        if (data.event === "vision_relay_started" && data.id) {
+          store.startVisionRelay({
+            id: data.id,
+            index: data.index ?? 1,
+            filename: data.filename ?? "image",
+            relayProviderName: data.relay_provider_name ?? "Vision relay",
+            relayModelId: data.relay_model_id ?? "",
+          });
+          continue;
+        }
+        if (data.event === "vision_relay_finished" && data.id) {
+          store.finishVisionRelay(data.id, {
+            ok: !!data.ok,
+            caption: data.caption ?? null,
+            error: data.error ?? null,
+          });
           continue;
         }
         if (data.event === "tool_started" && data.id && data.name) {
@@ -349,6 +377,7 @@ export function useStreamingChat(): UseStreamingChatResult {
           streamingSources: null,
           streamingAttachments: null,
           toolInvocations: [],
+          visionRelayInvocations: [],
         });
       }
     },
@@ -400,6 +429,7 @@ export function useStreamingChat(): UseStreamingChatResult {
           streamingSources: null,
           streamingAttachments: null,
           toolInvocations: [],
+          visionRelayInvocations: [],
         });
       }
     },
@@ -435,6 +465,7 @@ export function useStreamingChat(): UseStreamingChatResult {
           streamingSources: null,
           streamingAttachments: null,
           toolInvocations: [],
+          visionRelayInvocations: [],
         });
       }
     },
@@ -488,6 +519,7 @@ export function useStreamingChat(): UseStreamingChatResult {
           streamingSources: null,
           streamingAttachments: null,
           toolInvocations: [],
+          visionRelayInvocations: [],
         });
       }
     },

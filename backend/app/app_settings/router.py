@@ -109,6 +109,9 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         default_monthly_token_budget=row.default_monthly_token_budget,
         public_origins=list(row.public_origins or []),
         chat_max_web_searches_per_turn=row.chat_max_web_searches_per_turn,
+        vision_relay_provider_id=row.vision_relay_provider_id,
+        vision_relay_model_id=row.vision_relay_model_id,
+        vision_relay_configured=row.vision_relay_configured,
         updated_at=row.updated_at,
     )
 
@@ -232,6 +235,47 @@ async def update_app_settings(
         if row.chat_max_web_searches_per_turn != new_val:
             diff["chat_max_web_searches_per_turn"] = new_val
         row.chat_max_web_searches_per_turn = new_val
+
+    # ----- Vision relay -----
+    # Two halves move as a unit. The pydantic schema treats both as
+    # individually optional, but at runtime they only make sense
+    # together: a provider id without a model id is half-configured
+    # and would just silently no-op at chat time. We force the admin
+    # to send both, with explicit ``null`` for both meaning "disable",
+    # rather than letting a sloppy PATCH leave the row in a confusing
+    # state.
+    pid_set = "vision_relay_provider_id" in fields
+    mid_set = "vision_relay_model_id" in fields
+    if pid_set != mid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "vision_relay_provider_id and vision_relay_model_id must "
+                "be sent together — pass both to enable the relay, or "
+                "both as null to disable it."
+            ),
+        )
+    if pid_set and mid_set:
+        new_pid = payload.vision_relay_provider_id
+        new_mid = payload.vision_relay_model_id
+        # Disallow only one half being null (the schema permits it
+        # individually, but the combo is meaningless).
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "vision_relay_provider_id and vision_relay_model_id "
+                    "must both be set or both be null."
+                ),
+            )
+        if row.vision_relay_provider_id != new_pid:
+            diff["vision_relay_provider_id"] = (
+                str(new_pid) if new_pid else None
+            )
+        if row.vision_relay_model_id != new_mid:
+            diff["vision_relay_model_id"] = new_mid
+        row.vision_relay_provider_id = new_pid
+        row.vision_relay_model_id = new_mid
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

@@ -190,6 +190,18 @@ export interface AppSettings {
    * tool limits when a chatty model keeps overshooting.
    */
   chat_max_web_searches_per_turn: number;
+  /**
+   * Vision relay — when a user attaches an image to a chat whose
+   * active model can't read images natively, the chat router routes
+   * each image through this vision-capable model to produce a text
+   * caption, then splices the caption into the prompt. Both fields
+   * NULL = feature disabled. ``vision_relay_configured`` is a
+   * server-computed convenience flag (both halves set) so the UI
+   * doesn't have to repeat the and-check everywhere.
+   */
+  vision_relay_provider_id: string | null;
+  vision_relay_model_id: string | null;
+  vision_relay_configured: boolean;
   updated_at: string;
 }
 
@@ -599,6 +611,45 @@ export interface ToolInvocation {
   /** Tool-specific structured data (e.g. an image-gen prompt + model)
    *  surfaced for richer UI affordances. Opaque to the chat layer. */
   meta?: Record<string, unknown> | null;
+}
+
+/** State of a single vision-relay captioning call streamed via SSE.
+ *
+ *  When a user attaches an image to a chat whose active model can't
+ *  read images natively, the backend routes each image through an
+ *  admin-configured vision model to produce a text caption first.
+ *  Each image emits a ``vision_relay_started`` / ``vision_relay_finished``
+ *  pair which feeds this struct via ``chatStore.visionRelayInvocations``.
+ *
+ *  Lives in the store alongside ``toolInvocations`` and is cleared at
+ *  the start of the next stream — the relayed captions are spliced
+ *  into the chat model's prompt server-side, so the lasting record
+ *  is the assistant reply itself (just like search citations end up
+ *  in the sources footer, not in the live tool chip). */
+export type VisionRelayStatus = "pending" | "ok" | "error";
+
+export interface VisionRelayInvocation {
+  /** UUID of the ``UserFile`` being captioned; stable across the
+   *  started/finished pair. */
+  id: string;
+  /** 1-based ordering used by the chip ("Image #1", "Image #2", …)
+   *  so multi-image sends are distinguishable at a glance. */
+  index: number;
+  filename: string;
+  status: VisionRelayStatus;
+  /** Display name of the provider hosting the relay model (e.g.
+   *  "Gemini"). Populated on ``started`` so the pending chip can
+   *  already tell the user *who* is doing the captioning. */
+  relayProviderName: string;
+  /** Catalog id of the relay model (e.g. ``gemini-2.0-flash``). */
+  relayModelId: string;
+  /** Caption text — populated on success. Null while pending or on
+   *  error. The chip uses this for a click-to-expand tooltip so the
+   *  user can see exactly what the chat model received. */
+  caption?: string | null;
+  /** Human-readable failure reason — populated on error. Surfaces in
+   *  the red chip's hover tooltip. */
+  error?: string | null;
 }
 
 // ---- Study ----

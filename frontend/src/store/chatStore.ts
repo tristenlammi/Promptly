@@ -6,6 +6,7 @@ import type {
   MessageAttachmentSnapshot,
   Source,
   ToolInvocation,
+  VisionRelayInvocation,
 } from "@/api/types";
 
 interface ChatState {
@@ -27,6 +28,15 @@ interface ChatState {
    *  the persisted assistant message holds the lasting record (text +
    *  attachments) — these entries only drive the in-flight UI. */
   toolInvocations: ToolInvocation[];
+  /** Live-tracking of vision-relay captioning calls fired during the
+   *  current stream (one per image attached to a chat whose model
+   *  can't read images natively). Same lifecycle as ``toolInvocations``
+   *  — appended on ``vision_relay_started``, updated in place on
+   *  ``vision_relay_finished``, cleared at the start of the next
+   *  stream. The chat model already received the caption text, so
+   *  once the assistant reply commits the lasting record is the
+   *  reply itself. */
+  visionRelayInvocations: VisionRelayInvocation[];
   /** Attachments produced by tools during the current (still in-flight)
    *  stream. Mirrored onto the assistant message when the stream ends
    *  via the ``done`` payload, but kept here so the streaming bubble can
@@ -85,6 +95,24 @@ interface ChatState {
       meta?: Record<string, unknown> | null;
     }
   ) => void;
+  /** Append a freshly-started vision-relay caption call. No-op when an
+   *  entry with the same id already exists, so a duplicate
+   *  ``vision_relay_started`` from a flaky proxy can't desync the UI. */
+  startVisionRelay: (
+    invocation: Omit<VisionRelayInvocation, "status" | "caption" | "error">
+  ) => void;
+  /** Move a relay invocation from ``pending`` to ``ok``/``error`` and
+   *  attach its caption (success) or error (failure). Silently dropped
+   *  when the id isn't tracked — same defensive pattern as
+   *  ``finishToolInvocation``. */
+  finishVisionRelay: (
+    id: string,
+    update: {
+      ok: boolean;
+      caption?: string | null;
+      error?: string | null;
+    }
+  ) => void;
   appendStreamingAttachments: (
     attachments: MessageAttachmentSnapshot[]
   ) => void;
@@ -116,6 +144,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingSources: null,
   visionWarnings: [],
   toolInvocations: [],
+  visionRelayInvocations: [],
   streamingAttachments: null,
   isStreaming: false,
   streamError: null,
@@ -206,6 +235,30 @@ export const useChatStore = create<ChatState>((set) => ({
           : t
       ),
     })),
+  startVisionRelay: (invocation) =>
+    set((state) => {
+      if (state.visionRelayInvocations.some((v) => v.id === invocation.id))
+        return {};
+      return {
+        visionRelayInvocations: [
+          ...state.visionRelayInvocations,
+          { ...invocation, status: "pending" },
+        ],
+      };
+    }),
+  finishVisionRelay: (id, update) =>
+    set((state) => ({
+      visionRelayInvocations: state.visionRelayInvocations.map((v) =>
+        v.id === id
+          ? {
+              ...v,
+              status: update.ok ? "ok" : "error",
+              caption: update.caption ?? null,
+              error: update.error ?? null,
+            }
+          : v
+      ),
+    })),
   appendStreamingAttachments: (attachments) =>
     set((state) => ({
       streamingAttachments: [
@@ -219,6 +272,7 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingSources: null,
       visionWarnings: [],
       toolInvocations: [],
+      visionRelayInvocations: [],
       streamingAttachments: null,
       isStreaming: false,
       streamError: null,

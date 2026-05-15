@@ -2438,21 +2438,156 @@ async def _stream_generator(
                     ] + list(existing)
                     per_message_attachments[triggering_user_msg_id] = merged
 
+        # ---- Vision relay (pre-history-build) ----
+        # When the user's turn carries images AND the active chat model
+        # can't read them natively AND an admin-configured relay is
+        # available, run each image through the relay model to produce
+        # a text caption. The caption is then spliced into the
+        # triggering turn's text content below, replacing what would
+        # otherwise be a "model can't see images" warning with actual
+        # description content. A chip pair (started/finished) is
+        # emitted per image so the user sees what happened.
+        triggering_files = per_message_attachments.get(triggering_user_msg_id, [])
+        triggering_image_files = [f for f in triggering_files if looks_image(f)]
+        has_image = bool(triggering_image_files)
+
+        # Single load of the singleton settings row used by both the
+        # relay decision here and the tool-cap dict further down. Done
+        # once so an admin editing the row mid-stream can't cause the
+        # two reads to disagree.
+        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        relay_provider_row: ModelProvider | None = None
+        relay_will_run = (
+            has_image
+            and not model_supports_vision
+            and app_settings_row is not None
+            and app_settings_row.vision_relay_configured
+        )
+        if relay_will_run and app_settings_row is not None:
+            relay_provider_row = await db.get(
+                ModelProvider, app_settings_row.vision_relay_provider_id
+            )
+            if relay_provider_row is None:
+                # Provider was deleted between settings-write and now;
+                # collapse to the existing "cannot read images"
+                # warning path so the user gets a clear signal that
+                # the relay isn't usable.
+                relay_will_run = False
+
         # Surface vision warnings to the client. We only warn for the
         # *triggering* turn — older turns with images already produced
-        # a reply, the user has long since seen the consequence.
+        # a reply, the user has long since seen the consequence. The
+        # "model cannot read images" message is suppressed when the
+        # relay will run; the chip pair we emit below carries the same
+        # information in a more useful form.
         triggering_warnings: list[str] = []
-        triggering_files = per_message_attachments.get(triggering_user_msg_id, [])
-        if triggering_files:
-            has_image = any(looks_image(f) for f in triggering_files)
-            if has_image and not model_supports_vision:
-                triggering_warnings.append(
-                    f"The selected model ({ctx['model_id']}) cannot read "
-                    "images. Image attachments will be acknowledged by "
-                    "filename but their visual contents won't be sent. "
-                    "Pick a vision-capable model to have the AI actually "
-                    "see them."
+        if has_image and not model_supports_vision and not relay_will_run:
+            triggering_warnings.append(
+                f"The selected model ({ctx['model_id']}) cannot read "
+                "images. Image attachments will be acknowledged by "
+                "filename but their visual contents won't be sent. "
+                "Pick a vision-capable model to have the AI actually "
+                "see them — or ask an admin to configure a Vision "
+                "relay model under Admin → Settings."
+            )
+
+        # Capture whether this stream will produce the conversation's first
+        # assistant turn — that's when we generate the AI title.
+        is_first_turn = not any(m.role == "assistant" for m in history_rows)
+        first_user_message = next(
+            (m.content for m in history_rows if m.role == "user"), ""
+        )
+
+        # ---- SSE start ----
+        # Emitted earlier than it used to be (it lived after the
+        # history build) so the assistant bubble + chip area on the
+        # frontend can appear before any potentially-slow vision-relay
+        # captioning calls fire. Without this the user would stare at
+        # an empty placeholder for several seconds while we relay each
+        # image, with no indication anything was happening.
+        yield _sse({"event": "start", "stream_id": str(stream_id)})
+
+        # ---- Vision relay loop ----
+        # Captioning calls run serially (NOT in parallel) — the relay
+        # endpoint is typically a single provider and parallel image
+        # captions wouldn't pipeline faster on most upstreams while
+        # also making the chip animation jarring. Each image gets a
+        # ``vision_relay_started`` chip immediately, then the call
+        # blocks until the caption (or error) lands, then we yield
+        # ``vision_relay_finished``. Failed captions are surfaced as
+        # red chips and dropped from the spliced preamble — the main
+        # chat turn still fires so the user isn't left with nothing.
+        from app.chat.vision_relay import (  # local — sibling module
+            CaptionResult,
+            caption_image,
+            format_captions_as_text,
+        )
+
+        caption_results: list[tuple[uuid.UUID, str, CaptionResult]] = []
+        if (
+            relay_will_run
+            and relay_provider_row is not None
+            and app_settings_row is not None
+            and app_settings_row.vision_relay_model_id
+        ):
+            triggering_user_msg_row = next(
+                (m for m in history_rows if m.id == triggering_user_msg_id),
+                None,
+            )
+            user_question = (
+                (triggering_user_msg_row.content or "")
+                if triggering_user_msg_row is not None
+                else ""
+            )
+            for idx, image_file in enumerate(triggering_image_files, start=1):
+                yield _sse(
+                    {
+                        "event": "vision_relay_started",
+                        "id": str(image_file.id),
+                        "index": idx,
+                        "filename": image_file.filename,
+                        "relay_provider_name": relay_provider_row.name,
+                        "relay_model_id": (
+                            app_settings_row.vision_relay_model_id
+                        ),
+                    }
                 )
+                result = await caption_image(
+                    db=db,
+                    image_file=image_file,
+                    user_question=user_question,
+                    relay_provider=relay_provider_row,
+                    relay_model_id=app_settings_row.vision_relay_model_id,
+                )
+                caption_results.append(
+                    (image_file.id, image_file.filename, result)
+                )
+                yield _sse(
+                    {
+                        "event": "vision_relay_finished",
+                        "id": str(image_file.id),
+                        "ok": result.ok,
+                        "caption": result.text,
+                        "error": result.error,
+                    }
+                )
+
+        # Pre-compute the caption-preamble string once so the per-row
+        # history build below just splices it in (cheap append). Empty
+        # string when the relay didn't run or every caption failed —
+        # the splice becomes a no-op in those cases.
+        caption_preamble = (
+            format_captions_as_text(caption_results) if caption_results else ""
+        )
+        # If at least one caption succeeded the model genuinely has
+        # image context to work with, so we flip
+        # ``vision_handles_images`` on for the attachment preamble.
+        # That swaps the "model cannot read images" filler line for
+        # the friendlier "image bytes are provided separately" copy
+        # (which is true in spirit — the caption is the model's
+        # window into the image).
+        any_caption_ok = any(r[2].ok for r in caption_results)
+        vision_effective = model_supports_vision or any_caption_ok
 
         history: list[ChatMessage] = []
         for m in history_rows:
@@ -2468,17 +2603,26 @@ async def _stream_generator(
             # baked in, so re-feeding the text would waste tokens.
             if is_triggering and attachments:
                 preamble = build_attachment_preamble(
-                    attachments, vision_handles_images=model_supports_vision
+                    attachments, vision_handles_images=vision_effective
                 )
             else:
                 preamble = ""
+
+            # Splice the vision-relay caption block in front of the
+            # standard preamble for the triggering turn. Caption block
+            # first because it's the substantive content; the
+            # ``build_attachment_preamble`` block then references the
+            # files by name underneath.
+            if is_triggering and caption_preamble:
+                preamble = caption_preamble + preamble
 
             full_text = preamble + base_text
 
             # Image bytes: re-fed on EVERY user turn that had them, so the
             # model can keep referring back to the picture across multi-
             # turn conversations. Vision-incapable models silently drop
-            # the bytes (the textual marker + warning above covers it).
+            # the bytes — when relay ran successfully the caption above
+            # carries the visual content instead.
             image_parts: list[ImagePart] = []
             if model_supports_vision and attachments:
                 images, _img_warnings = build_image_parts(
@@ -2505,18 +2649,10 @@ async def _stream_generator(
                 if not full_text:
                     continue
                 history.append(ChatMessage(role=m.role, content=full_text))
-        # Capture whether this stream will produce the conversation's first
-        # assistant turn — that's when we generate the AI title.
-        is_first_turn = not any(m.role == "assistant" for m in history_rows)
-        first_user_message = next(
-            (m.content for m in history_rows if m.role == "user"), ""
-        )
-
-        yield _sse({"event": "start", "stream_id": str(stream_id)})
 
         # Forward any vision-related warnings (non-vision model + image
-        # attachment, oversized image, etc.) so the UI can surface them
-        # before any tokens stream in.
+        # attachment with no relay configured, oversized image, etc.)
+        # so the UI can surface them above the tool chips.
         for warning in triggering_warnings:
             yield _sse({"event": "vision_warning", "message": warning})
 
@@ -2583,8 +2719,10 @@ async def _stream_generator(
         # mid-stream. Falls back to the tool-class default
         # (``Tool.max_per_turn``) inside ``_dispatch_tools`` when this
         # dict is missing an entry — keeps behaviour stable if the
-        # singleton row is somehow unreadable.
-        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        # singleton row is somehow unreadable. Reuses the row loaded
+        # earlier for the vision-relay decision so an admin editing
+        # the settings mid-stream can't cause this read to disagree
+        # with that one.
         per_tool_caps: dict[str, int] = {}
         if app_settings_row is not None:
             per_tool_caps["web_search"] = (
