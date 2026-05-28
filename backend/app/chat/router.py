@@ -3015,18 +3015,32 @@ async def _stream_generator(
                 pending_calls: dict[int, dict[str, str]] = {}
                 hop_finish: str | None = None
 
-                # Forced-finish on the final hop: send the request
-                # WITHOUT tools so the model is forced to synthesise a
-                # text reply from whatever it has already gathered.
-                # Without this the model can keep calling tools until
-                # the budget runs out, which renders as an empty
-                # bubble + a red "model exceeded N-hop limit" chip —
-                # exactly the failure mode this branch exists to
-                # avoid. Tools-on hops still flow through the normal
-                # path so the model can chain searches naturally for
-                # the first ``MAX_TOOL_HOPS - 1`` iterations.
+                # Forced-finish on the final hop: keep the tool schema
+                # in scope (so the model still has the *context* of
+                # what tools were available for its earlier reasoning)
+                # but pin ``tool_choice="none"`` so the API obliges
+                # the model to generate a plain message instead of
+                # another tool call. This is the OpenAI-canonical
+                # "stop calling tools, synthesise an answer now"
+                # signal — every OpenAI-compatible endpoint we talk
+                # to (OpenAI, Anthropic-compat, Gemini-compat,
+                # Ollama, DeepSeek, OpenRouter) honours it.
+                #
+                # Earlier we just dropped tools entirely
+                # (``tools=None``), but some models pattern-match the
+                # conversation history and still emit ``tool_calls``
+                # even when no schema is provided — that produced the
+                # empty-bubble + red "couldn't finish within N hops"
+                # failure mode this branch exists to prevent. We also
+                # short-circuit the loop unconditionally on the final
+                # hop below so a misbehaving model that emits tool
+                # calls *anyway* (despite ``tool_choice="none"``)
+                # can't pull us past the cap.
                 is_final_hop = hop == MAX_TOOL_HOPS - 1
-                hop_tools = None if is_final_hop else tools_payload
+                hop_tools = tools_payload
+                hop_tool_choice = (
+                    "none" if is_final_hop and tools_payload else None
+                )
                 # If we're forcing a finish, surface a heads-up SSE
                 # event so the frontend can render a subtle "wrapping
                 # up" affordance instead of leaving the user staring
@@ -3049,6 +3063,7 @@ async def _stream_generator(
                     temperature=ctx["temperature"],
                     max_tokens=ctx["max_tokens"],
                     tools=hop_tools,
+                    tool_choice=hop_tool_choice,
                     include_usage=True,
                     # ``.get`` so stream contexts written by older
                     # backend builds (the Redis TTL is 60s, but
@@ -3114,8 +3129,27 @@ async def _stream_generator(
                 if hop_reasoning:
                     collected_reasoning.append(hop_reasoning)
 
-                # Plain reply — no tool calls. We're done.
-                if hop_finish != "tool_calls" or not pending_calls:
+                # We're done with the tool loop in one of three cases:
+                #
+                #   1. The model returned a plain text reply (no tool
+                #      calls) — the normal happy path.
+                #   2. ``hop_finish`` is something other than
+                #      ``tool_calls`` (e.g. ``stop`` / ``length``) —
+                #      we trust the upstream signal and stop.
+                #   3. We're on the forced-finish hop. Even if the
+                #      model emitted ``tool_calls`` despite the
+                #      ``tool_choice="none"`` pin, we MUST NOT
+                #      dispatch them — there are no hops left and
+                #      doing so just trips the for-else cap path.
+                #      Discard the misbehaving tool calls and persist
+                #      whatever text accumulated; the post-loop
+                #      empty-text check below covers the case where
+                #      that text is empty.
+                if (
+                    is_final_hop
+                    or hop_finish != "tool_calls"
+                    or not pending_calls
+                ):
                     # Diagnostic: tools were on but the model never
                     # actually called any. Useful for spotting models
                     # (Gemini-via-OpenRouter is the usual culprit) that
@@ -3123,13 +3157,26 @@ async def _stream_generator(
                     # at INFO so it shows up in normal operations
                     # tailing without polluting the audit log; no SSE
                     # event because the user already got a normal reply.
-                    if hop == 0 and tools_payload:
+                    if hop == 0 and tools_payload and not pending_calls:
                         logger.info(
                             "Tools enabled but model declined to call any "
                             "(stream=%s model=%s tools=%d)",
                             stream_id,
                             ctx["model_id"],
                             len(tools_payload),
+                        )
+                    # Belt-and-braces logging for case 3: helps an
+                    # operator spot the rare model that ignores
+                    # ``tool_choice="none"`` so we can flag it for a
+                    # provider-level allowlist later.
+                    if is_final_hop and pending_calls:
+                        logger.warning(
+                            "Forced-finish hop returned tool_calls "
+                            "despite tool_choice=none "
+                            "(stream=%s model=%s pending=%d). Discarding.",
+                            stream_id,
+                            ctx["model_id"],
+                            len(pending_calls),
                         )
                     break
 
@@ -3182,28 +3229,18 @@ async def _stream_generator(
                     yield sse_event
                     if tool_history_msg is not None:
                         running_history.append(tool_history_msg)
-            else:
-                # We hit ``MAX_TOOL_HOPS`` without ever breaking out
-                # via the "no more tool calls" path. With the
-                # forced-finish hop above this should only happen if
-                # the model produces a tool-call response on the
-                # tools-stripped final hop (pathological — the SDK
-                # generally won't even allow that since the schema
-                # said no tools). Render a soft error so the user
-                # isn't left looking at an empty bubble; the bubble
-                # below will still get persisted with whatever text
-                # was collected along the way, so partial answers
-                # aren't lost.
-                yield _sse(
-                    {
-                        "event": "tool_error",
-                        "error": (
-                            f"Model couldn't finish within {MAX_TOOL_HOPS} "
-                            "tool hops. Try a more focused question or "
-                            "ask the model to summarise what it found."
-                        ),
-                    }
-                )
+            # NOTE: no ``for...else`` clause here on purpose. The
+            # forced-finish hop's unconditional ``break`` above
+            # guarantees we always exit via ``break``, so the
+            # ``else`` branch was unreachable in practice and only
+            # served to emit a misleading "couldn't finish within N
+            # hops" error when what really happened was the model
+            # returned text + extra tool_calls on the final hop.
+            # The post-loop empty-text check below is the new home
+            # for the "model did nothing useful" failure-mode chip;
+            # it fires only when the bubble would otherwise be
+            # genuinely empty after the model already burned through
+            # at least one tool-call hop.
         except ProviderError as e:
             logger.warning("Provider error on stream %s: %s", stream_id, e)
             # Classify the error so the frontend can render an
@@ -3239,6 +3276,30 @@ async def _stream_generator(
         sources_payload: list[dict[str, Any]] | None = (
             _dedupe_sources(sources_accumulator) if sources_accumulator else None
         )
+
+        # Post-loop synthesis-failure check. If the model burned tool
+        # hops gathering information but never produced any visible
+        # text, render an actionable error chip so the user
+        # understands what happened — without this they'd just see an
+        # empty bubble next to a row of tool chips, with no signal
+        # that something went wrong. Only fires when sources or
+        # attachments WERE collected (otherwise the empty bubble is
+        # likely a benign "model said nothing" case worth keeping
+        # quiet about, e.g. an immediately-cancelled turn).
+        had_tool_activity = bool(sources_accumulator) or bool(
+            assistant_attachment_snaps
+        )
+        if not full.strip() and had_tool_activity:
+            yield _sse(
+                {
+                    "event": "tool_error",
+                    "error": (
+                        "The model ran tools but didn't synthesise a reply. "
+                        "Try asking a more focused question, or ask it to "
+                        "summarise what it found."
+                    ),
+                }
+            )
         # Convert dollars to integer micros for the message column. We
         # keep ``cost_usd`` as a float locally (sums and SSE) and only
         # round at the persistence boundary.
