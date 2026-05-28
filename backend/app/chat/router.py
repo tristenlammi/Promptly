@@ -3015,38 +3015,56 @@ async def _stream_generator(
                 pending_calls: dict[int, dict[str, str]] = {}
                 hop_finish: str | None = None
 
-                # Forced-finish on the final hop: keep the tool schema
-                # in scope (so the model still has the *context* of
-                # what tools were available for its earlier reasoning)
-                # but pin ``tool_choice="none"`` so the API obliges
-                # the model to generate a plain message instead of
-                # another tool call. This is the OpenAI-canonical
-                # "stop calling tools, synthesise an answer now"
-                # signal — every OpenAI-compatible endpoint we talk
-                # to (OpenAI, Anthropic-compat, Gemini-compat,
-                # Ollama, DeepSeek, OpenRouter) honours it.
+                # Forced-finish on the final hop: stack THREE signals so
+                # whichever the active provider honours, the model is
+                # forced to synthesise a text reply instead of calling
+                # yet another tool.
                 #
-                # Earlier we just dropped tools entirely
-                # (``tools=None``), but some models pattern-match the
-                # conversation history and still emit ``tool_calls``
-                # even when no schema is provided — that produced the
-                # empty-bubble + red "couldn't finish within N hops"
-                # failure mode this branch exists to prevent. We also
-                # short-circuit the loop unconditionally on the final
-                # hop below so a misbehaving model that emits tool
-                # calls *anyway* (despite ``tool_choice="none"``)
-                # can't pull us past the cap.
+                #   1. ``tools=None`` — drop the tool schema entirely
+                #      so the API has no functions to bind ``tool_calls``
+                #      against. OpenAI / Anthropic / DeepSeek / Ollama
+                #      treat this as "no tools available".
+                #   2. ``tool_choice="none"`` — only meaningful when
+                #      tools is non-empty per OpenAI spec, so it's set
+                #      to ``None`` here too. (We keep the parameter
+                #      threaded for non-final hops in case we ever
+                #      need it.)
+                #   3. **Synthesis instruction injected into the system
+                #      prompt** — the cross-provider safety net. Some
+                #      models (Gemini's OpenAI-compat layer is the
+                #      usual culprit) ignore ``tool_choice="none"`` AND
+                #      pattern-match the conversation history into more
+                #      tool calls even with no schema. An explicit
+                #      "you have no tools left, write the answer now"
+                #      instruction in the system prompt is the only
+                #      cross-provider thing that reliably stops them.
+                #
+                # Combined with the unconditional ``break`` further
+                # down on ``is_final_hop``, a still-misbehaving model
+                # that emits tool_calls anyway can't pull us past the
+                # cap; and the post-loop empty-text check provides a
+                # last-resort error chip.
                 is_final_hop = hop == MAX_TOOL_HOPS - 1
-                hop_tools = tools_payload
-                hop_tool_choice = (
-                    "none" if is_final_hop and tools_payload else None
-                )
-                # If we're forcing a finish, surface a heads-up SSE
-                # event so the frontend can render a subtle "wrapping
-                # up" affordance instead of leaving the user staring
-                # at a long tool-call run with no obvious next step.
-                # Not an error — just a transition cue.
+                hop_tools = None if is_final_hop else tools_payload
+                hop_tool_choice = None
+                hop_system = system_prompt
                 if is_final_hop and tools_payload:
+                    forced_finish_note = (
+                        "\n\n[FORCED FINISH] You have used all "
+                        "available tool calls for this turn. Do not "
+                        "attempt to call any more tools — none are "
+                        "available. Write your final answer to the "
+                        "user's question now using the information "
+                        "you have already gathered. If the gathered "
+                        "information is incomplete, explicitly say "
+                        "what's missing and answer with what you have."
+                    )
+                    hop_system = (system_prompt or "") + forced_finish_note
+                    # Surface a heads-up SSE event so the frontend can
+                    # render a subtle "wrapping up" affordance instead
+                    # of leaving the user staring at a long tool-call
+                    # run with no obvious next step. Not an error —
+                    # just a transition cue.
                     yield _sse(
                         {
                             "event": "tool_loop_wrapping_up",
@@ -3059,7 +3077,7 @@ async def _stream_generator(
                     provider=provider,
                     model_id=ctx["model_id"],
                     messages=running_history,
-                    system=system_prompt,
+                    system=hop_system,
                     temperature=ctx["temperature"],
                     max_tokens=ctx["max_tokens"],
                     tools=hop_tools,
@@ -3290,16 +3308,147 @@ async def _stream_generator(
             assistant_attachment_snaps
         )
         if not full.strip() and had_tool_activity:
-            yield _sse(
-                {
-                    "event": "tool_error",
-                    "error": (
-                        "The model ran tools but didn't synthesise a reply. "
-                        "Try asking a more focused question, or ask it to "
-                        "summarise what it found."
-                    ),
-                }
+            # ---- Synthesis-retry pass ----
+            # Truly model-agnostic safety net for the rare case where
+            # the forced-finish hop still produced no text — usually
+            # because the active model's OpenAI-compat layer
+            # silently drops ``tool_choice="none"`` and pattern-matches
+            # the long ``tool``/``tool_calls`` history into yet
+            # another tool call. We give that model nothing to
+            # pattern-match against: a clean prompt with the original
+            # user question, a text digest of every tool result we
+            # collected, no tools schema, no prior assistant
+            # tool_call turns. There is literally nothing left to
+            # call, so even the most stubborn model has to write
+            # something.
+            yield _sse({"event": "synthesis_retry"})
+            logger.info(
+                "Forced-finish hop produced no text; running "
+                "synthesis-retry pass (stream=%s model=%s "
+                "tool_results=%d)",
+                stream_id,
+                ctx["model_id"],
+                sum(
+                    1
+                    for m in running_history
+                    if isinstance(m, dict) and m.get("role") == "tool"
+                ),
             )
+
+            # Build a text digest from the tool messages we
+            # accumulated. Each entry truncated to 2 000 chars to
+            # keep the synthesis-prompt under control on chatty
+            # tool outputs (web_search results in particular).
+            tool_digest_parts: list[str] = []
+            for msg in running_history:
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") != "tool":
+                    continue
+                tname = msg.get("name", "tool")
+                tcontent = msg.get("content", "")
+                if isinstance(tcontent, list):
+                    # Some providers return content as a parts array;
+                    # flatten the text-typed parts only.
+                    tcontent = "\n".join(
+                        p.get("text", "")
+                        for p in tcontent
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                if not isinstance(tcontent, str) or not tcontent:
+                    continue
+                truncated = tcontent[:2000] + (
+                    "\n…[truncated]" if len(tcontent) > 2000 else ""
+                )
+                tool_digest_parts.append(f"--- {tname} ---\n{truncated}")
+            tool_digest = (
+                "\n\n".join(tool_digest_parts) or "(no tool output captured)"
+            )
+
+            # Reuse the user's most recent question as the only
+            # message in the synthesis call. The system prompt carries
+            # the research digest + the synthesis instruction. We
+            # walk ``reversed(history_rows)`` to grab the latest user
+            # turn — matching the existing pattern in this module
+            # rather than the *first* user message in the conversation.
+            synth_user_question = next(
+                (
+                    m.content
+                    for m in reversed(history_rows)
+                    if m.role == "user"
+                ),
+                "",
+            )
+            synth_system = (
+                (system_prompt or "")
+                + "\n\n[SYNTHESIS PASS] You previously researched the "
+                + "user's question. Below is a digest of what the tool "
+                + "calls returned. No tools are available now — write a "
+                + "clear, concise final answer for the user using only "
+                + "this research. If the research is incomplete, "
+                + "acknowledge the gaps and answer with what you have.\n\n"
+                + "=== RESEARCH DIGEST ===\n"
+                + tool_digest
+            )
+            synth_messages: list[ChatMessage] = [
+                ChatMessage(role="user", content=synth_user_question or "")
+            ]
+
+            retry_text_parts: list[str] = []
+            try:
+                async for ev in model_router.stream_chat_events(
+                    provider=provider,
+                    model_id=ctx["model_id"],
+                    messages=synth_messages,
+                    system=synth_system,
+                    temperature=ctx["temperature"],
+                    max_tokens=ctx["max_tokens"],
+                    tools=None,
+                    include_usage=False,
+                    reasoning_effort=ctx.get("reasoning_effort"),
+                ):
+                    if isinstance(ev, TextDelta):
+                        if first_token_at is None:
+                            first_token_at = time.monotonic()
+                        retry_text_parts.append(ev.text)
+                        yield _sse({"delta": ev.text})
+            except ProviderError as retry_err:
+                # The retry itself failed upstream — fall through to
+                # the final error chip below. Logged so an operator
+                # can see both the original failure and the retry
+                # failure side-by-side.
+                logger.warning(
+                    "Synthesis-retry pass failed (stream=%s model=%s): %s",
+                    stream_id,
+                    ctx["model_id"],
+                    retry_err,
+                )
+
+            retry_text = "".join(retry_text_parts)
+            if retry_text.strip():
+                # Synthesis-retry succeeded; promote it to the final
+                # ``full`` so the assistant message persists with the
+                # synthesised answer instead of an empty string.
+                collected_text.append(retry_text)
+                full = "".join(collected_text)
+            else:
+                # Even the synthesis-retry produced nothing — surface
+                # the actionable error chip as a last resort. The
+                # bubble will still be empty but the user has a clear
+                # signal something went wrong and a hint how to
+                # retry.
+                yield _sse(
+                    {
+                        "event": "tool_error",
+                        "error": (
+                            "The model ran tools but didn't synthesise a "
+                            "reply, even on a clean retry. Try asking a "
+                            "more focused question, or pick a different "
+                            "model — this one is struggling with the "
+                            "tool output."
+                        ),
+                    }
+                )
         # Convert dollars to integer micros for the message column. We
         # keep ``cost_usd`` as a float locally (sums and SSE) and only
         # round at the persistence boundary.
