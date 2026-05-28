@@ -99,6 +99,11 @@ interface MessageBubbleProps {
   ttftMs?: number | null;
   totalMs?: number | null;
   costUsd?: number | null;
+  /** Set on the just-streamed assistant reply when the upstream hit
+   *  its output-token ceiling and the text is cut off mid-thought.
+   *  Renders a subtle "response was cut off" hint with a regenerate
+   *  nudge. Only ever true on a freshly streamed message. */
+  truncated?: boolean;
   /** Edit-and-resend hook. When provided, a pencil icon renders below
    *  the bubble that swaps it into an inline editor. The promise should
    *  resolve once the new stream has been kicked off; the bubble exits
@@ -302,6 +307,17 @@ function extractTextFromNode(node: unknown): string {
 }
 
 // Wrap <pre> to add Copy + (when eligible) Open-in-panel buttons.
+// Hoisted so the plugin arrays keep a stable identity across renders
+// (a fresh ``[remarkGfm]`` literal every render defeats react-markdown's
+// internal memoisation). ``rehype-highlight`` walks the whole AST and
+// emits a tree of <span>s per code block — cheap once, but ruinous when
+// it re-runs on every streamed token of a long code-heavy reply. We
+// therefore skip it entirely while ``streaming`` and only highlight the
+// final, persisted bubble.
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS_WITH_HIGHLIGHT = [rehypeHighlight];
+const REHYPE_PLUGINS_NONE: [] = [];
+
 const markdownComponents: Components = {
   pre({ children, ...props }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -470,6 +486,7 @@ function MessageBubbleImpl({
   ttftMs,
   totalMs,
   costUsd,
+  truncated,
   messageId,
   authorUserId,
   authorLookup,
@@ -491,6 +508,38 @@ function MessageBubbleImpl({
     [toolInvocations],
   );
   const hasToolInvocations = displayedToolInvocations.length > 0;
+  // Preprocess the markdown once per content change rather than on
+  // every render. During streaming ``content`` changes ~60×/sec (post
+  // batching), so keeping these string passes out of the hot render
+  // path matters. Only the assistant prose path uses it.
+  const processedMarkdown = useMemo(
+    () => rewriteMentionsForMarkdown(stripInlineCitations(content || "")),
+    [content],
+  );
+  // Memoise the rendered markdown *element* on [content, streaming].
+  // ``MessageBubble``'s ``memo`` is routinely defeated by the inline
+  // ``onEdit`` / ``onBranch`` / ``onRegenerate`` closures the parent
+  // recreates every render, so persisted bubbles re-render whenever
+  // the streaming bubble updates. Holding the ReactMarkdown subtree by
+  // reference means React bails out of reconciling it when the content
+  // hasn't changed — so the expensive remark/rehype/highlight parse
+  // only runs when *this* message's text actually changes, not on
+  // every sibling token. The streaming bubble still recomputes (its
+  // content changes), but with highlight disabled that pass is cheap.
+  const markdownEl = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={
+          streaming ? REHYPE_PLUGINS_NONE : REHYPE_PLUGINS_WITH_HIGHLIGHT
+        }
+        components={markdownComponents}
+      >
+        {processedMarkdown}
+      </ReactMarkdown>
+    ),
+    [processedMarkdown, streaming],
+  );
   const hasVisionRelayInvocations =
     !!visionRelayInvocations && visionRelayInvocations.length > 0;
   const hasStats =
@@ -662,15 +711,7 @@ function MessageBubbleImpl({
               renderMentionText(content)
             ) : (
               <>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeHighlight]}
-                  components={markdownComponents}
-                >
-                  {rewriteMentionsForMarkdown(
-                    stripInlineCitations(content || "")
-                  )}
-                </ReactMarkdown>
+                {markdownEl}
                 {streaming && (
                   <span
                     aria-hidden
@@ -679,6 +720,21 @@ function MessageBubbleImpl({
                 )}
               </>
             )}
+          </div>
+        )}
+        {!isUser && !streaming && truncated && (
+          <div
+            className={cn(
+              "mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
+              "border border-amber-500/30 bg-amber-500/10 text-amber-700",
+              "dark:text-amber-300"
+            )}
+          >
+            <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              This reply was cut off because it hit the model's output
+              limit.{onRegenerate ? " Regenerate to continue it." : ""}
+            </span>
           </div>
         )}
         {hasVisionRelayInvocations && (

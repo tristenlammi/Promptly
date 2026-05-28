@@ -505,6 +505,12 @@ export interface ChatMessage {
   /** Total dollar cost reported by the provider (model + paid tools).
    *  Floats; ``null`` when the provider didn't surface a cost. */
   cost_usd?: number | null;
+  /** Client-only: set on the just-streamed assistant message when the
+   *  upstream stopped because it hit the output-token ceiling
+   *  (finish_reason "length") rather than finishing naturally. Drives
+   *  the "response was cut off" hint + regenerate nudge. Not persisted,
+   *  so it's only present until the next reload. */
+  truncated?: boolean;
   /** Stamped by the in-place edit endpoint when the conversation
    *  owner hand-corrects an assistant reply. Null on every original-
    *  state row. The UI uses this to render an "edited" badge. */

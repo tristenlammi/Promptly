@@ -2999,6 +2999,11 @@ async def _stream_generator(
                     "\n\n".join(blocks), system_prompt or ""
                 )
 
+        # Holds the final hop's ``finish_reason`` after the loop breaks
+        # so the ``done`` event can flag truncation (``"length"``).
+        # Initialised here so it's always bound even on the (impossible)
+        # zero-iteration path.
+        hop_finish: str | None = None
         try:
             for hop in range(MAX_TOOL_HOPS):
                 # Accumulators for the *current* hop. Tool-call deltas
@@ -3013,7 +3018,7 @@ async def _stream_generator(
                 hop_reasoning_parts: list[str] = []
                 # Each entry: {"id": str, "name": str, "arguments": str}
                 pending_calls: dict[int, dict[str, str]] = {}
-                hop_finish: str | None = None
+                hop_finish = None
 
                 # Forced-finish on the final hop: stack THREE signals so
                 # whichever the active provider honours, the model is
@@ -3545,6 +3550,13 @@ async def _stream_generator(
                 # paid tools that ran on this turn). Floats are fine
                 # over the wire — micros stays a server-side detail.
                 "cost_usd": cost_usd,
+                # The upstream stopped because it hit the output-token
+                # ceiling rather than finishing naturally — the reply is
+                # cut off mid-thought. Surface it so the UI can show a
+                # "response was truncated" hint + a regenerate nudge.
+                # ``hop_finish`` retains the final hop's finish_reason
+                # after the loop breaks.
+                "truncated": hop_finish == "length",
             }
         )
 

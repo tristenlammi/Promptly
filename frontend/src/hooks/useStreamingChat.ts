@@ -106,6 +106,10 @@ interface SSEPayload {
   ttft_ms?: number | null;
   total_ms?: number | null;
   cost_usd?: number | null;
+  // ``true`` when the upstream stopped because it hit the output-token
+  // ceiling (finish_reason "length") rather than finishing naturally —
+  // the reply is cut off mid-thought. Attached to the `done` payload.
+  truncated?: boolean;
 }
 
 interface SendMessageOptions {
@@ -196,7 +200,45 @@ export function useStreamingChat(): UseStreamingChatResult {
       let finalSources: Source[] | null = null;
       let finalAttachments: MessageAttachmentSnapshot[] | null = null;
 
-      for await (const raw of iterateSSE(resp.body, ac.signal)) {
+      // ---- Delta batching ----
+      // Writing to the store on *every* token (often many per second)
+      // forces a re-render + full markdown re-parse of the growing
+      // bubble each time, which locks up the main thread on long
+      // replies. Instead we buffer incoming tokens and flush at most
+      // once per animation frame (~60fps), so render frequency is
+      // decoupled from token frequency. ``flushDelta`` is also called
+      // synchronously before we read ``streamingContent`` on ``done``
+      // and in the ``finally`` so nothing is left unflushed.
+      let pendingDelta = "";
+      let rafHandle: number | null = null;
+      const flushDelta = () => {
+        rafHandle = null;
+        if (pendingDelta) {
+          useChatStore.getState().appendStreamingDelta(pendingDelta);
+          pendingDelta = "";
+        }
+      };
+      const scheduleFlush = () => {
+        if (rafHandle == null) {
+          rafHandle =
+            typeof requestAnimationFrame === "function"
+              ? requestAnimationFrame(flushDelta)
+              : (setTimeout(flushDelta, 16) as unknown as number);
+        }
+      };
+      const cancelScheduledFlush = () => {
+        if (rafHandle != null) {
+          if (typeof cancelAnimationFrame === "function") {
+            cancelAnimationFrame(rafHandle);
+          } else {
+            clearTimeout(rafHandle);
+          }
+          rafHandle = null;
+        }
+      };
+
+      try {
+        for await (const raw of iterateSSE(resp.body, ac.signal)) {
         let data: SSEPayload;
         try {
           data = JSON.parse(raw) as SSEPayload;
@@ -297,9 +339,15 @@ export function useStreamingChat(): UseStreamingChatResult {
         }
 
         if (data.delta) {
-          store.appendStreamingDelta(data.delta);
+          pendingDelta += data.delta;
+          scheduleFlush();
         }
         if (data.done) {
+          // Flush any buffered tokens before we snapshot the content
+          // for the persisted message, otherwise the final bubble can
+          // drop the last frame's worth of text.
+          cancelScheduledFlush();
+          flushDelta();
           const currentContent = useChatStore.getState().streamingContent;
           if (data.sources) finalSources = data.sources;
           if (data.attachments) finalAttachments = data.attachments;
@@ -317,10 +365,20 @@ export function useStreamingChat(): UseStreamingChatResult {
               ttft_ms: data.ttft_ms ?? null,
               total_ms: data.total_ms ?? null,
               cost_usd: data.cost_usd ?? null,
+              truncated: data.truncated ?? false,
             };
           }
           break;
         }
+        }
+      } finally {
+        // Whether we finished cleanly, broke on ``done``, or threw /
+        // aborted mid-stream, make sure no animation-frame callback is
+        // left pending (it would otherwise fire after the store was
+        // reset and re-append stale text) and that any buffered tokens
+        // land so a cancelled-but-partial reply keeps its last frame.
+        cancelScheduledFlush();
+        flushDelta();
       }
 
       if (finalMessage) {

@@ -767,7 +767,7 @@ class ModelRouter:
         messages: list[ChatMessage] | list[dict[str, Any]],
         system: str | None = None,
         temperature: float = 0.7,
-        max_tokens: int | None = 4096,
+        max_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         include_usage: bool = False,
@@ -824,9 +824,15 @@ class ModelRouter:
             model=model_id,
             messages=payload_messages,
             temperature=temperature,
-            max_tokens=max_tokens,
             stream=True,
         )
+        # Only pin an output cap when the caller asked for one. Sending
+        # ``max_tokens=null`` trips some OpenAI-compat layers, and when
+        # it's omitted entirely the model writes until it naturally
+        # stops or hits the context window — which is what we want so
+        # long replies stop getting truncated mid-sentence.
+        if max_tokens is not None:
+            create_kwargs["max_tokens"] = max_tokens
         if tools:
             create_kwargs["tools"] = tools
             if tool_choice is not None:

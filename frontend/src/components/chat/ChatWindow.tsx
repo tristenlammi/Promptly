@@ -231,12 +231,12 @@ export function ChatWindow({
   // author chip without re-walking the participants array per row.
   // ``null`` when there are <=1 participants (solo chat) — that's
   // the signal MessageBubble uses to skip the chip entirely.
-  const authorLookup = (() => {
+  const authorLookup = useMemo(() => {
     if (!participants || participants.length <= 1) return null;
     const map: Record<string, string> = {};
     for (const p of participants) map[p.user_id] = p.username;
     return map;
-  })();
+  }, [participants]);
 
   return (
     <div ref={scrollRef} className="promptly-scroll relative flex-1 overflow-y-auto">
@@ -261,6 +261,7 @@ export function ChatWindow({
               ttftMs={m.ttft_ms}
               totalMs={m.total_ms}
               costUsd={m.cost_usd}
+              truncated={m.truncated}
               authorUserId={m.author_user_id}
               authorLookup={authorLookup}
               currentUserId={currentUserId}

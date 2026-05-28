@@ -229,7 +229,12 @@ class SendMessageRequest(BaseModel):
     # this stays out of the wire shape so it can't 400 the call.
     reasoning_effort: ReasoningEffort | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
+    # Default ``None`` = don't cap the reply; let the model write until it
+    # naturally stops or hits the context window. The old 4096 default
+    # silently truncated long answers mid-sentence (finish_reason
+    # "length") because the UI never sends this field. Clients can still
+    # pass an explicit cap when they want one.
+    max_tokens: int | None = Field(default=None, ge=1, le=100_000)
     # IDs of files from /api/files the user picked via the paperclip modal.
     # Each must be readable by the caller (their own or shared-pool files).
     attachment_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -372,7 +377,12 @@ class EditMessageRequest(BaseModel):
     # how the original send was configured.
     reasoning_effort: ReasoningEffort | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
+    # Default ``None`` = don't cap the reply; let the model write until it
+    # naturally stops or hits the context window. The old 4096 default
+    # silently truncated long answers mid-sentence (finish_reason
+    # "length") because the UI never sends this field. Clients can still
+    # pass an explicit cap when they want one.
+    max_tokens: int | None = Field(default=None, ge=1, le=100_000)
     # Mirror of SendMessageRequest: edited turns may toggle tool calling
     # on the retry independently of how the original send went.
     tools_enabled: bool = False
@@ -416,5 +426,10 @@ class RegenerateMessageRequest(BaseModel):
     # Same override-then-persist pattern as ``web_search_mode``.
     reasoning_effort: ReasoningEffort | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int | None = Field(default=4096, ge=1, le=100_000)
+    # Default ``None`` = don't cap the reply; let the model write until it
+    # naturally stops or hits the context window. The old 4096 default
+    # silently truncated long answers mid-sentence (finish_reason
+    # "length") because the UI never sends this field. Clients can still
+    # pass an explicit cap when they want one.
+    max_tokens: int | None = Field(default=None, ge=1, le=100_000)
     tools_enabled: bool = False
