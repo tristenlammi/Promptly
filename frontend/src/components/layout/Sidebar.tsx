@@ -45,6 +45,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { id: activeId } = useParams<{ id?: string }>();
   const conversations = useChatStore((s) => s.conversations);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // Per-user feature visibility (Phase 2): optional nav surfaces the
+  // user chose to hide from their sidebar. Purely cosmetic.
+  const hiddenNav = useAuthStore((s) => s.user?.settings?.hidden_nav);
   // Study is desktop/tablet only — the chat/whiteboard split and the
   // interactive exercises are too cramped below the md breakpoint (<768px).
   const isMobile = useIsMobile();
@@ -80,9 +83,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Stage-3 prep: drive nav rendering from the shared ``NAV_ITEMS``
   // config so the future Promptly Drive PWA layout can filter the
   // same list to ``section === "drive"`` without touching markup.
+  const hiddenSet = useMemo(
+    () => new Set(hiddenNav ?? []),
+    [hiddenNav]
+  );
   const visibleNavItems: NavItemConfig[] = NAV_ITEMS.filter((it) => {
     if (it.desktopOnly && isMobile) return false;
     if (it.adminOnly && !isAdmin) return false;
+    if (it.optionalKey && hiddenSet.has(it.optionalKey)) return false;
     return true;
   });
 

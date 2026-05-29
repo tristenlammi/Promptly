@@ -268,6 +268,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("shared_message", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Scheduled tasks"
+                subtitle="A scheduled task finished and a new report is ready (or failed)."
+                checked={prefs.task_complete}
+                busy={prefsBusy === "task_complete"}
+                onChange={(v) => toggle("task_complete", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

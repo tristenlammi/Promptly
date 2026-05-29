@@ -26,6 +26,7 @@ from app.observability.capture import (
     install_error_capture,
 )
 from app.chat.temporary_sweeper import start_sweeper
+from app.tasks.scheduler import start_scheduler
 from app.redis_client import close_redis, redis
 
 # Configure the JSON logger + in-memory ring buffer *before* any other
@@ -68,15 +69,19 @@ async def lifespan(_: FastAPI):
     # lazy-filters expired rows so the sweeper interval is purely a
     # housekeeping concern.
     sweeper_task = start_sweeper()
+    # Phase 1 (v2) — start the scheduled-tasks runner. Polls for due
+    # automations every minute and dispatches headless runs.
+    scheduler_task = start_scheduler()
     try:
         yield
     finally:
         logger.info("Promptly backend shutting down")
-        sweeper_task.cancel()
-        try:
-            await sweeper_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        for bg in (sweeper_task, scheduler_task):
+            bg.cancel()
+            try:
+                await bg
+            except (asyncio.CancelledError, Exception):
+                pass
         await close_redis()
 
 
@@ -262,6 +267,7 @@ from app.notifications.router import router as notifications_router  # noqa: E40
 from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
+from app.tasks.router import router as tasks_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
@@ -322,6 +328,7 @@ app.include_router(
     tags=["local-models"],
 )
 app.include_router(study_router, prefix="/api/study", tags=["study"])
+app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])
 # Drive Documents API (create doc, mint collab JWT, accept snapshot

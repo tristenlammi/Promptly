@@ -49,6 +49,10 @@ export interface UserSettings {
   default_model_id?: string;
   /** Provider UUID matching ``default_model_id``. */
   default_provider_id?: string;
+  /** Optional top-level nav surfaces the user has hidden from their
+   *  sidebar (purely cosmetic — routes still work). One of
+   *  ``"projects" | "study" | "tasks"``. Absent / ``[]`` = show all. */
+  hidden_nav?: string[];
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -67,6 +71,8 @@ export interface UserPreferencesUpdate {
   default_model_id?: string;
   /** Pass an empty string to clear. See ``default_model_id``. */
   default_provider_id?: string;
+  /** Replace the full set of hidden nav surfaces. ``[]`` shows all. */
+  hidden_nav?: string[];
 }
 
 export interface User {
@@ -525,6 +531,16 @@ export interface ChatMessage {
    *  note left on a thumbs-down. */
   feedback?: "up" | "down" | null;
   feedback_reason?: string | null;
+  /** Phase 2.6 — in-thread regeneration versioning. ``parent_id`` is the
+   *  lineage link. The pager fields are only present when a message has
+   *  more than one sibling version: ``version_index`` is 1-based,
+   *  ``version_count`` the total, and ``sibling_ids`` the ordered ids
+   *  used for prev/next navigation. Absent when there's a single
+   *  version (no pager). */
+  parent_id?: string | null;
+  version_index?: number | null;
+  version_count?: number | null;
+  sibling_ids?: string[] | null;
 }
 
 export interface ConversationSummary {

@@ -22,6 +22,8 @@ import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
 import { StudyPage } from "@/pages/StudyPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
 import { StudyTopicPage } from "@/pages/StudyTopicPage";
+import { TaskDetailPage } from "@/pages/TaskDetailPage";
+import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
@@ -212,6 +214,8 @@ export default function App() {
         <Route path="/chat/:id" element={<ChatPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
+        <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route
           path="/study"
           element={

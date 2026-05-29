@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  CalendarClock,
   FolderKanban,
   FolderOpen,
   MessagesSquare,
@@ -25,6 +26,29 @@ import {
  */
 export type NavSection = "chat" | "drive" | "study" | "admin";
 
+/** Stable identifiers for the *optional* nav surfaces a user can hide
+ *  from their sidebar (Phase 2 — per-user feature visibility). Chat and
+ *  Files are core and intentionally absent. */
+export type OptionalNavKey = "projects" | "study" | "tasks";
+
+export const OPTIONAL_NAV_KEYS: { key: OptionalNavKey; label: string; description: string }[] = [
+  {
+    key: "projects",
+    label: "Projects",
+    description: "Group chats, files, and context into shared workspaces.",
+  },
+  {
+    key: "tasks",
+    label: "Tasks",
+    description: "Scheduled automations that generate recurring reports.",
+  },
+  {
+    key: "study",
+    label: "Study",
+    description: "Interactive study mode with a whiteboard and exercises.",
+  },
+];
+
 export interface NavItem {
   to: string;
   icon: LucideIcon;
@@ -36,6 +60,9 @@ export interface NavItem {
   desktopOnly?: boolean;
   /** Hide unless the viewer is an admin. */
   adminOnly?: boolean;
+  /** When set, this item is *optional*: the user can hide it from their
+   *  sidebar via Account → Features. Matches an ``OptionalNavKey``. */
+  optionalKey?: OptionalNavKey;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -51,6 +78,14 @@ export const NAV_ITEMS: NavItem[] = [
     icon: FolderKanban,
     label: "Projects",
     section: "chat",
+    optionalKey: "projects",
+  },
+  {
+    to: "/tasks",
+    icon: CalendarClock,
+    label: "Tasks",
+    section: "chat",
+    optionalKey: "tasks",
   },
   {
     to: "/study",
@@ -58,6 +93,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Study",
     section: "study",
     desktopOnly: true,
+    optionalKey: "study",
   },
   {
     to: "/files",

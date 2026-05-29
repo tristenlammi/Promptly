@@ -44,6 +44,7 @@ class PreferencesSchema(BaseModel):
     export_ready: bool
     import_done: bool
     shared_message: bool
+    task_complete: bool
 
 
 class PreferencesUpdate(BaseModel):
@@ -56,6 +57,7 @@ class PreferencesUpdate(BaseModel):
     export_ready: bool | None = None
     import_done: bool | None = None
     shared_message: bool | None = None
+    task_complete: bool | None = None
 
 
 class PublicKeyResponse(BaseModel):

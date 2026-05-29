@@ -154,6 +154,27 @@ class UserPreferencesUpdate(BaseModel):
     timezone: str | None = Field(default=None, max_length=64)
     default_model_id: str | None = Field(default=None, max_length=128)
     default_provider_id: str | None = Field(default=None, max_length=64)
+    # Per-user interface curation: the set of *optional* top-level nav
+    # surfaces this user has chosen to hide from their sidebar. Purely
+    # cosmetic — hiding a section doesn't disable the underlying feature
+    # or its routes, it just declutters the nav. Unknown keys are dropped
+    # so a stale client can't poison the list. ``[]`` = show everything.
+    hidden_nav: list[str] | None = None
+
+    @field_validator("hidden_nav")
+    @classmethod
+    def _clean_hidden_nav(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        allowed = {"projects", "study", "tasks"}
+        # Preserve order, dedupe, and drop anything outside the optional
+        # set (Chat + Files are core and can never be hidden).
+        seen: list[str] = []
+        for item in v:
+            key = str(item).strip().lower()
+            if key in allowed and key not in seen:
+                seen.append(key)
+        return seen
 
     @field_validator("location")
     @classmethod

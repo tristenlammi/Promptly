@@ -1,6 +1,7 @@
 import { ShieldCheck } from "lucide-react";
 
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
+import { FeatureVisibilityPanel } from "@/components/account/FeatureVisibilityPanel";
 import { NotificationsPanel } from "@/components/account/NotificationsPanel";
 import { PersonalContextPanel } from "@/components/account/PersonalContextPanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
@@ -44,6 +45,7 @@ export function AccountSecurityPage() {
         <div className="mx-auto flex max-w-2xl flex-col gap-6">
           <PersonalContextPanel />
           <ChatPreferencesPanel />
+          <FeatureVisibilityPanel />
           <SavedPromptsPanel />
           <NotificationsPanel />
           <MfaSettingsPanel defaultEmail={user?.email} />

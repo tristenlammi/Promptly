@@ -14,6 +14,7 @@ export interface NotificationPreferences {
   export_ready: boolean;
   import_done: boolean;
   shared_message: boolean;
+  task_complete: boolean;
 }
 
 export interface SubscribePayload {
