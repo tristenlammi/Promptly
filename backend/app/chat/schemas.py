@@ -69,6 +69,17 @@ class MessageResponse(BaseModel):
     # short note left on a thumbs-down.
     feedback: Literal["up", "down"] | None = None
     feedback_reason: str | None = None
+    # Phase 2.6 — in-thread regeneration versioning. ``parent_id`` is the
+    # lineage link (the preceding message). The pager fields are only
+    # populated for messages that actually have more than one sibling
+    # version, and are attached by the router after validation (they are
+    # computed, not stored on the row): ``version_index`` (1-based),
+    # ``version_count``, and ``sibling_ids`` (ordered, for prev/next
+    # navigation). All ``None`` when a message has a single version.
+    parent_id: uuid.UUID | None = None
+    version_index: int | None = None
+    version_count: int | None = None
+    sibling_ids: list[uuid.UUID] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -110,6 +121,7 @@ class MessageResponse(BaseModel):
                         "edited_at",
                         "feedback",
                         "feedback_reason",
+                        "parent_id",
                     )
                 }
                 payload["cost_usd"] = micros / 1_000_000.0
@@ -266,6 +278,37 @@ class SendMessageRequest(BaseModel):
 class SendMessageResponse(BaseModel):
     stream_id: uuid.UUID
     user_message: MessageResponse
+
+
+class EnhancePromptRequest(BaseModel):
+    """Phase 3.2 — rewrite a rough composer draft into a sharper prompt."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    text: str = Field(min_length=1, max_length=8000)
+    model_id: str | None = Field(default=None, max_length=255)
+    provider_id: uuid.UUID | None = None
+
+
+class EnhancePromptResponse(BaseModel):
+    enhanced: str
+
+
+class ArtifactEditRequest(BaseModel):
+    """Phase 5 — apply a natural-language change to a code artifact and
+    get the full updated source back (in-place editing)."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    source: str = Field(min_length=1, max_length=60000)
+    language: str = Field(default="plain", max_length=40)
+    instruction: str = Field(min_length=1, max_length=2000)
+    model_id: str | None = Field(default=None, max_length=255)
+    provider_id: uuid.UUID | None = None
+
+
+class ArtifactEditResponse(BaseModel):
+    updated: str
 
 
 class BranchConversationRequest(BaseModel):

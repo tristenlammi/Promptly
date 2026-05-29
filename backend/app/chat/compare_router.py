@@ -276,15 +276,20 @@ async def _send_across_columns(
     now = datetime.now(timezone.utc)
     out: list[CompareSendColumn] = []
     for conv in columns:
+        # Phase 2.6 — chain into the column's lineage so the shared
+        # stream generator can hang the assistant reply off this turn
+        # and the version pager stays coherent per column.
         user_msg = Message(
             conversation_id=conv.id,
             role="user",
             content=content,
+            parent_id=conv.active_leaf_message_id,
             author_user_id=user.id,
         )
         db.add(user_msg)
         conv.updated_at = now
         await db.flush()
+        conv.active_leaf_message_id = user_msg.id
 
         stream_id = uuid.uuid4()
         ctx: StreamContext = {

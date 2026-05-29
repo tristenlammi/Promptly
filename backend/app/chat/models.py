@@ -95,6 +95,18 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         nullable=True,
     )
 
+    # Phase 2.6 — in-thread regeneration versioning. Points at the
+    # currently-visible leaf message; the visible thread is reconstructed
+    # by walking ``Message.parent_id`` from this leaf up to the root and
+    # reversing. NULL on legacy/empty conversations, in which case the
+    # readers fall back to plain ``created_at`` ordering. Self-heals via
+    # the 0054 backfill migration. ``SET NULL`` on delete so dropping the
+    # leaf row never dangles the FK.
+    active_leaf_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Temporary chats (Phase Z1):
     #   * NULL          — permanent (the default; existing chats are all NULL).
     #   * "ephemeral"   — deleted as soon as the user navigates away.
@@ -259,6 +271,18 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Phase 2.6 — in-thread regeneration versioning. The message that
+    # immediately precedes this one in its lineage. Messages sharing a
+    # ``parent_id`` are *sibling versions* (e.g. the original answer and
+    # a regenerated one, or an original user turn and an edited copy).
+    # NULL only for the conversation's root message. ``SET NULL`` on
+    # delete so deleting a parent doesn't cascade away its alternatives.
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
 
     # 'user' | 'assistant' | 'system'

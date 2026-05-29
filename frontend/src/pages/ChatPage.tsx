@@ -77,8 +77,14 @@ export function ChatPage() {
   // responded). Keeping this a primitive selector avoids re-renders when
   // unrelated chat state changes.
   const storeMessageCount = useChatStore((s) => s.messages.length);
-  const { sendMessage, editAndResend, regenerate, reattach, cancel } =
-    useStreamingChat();
+  const {
+    sendMessage,
+    editAndResend,
+    regenerate,
+    continueGenerate,
+    reattach,
+    cancel,
+  } = useStreamingChat();
   const selectedModel = useSelectedModel();
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
@@ -578,6 +584,55 @@ export function ChatPage() {
     ]
   );
 
+  /** Phase 3.1 — resume a reply that was cut off at the output limit.
+   *  Streams the continuation onto the same bubble using the
+   *  conversation's current settings (no model override needed). */
+  const handleContinue = useCallback(
+    async (messageId: string) => {
+      if (!id) return;
+      const provider_id = selectedModel?.provider_id;
+      const model_id = selectedModel?.model_id;
+      await continueGenerate(id, messageId, {
+        provider_id,
+        model_id,
+        web_search_mode: webSearchMode,
+        reasoning_effort:
+          reasoningSupported && reasoningEffort ? reasoningEffort : undefined,
+        tools_enabled: toolsEnabled,
+      });
+    },
+    [
+      continueGenerate,
+      id,
+      selectedModel,
+      webSearchMode,
+      reasoningSupported,
+      reasoningEffort,
+      toolsEnabled,
+    ]
+  );
+
+  /** Phase 2.6 — switch the visible thread to a sibling version from the
+   *  ``‹ 2/3 ›`` pager. The backend re-resolves the active path and hands
+   *  back the full conversation detail, which we both push into the
+   *  store (instant swap) and write into the query cache so a later
+   *  refetch / hydrate doesn't bounce back to the previous version. */
+  const handleSelectVersion = useCallback(
+    async (siblingId: string) => {
+      if (!id) return;
+      try {
+        const detail = await chatApi.activateMessageVersion(id, siblingId);
+        setMessages(detail.messages);
+        queryClient.setQueryData(["conversation", id], detail);
+      } catch (err) {
+        const detail2 =
+          err instanceof Error ? err.message : "Couldn't switch version.";
+        window.alert(detail2);
+      }
+    },
+    [id, setMessages, queryClient]
+  );
+
   /** One-click recovery after a stream error. Re-runs the most recent
    *  user turn with the currently-selected model. The user message is
    *  persisted before the stream drains, so in the common case (upstream
@@ -824,10 +879,12 @@ export function ChatPage() {
               participants={participants}
               onBranchFrom={id ? handleBranchFrom : undefined}
               onRegenerate={id ? handleRegenerate : undefined}
+              onContinue={id ? handleContinue : undefined}
               onRetry={id ? handleRetry : undefined}
               onPickAnotherModel={handlePickAnotherModel}
               onDelete={id && isOwner ? handleDeleteMessage : undefined}
               onFeedback={id && isOwner ? handleMessageFeedback : undefined}
+              onSelectVersion={id ? handleSelectVersion : undefined}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">

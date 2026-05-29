@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from app.redis_client import redis
 
@@ -45,6 +45,12 @@ class StreamContext(TypedDict):
     # JSON round-trip on the stream-context handoff stays exact; the
     # router validates the value before sending it upstream.
     reasoning_effort: str | None
+    # Continue-generation (Phase 3.1). When present, the stream resumes a
+    # *truncated* assistant reply: the generator splices the partial text
+    # into the prompt as context and **appends** the continuation to this
+    # existing message id instead of creating a fresh assistant row.
+    # Absent on every normal send / edit / regenerate.
+    continue_from_message_id: NotRequired[str]
 
 
 async def enqueue_stream(stream_id: uuid.UUID, ctx: StreamContext) -> None:

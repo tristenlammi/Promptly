@@ -143,6 +143,13 @@ interface UseStreamingChatResult {
     messageId: string,
     payload?: RegenerateMessagePayload
   ) => Promise<void>;
+  /** Resume a truncated assistant reply, appending the continuation onto
+   *  the same message so it reads as one answer. */
+  continueGenerate: (
+    conversationId: string,
+    messageId: string,
+    payload?: RegenerateMessagePayload
+  ) => Promise<void>;
   /** Re-attach to a generation that's still running on the backend (the
    *  user navigated away mid-reply and came back). Replays the buffered
    *  transcript from the start, then tails the live token stream. The
@@ -457,20 +464,22 @@ export function useStreamingChat(): UseStreamingChatResult {
       store.setStreaming(true);
 
       try {
-        // POST the edit. Backend rewrites the user message, deletes any
-        // assistant tail, and returns the persisted user_message + a
-        // fresh stream_id for the new reply.
+        // POST the edit. Phase 2.6 — the backend now inserts the edited
+        // turn as a *sibling* (new id) rather than rewriting in place,
+        // and returns that new ``user_message`` + a fresh stream_id.
         const { stream_id, user_message } = await chatApi.editMessage(
           conversationId,
           messageId,
           payload
         );
 
-        // Reflect the edit in the local store: swap the message in place
-        // (so React keeps the DOM node) and drop everything after it.
-        // The drainStream call below will append the new assistant reply.
+        // Reflect the edit locally: swap the old turn out for the new
+        // sibling and drop everything after it (truncate by the *new*
+        // id, since the old one is no longer in the list). The drain
+        // below appends the fresh reply; the finally-block conversation
+        // refetch then backfills the ‹ 2/3 › version metadata.
         store.replaceMessage(messageId, user_message);
-        store.truncateAfter(messageId);
+        store.truncateAfter(user_message.id);
 
         await drainStream(conversationId, stream_id, ac);
       } catch (err) {
@@ -584,5 +593,74 @@ export function useStreamingChat(): UseStreamingChatResult {
     [cancel, drainStream, qc]
   );
 
-  return { sendMessage, editAndResend, regenerate, reattach, cancel };
+  const continueGenerate = useCallback(
+    async (
+      conversationId: string,
+      assistantMessageId: string,
+      payload: RegenerateMessagePayload = {}
+    ) => {
+      const store = useChatStore.getState();
+      cancel();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      // Snapshot the truncated reply BEFORE we touch the store so we can
+      // seed the streaming buffer with it — the continuation streams onto
+      // the end and the server appends to the same row, so the final
+      // bubble reads as one continuous answer.
+      const target = store.messages.find((m) => m.id === assistantMessageId);
+      const partial = target?.content ?? "";
+      const partialSources = target?.sources ?? null;
+      const partialAttachments = target?.attachments ?? null;
+
+      store.resetStream();
+      store.setStreaming(true);
+
+      try {
+        const { stream_id, user_message } = await chatApi.continueMessage(
+          conversationId,
+          assistantMessageId,
+          payload
+        );
+
+        // Drop the partial assistant row from the list; the streaming
+        // bubble (seeded below) renders in its place and `done` re-adds
+        // the merged message under the same id.
+        store.truncateAfter(user_message.id);
+        useChatStore.setState({
+          streamingContent: partial,
+          streamingSources: partialSources,
+          streamingAttachments: partialAttachments,
+        });
+
+        await drainStream(conversationId, stream_id, ac);
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        store.setStreamError(msg);
+      } finally {
+        abortRef.current = null;
+        useChatStore.getState().setStreaming(false);
+        qc.invalidateQueries({ queryKey: ["conversations"] });
+        qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        useChatStore.setState({
+          streamingContent: "",
+          streamingSources: null,
+          streamingAttachments: null,
+          toolInvocations: [],
+          visionRelayInvocations: [],
+        });
+      }
+    },
+    [cancel, drainStream, qc]
+  );
+
+  return {
+    sendMessage,
+    editAndResend,
+    regenerate,
+    continueGenerate,
+    reattach,
+    cancel,
+  };
 }

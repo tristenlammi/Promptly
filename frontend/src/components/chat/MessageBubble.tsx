@@ -1,4 +1,13 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -6,9 +15,12 @@ import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import {
+  ArrowDownToLine,
   AtSign,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   Eye,
@@ -31,7 +43,8 @@ import {
 } from "lucide-react";
 
 import { apiClient } from "@/api/client";
-import { filesApi } from "@/api/files";
+import { filesApi, type FileItem } from "@/api/files";
+import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { MermaidDiagram } from "./MermaidDiagram";
 import type {
   ChatMessage,
@@ -130,6 +143,11 @@ interface MessageBubbleProps {
    *  pick "Try a different model" → <model> from the chevron submenu.
    *  Resolves once the new stream has been kicked off. */
   onRegenerate?: (override: RegenerateOverride | null) => Promise<void> | void;
+  /** Phase 3.1 — resume a reply that was cut off at the output limit.
+   *  When provided (only on a truncated last reply), the truncation
+   *  banner shows a "Continue" button that streams more text onto the
+   *  end of this same bubble. */
+  onContinue?: () => Promise<void> | void;
   /** Delete-this-message hook. When provided, a "Delete" action shows
    *  in the row's overflow menu. The parent confirms + removes the
    *  message; the bubble just invokes the callback. */
@@ -155,72 +173,16 @@ interface MessageBubbleProps {
    *  to relabel the action button ("Revisit exercise" vs "Open
    *  exercise") so the student knows they're re-opening an old one. */
   exerciseReviewed?: boolean;
-}
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1200);
-        } catch {
-          // Clipboard may be unavailable on insecure origins; fail quietly.
-        }
-      }}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1",
-        "bg-white/10 text-xs text-white/80 opacity-0 transition",
-        "hover:bg-white/20 hover:text-white group-hover:opacity-100",
-        "focus:opacity-100"
-      )}
-      aria-label={copied ? "Copied" : "Copy code"}
-      title={copied ? "Copied" : "Copy"}
-    >
-      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      {copied ? "Copied" : "Copy"}
-    </button>
-  );
-}
-
-/** Button that opens a fenced code block in the right-hand Code
- *  Artifact side panel. Only rendered when the block is long enough
- *  or the language has a live preview (HTML / SVG / Markdown /
- *  JSON / CSV) — see {@link shouldShowOpenButton}. */
-function OpenInPanelButton({
-  source,
-  rawLanguage,
-}: {
-  source: string;
-  rawLanguage: string;
-}) {
-  const language = normaliseLanguage(rawLanguage);
-  if (!shouldShowOpenButton(source, language)) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        useCodeArtifactStore.getState().openArtifact({
-          source,
-          language,
-          filenameStem: "artifact",
-        });
-      }}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1",
-        "bg-white/10 text-xs text-white/80 opacity-0 transition",
-        "hover:bg-white/20 hover:text-white group-hover:opacity-100",
-        "focus:opacity-100"
-      )}
-      aria-label="Open in panel"
-      title="Open in side panel"
-    >
-      <PanelRightIcon className="h-3 w-3" />
-      Open
-    </button>
-  );
+  /** Phase 2.6 — in-thread regeneration versioning. When this message
+   *  has more than one sibling version, ``versionIndex`` (1-based) and
+   *  ``versionCount`` drive a compact ``‹ 2/3 ›`` pager; ``siblingIds``
+   *  is the ordered list used to resolve prev/next, and
+   *  ``onSelectVersion`` activates the chosen sibling. All undefined for
+   *  single-version messages (no pager). */
+  versionIndex?: number;
+  versionCount?: number;
+  siblingIds?: string[];
+  onSelectVersion?: (siblingId: string) => Promise<void> | void;
 }
 
 // Phase C — ``@[title](id)`` mention tokens. We rewrite them to a
@@ -375,7 +337,13 @@ function extractTextFromNode(node: unknown): string {
 // half-typed equation mid-stream (e.g. an unmatched ``$``) from
 // blowing up the whole bubble — KaTeX just renders the raw source in
 // the error colour until the closing delimiter arrives.
-const REMARK_PLUGINS: Options["remarkPlugins"] = [remarkGfm, remarkMath];
+// ``singleDollarTextMath: false`` stops a lone ``$`` from opening inline
+// math, so currency amounts ("$965 billion") render as plain text instead
+// of being parsed as garbled LaTeX. Real math can still use ``$$…$$``.
+const REMARK_PLUGINS: Options["remarkPlugins"] = [
+  remarkGfm,
+  [remarkMath, { singleDollarTextMath: false }],
+];
 const REHYPE_PLUGINS_WITH_HIGHLIGHT: Options["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false }],
   rehypeHighlight,
@@ -386,6 +354,139 @@ const REHYPE_PLUGINS_WITH_HIGHLIGHT: Options["rehypePlugins"] = [
 const REHYPE_PLUGINS_NONE: Options["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false }],
 ];
+
+/** Code blocks longer than this (in lines) start collapsed so a big
+ *  reply with several long snippets doesn't become an endless scroll.
+ *  Short blocks render inline as before. */
+const COLLAPSE_LINE_THRESHOLD = 8;
+
+/** Supplies the streaming flag to the markdown ``pre`` renderer so code
+ *  blocks stay expanded while the reply is still arriving (so the user
+ *  can watch it land) and collapse once finalised. */
+const CodeBlockStreamingContext = createContext(false);
+
+/** A fenced code block that collapses by default when it's long.
+ *  Collapsed shows a compact header (language · line count) plus the
+ *  Open-in-viewer and Copy actions; expanding reveals the syntax-
+ *  highlighted source. Short blocks (and in-flight streaming ones)
+ *  render open. */
+function CollapsibleCodeBlock({
+  text,
+  rawLang,
+  preProps,
+  children,
+}: {
+  text: string;
+  rawLang: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  preProps: Record<string, any>;
+  children: ReactNode;
+}) {
+  const streaming = useContext(CodeBlockStreamingContext);
+  const lineCount = text ? text.split("\n").length : 0;
+  const isLong = lineCount > COLLAPSE_LINE_THRESHOLD;
+  // Initial state is computed once on mount. The final (persisted)
+  // bubble mounts fresh with ``streaming === false``, so a long block
+  // lands collapsed; the streaming bubble starts short and stays open.
+  const [collapsed, setCollapsed] = useState(isLong && !streaming);
+  const label = normaliseLanguage(rawLang) || "code";
+
+  return (
+    <div className="promptly-codeblock group relative my-2 overflow-hidden rounded-card border border-[var(--border)]">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className={cn(
+            "inline-flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs",
+            "text-[var(--text-muted)] transition hover:text-[var(--text)]"
+          )}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand code" : "Collapse code"}
+        >
+          {collapsed ? (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="font-mono font-medium text-[var(--text)]">
+            {label}
+          </span>
+          <span className="truncate">
+            · {lineCount} {lineCount === 1 ? "line" : "lines"}
+          </span>
+        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <HeaderOpenInPanelButton source={text} rawLanguage={rawLang} />
+          <HeaderCopyButton text={text} />
+        </div>
+      </div>
+      {!collapsed && <pre {...preProps}>{children}</pre>}
+    </div>
+  );
+}
+
+/** Header variant of the copy action — always visible (no hover-reveal)
+ *  and themed for the light surface header bar. */
+function HeaderCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        } catch {
+          // Clipboard may be unavailable on insecure origins.
+        }
+      }}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+        "text-[var(--text-muted)] transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
+      )}
+      aria-label={copied ? "Copied" : "Copy code"}
+      title={copied ? "Copied" : "Copy"}
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
+
+/** Header variant of the open-in-panel action — themed for the header
+ *  bar; only rendered when the block is panel-eligible. */
+function HeaderOpenInPanelButton({
+  source,
+  rawLanguage,
+}: {
+  source: string;
+  rawLanguage: string;
+}) {
+  const language = normaliseLanguage(rawLanguage);
+  if (!shouldShowOpenButton(source, language)) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        useCodeArtifactStore.getState().openArtifact({
+          source,
+          language,
+          filenameStem: "artifact",
+        });
+      }}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+        "text-[var(--text-muted)] transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
+      )}
+      aria-label="Open in panel"
+      title="Open in side panel"
+    >
+      <PanelRightIcon className="h-3 w-3" />
+      Open
+    </button>
+  );
+}
 
 const markdownComponents: Components = {
   pre({ children, ...props }) {
@@ -405,13 +506,9 @@ const markdownComponents: Components = {
       return <MermaidDiagram code={text} />;
     }
     return (
-      <div className="group relative">
-        <pre {...props}>{children}</pre>
-        <div className="absolute right-2 top-2 flex items-center gap-1">
-          <OpenInPanelButton source={text} rawLanguage={rawLang} />
-          <CopyButton text={text} />
-        </div>
-      </div>
+      <CollapsibleCodeBlock text={text} rawLang={rawLang} preProps={props}>
+        {children}
+      </CollapsibleCodeBlock>
     );
   },
   a({ children, href, ...props }) {
@@ -596,12 +693,17 @@ function MessageBubbleImpl({
   editedAt,
   onBranch,
   onRegenerate,
+  onContinue,
   onDelete,
   feedback,
   feedbackReason,
   onFeedback,
   onOpenExercise,
   exerciseReviewed,
+  versionIndex,
+  versionCount,
+  siblingIds,
+  onSelectVersion,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const hasSources = !isUser && sources && sources.length > 0;
@@ -633,15 +735,17 @@ function MessageBubbleImpl({
   // content changes), but with highlight disabled that pass is cheap.
   const markdownEl = useMemo(
     () => (
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={
-          streaming ? REHYPE_PLUGINS_NONE : REHYPE_PLUGINS_WITH_HIGHLIGHT
-        }
-        components={markdownComponents}
-      >
-        {processedMarkdown}
-      </ReactMarkdown>
+      <CodeBlockStreamingContext.Provider value={!!streaming}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={
+            streaming ? REHYPE_PLUGINS_NONE : REHYPE_PLUGINS_WITH_HIGHLIGHT
+          }
+          components={markdownComponents}
+        >
+          {processedMarkdown}
+        </ReactMarkdown>
+      </CodeBlockStreamingContext.Provider>
     ),
     [processedMarkdown, streaming],
   );
@@ -740,6 +844,14 @@ function MessageBubbleImpl({
 
   // Phase 2.5 — thumbs feedback. Assistant replies only.
   const canFeedback = !isUser && !streaming && !!onFeedback;
+  // Phase 2.6 — show the ‹ 2/3 › pager only when this message actually
+  // has sibling versions and the parent wired up a switch handler.
+  const showVersionPager =
+    !!onSelectVersion &&
+    !!versionCount &&
+    versionCount > 1 &&
+    !!siblingIds &&
+    !!versionIndex;
   const [reasonOpen, setReasonOpen] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
   const handleThumb = (rating: "up" | "down") => {
@@ -909,16 +1021,29 @@ function MessageBubbleImpl({
         {!isUser && !streaming && truncated && (
           <div
             className={cn(
-              "mt-2 flex items-start gap-2 rounded-lg px-3 py-2 text-xs",
+              "mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs",
               "border border-amber-500/30 bg-amber-500/10 text-amber-700",
               "dark:text-amber-300"
             )}
           >
-            <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              This reply was cut off because it hit the model's output
-              limit.{onRegenerate ? " Regenerate to continue it." : ""}
+            <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              This reply was cut off because it hit the model's output limit.
             </span>
+            {onContinue && (
+              <button
+                type="button"
+                onClick={() => void onContinue()}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium transition",
+                  "bg-amber-500/20 hover:bg-amber-500/30",
+                  "text-amber-800 dark:text-amber-200"
+                )}
+              >
+                <ArrowDownToLine className="h-3.5 w-3.5" />
+                Continue
+              </button>
+            )}
           </div>
         )}
         {hasVisionRelayInvocations && (
@@ -949,8 +1074,17 @@ function MessageBubbleImpl({
           canCopy ||
           canReadAloud ||
           canFeedback ||
+          (showVersionPager && !streaming) ||
           (onOpenExercise && !streaming)) && (
           <div className="mt-1.5 flex items-center gap-1">
+            {showVersionPager && !streaming && (
+              <VersionPager
+                index={versionIndex!}
+                count={versionCount!}
+                siblingIds={siblingIds!}
+                onSelectVersion={onSelectVersion!}
+              />
+            )}
             {onOpenExercise && !streaming && (
               <button
                 type="button"
@@ -1343,6 +1477,17 @@ function AttachmentChips({
   showDownload?: boolean;
 }) {
   const openEditor = useEditorStore((s) => s.openEditor);
+  // In-app modal preview (replaces "open in a new tab" for images and
+  // makes previously-inert file chips clickable). Editable AI PDFs keep
+  // their dedicated side-panel editor; everything else opens here.
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const fileItems = useMemo(
+    () => attachments.map(attachmentToFileItem),
+    [attachments]
+  );
+  const previewFile = previewId
+    ? fileItems.find((f) => f.id === previewId) ?? null
+    : null;
   return (
     <div
       className={cn(
@@ -1361,13 +1506,14 @@ function AttachmentChips({
         // generated images need a visual preview, not a generic chip).
         // We use the same component for user-uploaded images so a
         // round-trip ("here's a photo" → "here's an edited version")
-        // stays visually consistent.
+        // stays visually consistent. Click opens the modal preview.
         if (a.mime_type.startsWith("image/")) {
           return (
             <ImageAttachmentTile
               key={a.id}
               attachment={a}
               showDownload={showDownload}
+              onPreview={() => setPreviewId(a.id)}
             />
           );
         }
@@ -1377,24 +1523,18 @@ function AttachmentChips({
           a.mime_type === "application/xml"
             ? FileText
             : FileIcon;
-        // Every PDF chip is clickable (Phase B3): rendered_pdf rows
-        // open the editable Markdown side panel; everything else
-        // (user uploads, missing-source rows) opens the read-only
-        // preview. The store doesn't care which mode — the panel
-        // decides based on ``source_kind``. We still expose the
-        // download button next to the chip so the user can grab the
-        // file without round-tripping through the panel.
-        const isPdf = a.mime_type === "application/pdf";
-        const isEditablePdf = isPdf && a.source_kind === "rendered_pdf";
-        const isPreviewPdf = isPdf && !isEditablePdf;
-        const isOpenable = isPdf;
-        const ChipBase = isOpenable ? "button" : "div";
-        const HoverIcon = isEditablePdf ? Pencil : isPreviewPdf ? Eye : null;
+        // Editable AI PDFs (``rendered_pdf``) keep their dedicated
+        // Markdown side-panel editor. Every other chip — preview PDFs,
+        // CSVs, JSON, text, and anything the interpreter produces —
+        // opens the in-app modal preview instead of being inert or
+        // launching a new browser tab. The download button next to the
+        // chip still lets the user grab the file directly.
+        const isEditablePdf =
+          a.mime_type === "application/pdf" && a.source_kind === "rendered_pdf";
+        const HoverIcon = isEditablePdf ? Pencil : Eye;
         const chipTitle = isEditablePdf
           ? `Click to edit ${a.filename}`
-          : isPreviewPdf
-            ? `Click to preview ${a.filename}`
-            : `${a.filename} · ${a.mime_type}`;
+          : `Click to preview ${a.filename}`;
         return (
           <div
             key={a.id}
@@ -1403,21 +1543,20 @@ function AttachmentChips({
               "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
             )}
           >
-            <ChipBase
-              {...(isOpenable
-                ? {
-                    type: "button" as const,
-                    onClick: () => openEditor(a),
-                    title: chipTitle,
-                    "aria-label": isEditablePdf
-                      ? `Open ${a.filename} in the editor`
-                      : `Preview ${a.filename}`,
-                  }
-                : { title: chipTitle })}
+            <button
+              type="button"
+              onClick={() =>
+                isEditablePdf ? openEditor(a) : setPreviewId(a.id)
+              }
+              title={chipTitle}
+              aria-label={
+                isEditablePdf
+                  ? `Open ${a.filename} in the editor`
+                  : `Preview ${a.filename}`
+              }
               className={cn(
                 "group/chip inline-flex min-w-0 items-center gap-1.5 px-2 py-1 text-left",
-                isOpenable &&
-                  "cursor-pointer transition hover:bg-[var(--accent)]/[0.08]"
+                "cursor-pointer transition hover:bg-[var(--accent)]/[0.08]"
               )}
             >
               <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
@@ -1431,7 +1570,7 @@ function AttachmentChips({
                   aria-hidden
                 />
               )}
-            </ChipBase>
+            </button>
             {showDownload && (
               <button
                 type="button"
@@ -1454,6 +1593,13 @@ function AttachmentChips({
           </div>
         );
       })}
+      <FilePreviewModal
+        open={!!previewFile}
+        file={previewFile}
+        siblings={fileItems.length > 1 ? fileItems : undefined}
+        onClose={() => setPreviewId(null)}
+        onSelect={(f) => setPreviewId(f.id)}
+      />
     </div>
   );
 }
@@ -1466,17 +1612,19 @@ function AttachmentChips({
  * them in an object URL, and revokes it on unmount so we don't leak
  * memory across long chat sessions.
  *
- * Click → opens the image in a new tab (using a fresh blob URL the
- * browser is happy to render). Optional download button overlays the
- * top-right corner on hover when ``showDownload`` is on (assistant
+ * Click → opens the shared in-app preview modal (``onPreview``) rather
+ * than spawning a new browser tab. Optional download button overlays
+ * the top-right corner on hover when ``showDownload`` is on (assistant
  * turns).
  */
 function ImageAttachmentTile({
   attachment,
   showDownload,
+  onPreview,
 }: {
   attachment: MessageAttachmentSnapshot;
   showDownload: boolean;
+  onPreview: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [errored, setErrored] = useState(false);
@@ -1501,11 +1649,6 @@ function ImageAttachmentTile({
     };
   }, [attachment.id]);
 
-  const openInNewTab = () => {
-    if (!blobUrl) return;
-    window.open(blobUrl, "_blank", "noopener");
-  };
-
   return (
     <div
       className={cn(
@@ -1515,15 +1658,13 @@ function ImageAttachmentTile({
     >
       <button
         type="button"
-        onClick={openInNewTab}
-        disabled={!blobUrl}
-        title={`${attachment.filename} · click to open full size`}
-        aria-label={`Open ${attachment.filename} in a new tab`}
+        onClick={onPreview}
+        title={`${attachment.filename} · click to preview`}
+        aria-label={`Preview ${attachment.filename}`}
         className={cn(
           "relative flex h-40 w-full items-center justify-center overflow-hidden",
           "bg-black/[0.04] transition dark:bg-white/[0.04]",
-          blobUrl && "cursor-zoom-in hover:bg-black/[0.06] dark:hover:bg-white/[0.06]",
-          !blobUrl && "cursor-default"
+          "cursor-zoom-in hover:bg-black/[0.06] dark:hover:bg-white/[0.06]"
         )}
       >
         {blobUrl ? (
@@ -1634,6 +1775,30 @@ function SourcesFooter({ sources }: { sources: Source[] }) {
   );
 }
 
+/** Adapt a chat ``MessageAttachmentSnapshot`` into the ``FileItem``
+ *  shape the Drive ``FilePreviewModal`` expects. The modal only reads
+ *  id / filename / mime_type / size_bytes / source_kind (plus
+ *  optionally-guarded ``sharing`` / ``starred_at``), so the remaining
+ *  Drive-only fields are filled with inert defaults — they're never
+ *  surfaced because we don't pass the star / share / edit callbacks. */
+function attachmentToFileItem(a: MessageAttachmentSnapshot): FileItem {
+  return {
+    id: a.id,
+    folder_id: null,
+    filename: a.filename,
+    mime_type: a.mime_type,
+    size_bytes: a.size_bytes,
+    scope: "mine",
+    created_at: "",
+    updated_at: null,
+    starred_at: null,
+    trashed_at: null,
+    source_kind: a.source_kind ?? null,
+    source_file_id: a.source_file_id ?? null,
+    sharing: null,
+  };
+}
+
 /** Authenticated blob download for an attachment chip.
  *  Mirrors ``downloadAuthed`` in FilesPage — kept local rather than
  *  shared because this is the only other call site today and the
@@ -1657,6 +1822,71 @@ async function downloadAttachment(
     // Best-effort — the chip stays visible so the user can retry.
     // A toast system would slot in here once we add one.
   }
+}
+
+/** Phase 2.6 — compact ``‹ 2/3 ›`` version pager.
+ *
+ *  Renders inline in the message action row when a message has more
+ *  than one sibling version (a regenerated answer, or an edited user
+ *  turn). The arrows step to the previous / next sibling and activate
+ *  it; the parent re-resolves the visible thread. Disabled at the ends
+ *  so there's no wraparound surprise. */
+function VersionPager({
+  index,
+  count,
+  siblingIds,
+  onSelectVersion,
+}: {
+  index: number;
+  count: number;
+  siblingIds: string[];
+  onSelectVersion: (siblingId: string) => Promise<void> | void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const go = async (targetIndex: number) => {
+    const id = siblingIds[targetIndex - 1];
+    if (!id || busy) return;
+    setBusy(true);
+    try {
+      await onSelectVersion(id);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div
+      className="inline-flex items-center gap-0.5 text-xs text-[var(--text-muted)]"
+      title="Switch between versions of this message"
+    >
+      <button
+        type="button"
+        onClick={() => void go(index - 1)}
+        disabled={busy || index <= 1}
+        aria-label="Previous version"
+        className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded-md transition",
+          "hover:bg-[var(--accent)]/[0.08] disabled:opacity-30 disabled:hover:bg-transparent"
+        )}
+      >
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </button>
+      <span className="tabular-nums select-none">
+        {index}/{count}
+      </span>
+      <button
+        type="button"
+        onClick={() => void go(index + 1)}
+        disabled={busy || index >= count}
+        aria-label="Next version"
+        className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded-md transition",
+          "hover:bg-[var(--accent)]/[0.08] disabled:opacity-30 disabled:hover:bg-transparent"
+        )}
+      >
+        <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
 }
 
 /** Split-button regenerate control.

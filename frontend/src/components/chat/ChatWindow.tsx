@@ -45,6 +45,10 @@ interface ChatWindowProps {
     messageId: string,
     override: RegenerateOverride | null
   ) => Promise<void> | void;
+  /** Phase 3.1 — resume a truncated reply, appending the continuation
+   *  onto the same bubble. Only offered on the last assistant turn when
+   *  it was cut off at the output limit. */
+  onContinue?: (messageId: string) => Promise<void> | void;
   /** Re-run the last turn after a stream error (same model). Surfaced
    *  as the "Try again" button on the error card. */
   onRetry?: () => void;
@@ -61,6 +65,9 @@ interface ChatWindowProps {
     rating: "up" | "down" | null,
     reason?: string
   ) => Promise<void> | void;
+  /** Phase 2.6 — switch to a sibling version from the ``‹ 2/3 ›`` pager.
+   *  Receives the id of the sibling to activate. */
+  onSelectVersion?: (siblingId: string) => Promise<void> | void;
 }
 
 export function ChatWindow({
@@ -69,10 +76,12 @@ export function ChatWindow({
   participants,
   onBranchFrom,
   onRegenerate,
+  onContinue,
   onRetry,
   onPickAnotherModel,
   onDelete,
   onFeedback,
+  onSelectVersion,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
   const activeId = useChatStore((s) => s.activeId);
@@ -299,6 +308,11 @@ export function ChatWindow({
                   ? (override) => onRegenerate(m.id, override)
                   : undefined
               }
+              onContinue={
+                m.id === lastRegenerableAssistantId && m.truncated && onContinue
+                  ? () => onContinue(m.id)
+                  : undefined
+              }
               onDelete={
                 onDelete && !m.id.startsWith("optimistic-")
                   ? () => onDelete(m.id)
@@ -313,6 +327,10 @@ export function ChatWindow({
                   ? (rating, reason) => onFeedback(m.id, rating, reason)
                   : undefined
               }
+              versionIndex={m.version_index ?? undefined}
+              versionCount={m.version_count ?? undefined}
+              siblingIds={m.sibling_ids ?? undefined}
+              onSelectVersion={onSelectVersion}
             />
           );
         })}

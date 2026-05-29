@@ -172,10 +172,15 @@ async def compact_conversation(
     # is UUID + created_at orders the timeline, we use the first
     # middle row's created_at so the new summary sits naturally in
     # the same slot — no re-ordering needed on reload.
+    # Phase 2.6 — splice the summary into the lineage where the middle
+    # used to be: its parent is the last head row, and the first tail row
+    # is re-pointed to the summary. Deleting the middle would otherwise
+    # SET NULL the tail's parent_id and sever the active-path walk.
     summary_message = Message(
         conversation_id=conversation.id,
         role="system",
         content=_COMPACTION_PREFIX.format(n=len(middle)) + summary,
+        parent_id=head[-1].id if head else None,
         created_at=middle[0].created_at,
     )
     db.add(summary_message)
@@ -184,6 +189,8 @@ async def compact_conversation(
     await db.execute(delete(Message).where(Message.id.in_(middle_ids)))
     await db.flush()
     await db.refresh(summary_message)
+    if tail:
+        tail[0].parent_id = summary_message.id
 
     # Bump the conversation's updated_at so sidebar bucketing reflects
     # the compaction activity.

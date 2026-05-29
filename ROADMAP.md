@@ -1,220 +1,351 @@
-# Promptly — Chat Interface Roadmap
+# Promptly — Roadmap v2
 
-> Forward-looking list of chat features we've decided are worth building.
-> This is a planning document only — nothing here is implemented yet.
-> Created 2026-05-29 from a capability audit of the existing chat stack.
+> Forward-looking plan created 2026-05-29 after a fresh capability audit.
+> v1 (Phases 1–3 of the original roadmap) is fully shipped — see the
+> **Appendix: Shipped to date** at the bottom. Nothing in the numbered
+> phases below is implemented yet.
 
 ## Guiding principles
 
 These constraints apply to **every** item below — they are not optional polish:
 
-1. **Keep the UI clean and uncluttered.** Promptly's composer and message
-   surface are already dense. New affordances should hide until needed
-   (hover / overflow menus / disclosures), reuse existing patterns (the
-   tool/relay chips, the regenerate split-button, the `⋯` row menus), and
-   never add a permanently-visible control that most users won't touch.
-2. **Lean on scaffolding that already exists** before adding new surfaces —
-   several gaps below are mostly "wire up the thing we already wrote."
-3. **Model-agnostic.** Anything provider-specific (e.g. reasoning effort)
-   must degrade gracefully when the active model doesn't support it.
-4. **Mobile parity.** If a control matters, it has a touch story; if it's
-   power-user-only, it can stay desktop-first (matches today's
-   `ContextWindowPill` / `MessageStats` approach).
+1. **Keep the UI clean and uncluttered.** New affordances hide until
+   needed (hover / overflow menus / disclosures), reuse existing patterns
+   (tool/relay chips, the regenerate split-button, the `⋯` row menus, the
+   `‹2/3›` pager), and never add a permanently-visible control most users
+   won't touch.
+2. **Lean on scaffolding that already exists.** Many items below are
+   mostly "wire up / extend the thing we already wrote" (tool registry,
+   ModelRouter headless calls, notifications, embeddings, artifact panel).
+3. **Model-agnostic.** Anything provider-specific (reasoning effort, code
+   execution, vision) must degrade gracefully when the active model can't
+   do it.
+4. **Mobile parity.** If a control matters, it has a touch story; power-
+   user-only controls can stay desktop-first.
+5. **Cost- and abuse-aware.** Anything that runs the model **without a
+   human in the loop** (Tasks especially) needs admin caps, per-run token
+   limits, and a kill switch from day one. Background spend must never be
+   silent or unbounded.
 
 Legend: **impact** / **effort** are rough t-shirt sizes. "Scaffolding"
-notes existing code we can build on.
+notes existing code to build on.
 
 ---
 
-## Phase 1 — Tier 1 polish (table stakes, mostly quick wins)
+## Phase 1 — Scheduled Tasks / Automations  *(the new pillar)*
 
-> **Status: shipped (2026-05-29).** All five items below are now live —
-> LaTeX/math rendering, per-conversation instructions, single-message
-> delete, one-click retry / pick-another-model on stream errors, and a
-> desktop copy button on user messages.
+> **The headline feature of v2.** A Task is a saved prompt + a schedule.
+> On schedule it runs **headless** (no human watching) and produces a
+> discrete, dated **Run** — a standalone report, *not* an ever-growing
+> chat thread. The Tasks area reads like a newsletter/reports inbox:
+> "Morning AU News", "Weekly competitor digest", "Daily standup summary".
 
-These are the gaps users notice fastest. Most are small.
+### Why this shape (not a chat thread)
+The biggest value is a **fresh artifact every period** (e.g. a daily news
+compilation). Appending each day's output to one endless conversation
+would bury history, blow the context window, and make old editions
+unreadable. So each run is its own immutable document with its own
+date, cost, and status — browsable like back-issues of a newsletter.
 
-### 1.1 LaTeX / math rendering
-- **What:** Render `$inline$` and `$$block$$` / `\[ \]` math in assistant
-  replies instead of raw text.
-- **Why:** Any math/science/finance answer currently looks broken.
-  Highest "feels broken" gap for the smallest change.
-- **How (clean UI):** Add `remark-math` + `rehype-katex` to the existing
-  `react-markdown` pipeline in `MessageBubble.tsx`; load KaTeX CSS once.
-  No new UI chrome at all.
-- **impact: high · effort: low** · Scaffolding: existing markdown pipeline.
+### Data model
+- **`Task`**: `id`, `user_id`, `title`, `prompt` (the instruction),
+  `model_id`, `reasoning_effort`, tool config (web search on/off,
+  fetch-url, RAG over a chosen project/folder), `schedule` (structured —
+  see below), `timezone` (AU-friendly default), `enabled`, `next_run_at`,
+  `last_run_at`, `last_status`, delivery prefs (notify in-app / email),
+  retention (keep last N runs or N days), `created_at`.
+- **`TaskRun`**: `id`, `task_id`, `status`
+  (`pending`/`running`/`success`/`failed`), `started_at`, `finished_at`,
+  `output_markdown`, `prompt_tokens`, `completion_tokens`, `cost_usd`,
+  `error`, optional `tool_invocations` (so the report can show its
+  sources, reusing the existing tool-chip rendering). Each run is its own
+  row → the feed of dated digests.
 
-### 1.2 Per-conversation custom instructions / system prompt
-- **What:** A per-chat "instructions" field (e.g. "answer concisely, you're
-  a Rust expert") without having to create a Project.
-- **Why:** System prompts only exist at the Project level today; most
-  one-off steering wants to live on the chat.
-- **How (clean UI):** Tuck behind a small "Instructions" affordance in the
-  chat header / overflow menu — a slide-over or popover, **not** a
-  permanent textarea above the composer. Persist on the conversation
-  alongside `model_id` / `reasoning_effort`.
-- **impact: high · effort: med** · Scaffolding: project `system_prompt`
-  field + per-conversation settings hydration in `ChatPage.tsx`.
+### Scheduling & execution engine
+- **Schedule representation:** structured recurrence — `frequency`
+  (`hourly`/`daily`/`weekly`/`monthly`), `time_of_day`, `weekdays[]`,
+  plus an **advanced cron string** escape hatch. Friendly UI builder;
+  `next_run_at` computed server-side in the task's timezone (handle
+  AU DST).
+- **Runner:** a background scheduler in the backend that polls
+  `tasks WHERE enabled AND next_run_at <= now()` every minute, claims
+  rows with `SELECT … FOR UPDATE SKIP LOCKED` (or a Redis lock — Redis is
+  already in the stack) so two workers never double-fire, then executes.
+- **Generation:** reuse the **headless** model path that `summariser.py`
+  / `titler.py` already use (ModelRouter, collect the full output instead
+  of streaming), with the chat tool loop available so a news task can
+  actually `web_search` + `fetch_url`. Store the final markdown on the
+  run.
+- **Catch-up policy:** after downtime, run a missed task **once** — never
+  backfill every missed slot. **Overlap policy:** skip a trigger if the
+  previous run is still `running`.
+- **Manual "Run now":** every task has a one-tap test run that produces a
+  normal `TaskRun`, so users aren't waiting until tomorrow to see output.
 
-### 1.3 Delete an individual message
-- **What:** Remove a single message (and, where it makes sense, the turn
-  it belongs to) rather than only editing the last user turn or nuking the
-  whole chat.
-- **How (clean UI):** Add to the existing per-message hover/`⋯` actions and
-  the touch long-press menu — no new always-on buttons. Confirm on
-  destructive deletes that drop assistant context.
-- **impact: med · effort: med** · Scaffolding: message action row in
-  `MessageBubble.tsx`; needs a new backend delete endpoint.
+### UI (reports inbox, not chat)
+- New **Tasks** nav entry (respects the Phase 2 visibility toggle).
+- **Task list:** cards — title, schedule summary ("Daily · 7:00 AEST"),
+  last-run status, next run, enable/pause switch.
+- **Task detail:** the latest run rendered as a clean document via the
+  existing `MessageBubble` markdown pipeline (headings, links, tables,
+  collapsible code all for free), with a **date/history rail** to read
+  past editions. Per-run cost shown like `MessageStats`.
+- **Bridges out of the feed:** "Follow up in chat" seeds a *real*
+  conversation from a run (so questions don't pollute the report feed);
+  "Export as PDF" reuses the `generate_pdf` tool; optional "Save to
+  Drive".
+- **Mobile:** native time/day pickers in the schedule builder; list +
+  reader are responsive first-class.
 
-### 1.4 One-click "Retry" on stream error
-- **What:** When a stream fails, offer an immediate "Try again" (same
-  model) and "Pick another model".
-- **Why:** Reliability UX. `StreamErrorCard` already exists but
-  `ChatWindow` doesn't even pass it `onPickAnotherModel`, and there's no
-  plain retry.
-- **How (clean UI):** Finish wiring the existing error card; reuse the
-  regenerate model-override submenu for "pick another model".
-- **impact: med · effort: low** · Scaffolding: `StreamErrorCard.tsx`,
-  `RegenerateOverride` model menu.
+### Delivery & guardrails
+- **Completion notifications** via the existing notifications module
+  (`notifications/router.py`, `dispatch.py`) — in-app bell + optional
+  email (email infra already exists for OTP).
+- **Admin caps (required):** max active tasks/user, minimum interval
+  (e.g. ≥ hourly), max runs/day, per-run token/cost cap, global kill
+  switch — surfaced in Admin → Settings alongside the web-search caps.
+- **Failure handling:** one retry, then mark `failed` + notify.
 
-### 1.5 Copy button on user messages (desktop)
-- **What:** Desktop copy button on user messages, not just assistant
-  replies.
-- **How (clean UI):** Same hover affordance already used for assistant
-  copy; touch long-press already copies any message.
-- **impact: low · effort: trivial** · Scaffolding: `MessageBubble.tsx`
-  `CopyButton` / `canCopy`.
+### Suggested sub-sequencing
+- ✅ **T.1** — model + migration + scheduler + headless run engine + "Run now".
+- ✅ **T.2** — Tasks UI: list, schedule builder, run history, run viewer.
+- ✅ **T.3** — completion notifications (`task_complete` push category) +
+  "Follow up in chat" (seeds a real conversation from a run) +
+  export (copy / download `.md` / download PDF via the chat renderer).
+- ✅ **T.4** — per-run output-token cap (`_MAX_OUTPUT_TOKENS`), retention
+  sweeper (prunes runs beyond `retention_runs` after each run). *Deferred:
+  promoting the per-user task cap + token cap into admin `app_settings` UI
+  — currently module constants; revisit only if an admin needs to tune them.*
 
----
-
-## Phase 2 — Expected differentiators
-
-> **Status: 2.1–2.5 shipped (2026-05-29).** Voice dictation, @-mention
-> Drive files, Mermaid diagram rendering, read-aloud (TTS), and
-> thumbs-up/down response feedback are now live. **2.6 (in-thread
-> regeneration versioning) is intentionally deferred as its own project**
-> — it needs a message-version storage model and history-aware
-> send/regenerate, so it doesn't belong in this batch.
-
-The features people expect from a "real" chat product.
-
-### 2.1 Voice input (dictation)
-- **What:** Mic button in the composer that dictates into the input.
-- **Why:** Near-free — the hook `hooks/useSpeechRecognition.ts` is already
-  written and simply **not wired into the composer**.
-- **How (clean UI):** Single mic icon in the `InputBar` action cluster;
-  show a subtle recording state; hide entirely where the Web Speech API
-  is unsupported.
-- **impact: med · effort: low** · Scaffolding: `useSpeechRecognition.ts`.
-
-### 2.2 @-mention Drive files into a message
-- **What:** Extend the existing `@`-mention so it can pull a Drive **file**
-  (not just other chats) into context.
-- **Why:** We have a full Drive *and* an @-mention system; mentioning a
-  file is the natural bridge between them.
-- **How (clean UI):** Reuse `MentionAutocomplete.tsx`; add a files section /
-  tab to the picker. Resolve to file context server-side like the chat
-  mention path (`mentions.py`).
-- **impact: high · effort: med** · Scaffolding: `MentionAutocomplete.tsx`,
-  `InputBar.tsx`, backend `mentions.py`, Drive file APIs.
-
-### 2.3 Mermaid / diagram rendering
-- **What:** Render ` ```mermaid ` fenced blocks as diagrams.
-- **Why:** Models emit mermaid frequently; it shows as a raw code block now.
-- **How (clean UI):** Render in the message body with a small "view source"
-  toggle; consider routing large diagrams to the existing artifact panel
-  pattern so the message stays compact.
-- **impact: med · effort: low-med** · Scaffolding: `MessageBubble.tsx`
-  code-fence handling, `CodeArtifactPanel.tsx` pattern.
-
-### 2.4 Read-aloud / TTS of responses
-- **What:** "Play" an assistant reply via `speechSynthesis`.
-- **How (clean UI):** Lives in the per-message overflow/hover actions, not a
-  persistent button. Clear play/stop state.
-- **impact: med · effort: low**.
-
-### 2.5 Response feedback (thumbs up / down) — *big rock*
-- **What:** Capture per-response quality signal, optionally with a short
-  reason on thumbs-down.
-- **Why:** We currently capture **no** chat answer-quality signal. Needed
-  for model evaluation and surfacing bad outputs. (Study mode has its own
-  `ai_feedback`; chat has nothing.)
-- **How (clean UI):** Tiny thumbs in the per-message actions; thumbs-down
-  opens a light, optional reason popover. Store + expose to admin later.
-- **impact: high · effort: med** · New backend table + endpoint.
-
-### 2.6 In-thread regeneration versioning (`‹ 2/3 ›`) — *big rock*
-- **What:** Keep alternate regenerated/edited answers as siblings with a
-  version pager, instead of destroying the previous answer.
-- **Why:** Today regenerate/edit **deletes** subsequent messages. The
-  ChatGPT/Claude-style sibling navigation is the most-missed genuine chat
-  feature.
-- **How (clean UI):** A compact `‹ 2/3 ›` control inline in the message
-  footer (next to regenerate); nothing new when there's only one version.
-- **impact: high · effort: high** · Largest item: needs message-version
-  storage model + history-aware send/regenerate. Plan as its own project.
+**impact: very high · effort: high** · Scaffolding: `summariser.py` /
+`titler.py` headless ModelRouter calls, `tools/registry.py`, notifications
+module, `generate_pdf`, Redis, `app_settings`/admin, `MessageBubble`
+renderer.
 
 ---
 
-## Phase 3 — Power-user & polish
+## Phase 2 — Per-user feature visibility (clean vs. full) — ✅ SHIPPED
 
-> **Status: shipped (2026-05-29).** Saved prompt library + `/` slash
-> commands (3.1), move-an-existing-chat-into-a-project from the sidebar
-> context menu (3.2), global keyboard shortcuts — `Ctrl/Cmd+Shift+O`
-> new chat, `/` focus composer, alongside the existing `Ctrl/Cmd+K`
-> search (3.3), and true draft persistence across reload/PWA restart
-> via a `localStorage`-backed composer store (3.4) are all live.
+- **Shipped:** "Sidebar features" panel in Account (`FeatureVisibilityPanel`)
+  with show/hide toggles for the optional modules **Projects, Tasks, Study**.
+  Persisted to `users.settings.hidden_nav` via `PATCH /auth/me/preferences`
+  (server-validated to the optional set; unknown keys dropped). `Sidebar.tsx`
+  filters `NAV_ITEMS` by `optionalKey ∈ hidden_nav`. Chat + Files are core and
+  never hideable; direct URLs still resolve since nothing is disabled.
 
-### 3.1 Saved prompt library + slash commands
-- **What:** Reusable saved prompts/templates, invokable via `/` in the
-  composer.
-- **How (clean UI):** Reuse the `SearchPalette` interaction model; `/` opens
-  an inline command/prompt menu. Keep the composer itself unchanged until
-  `/` is typed.
+- **What:** A section in account settings where each user shows/hides the
+  **optional modules** in their nav — e.g. Projects, Study, **Tasks**,
+  Compare, Drive. Purely cosmetic: it removes the nav entry only; no data
+  is deleted or disabled, and it can be re-enabled anytime. Direct URLs
+  still resolve.
+- **Why:** v2 adds a new nav item (Tasks); this lets power users run a
+  full cockpit while minimalists keep chat-only. Pairs naturally with the
+  "keep the UI uncluttered" principle.
+- **How (clean UI):** Store `enabled_modules` on user preferences
+  (JSON/bool flags, default sensible). `Sidebar.tsx` / `AppLayout.tsx`
+  filter nav from prefs. A simple checkbox list under
+  account settings ("Interface").
+- **impact: med · effort: low** · Scaffolding: account settings pages
+  (`components/account`, `AccountSecurityPage.tsx`), `Sidebar.tsx`.
+
+---
+
+## Phase 3 — Quick wins — ✅ SHIPPED
+
+### 3.1 Continue generating (on truncation) — ✅ SHIPPED
+- **Shipped:** A **Continue** button in the amber "cut off" banner on the
+  last assistant reply when `truncated` is set. New endpoint
+  `POST /chat/conversations/{id}/messages/{mid}/continue` resumes the
+  reply: the stream generator splices the partial text into the prompt as
+  an in-memory scaffold turn (never persisted) and **appends** the
+  continuation onto the *same* message row (content, tokens, cost, and
+  latency all accumulate). Frontend `continueGenerate` seeds the streaming
+  buffer with the existing text so the bubble grows in place and reads as
+  one continuous answer; `truncated` re-fires if the continuation also hits
+  the cap, so it can be continued again.
+- **What:** A one-click **Continue** when a reply was cut off (re-prompt
+  with the partial as context and append).
+- **impact: med · effort: low** · Scaffolding: `truncated` flag, regenerate path.
+
+### 3.2 Enhance prompt — ✅ SHIPPED
+- **Shipped:** A **Enhance** wand in the `InputBar` action cluster (icon-only
+  on mobile). Calls a stateless, quota-checked `POST /chat/enhance-prompt`
+  that runs a headless `model_router.stream_chat` rewrite (system prompt
+  preserves intent, no answering) using the user's selected model. The
+  result lands in an inline **Enhanced prompt** preview with **Use this** /
+  **Keep mine** so the draft is never silently overwritten. No-op rewrites
+  (identical/empty) reset quietly.
+- **What:** A small wand in the composer that rewrites a rough prompt into
+  a sharper one before sending (preview + accept/discard).
+- **impact: low-med · effort: low** · Scaffolding: `InputBar.tsx`,
+  headless model call.
+
+---
+
+## Phase 4 — Code interpreter / data analysis  *(big rock)* — ✅ SHIPPED
+
+- **What:** Actually **run** model-written code in a sandbox and return
+  stdout, errors, dataframes, and **plots/charts as images** — turning
+  Promptly from "chat" into an analysis tool. Unlocks real CSV/Excel
+  analysis on uploaded files.
+- **Shipped:**
+  - A dedicated, locked-down **`sandbox`** service (new container) running
+    a tiny FastAPI `/execute` worker with pandas / numpy / matplotlib /
+    openpyxl preinstalled. Pinned to an **internal-only** docker network
+    (`sandbox-net`, `internal: true`) so executed code has **no internet
+    and no access to Postgres/Redis/Ollama**; read-only rootfs with a
+    per-job tmpfs scratch, `cap_drop: ALL`, `no-new-privileges`, PID + mem
+    caps, runs as non-root. Per-job CPU / address-space / file-size /
+    fd / nproc `setrlimit` caps + a wall-clock timeout (verified: an
+    infinite loop is killed, a raised exception surfaces its traceback).
+  - A new **`code_interpreter`** tool (category **`code`**, gated by the
+    existing Tools toggle). The model writes Python; we ship it to the
+    sandbox, feed back stdout/stderr, and route every produced file
+    (matplotlib charts, exported CSVs, …) through `persist_generated_file`
+    so charts render inline as attachment chips like image generation.
+  - **Auto data inputs:** every data-ish file the user attaches this turn
+    (CSV/Excel/JSON/Parquet/text) — plus any explicit `input_file_ids`
+    for `@`-mentioned Drive files — is materialised into the working dir
+    under its original filename, so `pd.read_csv('data.csv')` just works.
+  - **4.1** CSV files already get a rich table preview (the `code_artifact`
+    preview kind); the interpreter operates on them and on Excel directly.
+  - UI: `ToolStatusBlock` renders a "Ran code" chip with chart/file-count
+    badges + an `error` badge when a script exits non-zero.
+- **impact: very high · effort: high** · Scaffolding: tool registry,
+  attachment/image rendering, artifact panel, Drive file APIs.
+
+---
+
+## Phase 5 — Live / iterative artifacts — ✅ SHIPPED
+
+- **What:** Upgrade the artifact **viewer** into a **live, iteratively-
+  editable** artifact: sandboxed iframe preview, and "make the button
+  blue" patches the *same* artifact in place instead of re-emitting the
+  whole block (Claude Artifacts-style).
+- **Shipped:**
+  - **In-place AI editing** — a "Describe a change…" bar in
+    `CodeArtifactPanel.tsx`. The user types e.g. "make the button blue";
+    we send the current artifact source + instruction to a stateless,
+    quota-checked `POST /chat/edit-artifact` endpoint (headless model
+    call, mirrors `enhance-prompt`) that returns the **full updated
+    source**, which swaps into the panel draft in place. The live preview
+    re-renders — no new chat message, no re-emitted code block. **Reset**
+    reverts to the original.
+  - **Live sandboxed iframe preview** already existed and is reused:
+    `allow-scripts` (no `allow-same-origin`) blob-URL iframe for HTML/SVG,
+    plus Markdown/JSON/CSV preview panes, all debounced so edits (manual
+    or AI) re-render without thrashing.
+- **Deferred:** a dedicated **React/JSX** live preview. It needs a
+  bundled JSX transformer + inlined React to stay offline-safe (the app
+  is self-hosted and can't depend on a CDN inside the sandboxed iframe);
+  HTML/SVG previews already cover the common "show me a UI" case.
+- **impact: high · effort: med-high** · Scaffolding: `CodeArtifactPanel.tsx`,
+  collapsible code block plumbing in `MessageBubble.tsx`.
+
+---
+
+## Phase 6 — Cross-chat memory / personalization
+
+- **What:** An auto-memory that remembers durable facts about the user
+  across all chats ("I'm a Rust dev", "answer concisely"), with a
+  user-managed memory list (view / edit / delete) and a clear "saved to
+  memory" affordance when something is captured.
+- **How (clean UI):** A memory store injected into the system prompt;
+  capture either via an explicit "remember this" or a lightweight
+  extraction pass. Management UI lives in account settings.
+- **impact: high · effort: med** · Scaffolding: per-chat instructions +
+  project system-prompt hydration, account settings.
+
+---
+
+## Phase 7 — Semantic conversation search
+
+- **What:** Find chats by meaning, not just keywords ("that chat where we
+  fixed the nginx timeout"). The `SearchPalette` already does FTS; this
+  adds embedding-based recall.
+- **How (clean UI):** Reuse the embeddings infra already powering RAG
+  (`custom_models` ingestion/retrieval) to index conversations; blend
+  semantic + FTS results in the existing palette.
 - **impact: med · effort: med** · Scaffolding: `SearchPalette.tsx`,
-  `MentionAutocomplete.tsx` autocomplete pattern.
+  `custom_models` embeddings, `search/` module.
 
-### 3.2 Move an existing chat into a project
-- **What:** Move a standalone chat into a Project from the sidebar.
-- **Why:** `MoveToProjectMenu.tsx` already exists but **isn't mounted
-  anywhere** — pure plumbing.
-- **How (clean UI):** Surface inside the existing sidebar row `⋯` /
+---
+
+## Phase 8 — End-user usage & cost dashboard
+
+- **What:** A personal page showing spend, token usage, and activity over
+  time (by model / day / conversation). Admin sees the fleet; users
+  currently can't see their own.
+- **How (clean UI):** New panel in account settings; aggregate the
+  per-message cost we already record.
+- **impact: med · effort: med** · Scaffolding: `billing/usage.py`,
+  `MessageStats`, per-message cost fields.
+
+---
+
+## Phase 9 — Chat folders
+
+- **What:** Lightweight folders for **loose** chats (separate from
+  Projects), with drag-drop organisation in the sidebar.
+- **How (clean UI):** Extend the sidebar grouping + the existing
+  move/context-menu plumbing (`ConversationRowContextMenu.tsx`,
+  `MoveToProjectMenu.tsx`).
+- **impact: low-med · effort: med** · Scaffolding: sidebar, conversation
   context menu.
-- **impact: med · effort: low** · Scaffolding: `MoveToProjectMenu.tsx`,
-  `ConversationRowContextMenu.tsx`.
 
-### 3.3 Global keyboard shortcuts
-- **What:** New chat, focus composer, (and document existing ⌘K search /
-  Enter-to-send).
-- **How (clean UI):** No visual footprint; optional discoverable shortcuts
-  sheet later.
-- **impact: low-med · effort: low** · Scaffolding: `AppLayout.tsx` ⌘K
-  handler.
+---
 
-### 3.4 True draft persistence (across reload / app restart)
-- **What:** Today an unsent draft (text + attachments) lives in the
-  in-memory `composerStore`, keyed per conversation. It survives switching
-  chats and mobile rotation, but is **lost on a full page reload, tab
-  close, or PWA restart**. This promotes drafts to `localStorage` so a
-  half-typed message survives a reload — like Gmail keeping an unsent
-  draft.
-- **Why:** Cheap, invisible (no new UI), and genuinely annoying to lose a
-  long draft to an accidental refresh — especially on flaky mobile / PWA.
-- **How (clean UI):** Scope to **text-only** drafts (skip attachments —
-  they reference uploaded files/blobs, not plain text) with a short TTL so
-  stale drafts expire. No visible UI; just a persisted variant of the
-  existing store.
-- **impact: low · effort: low** · Scaffolding: `store/composerStore.ts`
-  (promote to a `localStorage`-persisted store).
+## Phase 10 — Real-time voice conversation mode
+
+- **What:** Full-duplex voice mode (speak ↔ hear, with barge-in), beyond
+  today's separate dictation (in) + TTS (out).
+- **How (clean UI):** A dedicated voice session surface; reuse
+  `useSpeechRecognition` for input and the TTS path for output, with a
+  streaming turn loop.
+- **impact: med · effort: high** · Scaffolding: `useSpeechRecognition.ts`,
+  TTS in `MessageBubble.tsx`, streaming chat. *(Heaviest; intentionally
+  last.)*
 
 ---
 
 ## Suggested sequencing
 
-1. **Phase 1 batch** (LaTeX, per-chat instructions, retry, copy-on-user,
-   delete message) — high perceived polish, low risk, lots of reused code.
-2. **Phase 2 quick wins** (voice input, @-mention files, mermaid, TTS).
-3. **Big rocks** as dedicated efforts: **response feedback**, then
-   **regeneration versioning**.
-4. **Phase 3** opportunistically.
+1. **Tasks (Phase 1)** — the new pillar; build the engine + reports inbox.
+2. **Feature visibility (Phase 2)** — ships right after Tasks so the new
+   nav item is curatable.
+3. **Quick wins (Phase 3)** — Continue generating + Enhance prompt.
+4. **Code interpreter (Phase 4)** — biggest capability jump after Tasks.
+5. **Artifacts (5) → Memory (6) → Semantic search (7)** as dedicated efforts.
+6. **Usage dashboard (8) → Folders (9)** opportunistically.
+7. **Voice mode (10)** when there's appetite for the heaviest item.
+
+> **Explicitly out of scope for v2** (decided 2026-05-29): MCP /
+> connectors, read-only public share links, conversation tree view,
+> i18n / localization (Promptly is AU-only for now).
+
+---
+
+## Appendix: Shipped to date (v1)
+
+The original roadmap is fully delivered (2026-05-29):
+
+- **Phase 1 — Tier-1 polish:** LaTeX/math rendering, per-conversation
+  instructions, single-message delete, one-click retry / pick-another-
+  model on stream errors, desktop copy on user messages.
+- **Phase 2 — Differentiators:** voice dictation, @-mention Drive files,
+  Mermaid diagram rendering, read-aloud (TTS), thumbs-up/down feedback,
+  and **in-thread regeneration versioning** (`‹2/3›` via a message tree:
+  `Message.parent_id` + `Conversation.active_leaf_message_id`;
+  regenerate/edit keep old answers as siblings).
+- **Phase 3 — Power-user & polish:** saved-prompt library + `/` slash
+  commands, move-a-chat-into-a-project from the sidebar, global keyboard
+  shortcuts (`Ctrl/Cmd+Shift+O` new chat, `/` focus composer, `Ctrl/Cmd+K`
+  search), and true draft persistence (localStorage-backed composer).
+- **Post-v1:** code blocks collapsed-by-default with expand + open-in-
+  viewer.
+
+Already present before v2 (so **not** re-listed as gaps): image
+generation, PDF generation, web search + URL fetch, RAG over uploaded
+docs, compare mode, study mode, projects, Drive (grid/list, user-to-user
+sharing), conversation export, reasoning-effort control, vision relay,
+MFA.

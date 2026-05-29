@@ -112,6 +112,11 @@ const TOOL_PRESENTATION: Record<string, ToolPresentation> = {
     done: "Generated image",
     failed: "Image generation failed",
   },
+  code_interpreter: {
+    pending: "Running code…",
+    done: "Ran code",
+    failed: "Code execution failed",
+  },
   // Internal / debug tools — kept friendly in case they ever surface.
   echo: {
     pending: "Running diagnostic…",
@@ -200,13 +205,56 @@ function ToolMetaBadges({
   const edited = meta.edited === true;
   const resultCount =
     typeof meta.result_count === "number" ? meta.result_count : null;
+  // Code interpreter (Phase 4): surface how many charts/files a run
+  // produced and flag a non-zero exit so a green "Ran code" chip still
+  // reads honestly when the script itself errored.
+  const chartCount =
+    typeof meta.chart_count === "number" && meta.chart_count > 0
+      ? meta.chart_count
+      : null;
+  const fileCount =
+    typeof meta.file_count === "number" && meta.file_count > 0
+      ? meta.file_count
+      : null;
+  const codeErrored = meta.errored === true;
 
-  if (modelId === null && !edited && resultCount === null) {
+  if (
+    modelId === null &&
+    !edited &&
+    resultCount === null &&
+    chartCount === null &&
+    fileCount === null &&
+    !codeErrored
+  ) {
     return null;
   }
 
   return (
     <span className="ml-0.5 inline-flex items-center gap-1">
+      {chartCount !== null && (
+        <span
+          className="rounded-md border border-current/30 px-1.5 py-px text-[10px] font-medium tabular-nums opacity-80"
+          title={`${chartCount} chart${chartCount === 1 ? "" : "s"} produced`}
+        >
+          {chartCount} chart{chartCount === 1 ? "" : "s"}
+        </span>
+      )}
+      {chartCount === null && fileCount !== null && (
+        <span
+          className="rounded-md border border-current/30 px-1.5 py-px text-[10px] font-medium tabular-nums opacity-80"
+          title={`${fileCount} file${fileCount === 1 ? "" : "s"} produced`}
+        >
+          {fileCount} file{fileCount === 1 ? "" : "s"}
+        </span>
+      )}
+      {codeErrored && (
+        <span
+          className="rounded-md border border-amber-500/40 px-1.5 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400"
+          title="The script exited with an error"
+        >
+          error
+        </span>
+      )}
       {resultCount !== null && (
         <span
           className={cn(

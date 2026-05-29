@@ -130,6 +130,15 @@ class Settings(BaseSettings):
     # ---- Redis ----
     REDIS_URL: str = "redis://redis:6379/0"
 
+    # ---- Code interpreter sandbox (Phase 4) ----
+    # Base URL of the isolated execution worker. Empty disables the
+    # ``code_interpreter`` tool entirely (it'll report itself as
+    # unavailable rather than silently failing). The shared secret is
+    # sent on every job so only the backend can submit work.
+    CODE_SANDBOX_URL: str = "http://sandbox:8000"
+    CODE_SANDBOX_SECRET: str = ""
+    CODE_SANDBOX_TIMEOUT_S: int = 30
+
     # ---- Search ----
     SEARXNG_URL: str = "http://searxng:8080"
     DEFAULT_SEARCH_PROVIDER: str = "searxng"

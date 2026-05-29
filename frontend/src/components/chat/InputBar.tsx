@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ArrowUp,
+  Check,
   Eye,
   File as FileIcon,
   FileText,
@@ -15,11 +16,13 @@ import {
   Loader2,
   Mic,
   Paperclip,
+  Sparkles,
   Square,
   Upload,
   X,
 } from "lucide-react";
 
+import { chatApi } from "@/api/chat";
 import { filesApi } from "@/api/files";
 import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
@@ -607,6 +610,69 @@ export function InputBar({
     },
   });
 
+  // Phase 3.2 — Enhance prompt. ``preview`` holds the model's rewrite
+  // until the user accepts or discards it, so we never silently overwrite
+  // what they typed.
+  const [enhanceStatus, setEnhanceStatus] = useState<
+    "idle" | "loading" | "preview" | "error"
+  >("idle");
+  const [enhancePreview, setEnhancePreview] = useState("");
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+
+  const handleEnhance = useCallback(async () => {
+    const draft = value.trim();
+    if (!draft || enhanceStatus === "loading") return;
+    if (!selectedModel) {
+      setEnhanceStatus("error");
+      setEnhanceError("Pick a model first.");
+      return;
+    }
+    setEnhanceStatus("loading");
+    setEnhanceError(null);
+    try {
+      const improved = await chatApi.enhancePrompt(
+        draft,
+        selectedModel.provider_id,
+        selectedModel.model_id
+      );
+      const cleaned = improved.trim();
+      if (!cleaned || cleaned === draft) {
+        // Nothing meaningfully changed — don't make the user diff two
+        // identical blocks. Quietly reset.
+        setEnhanceStatus("idle");
+        return;
+      }
+      setEnhancePreview(cleaned);
+      setEnhanceStatus("preview");
+    } catch (e) {
+      setEnhanceStatus("error");
+      setEnhanceError(extractError(e));
+    }
+  }, [value, enhanceStatus, selectedModel]);
+
+  const acceptEnhance = useCallback(() => {
+    setValue(enhancePreview);
+    setEnhanceStatus("idle");
+    setEnhancePreview("");
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const end = enhancePreview.length;
+      try {
+        el.setSelectionRange(end, end);
+      } catch {
+        // older browsers
+      }
+    });
+  }, [enhancePreview]);
+
+  const dismissEnhance = useCallback(() => {
+    setEnhanceStatus("idle");
+    setEnhancePreview("");
+    setEnhanceError(null);
+  }, []);
+
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
@@ -721,6 +787,56 @@ export function InputBar({
               </span>
             </div>
           )}
+          {enhanceStatus === "error" && enhanceError && (
+            <div
+              className={cn(
+                "flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[11px]",
+                "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              )}
+              role="alert"
+            >
+              <span className="leading-snug">
+                Couldn't enhance: {enhanceError}
+              </span>
+              <button
+                onClick={dismissEnhance}
+                className="shrink-0 rounded p-0.5 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                aria-label="Dismiss"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+          {enhanceStatus === "preview" && (
+            <div
+              className={cn(
+                "rounded-md border px-2.5 py-2 text-xs",
+                "border-[var(--accent)]/40 bg-[var(--accent)]/[0.06]"
+              )}
+            >
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent)]">
+                <Sparkles className="h-3 w-3" />
+                Enhanced prompt
+              </div>
+              <p className="promptly-scroll max-h-40 overflow-y-auto whitespace-pre-wrap leading-snug text-[var(--text)]">
+                {enhancePreview}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={acceptEnhance}
+                  className="inline-flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
+                >
+                  <Check className="h-3 w-3" /> Use this
+                </button>
+                <button
+                  onClick={dismissEnhance}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                >
+                  Keep mine
+                </button>
+              </div>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={value}
@@ -829,6 +945,39 @@ export function InputBar({
                   )}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => void handleEnhance()}
+                disabled={
+                  disabled ||
+                  streaming ||
+                  value.trim().length === 0 ||
+                  enhanceStatus === "loading"
+                }
+                className={cn(
+                  "inline-flex items-center rounded-full border transition",
+                  "border-[var(--border)] text-[var(--text-muted)]",
+                  "hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                  isMobile
+                    ? "h-9 w-9 justify-center"
+                    : "h-8 gap-1.5 px-2.5 text-xs"
+                )}
+                aria-label="Enhance prompt"
+                title="Enhance prompt — rewrite it for a better answer"
+              >
+                {enhanceStatus === "loading" ? (
+                  <Loader2
+                    className={cn(
+                      isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
+                      "animate-spin"
+                    )}
+                  />
+                ) : (
+                  <Sparkles className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+                )}
+                {!isMobile && <span className="font-medium">Enhance</span>}
+              </button>
             </div>
             {streaming ? (
               <button

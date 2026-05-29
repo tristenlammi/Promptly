@@ -105,6 +105,12 @@ services:
       # (~270 MB), fast, 768-dim — plenty for knowledge-base RAG
       # without making first-run downloads painful.
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
+      # Code-interpreter sandbox (Phase 4). The backend submits
+      # model-written Python here over the internal-only ``sandbox-net``
+      # network. The shared secret (reusing SECRET_KEY) gates job
+      # submission as defense-in-depth on top of the network boundary.
+      - CODE_SANDBOX_URL=http://sandbox:8000
+      - CODE_SANDBOX_SECRET=${SECRET_KEY}
     volumes:
       # Bind-mount user data into the project directory so it's
       # always next to the compose file — easy to back up, easy
@@ -118,6 +124,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Soft dependency — the chat path still boots and degrades
+      # gracefully (code_interpreter returns a friendly error) if the
+      # sandbox is slow to come up.
+      sandbox:
+        condition: service_started
       # Ollama is a soft dependency — the backend boots even if
       # Ollama is still warming up its embedding model (the RAG
       # ingester will surface a friendly "indexing failed, retry"
@@ -139,7 +150,11 @@ services:
       retries: 3
       start_period: 60s
     networks:
+      # Backend straddles both networks: ``promptly`` for the app
+      # services (Postgres, Redis, Ollama, SearXNG) + the internet,
+      # and ``sandbox-net`` so it can reach the isolated code sandbox.
       - promptly
+      - sandbox-net
 
   collab:
     # Hocuspocus websocket collaboration server for Drive documents.
@@ -352,7 +367,56 @@ services:
     # `cap_drop` block, run `docker compose up -d searxng`,
     # then restore the cap-drop and recreate.
 
+  sandbox:
+    # Code-interpreter execution worker (Phase 4). Runs model-written
+    # Python in a throwaway, resource-limited scratch dir. Deliberately
+    # locked down:
+    #   * On the internal-only ``sandbox-net`` (no internet, and no
+    #     access to Postgres / Redis / Ollama, which live on ``promptly``).
+    #   * Read-only root filesystem; the ONLY writable path is an
+    #     in-memory tmpfs scratch that's wiped per job. No host or user
+    #     data volumes are mounted.
+    #   * All Linux capabilities dropped, no privilege escalation, PID
+    #     and memory caps. The worker process itself runs as non-root.
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    container_name: Promptly-Sandbox
+    environment:
+      - SANDBOX_SECRET=${SECRET_KEY}
+    read_only: true
+    tmpfs:
+      - /sandbox/run:size=512m,uid=10001,gid=10001,mode=0700
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - sandbox-net
+
 networks:
   promptly:
     name: promptly
     driver: bridge
+  # Internal-only network for the code sandbox. ``internal: true`` means
+  # containers on it have NO route to the internet or to the host —
+  # they can only talk to other members of this network. The backend
+  # joins both ``promptly`` and ``sandbox-net``; the sandbox joins ONLY
+  # this one, so executed code is fully air-gapped from everything
+  # except the backend that submits the job.
+  sandbox-net:
+    name: promptly-sandbox
+    driver: bridge
+    internal: true

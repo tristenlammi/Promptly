@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.chat.tools.base import Tool
+from app.chat.tools.code_interpreter import CodeInterpreterTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
@@ -33,6 +34,7 @@ REGISTRY: list[Tool] = [
     EchoTool(),
     GeneratePdfTool(),
     GenerateImageTool(),
+    CodeInterpreterTool(),
     WebSearchTool(),
     FetchUrlTool(),
 ]

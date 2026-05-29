@@ -5,18 +5,23 @@ import {
   Copy,
   Download,
   FolderOpen,
+  Loader2,
   RotateCcw,
   Save,
+  Wand2,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useCodeArtifactStore } from "@/stores/codeArtifactStore";
 import { filesApi } from "@/api/files";
+import { chatApi } from "@/api/chat";
+import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
 import { CodeArtifactView } from "./CodeArtifactView";
 import {
+  type ArtifactLanguage,
   driveArtifactMeta,
   humanLanguageLabel,
   isPreviewableLanguage,
@@ -124,6 +129,15 @@ export function CodeArtifactPanel() {
             onActiveTabChange={setActiveTab}
           />
         </div>
+
+        <ArtifactEditBar
+          language={language}
+          source={draft}
+          onApplied={(updated) => {
+            setDraft(updated);
+            if (isPreviewableLanguage(language)) setActiveTab("preview");
+          }}
+        />
 
         <Footer
           draft={draft}
@@ -255,6 +269,115 @@ function Header({
       >
         <X className="h-5 w-5" />
       </button>
+    </div>
+  );
+}
+
+/** Phase 5 — in-place AI editing. A one-line "describe a change" bar
+ *  that sends the current draft + instruction to the model and swaps
+ *  the result back into the same artifact (the live preview re-renders).
+ *  This is the "make the button blue" affordance: no new chat message,
+ *  no re-emitted code block — the artifact is patched in place. */
+function ArtifactEditBar({
+  language,
+  source,
+  onApplied,
+}: {
+  language: ArtifactLanguage;
+  source: string;
+  onApplied: (updated: string) => void;
+}) {
+  const [instruction, setInstruction] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const selectedModel = useModelStore(
+    (s) =>
+      s.available.find(
+        (m) =>
+          m.provider_id === s.selectedProviderId &&
+          m.model_id === s.selectedModelId
+      ) ?? null
+  );
+
+  const submit = useCallback(async () => {
+    const instr = instruction.trim();
+    if (!instr || status === "loading") return;
+    if (!selectedModel) {
+      setStatus("error");
+      setError("Pick a model first.");
+      return;
+    }
+    setStatus("loading");
+    setError(null);
+    try {
+      const updated = await chatApi.editArtifact(
+        source,
+        language,
+        instr,
+        selectedModel.provider_id,
+        selectedModel.model_id
+      );
+      onApplied(updated);
+      setInstruction("");
+      setStatus("idle");
+    } catch (e) {
+      setStatus("error");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Couldn't edit the artifact. Try again."
+      );
+    }
+  }, [instruction, status, selectedModel, source, language, onApplied]);
+
+  return (
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+      <div className="flex items-center gap-2">
+        <Wand2 className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />
+        <input
+          type="text"
+          value={instruction}
+          onChange={(e) => {
+            setInstruction(e.target.value);
+            if (status === "error") setStatus("idle");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void submit();
+            }
+          }}
+          placeholder="Describe a change — e.g. make the button blue"
+          disabled={status === "loading"}
+          aria-label="Describe a change for the AI to apply"
+          className={cn(
+            "min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)]",
+            "px-2.5 py-1.5 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]",
+            "focus:border-[var(--accent)]/60 focus:outline-none disabled:opacity-60"
+          )}
+        />
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={status === "loading" || instruction.trim().length === 0}
+          title="Ask AI to edit this artifact in place"
+          className={cn(
+            "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition",
+            "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]",
+            "disabled:cursor-not-allowed disabled:opacity-50"
+          )}
+        >
+          {status === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Wand2 className="h-3.5 w-3.5" />
+          )}
+          {status === "loading" ? "Editing…" : "Edit"}
+        </button>
+      </div>
+      {status === "error" && error && (
+        <div className="mt-1 px-1 text-[11px] text-red-500">{error}</div>
+      )}
     </div>
   );
 }

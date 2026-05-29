@@ -191,6 +191,19 @@ export const chatApi = {
     );
     return data;
   },
+  /** Resume a truncated assistant reply — streams more text onto the end
+   *  of the same message rather than producing a fresh sibling. */
+  async continueMessage(
+    conversationId: string,
+    messageId: string,
+    payload: RegenerateMessagePayload = {}
+  ): Promise<SendMessageResponse> {
+    const { data } = await apiClient.post<SendMessageResponse>(
+      `/chat/conversations/${conversationId}/messages/${messageId}/continue`,
+      payload
+    );
+    return data;
+  },
   /** Download a conversation in the requested format. Returns the
    *  axios response so the caller has access to headers (we pull the
    *  filename out of ``Content-Disposition`` rather than re-deriving
@@ -231,6 +244,40 @@ export const chatApi = {
       }
     );
     return data;
+  },
+  /** Phase 3.2 — rewrite a rough composer draft into a sharper prompt.
+   *  Stateless; returns the improved text for a preview/accept flow. */
+  async enhancePrompt(
+    text: string,
+    providerId?: string | null,
+    modelId?: string | null
+  ): Promise<string> {
+    const { data } = await apiClient.post<{ enhanced: string }>(
+      `/chat/enhance-prompt`,
+      { text, provider_id: providerId ?? null, model_id: modelId ?? null }
+    );
+    return data.enhanced;
+  },
+  /** Phase 5 — apply a natural-language change to a code artifact and
+   *  return the full updated source for in-place patching. */
+  async editArtifact(
+    source: string,
+    language: string,
+    instruction: string,
+    providerId?: string | null,
+    modelId?: string | null
+  ): Promise<string> {
+    const { data } = await apiClient.post<{ updated: string }>(
+      `/chat/edit-artifact`,
+      {
+        source,
+        language,
+        instruction,
+        provider_id: providerId ?? null,
+        model_id: modelId ?? null,
+      }
+    );
+    return data.updated;
   },
   streamUrl(streamId: string): string {
     // Used by useStreamingChat — must be absolute-ish since it flows through
@@ -353,6 +400,21 @@ export const chatApi = {
     const { data } = await apiClient.put<ChatMessage>(
       `/chat/conversations/${conversationId}/messages/${messageId}/feedback`,
       { rating, reason }
+    );
+    return data;
+  },
+
+  // ---- Phase 2.6 — in-thread regeneration versioning ----
+  /** Switch the visible thread to a sibling version. ``messageId`` is
+   *  the sibling picked from the ``‹ 2/3 ›`` pager. Returns the full
+   *  conversation detail with the newly-resolved active path so the
+   *  caller can replace its message list. */
+  async activateMessageVersion(
+    conversationId: string,
+    messageId: string
+  ): Promise<ConversationDetail> {
+    const { data } = await apiClient.post<ConversationDetail>(
+      `/chat/conversations/${conversationId}/messages/${messageId}/activate`
     );
     return data;
   },

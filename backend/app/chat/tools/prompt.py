@@ -84,6 +84,22 @@ def build_tools_system_prompt(categories: set[str]) -> str:
             "a <style> block unless they ask for separate files). "
             "The side panel's live preview renders it as a real page."
         )
+    if "code" in categories:
+        guidelines.append(
+            "- For anything that benefits from actually running code — "
+            "data analysis, calculations, parsing/transforming files, or "
+            "making a chart from data — call `code_interpreter` and let it "
+            "execute rather than hand-computing or guessing the result. "
+            "Files the user attached this turn are already in the working "
+            "directory by their original filename, so read them directly "
+            "(e.g. `pd.read_csv('data.csv')`)."
+        )
+        guidelines.append(
+            "- To show a chart, have the code save it (e.g. "
+            "`plt.savefig('chart.png')`); saved images are attached to "
+            "your reply automatically. After it runs, briefly interpret "
+            "the results for the user instead of repeating the raw output."
+        )
     if "search" in categories:
         guidelines.append(
             "- If the user asks about anything that may have changed "

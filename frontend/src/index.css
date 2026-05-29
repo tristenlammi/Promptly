@@ -252,6 +252,13 @@ body {
   font-size: 0.85rem;
   line-height: 1.55;
 }
+/* When a code block is wrapped in the collapsible shell, the shell
+   owns the rounded border + spacing, so the inner <pre> drops its own
+   margin/radius and sits flush beneath the header bar. */
+.promptly-codeblock pre {
+  margin: 0;
+  border-radius: 0;
+}
 .promptly-prose pre code {
   background: transparent;
   padding: 0;

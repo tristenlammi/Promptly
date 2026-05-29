@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
@@ -52,7 +52,11 @@ from app.chat.schemas import (
     ConversationSearchHit,
     ConversationSummary,
     ConversationUpdate,
+    ArtifactEditRequest,
+    ArtifactEditResponse,
     EditMessageRequest,
+    EnhancePromptRequest,
+    EnhancePromptResponse,
     MentionCandidate,
     MentionCandidatesResponse,
     MessageResponse,
@@ -94,6 +98,12 @@ from app.chat.stream_runner import (
 )
 from app.chat.personal_context import build_personal_context_prompt
 from app.chat.titler import fallback_title, generate_conversation_title
+from app.chat.versioning import (
+    active_path,
+    descend_to_leaf,
+    lineage_to,
+    version_meta,
+)
 from app.chat.tools import (
     ToolContext,
     ToolError,
@@ -543,6 +553,43 @@ async def create_conversation(
     return ConversationSummary.model_validate(conv)
 
 
+async def _build_active_message_payloads(
+    conv: Conversation, db: AsyncSession
+) -> list[MessageResponse]:
+    """Serialize a conversation's *active* thread (Phase 2.6).
+
+    Loads every row once, resolves the active path from
+    ``active_leaf_message_id`` (falling back to created_at order for
+    legacy conversations), and attaches per-message version metadata so
+    the client can render the ``‹ 2/3 ›`` pager. Only messages on the
+    active path are returned — inactive sibling subtrees stay in the DB
+    but off the wire.
+    """
+    rows = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    path = active_path(rows, conv.active_leaf_message_id)
+    meta = version_meta(rows, path)
+    payloads: list[MessageResponse] = []
+    for m in path:
+        resp = MessageResponse.model_validate(m)
+        vm = meta.get(m.id)
+        if vm is not None:
+            resp.version_index = vm.index
+            resp.version_count = vm.count
+            resp.sibling_ids = vm.sibling_ids
+        payloads.append(resp)
+    return payloads
+
+
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
 async def get_conversation(
     conversation_id: uuid.UUID,
@@ -550,14 +597,71 @@ async def get_conversation(
     user: User = Depends(get_current_user),
 ) -> ConversationDetail:
     conv, role = await get_accessible_conversation(conversation_id, user, db)
-    messages_result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conv.id)
-        .order_by(Message.created_at.asc())
+    messages = await _build_active_message_payloads(conv, db)
+    participants = await load_participants(conv, db)
+    return ConversationDetail.model_validate(
+        {
+            **conv.__dict__,
+            "messages": messages,
+            "role": role,
+            "owner": {
+                "user_id": participants.owner.user_id,
+                "username": participants.owner.username,
+                "email": participants.owner.email,
+            },
+            "collaborators": [
+                {
+                    "user_id": c.user_id,
+                    "username": c.username,
+                    "email": c.email,
+                }
+                for c in participants.collaborators
+            ],
+        }
     )
-    messages = [
-        MessageResponse.model_validate(m) for m in messages_result.scalars().all()
-    ]
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/activate",
+    response_model=ConversationDetail,
+)
+async def activate_message_version(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ConversationDetail:
+    """Switch the visible thread to a sibling version (Phase 2.6).
+
+    ``message_id`` is the sibling the user picked from the ``‹ 2/3 ›``
+    pager. We re-point ``active_leaf_message_id`` at the deepest
+    most-recent descendant of that sibling so its whole continuation
+    comes back into view, then return the freshly-resolved active path.
+    """
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+
+    target = await db.get(Message, message_id)
+    if target is None or target.conversation_id != conv.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+
+    rows = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    conv.active_leaf_message_id = descend_to_leaf(rows, message_id)
+    await db.commit()
+    await db.refresh(conv)
+
+    messages = await _build_active_message_payloads(conv, db)
     participants = await load_participants(conv, db)
     return ConversationDetail.model_validate(
         {
@@ -725,27 +829,35 @@ async def branch_conversation(
     # (token counts, ttft, cost) so the branch's history matches
     # what the user actually saw when they forked. New turns posted
     # after the fork are billed normally to whoever sends them.
+    #
+    # Phase 2.6 — rebuild the lineage in the copy: each row's parent is
+    # the previously-copied row, and the last copied row becomes the
+    # branch's active leaf. ``history`` is already created_at-ordered.
+    prev_copy_id: uuid.UUID | None = None
     for src_msg in history:
-        db.add(
-            Message(
-                conversation_id=branch.id,
-                role=src_msg.role,
-                content=src_msg.content,
-                sources=src_msg.sources,
-                whiteboard_actions=src_msg.whiteboard_actions,
-                attachments=src_msg.attachments,
-                prompt_tokens=src_msg.prompt_tokens,
-                completion_tokens=src_msg.completion_tokens,
-                ttft_ms=src_msg.ttft_ms,
-                total_ms=src_msg.total_ms,
-                cost_usd_micros=src_msg.cost_usd_micros,
-                # Preserve original authorship so the "from Jane" chip
-                # in shared chats stays accurate after a private fork.
-                author_user_id=src_msg.author_user_id,
-                created_at=src_msg.created_at,
-            )
+        copy = Message(
+            conversation_id=branch.id,
+            role=src_msg.role,
+            content=src_msg.content,
+            sources=src_msg.sources,
+            whiteboard_actions=src_msg.whiteboard_actions,
+            attachments=src_msg.attachments,
+            parent_id=prev_copy_id,
+            prompt_tokens=src_msg.prompt_tokens,
+            completion_tokens=src_msg.completion_tokens,
+            ttft_ms=src_msg.ttft_ms,
+            total_ms=src_msg.total_ms,
+            cost_usd_micros=src_msg.cost_usd_micros,
+            # Preserve original authorship so the "from Jane" chip
+            # in shared chats stays accurate after a private fork.
+            author_user_id=src_msg.author_user_id,
+            created_at=src_msg.created_at,
         )
+        db.add(copy)
+        await db.flush()
+        prev_copy_id = copy.id
 
+    branch.active_leaf_message_id = prev_copy_id
     await db.commit()
     await db.refresh(branch)
 
@@ -926,16 +1038,24 @@ async def send_message(
 
     # Persist the user message immediately so the client can optimistically
     # render it before the stream opens.
+    #
+    # Phase 2.6 — link it into the lineage: its parent is whatever leaf
+    # was active, and it becomes the new active leaf. The assistant reply
+    # streamed in response will then hang off this user message.
+    prev_leaf_id = conv.active_leaf_message_id
     user_msg = Message(
         conversation_id=conv.id,
         role="user",
         content=payload.content,
         attachments=attachment_snapshots,
+        parent_id=prev_leaf_id,
         # Phase 4b — record who actually sent the turn so the UI can
         # render "from Jane" chips on shared chats.
         author_user_id=user.id,
     )
     db.add(user_msg)
+    await db.flush()
+    conv.active_leaf_message_id = user_msg.id
 
     # Set a *provisional* title so the sidebar has something meaningful the
     # moment the POST returns. An AI-generated title will replace it at the
@@ -1039,22 +1159,17 @@ async def edit_and_resend_message(
     * ``message_id`` must belong to ``conversation_id``.
     * The message must be a *user* message — editing assistant replies is
       a different feature (regeneration without text change).
-    * The message must be the *most recent* user message in the
-      conversation. Editing arbitrarily-old user turns would orphan or
-      contradict every assistant reply that came after, which is more
-      mess than we want to support today.
+    Side effects on success (Phase 2.6 — versioned, non-destructive):
 
-    Side effects on success:
-
-    * ``messages.content`` is overwritten in place. Attachments are
-      preserved — the user is editing text, not files.
-    * Every message strictly *after* the edited one is hard-deleted
-      (typically just one assistant reply, but we tolerate any tail in
-      case streams ever produce siblings).
-    * A fresh stream is enqueued with the same shape ``send_message``
-      uses, so the existing SSE pipeline drives the regeneration. The
-      response body is byte-identical to ``send_message``'s so the
-      frontend can reuse its streaming hook unchanged.
+    * A new user message is inserted as a *sibling* of the original
+      (same lineage parent), carrying over the original's attachments.
+      Nothing is overwritten or deleted — the original turn and every
+      reply downstream of it are preserved off the active path and
+      reachable via the version pager.
+    * The edited turn becomes the active leaf; a fresh stream is enqueued
+      against it. The response body matches ``send_message``'s shape, but
+      ``user_message`` is the *new* (edited) message, so the frontend
+      swaps the old turn out and streams the new reply.
     """
     # Quota gates apply to every regenerate too — otherwise the
     # easiest way around a budget cap is to spam the "edit" button.
@@ -1086,24 +1201,11 @@ async def edit_and_resend_message(
             detail="You can only edit messages you sent.",
         )
 
-    # Confirm this is the conversation's last user message. Anything
-    # newer than `target.created_at` must therefore be assistant /
-    # system rows produced in response to it — those get cleared below.
-    last_user_q = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conv.id, Message.role == "user")
-        .order_by(Message.created_at.desc())
-        .limit(1)
-    )
-    last_user = last_user_q.scalars().first()
-    if last_user is None or last_user.id != target.id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Only the most recent user message can be edited. Send a "
-                "new message instead."
-            ),
-        )
+    # Phase 2.6 — no "most recent user message" constraint anymore.
+    # Editing creates a *sibling* user turn (it does not rewrite or
+    # delete anything), so editing an older turn is safe: the previous
+    # version and its whole continuation are preserved off the active
+    # path and reachable via the version pager.
 
     # Resolve the effective model + provider for the regeneration.
     # Mirrors send_message: caller may override per-request, otherwise
@@ -1162,22 +1264,22 @@ async def edit_and_resend_message(
                 detail="You don't have access to that model. Ask an admin to grant it.",
             )
 
-    # Rewrite the user message in place. Don't touch attachments — the
-    # snapshot stays valid and the stream re-resolves them by id.
-    target.content = payload.content
-
-    # Drop everything that came strictly after this user turn. In normal
-    # flows that's exactly one assistant reply; we tolerate more in case
-    # interrupted streams or future features ever leave siblings behind.
-    delete_after_q = await db.execute(
-        select(Message)
-        .where(
-            Message.conversation_id == conv.id,
-            Message.created_at > target.created_at,
-        )
+    # Phase 2.6 — create the edited message as a *sibling* of the
+    # original (same lineage parent), carrying over the attachments. The
+    # new turn becomes the active leaf; the regenerated assistant reply
+    # will hang off it. The original user turn and everything downstream
+    # of it stay in the DB, off the active path.
+    edited = Message(
+        conversation_id=conv.id,
+        role="user",
+        content=payload.content,
+        attachments=target.attachments,
+        parent_id=target.parent_id,
+        author_user_id=user.id,
     )
-    for stale in delete_after_q.scalars().all():
-        await db.delete(stale)
+    db.add(edited)
+    await db.flush()
+    conv.active_leaf_message_id = edited.id
 
     # Update conv defaults so the next plain ``send_message`` works
     # without re-specifying — same behavior as send_message.
@@ -1190,7 +1292,7 @@ async def edit_and_resend_message(
     conv.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
-    await db.refresh(target)
+    await db.refresh(edited)
 
     effective_mode = (
         payload.web_search_mode
@@ -1205,7 +1307,7 @@ async def edit_and_resend_message(
     stream_id = uuid.uuid4()
     ctx: StreamContext = {
         "conversation_id": str(conv.id),
-        "user_message_id": str(target.id),
+        "user_message_id": str(edited.id),
         "provider_id": str(provider_id),
         "model_id": model_id,
         "web_search_mode": effective_mode,
@@ -1218,7 +1320,7 @@ async def edit_and_resend_message(
 
     return SendMessageResponse(
         stream_id=stream_id,
-        user_message=MessageResponse.model_validate(target),
+        user_message=MessageResponse.model_validate(edited),
     )
 
 
@@ -1341,6 +1443,18 @@ async def delete_message(
             status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
         )
 
+    # Phase 2.6 — re-link the lineage before deleting so children aren't
+    # orphaned (the FK is ``SET NULL``, which would sever the active-path
+    # walk). Splice them onto the deleted row's parent, and slide the
+    # active leaf back if it pointed at this row.
+    await db.execute(
+        update(Message)
+        .where(Message.parent_id == target.id)
+        .values(parent_id=target.parent_id)
+    )
+    if conv.active_leaf_message_id == target.id:
+        conv.active_leaf_message_id = target.parent_id
+
     await db.delete(target)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1412,21 +1526,22 @@ async def regenerate_assistant_message(
     Constraints (returned as 4xx):
 
     * ``message_id`` must be an *assistant* message in this conversation.
-    * It must be the *most recent* assistant message. Regenerating an
-      older assistant turn would orphan every reply that followed — same
-      reason :func:`edit_and_resend_message` pins to the last user turn.
-    * A preceding user message must exist; regenerating an assistant
-      message with no prompt would just re-emit the system preamble.
+    * Its lineage parent must be a user message; regenerating an
+      assistant message with no prompt would just re-emit the system
+      preamble.
 
-    Side effects on success:
+    Side effects on success (Phase 2.6 — versioned, non-destructive):
 
-    * The target assistant message (and anything strictly newer, e.g.
-      tool-invocation sidecars produced mid-stream) is hard-deleted.
-    * The preceding user message is left untouched.
-    * A fresh stream is enqueued against the same user message. Callers
-      may override ``provider_id`` / ``model_id`` to power the "try a
-      different model" button; omitting them regenerates with the
-      conversation's existing defaults.
+    * Nothing is deleted. The fresh answer streams in as a *sibling* of
+      the target (both share the user prompt as their ``parent_id``), so
+      the previous answer — and any conversation that branched off it —
+      is preserved off the active path and reachable via the version
+      pager.
+    * The active leaf is moved back to the prompt for the in-flight
+      regeneration, then to the new assistant reply once it completes.
+    * A fresh stream is enqueued against the prompt. Callers may override
+      ``provider_id`` / ``model_id`` to power the "try a different model"
+      button; omitting them regenerates with the conversation's defaults.
 
     The response shape matches ``send_message`` and ``edit_and_resend``
     so the frontend streaming hook stays unchanged — we just hand back
@@ -1449,42 +1564,13 @@ async def regenerate_assistant_message(
             detail="Only assistant messages can be regenerated.",
         )
 
-    # Confirm it's the latest assistant turn. Regenerating mid-history
-    # would contradict / orphan everything that followed.
-    last_assistant_q = await db.execute(
-        select(Message)
-        .where(
-            Message.conversation_id == conv.id,
-            Message.role == "assistant",
-        )
-        .order_by(Message.created_at.desc())
-        .limit(1)
-    )
-    last_assistant = last_assistant_q.scalars().first()
-    if last_assistant is None or last_assistant.id != target.id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Only the most recent assistant reply can be regenerated. "
-                "Branch the conversation if you want to retry earlier."
-            ),
-        )
-
-    # Find the user message that prompted this reply. With our current
-    # schema that's simply "the newest user message older than target";
-    # branching guarantees each assistant reply has exactly one ancestor.
-    prompt_q = await db.execute(
-        select(Message)
-        .where(
-            Message.conversation_id == conv.id,
-            Message.role == "user",
-            Message.created_at < target.created_at,
-        )
-        .order_by(Message.created_at.desc())
-        .limit(1)
-    )
-    prompt = prompt_q.scalars().first()
-    if prompt is None:
+    # Phase 2.6 — the prompt is simply this reply's lineage parent. We no
+    # longer require it to be the most-recent assistant: regenerating
+    # produces a *sibling* answer rather than destroying anything, so an
+    # older turn can be regenerated safely (its previous continuation is
+    # preserved off the active path).
+    prompt = await db.get(Message, target.parent_id) if target.parent_id else None
+    if prompt is None or prompt.role != "user":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No user prompt precedes this assistant message.",
@@ -1547,19 +1633,11 @@ async def regenerate_assistant_message(
                 detail="You don't have access to that model. Ask an admin to grant it.",
             )
 
-    # Wipe the target assistant reply plus any newer rows (tool sidecars,
-    # interrupted-stream scraps). The preceding user turn is preserved
-    # verbatim so re-streaming is bit-for-bit identical on the prompt
-    # side.
-    delete_after_q = await db.execute(
-        select(Message)
-        .where(
-            Message.conversation_id == conv.id,
-            Message.created_at >= target.created_at,
-        )
-    )
-    for stale in delete_after_q.scalars().all():
-        await db.delete(stale)
+    # Phase 2.6 — no deletes. The new answer streams in as a *sibling* of
+    # ``target`` (both hang off ``prompt``). We re-point the active leaf
+    # back to the prompt so the in-flight regeneration renders in place;
+    # the streamed assistant becomes the new leaf when it finishes.
+    conv.active_leaf_message_id = prompt.id
 
     # Persist any model override onto the conversation so the next plain
     # send picks up the choice, mirroring send_message/edit semantics.
@@ -1602,6 +1680,318 @@ async def regenerate_assistant_message(
         stream_id=stream_id,
         user_message=MessageResponse.model_validate(prompt),
     )
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/continue",
+    response_model=SendMessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def continue_assistant_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    payload: RegenerateMessageRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SendMessageResponse:
+    """Resume a *truncated* assistant reply, appending to the same bubble.
+
+    Unlike regenerate (which produces a fresh sibling answer), continue
+    keeps the existing reply and streams more text onto the end of it.
+    The generator splices the partial answer into the prompt as context
+    and writes the continuation back onto this message row.
+
+    Constraints (returned as 4xx):
+
+    * ``message_id`` must be an *assistant* message in this conversation.
+    * It must be the conversation's current active leaf — we only ever
+      continue the reply the user is actually looking at, never an older
+      off-path version.
+    * Its lineage parent must be a user message.
+    """
+    await _enforce_send_quotas(request, user, db)
+    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+
+    target = await db.get(Message, message_id)
+    if target is None or target.conversation_id != conv.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+    if target.role != "assistant":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only assistant messages can be continued.",
+        )
+    if conv.active_leaf_message_id != target.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only the latest reply on the active path can be continued.",
+        )
+
+    prompt = await db.get(Message, target.parent_id) if target.parent_id else None
+    if prompt is None or prompt.role != "user":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No user prompt precedes this assistant message.",
+        )
+
+    # Reuse the conversation's configured model/provider; allow the same
+    # optional overrides regenerate supports (kept for symmetry, rarely
+    # used for a continuation).
+    provider_id = payload.provider_id or conv.provider_id
+    model_id = payload.model_id or conv.model_id
+    if provider_id is None or not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No model configured for this conversation. Pick one from "
+                "the model selector before retrying."
+            ),
+        )
+
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+        )
+    owner_ok = provider.user_id is None or provider.user_id == user.id
+    if not owner_ok:
+        owner = await db.get(User, provider.user_id)
+        owner_ok = (
+            owner is not None and owner.role == "admin" and user.role != "admin"
+        )
+        if not owner_ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+            )
+    if not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
+        )
+
+    # ``custom:<uuid>`` → base model id for the allowlist check (see
+    # send_message / regenerate for the full rationale).
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    effective_model_id_for_check = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown or disabled custom model",
+            )
+        effective_model_id_for_check = resolved.base_model_id
+
+    if user.role != "admin" and user.allowed_models is not None:
+        if effective_model_id_for_check not in set(user.allowed_models):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to that model. Ask an admin to grant it.",
+            )
+
+    # The active leaf stays on ``target`` — we're extending it in place.
+    conv.model_id = model_id
+    conv.provider_id = provider_id
+    if payload.web_search_mode is not None:
+        conv.web_search_mode = payload.web_search_mode
+    if payload.reasoning_effort is not None:
+        conv.reasoning_effort = payload.reasoning_effort
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(prompt)
+
+    effective_mode = (
+        payload.web_search_mode
+        if payload.web_search_mode is not None
+        else (conv.web_search_mode or "off")
+    )
+    effective_reasoning = (
+        payload.reasoning_effort
+        if payload.reasoning_effort is not None
+        else conv.reasoning_effort
+    )
+    stream_id = uuid.uuid4()
+    ctx: StreamContext = {
+        "conversation_id": str(conv.id),
+        "user_message_id": str(prompt.id),
+        "provider_id": str(provider_id),
+        "model_id": model_id,
+        "web_search_mode": effective_mode,
+        "temperature": payload.temperature,
+        "max_tokens": payload.max_tokens,
+        "tools_enabled": bool(payload.tools_enabled),
+        "reasoning_effort": effective_reasoning,
+        "continue_from_message_id": str(target.id),
+    }
+    await enqueue_stream(stream_id, ctx)
+
+    return SendMessageResponse(
+        stream_id=stream_id,
+        user_message=MessageResponse.model_validate(prompt),
+    )
+
+
+@router.post("/enhance-prompt", response_model=EnhancePromptResponse)
+async def enhance_prompt_endpoint(
+    payload: EnhancePromptRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EnhancePromptResponse:
+    """Rewrite a rough composer draft into a sharper prompt (Phase 3.2).
+
+    Stateless — no conversation, nothing persisted. Uses the caller's
+    selected model (or any model they're allowed to use). Quota-checked
+    like a send so it can't be abused as a free generation backdoor.
+    """
+    from app.chat.enhance import enhance_prompt
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    await _enforce_send_quotas(request, user, db)
+
+    provider_id = payload.provider_id
+    model_id = payload.model_id
+    if provider_id is None or not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pick a model before enhancing a prompt.",
+        )
+
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+        )
+    owner_ok = provider.user_id is None or provider.user_id == user.id
+    if not owner_ok:
+        owner = await db.get(User, provider.user_id)
+        owner_ok = (
+            owner is not None and owner.role == "admin" and user.role != "admin"
+        )
+        if not owner_ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+            )
+    if not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
+        )
+
+    effective_model_id = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown or disabled custom model",
+            )
+        provider = resolved.base_provider
+        effective_model_id = resolved.base_model_id
+
+    if user.role != "admin" and user.allowed_models is not None:
+        if effective_model_id not in set(user.allowed_models):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to that model. Ask an admin to grant it.",
+            )
+
+    try:
+        improved = await enhance_prompt(
+            text=payload.text,
+            provider=provider,
+            model_id=effective_model_id,
+        )
+    except ProviderError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Prompt enhancement failed: {e}",
+        ) from e
+
+    return EnhancePromptResponse(enhanced=improved)
+
+
+@router.post("/edit-artifact", response_model=ArtifactEditResponse)
+async def edit_artifact_endpoint(
+    payload: ArtifactEditRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ArtifactEditResponse:
+    """Apply a natural-language change to a code artifact (Phase 5).
+
+    Stateless — no conversation, nothing persisted. The side panel sends
+    the current artifact source + a one-line change request and gets the
+    full updated source back, which it swaps into the draft in place.
+    Quota-checked and model-gated exactly like ``enhance-prompt``.
+    """
+    from app.chat.artifact_edit import edit_artifact
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    await _enforce_send_quotas(request, user, db)
+
+    provider_id = payload.provider_id
+    model_id = payload.model_id
+    if provider_id is None or not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pick a model before editing an artifact.",
+        )
+
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+        )
+    owner_ok = provider.user_id is None or provider.user_id == user.id
+    if not owner_ok:
+        owner = await db.get(User, provider.user_id)
+        owner_ok = (
+            owner is not None and owner.role == "admin" and user.role != "admin"
+        )
+        if not owner_ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+            )
+    if not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
+        )
+
+    effective_model_id = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown or disabled custom model",
+            )
+        provider = resolved.base_provider
+        effective_model_id = resolved.base_model_id
+
+    if user.role != "admin" and user.allowed_models is not None:
+        if effective_model_id not in set(user.allowed_models):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to that model. Ask an admin to grant it.",
+            )
+
+    try:
+        updated = await edit_artifact(
+            source=payload.source,
+            language=payload.language,
+            instruction=payload.instruction,
+            provider=provider,
+            model_id=effective_model_id,
+        )
+    except ProviderError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Artifact edit failed: {e}",
+        ) from e
+
+    return ArtifactEditResponse(updated=updated)
 
 
 @router.post(
@@ -2417,6 +2807,11 @@ async def _stream_generator(
     conv_id = uuid.UUID(ctx["conversation_id"])
     provider_id = uuid.UUID(ctx["provider_id"])
     triggering_user_msg_id = uuid.UUID(ctx["user_message_id"])
+    # Continue-generation (Phase 3.1): when set, we resume a truncated
+    # assistant reply rather than producing a new one. Parsed up front so
+    # the history-builder and the finalize step can both branch on it.
+    _continue_raw = ctx.get("continue_from_message_id")
+    continue_from_id = uuid.UUID(_continue_raw) if _continue_raw else None
 
     async with SessionLocal() as db:
         conv = await db.get(Conversation, conv_id)
@@ -2470,13 +2865,29 @@ async def _stream_generator(
             provider = resolved.base_provider
             ctx["model_id"] = resolved.base_model_id
 
-        # Build message history from DB (ordered).
-        messages_result = await db.execute(
-            select(Message)
-            .where(Message.conversation_id == conv.id)
-            .order_by(Message.created_at.asc())
+        # Build message history from DB. Phase 2.6 — follow the lineage
+        # from the triggering user message back to the root rather than
+        # taking every row in ``created_at`` order. Now that regenerate /
+        # edit keep alternate answers as siblings instead of deleting
+        # them, a flat created_at scan would wrongly fold off-path
+        # versions into the prompt. The parent chain gives exactly the
+        # active context that produced this turn.
+        all_rows = (
+            (
+                await db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conv.id)
+                    .order_by(Message.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
         )
-        history_rows = messages_result.scalars().all()
+        history_rows = lineage_to(all_rows, triggering_user_msg_id)
+        if not history_rows:
+            # Defensive fallback for any pre-0054 row whose parent chain
+            # doesn't reach the triggering message: use the flat scan.
+            history_rows = list(all_rows)
 
         # Look up vision support for the currently selected model so we
         # know whether to actually feed image bytes or fall back to a
@@ -2615,7 +3026,11 @@ async def _stream_generator(
 
         # Capture whether this stream will produce the conversation's first
         # assistant turn — that's when we generate the AI title.
-        is_first_turn = not any(m.role == "assistant" for m in history_rows)
+        # A continuation never re-titles: the conversation already had a
+        # reply, and the streamed text is only the tail of an existing one.
+        is_first_turn = continue_from_id is None and not any(
+            m.role == "assistant" for m in history_rows
+        )
         first_user_message = next(
             (m.content for m in history_rows if m.role == "user"), ""
         )
@@ -2818,6 +3233,9 @@ async def _stream_generator(
         enabled_categories: set[str] = set()
         if ctx.get("tools_enabled"):
             enabled_categories.add("artefact")
+            # Phase 4 — the code interpreter rides on the same Tools
+            # toggle as the artefact generators.
+            enabled_categories.add("code")
         if web_search_mode != "off":
             enabled_categories.add("search")
 
@@ -2852,6 +3270,34 @@ async def _stream_generator(
         # dicts (assistant + tool messages) directly because there's
         # no first-class ChatMessage representation for those shapes.
         running_history: list[ChatMessage | dict[str, Any]] = list(history)
+
+        # Continue-generation (Phase 3.1): splice the truncated reply's
+        # existing text into the prompt as a scaffold turn so the model
+        # resumes seamlessly. This turn is in-memory only (never persisted)
+        # and the streamed continuation is appended onto the existing
+        # assistant row in the finalize step below.
+        continue_target: Message | None = None
+        if continue_from_id is not None:
+            continue_target = await db.get(Message, continue_from_id)
+            partial = (continue_target.content or "") if continue_target else ""
+            if partial.strip():
+                running_history.append(
+                    ChatMessage(
+                        role="user",
+                        content=(
+                            "Your previous reply was cut off because it hit "
+                            "the output-length limit. Here is everything you "
+                            "have written so far:\n\n-----\n"
+                            f"{partial}\n-----\n\n"
+                            "Continue the reply seamlessly from exactly where "
+                            "it stopped. Do not repeat any text you already "
+                            "wrote, do not restate earlier points, and do not "
+                            "add a preamble like 'continuing' — just produce "
+                            "the next part so the whole thing reads as one "
+                            "continuous response."
+                        ),
+                    )
+                )
 
         collected_text: list[str] = []
         # DeepSeek thinking-mode chain-of-thought, accumulated across
@@ -3576,25 +4022,79 @@ async def _stream_generator(
             cost_micros = max(0, int(round(cost_usd * 1_000_000)))
 
         reasoning_full = "".join(collected_reasoning) or None
-        assistant = Message(
-            conversation_id=conv.id,
-            role="assistant",
-            content=full,
-            # DeepSeek thinking-mode chain-of-thought. NULL on every
-            # other provider; replayed back on follow-up turns to
-            # avoid the "reasoning_content must be passed back" 400
-            # the API throws on multi-turn tool-call conversations.
-            reasoning_content=reasoning_full,
-            sources=sources_payload,
-            attachments=assistant_attachment_snaps or None,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            ttft_ms=ttft_ms,
-            total_ms=total_ms,
-            cost_usd_micros=cost_micros,
-        )
-        db.add(assistant)
-        conv.updated_at = datetime.now(timezone.utc)
+        if continue_target is not None:
+            # Continue-generation (Phase 3.1): append the freshly streamed
+            # text onto the existing reply rather than creating a sibling.
+            # ``full`` is the continuation only — the partial was injected
+            # as prompt context, never into ``collected_text``. Tokens,
+            # cost, and latency accumulate so the per-message stats stay
+            # honest across both passes.
+            assistant = continue_target
+            assistant.content = (assistant.content or "") + full
+            if reasoning_full:
+                assistant.reasoning_content = (
+                    (assistant.reasoning_content or "") + reasoning_full
+                ) or None
+            if sources_payload:
+                merged_sources = list(assistant.sources or [])
+                seen_urls = {
+                    s.get("url")
+                    for s in merged_sources
+                    if isinstance(s, dict)
+                }
+                for s in sources_payload:
+                    if isinstance(s, dict) and s.get("url") not in seen_urls:
+                        merged_sources.append(s)
+                        seen_urls.add(s.get("url"))
+                assistant.sources = merged_sources
+            if assistant_attachment_snaps:
+                assistant.attachments = (
+                    list(assistant.attachments or []) + assistant_attachment_snaps
+                )
+            assistant.prompt_tokens = (
+                (assistant.prompt_tokens or 0) + (prompt_tokens or 0)
+            ) or None
+            assistant.completion_tokens = (
+                (assistant.completion_tokens or 0) + (completion_tokens or 0)
+            ) or None
+            if total_ms is not None:
+                assistant.total_ms = (assistant.total_ms or 0) + total_ms
+            if cost_micros is not None:
+                assistant.cost_usd_micros = (
+                    assistant.cost_usd_micros or 0
+                ) + cost_micros
+            await db.flush()
+            # Active leaf is unchanged (we extended the current reply).
+            conv.active_leaf_message_id = assistant.id
+            conv.updated_at = datetime.now(timezone.utc)
+        else:
+            assistant = Message(
+                conversation_id=conv.id,
+                role="assistant",
+                content=full,
+                # Phase 2.6 — hang the reply off the user turn that prompted
+                # it. On a regenerate this makes the new answer a sibling of
+                # the previous one (both share this parent), enabling the
+                # ‹ 2/3 › version pager.
+                parent_id=triggering_user_msg_id,
+                # DeepSeek thinking-mode chain-of-thought. NULL on every
+                # other provider; replayed back on follow-up turns to
+                # avoid the "reasoning_content must be passed back" 400
+                # the API throws on multi-turn tool-call conversations.
+                reasoning_content=reasoning_full,
+                sources=sources_payload,
+                attachments=assistant_attachment_snaps or None,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                ttft_ms=ttft_ms,
+                total_ms=total_ms,
+                cost_usd_micros=cost_micros,
+            )
+            db.add(assistant)
+            await db.flush()
+            # This reply is now the visible leaf of the active path.
+            conv.active_leaf_message_id = assistant.id
+            conv.updated_at = datetime.now(timezone.utc)
 
         # Fold this turn's tokens into ``usage_daily`` in the *same*
         # transaction as the assistant message — either both land or
@@ -4026,12 +4526,16 @@ async def import_conversations(
         await db.flush()
 
         count = 0
+        prev_msg_id: uuid.UUID | None = None
         for msg in parsed.messages[:_IMPORT_MAX_MESSAGES_PER_CONV]:
             m = Message(
                 conversation_id=conv.id,
                 role=msg.role,
                 content=msg.content,
                 sources=msg.sources,
+                # Phase 2.6 — rebuild a linear lineage on import so the
+                # active-path walk + version metadata stay coherent.
+                parent_id=prev_msg_id,
                 # Attachments carried on the imported rows are
                 # *snapshots* from a different install — the file
                 # ids inside won't resolve to anything in this
@@ -4044,8 +4548,12 @@ async def import_conversations(
             if msg.created_at is not None:
                 m.created_at = msg.created_at
             db.add(m)
+            await db.flush()
+            prev_msg_id = m.id
             count += 1
         total_messages += count
+        # The last imported message is the active leaf.
+        conv.active_leaf_message_id = prev_msg_id
 
         # Tag latest activity so history-grouping sorts correctly.
         if parsed.messages and parsed.messages[-1].created_at:
