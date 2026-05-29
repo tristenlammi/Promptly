@@ -23,6 +23,7 @@ import { filesApi } from "@/api/files";
 import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useComposerStore } from "@/store/composerStore";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
@@ -106,8 +107,19 @@ export function InputBar({
   currentConversationId = null,
   projectId = null,
 }: InputBarProps) {
-  const [value, setValue] = useState("");
-  const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  // Persist the draft (text + attachments) in a module-level store so a
+  // mobile rotation that flips the AppLayout tree (crossing the 768px
+  // breakpoint) and remounts this component doesn't wipe what the user
+  // was composing. Keyed per conversation; "__new__" for unsaved chats.
+  const draftKey = currentConversationId ?? "__new__";
+  // Read once on mount via the lazy initialiser so a remount restores
+  // the persisted draft instead of starting blank.
+  const [value, setValue] = useState(
+    () => useComposerStore.getState().getDraft(draftKey)?.text ?? ""
+  );
+  const [attachments, setAttachments] = useState<AttachedFile[]>(
+    () => useComposerStore.getState().getDraft(draftKey)?.attachments ?? []
+  );
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -127,6 +139,39 @@ export function InputBar({
     },
     []
   );
+
+  // Which conversation the current ``value`` / ``attachments`` belong
+  // to. Tracked in a ref (not just ``draftKey``) because the route can
+  // change the key *in place* — both ``/chat`` and ``/chat/:id`` render
+  // the same ``ChatPage``, so switching conversations may update the
+  // prop without remounting us. Saving under the *loaded* key rather
+  // than the latest ``draftKey`` prevents one chat's draft bleeding
+  // into another during that transition.
+  const loadedDraftKeyRef = useRef(draftKey);
+
+  // Mirror the live draft into the composer store on every change so a
+  // remount (e.g. mobile rotation crossing the AppLayout breakpoint)
+  // can restore it. Empty drafts are cleared rather than stored so we
+  // don't leak blank per-conversation entries.
+  useEffect(() => {
+    const key = loadedDraftKeyRef.current;
+    if (value.trim() === "" && attachments.length === 0) {
+      useComposerStore.getState().clearDraft(key);
+    } else {
+      useComposerStore.getState().saveDraft(key, { text: value, attachments });
+    }
+  }, [value, attachments]);
+
+  // Conversation switched without a remount: the outgoing draft is
+  // already persisted under its old key by the effect above, so just
+  // load the new key's draft (if any) and re-point the tracking ref.
+  useEffect(() => {
+    if (loadedDraftKeyRef.current === draftKey) return;
+    loadedDraftKeyRef.current = draftKey;
+    const draft = useComposerStore.getState().getDraft(draftKey);
+    setValue(draft?.text ?? "");
+    setAttachments(draft?.attachments ?? []);
+  }, [draftKey]);
 
   // Replace the in-progress ``@query`` with a resolved token and
   // advance the caret to sit right after the inserted token. Wrapped
@@ -441,6 +486,10 @@ export function InputBar({
     setValue("");
     setAttachments([]);
     setPending([]);
+    // Clear synchronously too: ``onSend`` may navigate (new chat → its
+    // saved id), unmounting us before the sync effect's cleared write
+    // lands, which would otherwise leave a stale draft behind.
+    useComposerStore.getState().clearDraft(loadedDraftKeyRef.current);
   };
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {

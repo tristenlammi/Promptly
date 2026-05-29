@@ -69,6 +69,21 @@ export function AttachmentPickerModal({
     reset();
   };
 
+  // Camera capture is a one-shot action — there's nothing to multi-select
+  // after snapping a photo, so attach it (alongside anything already
+  // picked) and close immediately instead of making the user hunt for the
+  // "Attach" button. ``onAttach`` closes the picker via its caller.
+  const handleCaptureAttach = (f: FileItem) => {
+    const captured: AttachedFile = {
+      id: f.id,
+      filename: f.filename,
+      mime_type: f.mime_type,
+      size_bytes: f.size_bytes,
+    };
+    onAttach([...Object.values(selected), captured]);
+    reset();
+  };
+
   const onUploaded = (f: FileItem) => {
     setSelected((prev) => ({
       ...prev,
@@ -114,6 +129,7 @@ export function AttachmentPickerModal({
           view={mobileView}
           onViewChange={setMobileView}
           onUploaded={onUploaded}
+          onCaptureAttach={handleCaptureAttach}
           alreadyAttachedIds={alreadyAttachedIds}
           selected={selected}
           setSelected={setSelected}
@@ -190,6 +206,7 @@ function MobileBody({
   view,
   onViewChange,
   onUploaded,
+  onCaptureAttach,
   alreadyAttachedIds,
   selected,
   setSelected,
@@ -197,6 +214,7 @@ function MobileBody({
   view: MobileView;
   onViewChange: (v: MobileView) => void;
   onUploaded: (f: FileItem) => void;
+  onCaptureAttach: (f: FileItem) => void;
   alreadyAttachedIds: Set<string>;
   selected: Record<string, AttachedFile>;
   setSelected: React.Dispatch<React.SetStateAction<Record<string, AttachedFile>>>;
@@ -223,6 +241,7 @@ function MobileBody({
   return (
     <MobileHomeActions
       onUploaded={onUploaded}
+      onCaptureAttach={onCaptureAttach}
       onBrowse={() => onViewChange("browse")}
     />
   );
@@ -481,9 +500,11 @@ function FileTypeIconCompact({ mime }: { mime: string }) {
 // --------------------------------------------------------------------
 function MobileHomeActions({
   onUploaded,
+  onCaptureAttach,
   onBrowse,
 }: {
   onUploaded: (f: FileItem) => void;
+  onCaptureAttach: (f: FileItem) => void;
   onBrowse: () => void;
 }) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
@@ -492,7 +513,13 @@ function MobileHomeActions({
   const upload = useUploadFile();
   const [err, setErr] = useState<string | null>(null);
 
-  const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Shared upload routine; ``onDone`` decides what happens after the
+  // file lands — gallery/file picks add to the multi-select, the camera
+  // capture attaches-and-closes in one shot.
+  const uploadThen = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    onDone: (f: FileItem) => void
+  ) => {
     const file = e.target.files?.[0];
     // Reset so picking the same file twice in a row still fires change.
     e.target.value = "";
@@ -505,11 +532,16 @@ function MobileHomeActions({
         folderId: null,
         route: "chat",
       });
-      onUploaded(result);
+      onDone(result);
     } catch (e) {
       setErr(extractError(e));
     }
   };
+
+  const handlePick = (e: React.ChangeEvent<HTMLInputElement>) =>
+    uploadThen(e, onUploaded);
+  const handleCapture = (e: React.ChangeEvent<HTMLInputElement>) =>
+    uploadThen(e, onCaptureAttach);
 
   const busy = upload.isPending;
 
@@ -555,7 +587,7 @@ function MobileHomeActions({
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={handlePick}
+        onChange={handleCapture}
       />
       {/* Gallery picker — ``accept="image/*"`` without ``capture`` tells
           iOS + Android to open the photo library directly (on Android
