@@ -1,4 +1,4 @@
-import { AlertCircle, ExternalLink, X } from "lucide-react";
+import { AlertCircle, ExternalLink, RotateCw, X } from "lucide-react";
 
 import type { StreamErrorMeta } from "@/store/chatStore";
 import { cn } from "@/utils/cn";
@@ -7,6 +7,9 @@ interface Props {
   error: string;
   meta: StreamErrorMeta | null;
   onDismiss: () => void;
+  /** Re-run the last turn with the same model. Optional: callers that
+   *  don't wire it up simply don't render the "Try again" button. */
+  onRetry?: () => void;
   /** Focuses the model selector (or any equivalent "pick another
    *  model" affordance). The TopNav mounts the actual ``ModelSelector``
    *  so we don't open a picker from the error card directly — instead
@@ -33,28 +36,60 @@ export function StreamErrorCard({
   error,
   meta,
   onDismiss,
+  onRetry,
   onPickAnotherModel,
 }: Props) {
   if (!meta) {
     return (
       <div
         className={cn(
-          "mx-4 my-3 flex items-start gap-2 rounded-card border px-4 py-3 text-sm",
+          "mx-4 my-3 rounded-card border px-4 py-3 text-sm",
           "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
         )}
         role="alert"
       >
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-        <div className="min-w-0 flex-1 break-words">{error}</div>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="shrink-0 rounded p-0.5 opacity-70 hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
-          aria-label="Dismiss error"
-          title="Dismiss"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-start gap-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1 break-words">{error}</div>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="shrink-0 rounded p-0.5 opacity-70 hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+            aria-label="Dismiss error"
+            title="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {(onRetry || onPickAnotherModel) && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-2 pl-6">
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
+                  "bg-red-500/15 text-red-700 hover:bg-red-500/25 dark:text-red-300"
+                )}
+              >
+                <RotateCw className="h-3 w-3" />
+                Try again
+              </button>
+            )}
+            {onPickAnotherModel && (
+              <button
+                type="button"
+                onClick={onPickAnotherModel}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs",
+                  "text-red-700/80 hover:text-red-700 dark:text-red-300/80 dark:hover:text-red-300"
+                )}
+              >
+                Pick another model
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -80,6 +115,19 @@ export function StreamErrorCard({
             {body.explanation}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
+                  "bg-[var(--accent)] text-white hover:opacity-90"
+                )}
+              >
+                <RotateCw className="h-3 w-3" />
+                Try again
+              </button>
+            )}
             {meta.helpUrl && (
               <a
                 href={meta.helpUrl}
@@ -87,7 +135,9 @@ export function StreamErrorCard({
                 rel="noopener noreferrer"
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
-                  "bg-[var(--accent)] text-white hover:opacity-90"
+                  onRetry
+                    ? "border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                    : "bg-[var(--accent)] text-white hover:opacity-90"
                 )}
               >
                 {body.helpLabel}

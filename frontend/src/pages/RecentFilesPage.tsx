@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
 
 import { isDocumentFile, type FileItem } from "@/api/files";
@@ -7,7 +8,7 @@ import { DocumentEditorModal } from "@/components/files/documents/DocumentEditor
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
-import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
+import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { downloadAuthed } from "@/components/files/helpers";
@@ -25,6 +26,7 @@ import {
 const SCOPE = "mine" as const;
 
 export function RecentFilesPage() {
+  const qc = useQueryClient();
   const { data, isLoading } = useRecentFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   // Drive Documents jump straight into the editor on click — every
@@ -116,14 +118,23 @@ export function RecentFilesPage() {
         }}
       />
 
-      <ShareLinkDialog
+      <ShareGrantsModal
         open={!!shareFor}
         resource={
           shareFor
-            ? { kind: "file", id: shareFor.id, name: shareFor.filename }
+            ? {
+                type: "file",
+                id: shareFor.id,
+                name: shareFor.filename,
+                supports_edit: isDocumentFile(shareFor),
+              }
             : null
         }
         onClose={() => setShareFor(null)}
+        onChanged={() => {
+          void qc.invalidateQueries({ queryKey: ["files"] });
+          void qc.invalidateQueries({ queryKey: ["chat-project-files"] });
+        }}
       />
 
       {editingDoc && (

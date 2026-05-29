@@ -58,6 +58,9 @@ export interface UpdateConversationPayload {
   /** Phase P1 — move this chat into / out of a project. Pass a project
    *  id to move; pass ``null`` to detach. Omit to leave unchanged. */
   project_id?: string | null;
+  /** Phase 1 — per-conversation custom instructions. Pass a string to
+   *  set (empty string clears it); omit to leave unchanged. */
+  system_prompt?: string;
 }
 
 export interface SendMessagePayload {
@@ -323,6 +326,33 @@ export const chatApi = {
     const { data } = await apiClient.patch<ChatMessage>(
       `/chat/conversations/${conversationId}/messages/${messageId}`,
       { content }
+    );
+    return data;
+  },
+
+  /** Delete a single message. Owner-only on the backend; deletes
+   *  exactly the targeted row (no cascade to later turns). */
+  async deleteMessage(
+    conversationId: string,
+    messageId: string
+  ): Promise<void> {
+    await apiClient.delete(
+      `/chat/conversations/${conversationId}/messages/${messageId}`
+    );
+  },
+
+  /** Rate an assistant reply thumbs up / down (Phase 2.5). Pass
+   *  ``rating: null`` to clear an existing rating. Returns the updated
+   *  message so the caller can reconcile its store. */
+  async setMessageFeedback(
+    conversationId: string,
+    messageId: string,
+    rating: "up" | "down" | null,
+    reason?: string
+  ): Promise<ChatMessage> {
+    const { data } = await apiClient.put<ChatMessage>(
+      `/chat/conversations/${conversationId}/messages/${messageId}/feedback`,
+      { rating, reason }
     );
     return data;
   },

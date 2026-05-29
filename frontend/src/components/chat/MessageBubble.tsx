@@ -1,8 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
 import {
   AtSign,
   Check,
@@ -19,12 +21,18 @@ import {
   Pencil,
   Puzzle,
   RefreshCw,
+  Square,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
   User as UserIcon,
   Sparkles,
+  Volume2,
 } from "lucide-react";
 
 import { apiClient } from "@/api/client";
 import { filesApi } from "@/api/files";
+import { MermaidDiagram } from "./MermaidDiagram";
 import type {
   ChatMessage,
   MessageAttachmentSnapshot,
@@ -122,6 +130,20 @@ interface MessageBubbleProps {
    *  pick "Try a different model" → <model> from the chevron submenu.
    *  Resolves once the new stream has been kicked off. */
   onRegenerate?: (override: RegenerateOverride | null) => Promise<void> | void;
+  /** Delete-this-message hook. When provided, a "Delete" action shows
+   *  in the row's overflow menu. The parent confirms + removes the
+   *  message; the bubble just invokes the callback. */
+  onDelete?: () => Promise<void> | void;
+  /** Phase 2.5 — current thumbs rating on this assistant reply
+   *  (``null`` when unrated) and its optional reason note. */
+  feedback?: "up" | "down" | null;
+  feedbackReason?: string | null;
+  /** Rate-this-reply hook. When provided (assistant rows), thumbs
+   *  up/down show in the action row. ``rating: null`` clears. */
+  onFeedback?: (
+    rating: "up" | "down" | null,
+    reason?: string
+  ) => Promise<void> | void;
   /** Study module — when this assistant turn produced a whiteboard
    *  exercise, the parent passes a handler that re-opens it in the
    *  right-hand pane. Renders a "Open exercise" action below the reply
@@ -207,17 +229,26 @@ function OpenInPanelButton({
 // renderer below spots that href prefix and swaps in a chip.
 // Same preprocessing is applied to user messages (which render as
 // plain text), using ``renderMentionText`` directly.
-const MENTION_TOKEN_RE = /@\[([^\]\n]+?)\]\(([0-9a-fA-F-]{32,})\)/g;
+// ``@[title](id)`` for chat mentions and ``@[title](file:id)`` for
+// Drive-file mentions (Phase 2.2). The optional ``file:`` prefix group
+// discriminates the two.
+const MENTION_TOKEN_RE =
+  /@\[([^\]\n]+?)\]\((file:)?([0-9a-fA-F-]{32,})\)/g;
 
 function rewriteMentionsForMarkdown(markdown: string): string {
   if (!markdown) return markdown;
-  // Replace ``@[title](id)`` with ``[@title](promptly-mention:id)``.
-  // The zero-width space between ``@`` and title prevents Markdown
-  // parsers from collapsing adjacent tokens into one link.
-  return markdown.replace(MENTION_TOKEN_RE, (_m, title: string, id: string) => {
-    const safe = title.replace(/[\[\]]/g, "");
-    return `[@\u200B${safe}](promptly-mention:${id})`;
-  });
+  // Replace chat mentions with ``[@title](promptly-mention:id)`` and
+  // file mentions with ``[@title](promptly-file:id)``. The zero-width
+  // space between ``@`` and title prevents Markdown parsers from
+  // collapsing adjacent tokens into one link.
+  return markdown.replace(
+    MENTION_TOKEN_RE,
+    (_m, title: string, prefix: string | undefined, id: string) => {
+      const safe = title.replace(/[\[\]]/g, "");
+      const proto = prefix ? "promptly-file" : "promptly-mention";
+      return `[@\u200B${safe}](${proto}:${id})`;
+    }
+  );
 }
 
 /** Render a plain-text string (user messages) replacing any
@@ -235,13 +266,19 @@ function renderMentionText(text: string): ReactNode {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
-    parts.push(
-      <MentionChip
-        key={`mention-${match.index}`}
-        title={match[1]}
-        conversationId={match[2]}
-      />
-    );
+    if (match[2]) {
+      parts.push(
+        <FileMentionChip key={`mention-${match.index}`} title={match[1]} />
+      );
+    } else {
+      parts.push(
+        <MentionChip
+          key={`mention-${match.index}`}
+          title={match[1]}
+          conversationId={match[3]}
+        />
+      );
+    }
     lastIndex = MENTION_TOKEN_RE.lastIndex;
   }
   if (lastIndex < text.length) {
@@ -283,6 +320,25 @@ function MentionChip({
   );
 }
 
+/** Inline chip rendered wherever a ``@[name](file:id)`` token appears
+ *  (Phase 2.2). Non-navigating — it just signals that a Drive file's
+ *  contents were pulled into the turn as context. */
+function FileMentionChip({ title }: { title: string }) {
+  const clean = (title || "").replace(/[\[\]]/g, "").trim() || "File";
+  return (
+    <span
+      className={cn(
+        "mx-[1px] inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 align-baseline text-[12px] font-medium leading-5",
+        "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]"
+      )}
+      title={`Referenced file: ${clean}`}
+    >
+      <FileText className="h-3 w-3" />
+      <span className="max-w-[14rem] truncate">{clean}</span>
+    </span>
+  );
+}
+
 /** Recursively reduce a ReactNode subtree to its plain text content.
  *
  *  We need this because once ``rehype-highlight`` runs over a fenced
@@ -314,9 +370,22 @@ function extractTextFromNode(node: unknown): string {
 // it re-runs on every streamed token of a long code-heavy reply. We
 // therefore skip it entirely while ``streaming`` and only highlight the
 // final, persisted bubble.
-const REMARK_PLUGINS = [remarkGfm];
-const REHYPE_PLUGINS_WITH_HIGHLIGHT = [rehypeHighlight];
-const REHYPE_PLUGINS_NONE: [] = [];
+// ``remark-math`` parses ``$…$`` / ``$$…$$`` into math nodes and
+// ``rehype-katex`` renders them. ``throwOnError: false`` keeps a
+// half-typed equation mid-stream (e.g. an unmatched ``$``) from
+// blowing up the whole bubble — KaTeX just renders the raw source in
+// the error colour until the closing delimiter arrives.
+const REMARK_PLUGINS: Options["remarkPlugins"] = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS_WITH_HIGHLIGHT: Options["rehypePlugins"] = [
+  [rehypeKatex, { throwOnError: false }],
+  rehypeHighlight,
+];
+// While streaming we skip the expensive ``rehype-highlight`` AST walk
+// but still render math so equations don't flash in as raw text at the
+// end of the turn.
+const REHYPE_PLUGINS_NONE: Options["rehypePlugins"] = [
+  [rehypeKatex, { throwOnError: false }],
+];
 
 const markdownComponents: Components = {
   pre({ children, ...props }) {
@@ -329,6 +398,12 @@ const markdownComponents: Components = {
     const className: string = codeChild?.props?.className ?? "";
     const match = /language-(\S+)/.exec(className);
     const rawLang = match?.[1] ?? "";
+    // Phase 2.3 — render ` ```mermaid ` fences as diagrams instead of
+    // a raw code block. The component falls back to source while the
+    // reply is still streaming (incomplete / unparseable).
+    if (rawLang === "mermaid") {
+      return <MermaidDiagram code={text} />;
+    }
     return (
       <div className="group relative">
         <pre {...props}>{children}</pre>
@@ -355,6 +430,14 @@ const markdownComponents: Components = {
       const title = raw.replace(/^@\u200B?/, "");
       return <MentionChip title={title} conversationId={convId} />;
     }
+    if (typeof href === "string" && href.startsWith("promptly-file:")) {
+      const raw = String(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (children as any)?.[0] ?? children ?? ""
+      );
+      const title = raw.replace(/^@\u200B?/, "");
+      return <FileMentionChip title={title} />;
+    }
     return (
       <a {...props} href={href} target="_blank" rel="noopener noreferrer">
         {children}
@@ -378,6 +461,24 @@ function stripInlineCitations(markdown: string): string {
   return markdown
     .replace(/(?:\s*\[\d{1,2}\])+/g, "")
     .replace(/\s+([.,;:!?])/g, "$1");
+}
+
+/** Flatten Markdown into something pleasant for ``speechSynthesis`` to
+ *  read aloud (Phase 2.4). Drops code blocks, link/image syntax,
+ *  heading/emphasis markers and table pipes so the narration doesn't
+ *  spell out backticks, asterisks and URLs. */
+function markdownToSpeech(markdown: string): string {
+  if (!markdown) return "";
+  return markdown
+    .replace(/```[\s\S]*?```/g, " (code block) ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_~>#]/g, "")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function Avatar({ role }: { role: ChatMessage["role"] }) {
@@ -495,6 +596,10 @@ function MessageBubbleImpl({
   editedAt,
   onBranch,
   onRegenerate,
+  onDelete,
+  feedback,
+  feedbackReason,
+  onFeedback,
   onOpenExercise,
   exerciseReviewed,
 }: MessageBubbleProps) {
@@ -557,10 +662,10 @@ function MessageBubbleImpl({
   // we never gate on role here. Streaming rows are still excluded
   // because mutating an in-flight reply would race the SSE pipeline.
   const canEdit = !!onEdit && !streaming;
-  // Copy action shows on every persisted assistant reply with text.
-  // Skipped while streaming (content keeps changing) and on user
-  // turns (they already have the source via the Edit affordance).
-  const canCopy = !isUser && !streaming && !!content && content.trim().length > 0;
+  // Copy action shows on every persisted message with text (both
+  // roles). Skipped only while streaming, since the content is still
+  // changing.
+  const canCopy = !streaming && !!content && content.trim().length > 0;
 
   const [editing, setEditing] = useState(false);
   const [copiedFlash, setCopiedFlash] = useState(false);
@@ -569,9 +674,12 @@ function MessageBubbleImpl({
   const handleCopyMessage = async () => {
     if (!content) return;
     try {
-      // Copy what the user actually sees — stripped of the bracketed
-      // [1]/[2] inline citation markers we hide from the rendered prose.
-      await navigator.clipboard.writeText(stripInlineCitations(content));
+      // Copy what the user actually sees. Assistant replies get the
+      // bracketed [1]/[2] inline citation markers stripped (we hide
+      // them from the rendered prose); user messages copy verbatim.
+      await navigator.clipboard.writeText(
+        isUser ? content : stripInlineCitations(content),
+      );
       setCopyClicked(true);
       setCopiedFlash(true);
       window.setTimeout(() => setCopyClicked(false), 1500);
@@ -581,6 +689,82 @@ function MessageBubbleImpl({
       // browsers. Fail quietly — the long-press fallback (mobile) and
       // text-selection (desktop) still work.
     }
+  };
+
+  // Phase 2.4 — read-aloud (TTS). Assistant replies only; hidden when
+  // the browser has no SpeechSynthesis. Toggles play/stop.
+  const canReadAloud =
+    !isUser &&
+    !streaming &&
+    !!content &&
+    content.trim().length > 0 &&
+    typeof window !== "undefined" &&
+    "speechSynthesis" in window;
+  const [speaking, setSpeaking] = useState(false);
+  const speakingRef = useRef(false);
+  useEffect(() => {
+    speakingRef.current = speaking;
+  }, [speaking]);
+  // Stop narration if this bubble unmounts mid-utterance.
+  useEffect(
+    () => () => {
+      if (
+        speakingRef.current &&
+        typeof window !== "undefined" &&
+        "speechSynthesis" in window
+      ) {
+        window.speechSynthesis.cancel();
+      }
+    },
+    [],
+  );
+  const handleReadAloud = () => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    if (speakingRef.current) {
+      synth.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const plain = markdownToSpeech(stripInlineCitations(content || ""));
+    if (!plain) return;
+    // Cancel anything another bubble might be reading so only one
+    // narration plays at a time.
+    synth.cancel();
+    const utterance = new SpeechSynthesisUtterance(plain);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    setSpeaking(true);
+    synth.speak(utterance);
+  };
+
+  // Phase 2.5 — thumbs feedback. Assistant replies only.
+  const canFeedback = !isUser && !streaming && !!onFeedback;
+  const [reasonOpen, setReasonOpen] = useState(false);
+  const [reasonDraft, setReasonDraft] = useState("");
+  const handleThumb = (rating: "up" | "down") => {
+    if (!onFeedback) return;
+    if (feedback === rating) {
+      // Clicking the active thumb again clears the rating.
+      setReasonOpen(false);
+      void onFeedback(null);
+      return;
+    }
+    if (rating === "up") {
+      setReasonOpen(false);
+      void onFeedback("up");
+      return;
+    }
+    // Thumbs-down: persist the rating immediately, then offer an
+    // optional reason note via a small popover.
+    void onFeedback("down");
+    setReasonDraft(feedbackReason ?? "");
+    setReasonOpen(true);
+  };
+  const submitReason = () => {
+    if (!onFeedback) return;
+    void onFeedback("down", reasonDraft.trim() || undefined);
+    setReasonOpen(false);
   };
 
   // Phase 5 — long-press to copy on touch devices. ~500ms hold copies
@@ -761,7 +945,10 @@ function MessageBubbleImpl({
         {((canEdit && !editing) ||
           (onBranch && !streaming) ||
           (onRegenerate && !streaming) ||
+          (onDelete && !streaming) ||
           canCopy ||
+          canReadAloud ||
+          canFeedback ||
           (onOpenExercise && !streaming)) && (
           <div className="mt-1.5 flex items-center gap-1">
             {onOpenExercise && !streaming && (
@@ -799,8 +986,20 @@ function MessageBubbleImpl({
                   "dark:hover:bg-white/[0.06]",
                   copyClicked && "text-emerald-600 dark:text-emerald-400"
                 )}
-                title={copyClicked ? "Copied" : "Copy reply to clipboard"}
-                aria-label={copyClicked ? "Copied" : "Copy reply"}
+                title={
+                  copyClicked
+                    ? "Copied"
+                    : isUser
+                      ? "Copy message to clipboard"
+                      : "Copy reply to clipboard"
+                }
+                aria-label={
+                  copyClicked
+                    ? "Copied"
+                    : isUser
+                      ? "Copy message"
+                      : "Copy reply"
+                }
               >
                 {copyClicked ? (
                   <Check className="h-3 w-3" />
@@ -808,6 +1007,29 @@ function MessageBubbleImpl({
                   <Copy className="h-3 w-3" />
                 )}
                 <span>{copyClicked ? "Copied" : "Copy"}</span>
+              </button>
+            )}
+            {canReadAloud && (
+              <button
+                type="button"
+                onClick={handleReadAloud}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+                  "text-[var(--text-muted)] transition",
+                  "hover:bg-black/[0.04] hover:text-[var(--text)]",
+                  "dark:hover:bg-white/[0.06]",
+                  speaking && "text-[var(--accent)]"
+                )}
+                title={speaking ? "Stop reading" : "Read this reply aloud"}
+                aria-label={speaking ? "Stop reading" : "Read aloud"}
+                aria-pressed={speaking}
+              >
+                {speaking ? (
+                  <Square className="h-3 w-3 fill-current" />
+                ) : (
+                  <Volume2 className="h-3 w-3" />
+                )}
+                <span>{speaking ? "Stop" : "Listen"}</span>
               </button>
             )}
             {canEdit && !editing && (
@@ -852,6 +1074,108 @@ function MessageBubbleImpl({
                 <GitBranch className="h-3 w-3" />
                 <span>Branch</span>
               </button>
+            )}
+            {onDelete && !streaming && (
+              <button
+                type="button"
+                onClick={() => void onDelete()}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+                  "text-[var(--text-muted)] transition",
+                  "hover:bg-rose-500/10 hover:text-rose-500"
+                )}
+                title="Delete this message"
+                aria-label="Delete message"
+              >
+                <Trash2 className="h-3 w-3" />
+                <span>Delete</span>
+              </button>
+            )}
+            {canFeedback && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleThumb("up")}
+                  className={cn(
+                    "inline-flex items-center rounded-md px-1.5 py-1 text-xs transition",
+                    feedback === "up"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+                  )}
+                  title="Good response"
+                  aria-label="Good response"
+                  aria-pressed={feedback === "up"}
+                >
+                  <ThumbsUp
+                    className={cn(
+                      "h-3 w-3",
+                      feedback === "up" && "fill-current"
+                    )}
+                  />
+                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => handleThumb("down")}
+                    className={cn(
+                      "inline-flex items-center rounded-md px-1.5 py-1 text-xs transition",
+                      feedback === "down"
+                        ? "text-rose-500"
+                        : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+                    )}
+                    title="Bad response"
+                    aria-label="Bad response"
+                    aria-pressed={feedback === "down"}
+                  >
+                    <ThumbsDown
+                      className={cn(
+                        "h-3 w-3",
+                        feedback === "down" && "fill-current"
+                      )}
+                    />
+                  </button>
+                  {reasonOpen && (
+                    <div
+                      className={cn(
+                        "absolute left-0 top-full z-20 mt-1 w-64 rounded-card border p-2 shadow-lg",
+                        "border-[var(--border)] bg-[var(--surface)]"
+                      )}
+                    >
+                      <label className="mb-1 block text-[11px] font-medium text-[var(--text-muted)]">
+                        What went wrong? (optional)
+                      </label>
+                      <textarea
+                        value={reasonDraft}
+                        onChange={(e) => setReasonDraft(e.target.value)}
+                        rows={3}
+                        autoFocus
+                        placeholder="e.g. inaccurate, ignored my question…"
+                        className={cn(
+                          "w-full resize-none rounded-md border bg-[var(--bg)] px-2 py-1 text-xs",
+                          "border-[var(--border)] text-[var(--text)]",
+                          "outline-none focus:border-[var(--accent)]"
+                        )}
+                      />
+                      <div className="mt-1.5 flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setReasonOpen(false)}
+                          className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text)]"
+                        >
+                          Skip
+                        </button>
+                        <button
+                          type="button"
+                          onClick={submitReason}
+                          className="rounded-md bg-[var(--accent)] px-2 py-1 text-[11px] font-medium text-white hover:opacity-90"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}

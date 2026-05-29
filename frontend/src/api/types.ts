@@ -520,6 +520,11 @@ export interface ChatMessage {
    *  / system rows. The UI looks this up against the conversation's
    *  participants to render "from Jane" chips on shared chats. */
   author_user_id?: string | null;
+  /** Phase 2.5 — per-response quality signal on assistant replies.
+   *  ``null`` when unrated. ``feedback_reason`` is the optional short
+   *  note left on a thumbs-down. */
+  feedback?: "up" | "down" | null;
+  feedback_reason?: string | null;
 }
 
 export interface ConversationSummary {
@@ -559,6 +564,10 @@ export interface ConversationSummary {
   /** Phase P1 — Chat Projects. Non-null when this chat lives inside a
    *  :class:`ChatProject`. Drives the sidebar grouping + breadcrumb. */
   project_id?: string | null;
+  /** Phase 1 — per-conversation custom instructions / system prompt.
+   *  Free-text steer set from the chat header's "Instructions" editor.
+   *  Null / empty when unset. */
+  system_prompt?: string | null;
 }
 
 /** Phase Z1 — short-lived conversation modes. See ConversationSummary

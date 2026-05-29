@@ -1,10 +1,20 @@
 /* Code-block syntax highlighting theme for react-markdown + rehype-highlight.
    @import must precede all other statements per CSS spec. */
 @import "highlight.js/styles/github-dark.css";
+/* KaTeX styles for LaTeX/math rendering (remark-math + rehype-katex). */
+@import "katex/dist/katex.min.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Let wide display equations scroll horizontally instead of
+   overflowing the message bubble (especially on mobile). */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
 
 /* --------------------------------------------------------------
    Design tokens — Claude-inspired.

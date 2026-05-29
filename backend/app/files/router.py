@@ -1197,7 +1197,7 @@ async def upload_file(
     return _file_to_response(row, caller=user)
 
 
-@router.get("/{file_id}", response_model=FileResponse)
+@router.get("/{file_id:uuid}", response_model=FileResponse)
 async def get_file(
     file_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -1546,7 +1546,7 @@ async def update_file_source(
     )
 
 
-@router.patch("/{file_id}", response_model=FileResponse)
+@router.patch("/{file_id:uuid}", response_model=FileResponse)
 async def update_file(
     file_id: uuid.UUID,
     payload: FileUpdateRequest,
@@ -1573,7 +1573,7 @@ async def update_file(
     return _file_to_response(row, caller=user)
 
 
-@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{file_id:uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_file(
     file_id: uuid.UUID,
     purge: bool = Query(
@@ -2058,37 +2058,38 @@ async def search_files(
     Trashed rows are excluded so the search feels like "find a live
     file" instead of "find anything ever".
     """
-    from sqlalchemy import literal, text as sql_text
+    from sqlalchemy import desc, func, literal_column
 
-    tsquery = sql_text("websearch_to_tsquery('english', :q)").bindparams(q=q)
-    rank_expr = sql_text(
-        "ts_rank(content_tsv, websearch_to_tsquery('english', :q))"
-    ).bindparams(q=q)
-    headline_expr = sql_text(
-        "ts_headline('english', coalesce(content_text, filename), "
-        "websearch_to_tsquery('english', :q), "
-        "'StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8, "
-        "MaxFragments=1')"
-    ).bindparams(q=q)
-
-    tsv_match = sql_text("content_tsv @@ websearch_to_tsquery('english', :q)").bindparams(q=q)
+    # ``content_tsv`` is a generated tsvector column (migration 0036) that
+    # isn't mapped on the ORM model, so reference it via ``literal_column``.
+    # Building the rank / headline / match expressions with ``func`` (rather
+    # than raw ``text()``) keeps them composable — crucially they support
+    # ``.label()`` and ``order_by``, which a bare ``text()`` clause does not.
+    content_tsv = literal_column("content_tsv")
+    tsquery = func.websearch_to_tsquery("english", q)
+    rank_expr = func.ts_rank(content_tsv, tsquery)
+    headline_expr = func.ts_headline(
+        "english",
+        func.coalesce(UserFile.content_text, UserFile.filename),
+        tsquery,
+        "StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8, "
+        "MaxFragments=1",
+    )
 
     stmt = (
-        select(UserFile, rank_expr.label("rank"), headline_expr.label("snippet"))
+        select(
+            UserFile,
+            rank_expr.label("rank"),
+            headline_expr.label("snippet"),
+        )
         .where(
             _file_owner_filter(user),
             UserFile.trashed_at.is_(None),
             _drive_listing_filter(),
-            tsv_match,
+            content_tsv.op("@@")(tsquery),
         )
-        .order_by(literal(None))  # placeholder, replaced below
+        .order_by(desc(rank_expr))
         .limit(limit)
-    )
-    # Replace the placeholder order_by with our raw rank expression.
-    stmt = stmt.order_by(None).order_by(
-        sql_text(
-            "ts_rank(content_tsv, websearch_to_tsquery('english', :q)) DESC"
-        ).bindparams(q=q)
     )
 
     rows = (await db.execute(stmt)).all()
@@ -2245,20 +2246,24 @@ async def _assert_can_edit_allowed(
 
 @router.get("/users/search", response_model=UserSearchResponse)
 async def search_users_for_share(
-    q: str = Query(min_length=1, max_length=80),
+    q: str = Query(default="", max_length=80),
+    limit: int = Query(default=20, ge=1, le=50),
     resource_type: str | None = Query(default=None),
     resource_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> UserSearchResponse:
-    """Type-ahead user picker for the share modal.
+    """User picker / directory for the share modal.
 
     Matches by ``username`` or ``email`` (case-insensitive prefix).
+    When ``q`` is blank the endpoint acts as a *browse* directory and
+    returns the first ``limit`` users alphabetically so the share UI
+    can show who's on the app without forcing the user to type.
     Excludes the caller themselves. When ``resource_type`` and
     ``resource_id`` are passed, marks rows that already have a
     grant on that resource so the picker can disable them.
     """
-    needle = f"{q.lower()}%"
+    needle = f"{q.lower().strip()}%"
     rows = (
         await db.execute(
             select(User)
@@ -2270,7 +2275,7 @@ async def search_users_for_share(
                 ),
             )
             .order_by(User.username.asc())
-            .limit(10)
+            .limit(limit)
         )
     ).scalars().all()
     granted_ids: set[uuid.UUID] = set()

@@ -259,6 +259,7 @@ from app.local_models.router import router as local_models_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
 from app.notifications.router import router as notifications_router  # noqa: E402
+from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
 
@@ -278,6 +279,9 @@ app.include_router(
     tags=["workspace-defaults"],
 )
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(
+    saved_prompts_router, prefix="/api/saved-prompts", tags=["saved-prompts"]
+)
 app.include_router(
     chat_projects_router, prefix="/api/chat/projects", tags=["chat-projects"]
 )

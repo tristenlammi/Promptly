@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 
 import { isDocumentFile, type FileItem } from "@/api/files";
@@ -8,7 +9,7 @@ import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
-import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
+import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
   useSearchFiles,
@@ -25,6 +26,7 @@ import { downloadAuthed } from "@/components/files/helpers";
 const SCOPE = "mine" as const;
 
 export function SearchResultsPage() {
+  const qc = useQueryClient();
   const [params] = useSearchParams();
   const q = (params.get("q") ?? "").trim();
   const { data, isLoading, isFetching } = useSearchFiles(q, SCOPE);
@@ -123,14 +125,23 @@ export function SearchResultsPage() {
         }}
       />
 
-      <ShareLinkDialog
+      <ShareGrantsModal
         open={!!shareFor}
         resource={
           shareFor
-            ? { kind: "file", id: shareFor.id, name: shareFor.filename }
+            ? {
+                type: "file",
+                id: shareFor.id,
+                name: shareFor.filename,
+                supports_edit: isDocumentFile(shareFor),
+              }
             : null
         }
         onClose={() => setShareFor(null)}
+        onChanged={() => {
+          void qc.invalidateQueries({ queryKey: ["files"] });
+          void qc.invalidateQueries({ queryKey: ["chat-project-files"] });
+        }}
       />
 
       {editingDoc && (

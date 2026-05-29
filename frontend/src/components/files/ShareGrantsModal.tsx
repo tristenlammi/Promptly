@@ -95,7 +95,6 @@ export function ShareGrantsModal({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<UserSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
   /** The role applied to the *next* user added from the picker.
    *  Per-grantee changes happen on the row itself further down. */
   const [defaultRole, setDefaultRole] = useState<Role>("viewer");
@@ -142,20 +141,17 @@ export function ShareGrantsModal({
     };
   }, [open, resource]);
 
-  // Debounced user search. The picker only fires after 200ms of
-  // inactivity and at least 1 character — keeps the autocomplete
-  // feel snappy without flooding the backend on every keystroke.
+  // Debounced user directory. Unlike a pure type-ahead, this always
+  // fetches once the modal is open — a blank query browses the first
+  // page of users so people can simply *see* who's on the app and
+  // pick them, while typing narrows the same list. Debounced 200ms so
+  // keystrokes don't flood the backend.
   const searchTimer = useRef<number | null>(null);
   useEffect(() => {
     if (!open || !resource) return;
     if (searchTimer.current) {
       window.clearTimeout(searchTimer.current);
       searchTimer.current = null;
-    }
-    if (!query.trim()) {
-      setResults([]);
-      setSearching(false);
-      return;
     }
     setSearching(true);
     searchTimer.current = window.setTimeout(async () => {
@@ -170,7 +166,7 @@ export function ShareGrantsModal({
       } finally {
         setSearching(false);
       }
-    }, 200);
+    }, query.trim() ? 200 : 0);
     return () => {
       if (searchTimer.current) {
         window.clearTimeout(searchTimer.current);
@@ -205,8 +201,6 @@ export function ShareGrantsModal({
       });
       setGrants(res.grants);
       setQuery("");
-      setResults([]);
-      setPickerOpen(false);
       onChanged?.();
     } catch (e) {
       setError(extractError(e));
@@ -306,8 +300,7 @@ export function ShareGrantsModal({
               original stays a live shared doc)
             </>
           ) : null}
-          . Your original is never overwritten by a copy. Need a public URL
-          instead? Use the link-share button.
+          . Your original is never overwritten by a copy.
         </p>
 
         {error && (
@@ -321,22 +314,18 @@ export function ShareGrantsModal({
         <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-3">
           <label className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--text-muted)]">
             <Search className="h-3.5 w-3.5" />
-            <span>Add by username or email</span>
+            <span>Add people on Promptly</span>
           </label>
           <input
             type="text"
             autoComplete="off"
             spellCheck={false}
             placeholder={
-              atCap ? "Cap reached — revoke before adding" : "alice or alice@…"
+              atCap ? "Cap reached — revoke before adding" : "Search by name or email…"
             }
             disabled={atCap || adding}
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPickerOpen(true);
-            }}
-            onFocus={() => setPickerOpen(true)}
+            onChange={(e) => setQuery(e.target.value)}
             className={cn(
               "w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm",
               "outline-none focus:border-[var(--accent)]",
@@ -355,21 +344,20 @@ export function ShareGrantsModal({
               size="sm"
             />
           </div>
-          {pickerOpen && query.trim().length > 0 && (
+          {!atCap && (
             <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)]">
-              {searching && (
+              {searching && results.length === 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-muted)]">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Searching…</span>
+                  <span>Loading people…</span>
                 </div>
               )}
               {!searching && results.length === 0 && (
                 <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
-                  No matches.
+                  {query.trim() ? "No matches." : "No other users yet."}
                 </div>
               )}
-              {!searching &&
-                results.map((u) => {
+              {results.map((u) => {
                   const already =
                     u.already_granted || grantedIds.has(u.id);
                   return (

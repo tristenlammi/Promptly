@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 
 import { isDocumentFile, type FileItem } from "@/api/files";
@@ -12,7 +13,7 @@ import {
 } from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
-import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
+import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
   useStarredFiles,
@@ -31,13 +32,19 @@ const SCOPE = "mine" as const;
 
 export function StarredFilesPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data, isLoading } = useStarredFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
   // Drive Documents jump straight into the editor on click — every
   // other file type still falls back to the generic preview modal.
   const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<
-    { kind: "file" | "folder"; id: string; name: string } | null
+    {
+      kind: "file" | "folder";
+      id: string;
+      name: string;
+      supportsEdit?: boolean;
+    } | null
   >(null);
 
   const openFile = (f: FileItem) => {
@@ -113,6 +120,7 @@ export function StarredFilesPage() {
                           kind: "file",
                           id: f.id,
                           name: f.filename,
+                          supportsEdit: isDocumentFile(f),
                         }),
                       onTrash: () =>
                         trashFile.mutate({ id: f.id, scope: SCOPE }),
@@ -132,17 +140,35 @@ export function StarredFilesPage() {
         onSelect={setPreview}
         onClose={() => setPreview(null)}
         onShare={(f) =>
-          setShareFor({ kind: "file", id: f.id, name: f.filename })
+          setShareFor({
+            kind: "file",
+            id: f.id,
+            name: f.filename,
+            supportsEdit: isDocumentFile(f),
+          })
         }
         onToggleStar={(f) => {
           unstarFile.mutate({ id: f.id, scope: SCOPE });
         }}
       />
 
-      <ShareLinkDialog
+      <ShareGrantsModal
         open={!!shareFor}
-        resource={shareFor}
+        resource={
+          shareFor
+            ? {
+                type: shareFor.kind,
+                id: shareFor.id,
+                name: shareFor.name,
+                supports_edit: shareFor.supportsEdit ?? false,
+              }
+            : null
+        }
         onClose={() => setShareFor(null)}
+        onChanged={() => {
+          void qc.invalidateQueries({ queryKey: ["files"] });
+          void qc.invalidateQueries({ queryKey: ["chat-project-files"] });
+        }}
       />
 
       {editingDoc && (

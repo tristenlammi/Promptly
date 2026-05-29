@@ -51,6 +51,13 @@ _MENTION_RE: Final[re.Pattern[str]] = re.compile(
     r"@\[([^\]\n]+?)\]\(([0-9a-fA-F-]{32,})\)"
 )
 
+# File mentions carry a ``file:`` prefix on the id so they don't
+# collide with the chat-mention pattern above (whose id group is pure
+# hex and therefore can't match ``file:…``). Phase 2.2.
+_FILE_MENTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"@\[([^\]\n]+?)\]\(file:([0-9a-fA-F-]{32,})\)"
+)
+
 # Soft ceiling on references per turn. Each one costs a DB lookup
 # plus potentially a summary-generation LLM call; letting the user
 # fan out to 20 chats in a single turn is mostly a foot-gun. If
@@ -193,6 +200,65 @@ async def resolve_mentions(
     return out
 
 
+@dataclass(frozen=True)
+class FileMentionToken:
+    """One parsed ``@[name](file:id)`` occurrence (Phase 2.2)."""
+
+    title: str
+    file_id: uuid.UUID
+    raw: str
+
+
+def extract_file_mentions(text: str | None) -> list[FileMentionToken]:
+    """Return the deduplicated Drive-file mentions found in ``text``.
+
+    Same dedupe / cap / graceful-skip policy as :func:`extract_mentions`,
+    but for ``@[name](file:id)`` tokens. Order of first appearance is
+    preserved.
+    """
+    if not text:
+        return []
+    seen: set[uuid.UUID] = set()
+    out: list[FileMentionToken] = []
+    for m in _FILE_MENTION_RE.finditer(text):
+        title = m.group(1).strip()
+        try:
+            file_id = uuid.UUID(m.group(2))
+        except (ValueError, TypeError):
+            continue
+        if file_id in seen:
+            continue
+        seen.add(file_id)
+        out.append(
+            FileMentionToken(title=title, file_id=file_id, raw=m.group(0))
+        )
+        if len(out) >= _MAX_MENTIONS_PER_TURN:
+            break
+    return out
+
+
+def build_file_mention_block(files: list) -> str | None:
+    """Render referenced Drive files into a system-prompt block.
+
+    Reuses :func:`app.files.prompt.build_attachment_preamble` so text /
+    PDF extraction (and the per-type fallbacks) stay in one place. The
+    import is local to avoid a module-import cycle with the files
+    package. Returns ``None`` when there's nothing to inject.
+    """
+    if not files:
+        return None
+    from app.files.prompt import build_attachment_preamble
+
+    body = build_attachment_preamble(files, vision_handles_images=False)
+    if not body.strip():
+        return None
+    return (
+        "The user referenced the following Drive file(s) in this "
+        "message via `@[name](file:id)` tokens. Use their contents as "
+        "background context for the user's request.\n\n" + body
+    )
+
+
 def build_reference_system_block(
     references: list[ResolvedReference],
 ) -> str | None:
@@ -226,9 +292,12 @@ def build_reference_system_block(
 
 
 __all__ = [
+    "FileMentionToken",
     "MentionToken",
     "ResolvedReference",
+    "build_file_mention_block",
     "build_reference_system_block",
+    "extract_file_mentions",
     "extract_mentions",
     "resolve_mentions",
 ]

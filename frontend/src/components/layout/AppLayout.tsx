@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { SearchPalette } from "@/components/chat/SearchPalette";
 import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
 import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useComposerStore } from "@/store/composerStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
@@ -17,6 +18,7 @@ export function AppLayout() {
   // stays exactly as it was before the mobile work.
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   const mobileNavOpen = useUIStore((s) => s.mobileNavOpen);
   const closeMobileNav = useUIStore((s) => s.closeMobileNav);
@@ -36,17 +38,54 @@ export function AppLayout() {
   // palette the same way it does in ChatGPT / Linear, and we verify
   // the key + modifier in one place rather than per-component.
   useEffect(() => {
+    const isEditableTarget = (el: EventTarget | null): boolean => {
+      const node = el as HTMLElement | null;
+      if (!node) return false;
+      const tag = node.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        node.isContentEditable
+      );
+    };
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      const mod = e.ctrlKey || e.metaKey;
+      // Ctrl/Cmd+K — global search palette (works even while typing).
+      if (mod && !e.shiftKey && !e.altKey) {
         if (e.key === "k" || e.key === "K") {
           e.preventDefault();
           openSearchPalette();
+          return;
         }
+      }
+      // Ctrl/Cmd+Shift+O — start a new chat (mirrors ChatGPT).
+      if (mod && e.shiftKey && !e.altKey && (e.key === "o" || e.key === "O")) {
+        e.preventDefault();
+        navigate("/chat");
+        // Focus the composer right after the new-chat route mounts.
+        window.setTimeout(
+          () => useComposerStore.getState().requestComposerFocus(),
+          0
+        );
+        return;
+      }
+      // "/" — jump focus to the composer (unless already typing in a
+      // field). preventDefault so the slash itself isn't inserted; the
+      // user can then type their message or a "/" slash command.
+      if (
+        !mod &&
+        !e.altKey &&
+        e.key === "/" &&
+        !isEditableTarget(e.target)
+      ) {
+        e.preventDefault();
+        useComposerStore.getState().requestComposerFocus();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [openSearchPalette]);
+  }, [openSearchPalette, navigate]);
 
   // Desktop path is byte-identical to the pre-mobile layout: static
   // sidebar with its own collapse toggle, sitting next to the outlet.

@@ -45,6 +45,22 @@ interface ChatWindowProps {
     messageId: string,
     override: RegenerateOverride | null
   ) => Promise<void> | void;
+  /** Re-run the last turn after a stream error (same model). Surfaced
+   *  as the "Try again" button on the error card. */
+  onRetry?: () => void;
+  /** Open the model picker after a stream error ("Pick another model"). */
+  onPickAnotherModel?: () => void;
+  /** Delete a single message. When provided, every persisted message
+   *  gets a "Delete" affordance. Omitted on chats the caller can't
+   *  mutate. */
+  onDelete?: (messageId: string) => Promise<void> | void;
+  /** Phase 2.5 — rate an assistant reply thumbs up/down. When provided,
+   *  persisted assistant rows get the thumbs affordance. */
+  onFeedback?: (
+    messageId: string,
+    rating: "up" | "down" | null,
+    reason?: string
+  ) => Promise<void> | void;
 }
 
 export function ChatWindow({
@@ -53,6 +69,10 @@ export function ChatWindow({
   participants,
   onBranchFrom,
   onRegenerate,
+  onRetry,
+  onPickAnotherModel,
+  onDelete,
+  onFeedback,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
   const activeId = useChatStore((s) => s.activeId);
@@ -279,6 +299,20 @@ export function ChatWindow({
                   ? (override) => onRegenerate(m.id, override)
                   : undefined
               }
+              onDelete={
+                onDelete && !m.id.startsWith("optimistic-")
+                  ? () => onDelete(m.id)
+                  : undefined
+              }
+              feedback={m.feedback}
+              feedbackReason={m.feedback_reason}
+              onFeedback={
+                onFeedback &&
+                m.role === "assistant" &&
+                !m.id.startsWith("optimistic-")
+                  ? (rating, reason) => onFeedback(m.id, rating, reason)
+                  : undefined
+              }
             />
           );
         })}
@@ -304,6 +338,8 @@ export function ChatWindow({
             error={streamError}
             meta={streamErrorMeta}
             onDismiss={() => setStreamError(null, null)}
+            onRetry={onRetry}
+            onPickAnotherModel={onPickAnotherModel}
           />
         )}
 

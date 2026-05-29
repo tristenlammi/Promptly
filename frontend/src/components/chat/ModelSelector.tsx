@@ -20,9 +20,21 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
   const available = useModelStore((s) => s.available);
   const selected = useSelectedModel();
   const setSelection = useModelStore((s) => s.setSelection);
+  const pickerOpenNonce = useModelStore((s) => s.pickerOpenNonce);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
+
+  // Open on demand when another surface requests it (e.g. the
+  // "Pick another model" action on a stream-error card). Skips the
+  // initial mount value so we don't pop open on first render.
+  const lastNonceRef = useRef(pickerOpenNonce);
+  useEffect(() => {
+    if (pickerOpenNonce === lastNonceRef.current) return;
+    lastNonceRef.current = pickerOpenNonce;
+    setOpen(true);
+    ref.current?.scrollIntoView({ block: "nearest" });
+  }, [pickerOpenNonce]);
 
   useEffect(() => {
     if (!open) return;

@@ -56,6 +56,7 @@ from app.chat.schemas import (
     MentionCandidate,
     MentionCandidatesResponse,
     MessageResponse,
+    MessageFeedbackRequest,
     PatchAssistantMessageRequest,
     RegenerateMessageRequest,
     SendMessageRequest,
@@ -64,7 +65,9 @@ from app.chat.schemas import (
 )
 from app.chat.compaction import CompactionError, compact_conversation
 from app.chat.mentions import (
+    build_file_mention_block,
     build_reference_system_block,
+    extract_file_mentions,
     extract_mentions,
     resolve_mentions,
 )
@@ -608,6 +611,13 @@ async def update_conversation(
         conv.model_id = payload.model_id
     if payload.provider_id is not None:
         conv.provider_id = payload.provider_id
+    # Phase 1 — per-conversation instructions. Honour only when the
+    # client explicitly sent the field; an empty / whitespace string
+    # clears the steer (stored as NULL), any other value is trimmed
+    # and saved.
+    if "system_prompt" in payload.model_fields_set:
+        cleaned = (payload.system_prompt or "").strip()
+        conv.system_prompt = cleaned or None
     # Phase P1 — project reassignment. Only honour the field when the
     # client explicitly sent it (``model_fields_set`` check) so this
     # PATCH stays idempotent for the common "just toggle pinned"
@@ -1293,6 +1303,92 @@ async def patch_assistant_message(
 
     target.content = new_content
     target.edited_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(target)
+    return MessageResponse.model_validate(target)
+
+
+@router.delete(
+    "/conversations/{conversation_id}/messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Delete a single message.
+
+    Owner-only, and deletes exactly the targeted row — unlike the
+    edit/regenerate flows which also drop everything after their
+    target. We intentionally keep this surgical: removing one message
+    (e.g. a bad assistant reply, or a question the user no longer wants
+    in the transcript) shouldn't cascade and wipe later turns. The
+    caller is trusted to delete what they mean to; an orphaned
+    user/assistant pair is a valid (if lopsided) transcript.
+    """
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
+
+    target = await db.get(Message, message_id)
+    if target is None or target.conversation_id != conv.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+
+    await db.delete(target)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put(
+    "/conversations/{conversation_id}/messages/{message_id}/feedback",
+    response_model=MessageResponse,
+)
+async def set_message_feedback(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    payload: MessageFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    """Rate an assistant reply thumbs up / down (Phase 2.5).
+
+    Owner-only and assistant-rows-only. ``rating=None`` clears the
+    rating (toggling a thumb off) and also drops any stored reason.
+    The reason is a short optional note typically captured on a
+    thumbs-down; we keep it only alongside a ``"down"`` rating.
+    """
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None or conv.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
+
+    target = await db.get(Message, message_id)
+    if target is None or target.conversation_id != conv.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+    if target.role != "assistant":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only assistant replies can be rated.",
+        )
+
+    target.feedback = payload.rating
+    # Reason only makes sense attached to a rating; clear it when the
+    # rating is cleared or when none was supplied.
+    if payload.rating is None:
+        target.feedback_reason = None
+    else:
+        reason = (payload.reason or "").strip()
+        target.feedback_reason = reason or None
     await db.commit()
     await db.refresh(target)
     return MessageResponse.model_validate(target)
@@ -2734,6 +2830,16 @@ async def _stream_generator(
         # merged on top below, each taking precedence (since
         # ``merge_system_prompt`` puts the first argument first).
         system_prompt: str | None = project_system_prompt
+        # Per-conversation custom instructions (Phase 1). A free-text
+        # steer ("answer concisely", "you're a Rust expert") that lives
+        # on the chat itself — narrower than the project prompt, so it
+        # takes precedence over it but still sits *under* the tool /
+        # personal-context layers merged on below.
+        conv_instructions = (conv.system_prompt or "").strip() or None
+        if conv_instructions:
+            system_prompt = merge_system_prompt(
+                conv_instructions, system_prompt or ""
+            )
         # Sources accumulator (Phase D1). Drained from any web_search /
         # fetch_url tool call this turn (whether forced via "always" or
         # initiated by the model in "auto" mode). Persisted onto
@@ -2921,6 +3027,34 @@ async def _stream_generator(
                     # personal layers.
                     system_prompt = merge_system_prompt(
                         ref_block, system_prompt or ""
+                    )
+
+            # Drive-file @-mentions (Phase 2.2). Resolve each referenced
+            # file the caller can read and inject its extracted text as
+            # background context. Access control + text extraction are
+            # delegated to the files package; unreadable / missing files
+            # are dropped silently so a stale token can't block the send.
+            file_mentions_found = extract_file_mentions(trig_row.content)
+            if file_mentions_found:
+                from app.files.models import UserFile
+                from app.files.router import _load_readable_file
+
+                resolved_files: list[UserFile] = []
+                for fm in file_mentions_found:
+                    try:
+                        uf = await _load_readable_file(db, fm.file_id, user)
+                    except Exception:
+                        logger.info(
+                            "Dropping file mention %s — not accessible to %s",
+                            fm.file_id,
+                            user.id,
+                        )
+                        continue
+                    resolved_files.append(uf)
+                file_block = build_file_mention_block(resolved_files)
+                if file_block:
+                    system_prompt = merge_system_prompt(
+                        file_block, system_prompt or ""
                     )
 
         # ------------------------------------------------------------------

@@ -510,6 +510,7 @@ function ConversationRow({
       {menuPos && (
         <ConversationRowContextMenu
           conversationId={conv.id}
+          currentProjectId={conv.project_id ?? null}
           position={menuPos}
           onClose={() => setMenuPos(null)}
         />

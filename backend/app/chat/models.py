@@ -61,6 +61,14 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         String(8), nullable=True, default=None
     )
 
+    # Phase 1 — per-conversation custom instructions / system prompt.
+    # A free-text steer ("answer concisely", "you're a Rust expert")
+    # the owner can set without spinning up a Project. Merged into the
+    # outbound system prompt by the chat router (it takes precedence
+    # over the project-level prompt but sits under tool/personal-context
+    # layers). NULL / blank = no per-chat steer.
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # When True the user has renamed the conversation themselves and the
     # server must not auto-regenerate the title after subsequent turns. Set
     # by the title-PATCH endpoint; cleared only if we reset the conversation.
@@ -312,6 +320,14 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     edited_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # Phase 2.5 — per-response quality signal. ``"up"`` / ``"down"`` /
+    # NULL (no rating). Set by the conversation owner via the thumbs
+    # affordance on assistant replies; ``feedback_reason`` carries the
+    # optional short note captured on a thumbs-down. Both NULL on user /
+    # system rows and on un-rated assistant replies.
+    feedback: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    feedback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Message id={self.id} role={self.role}>"

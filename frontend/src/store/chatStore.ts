@@ -61,6 +61,9 @@ interface ChatState {
   /** Swap a message (matched by id) for a new one. Used to reconcile an
    *  optimistic client-side user message with the server-persisted copy. */
   replaceMessage: (id: string, message: ChatMessage) => void;
+  /** Remove a single message by id. Used by the delete-message action;
+   *  no-op when the id isn't present. */
+  removeMessage: (id: string) => void;
   /** Drop every message strictly *after* the one with this id. Used by
    *  the edit-and-resend flow so the stale assistant reply disappears
    *  before the new stream re-renders one in its place. No-op when the
@@ -174,6 +177,10 @@ export const useChatStore = create<ChatState>((set) => ({
   setMessages: (messages) => set({ messages }),
   appendMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
+  removeMessage: (id) =>
+    set((state) => ({
+      messages: state.messages.filter((m) => m.id !== id),
+    })),
   replaceMessage: (id, message) =>
     set((state) => ({
       messages: state.messages.map((m) => (m.id === id ? message : m)),

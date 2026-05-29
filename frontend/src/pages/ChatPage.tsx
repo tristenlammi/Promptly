@@ -21,6 +21,7 @@ import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { InputBar } from "@/components/chat/InputBar";
 import { ModelSelector } from "@/components/chat/ModelSelector";
+import { ConversationInstructionsButton } from "@/components/chat/ConversationInstructionsButton";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
 import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
 import {
@@ -36,6 +37,7 @@ import { useChatStore } from "@/store/chatStore";
 import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import type {
   ChatMessage,
+  ConversationDetail,
   ReasoningEffort,
   TemporaryMode,
   WebSearchMode,
@@ -576,6 +578,91 @@ export function ChatPage() {
     ]
   );
 
+  /** One-click recovery after a stream error. Re-runs the most recent
+   *  user turn with the currently-selected model. The user message is
+   *  persisted before the stream drains, so in the common case (upstream
+   *  rejected the request) we edit-and-resend it — which clears any
+   *  partial assistant reply and re-streams. In the rare pre-persist
+   *  failure the user bubble is still optimistic, so we drop it and send
+   *  fresh to avoid leaving a duplicate. */
+  const handleRetry = useCallback(() => {
+    if (!id) return;
+    const store = useChatStore.getState();
+    const msgs = store.messages;
+    let target: (typeof msgs)[number] | undefined;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user") {
+        target = msgs[i];
+        break;
+      }
+    }
+    if (!target) return;
+    store.setStreamError(null, null);
+    if (target.id.startsWith("optimistic-")) {
+      store.setMessages(msgs.filter((m) => m.id !== target!.id));
+      void handleSend(target.content);
+    } else {
+      void handleEditAndResend(target.id, target.content);
+    }
+  }, [id, handleEditAndResend, handleSend]);
+
+  const handlePickAnotherModel = useCallback(() => {
+    useModelStore.getState().requestPickerOpen();
+  }, []);
+
+  /** Delete a single message. Confirms first (it's destructive and not
+   *  undoable), removes it from the local store optimistically, then
+   *  calls the owner-only backend endpoint. On failure we refetch the
+   *  conversation so the store snaps back to the server's truth. */
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      if (!id) return;
+      const ok = window.confirm(
+        "Delete this message? This can't be undone."
+      );
+      if (!ok) return;
+      const store = useChatStore.getState();
+      const snapshot = store.messages;
+      store.removeMessage(messageId);
+      try {
+        await chatApi.deleteMessage(id, messageId);
+      } catch (err) {
+        store.setMessages(snapshot);
+        const detail =
+          (err as { response?: { data?: { detail?: string } } })?.response?.data
+            ?.detail ?? "Couldn't delete that message. Try again.";
+        window.alert(detail);
+      }
+    },
+    [id]
+  );
+
+  /** Rate an assistant reply thumbs up/down (Phase 2.5). Persists via
+   *  the backend and splices the returned row into the store so the
+   *  thumb state (and any reason) reflects the server's truth. */
+  const handleMessageFeedback = useCallback(
+    async (
+      messageId: string,
+      rating: "up" | "down" | null,
+      reason?: string
+    ) => {
+      if (!id) return;
+      try {
+        const updated = await chatApi.setMessageFeedback(
+          id,
+          messageId,
+          rating,
+          reason
+        );
+        replaceMessage(messageId, updated);
+      } catch {
+        // Non-critical — leave the previous state in place. A failed
+        // rating isn't worth interrupting the user with an alert.
+      }
+    },
+    [id, replaceMessage]
+  );
+
   // Context-window compaction — destructive (middle of the chat
   // becomes a single system summary). Gate on ``window.confirm`` to
   // match the pattern used elsewhere (PDF editor discard, provider
@@ -671,6 +758,20 @@ export function ChatPage() {
                   compact={isMobile}
                 />
               )}
+            {id && isOwner && (
+              <ConversationInstructionsButton
+                conversationId={id}
+                value={conversation?.system_prompt ?? null}
+                compact={isMobile}
+                onSaved={(next) => {
+                  queryClient.setQueryData<ConversationDetail>(
+                    ["conversation", id],
+                    (old) =>
+                      old ? { ...old, system_prompt: next } : old
+                  );
+                }}
+              />
+            )}
             {!isMobile && (
               <ContextWindowPill
                 conversationId={id ?? null}
@@ -723,6 +824,10 @@ export function ChatPage() {
               participants={participants}
               onBranchFrom={id ? handleBranchFrom : undefined}
               onRegenerate={id ? handleRegenerate : undefined}
+              onRetry={id ? handleRetry : undefined}
+              onPickAnotherModel={handlePickAnotherModel}
+              onDelete={id && isOwner ? handleDeleteMessage : undefined}
+              onFeedback={id && isOwner ? handleMessageFeedback : undefined}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">

@@ -13,6 +13,8 @@ import {
   Home,
   Image as ImageIcon,
   Inbox,
+  LayoutGrid,
+  List as ListIcon,
   Loader2,
   MoreVertical,
   Pencil,
@@ -39,7 +41,6 @@ import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { GranteesPill } from "@/components/files/GranteesPill";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
-import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
 import { documentsApi } from "@/api/documents";
 import {
   downloadAuthed,
@@ -69,6 +70,20 @@ import { cn } from "@/utils/cn";
 const DRAG_FILE = "application/x-promptly-file";
 const DRAG_FOLDER = "application/x-promptly-folder";
 const DRAG_SOURCE_PARENT = "application/x-promptly-source-parent";
+
+type ViewMode = "list" | "grid";
+const VIEW_MODE_KEY = "promptly.filesViewMode";
+
+function readStoredViewMode(): ViewMode {
+  if (typeof window === "undefined") return "list";
+  try {
+    return window.localStorage.getItem(VIEW_MODE_KEY) === "grid"
+      ? "grid"
+      : "list";
+  } catch {
+    return "list";
+  }
+}
 
 interface DragPayload {
   kind: "file" | "folder";
@@ -164,13 +179,19 @@ export function FilesPage({
 
   // Drive stage 1 — preview / share / star state.
   const [preview, setPreview] = useState<FileItem | null>(null);
-  const [shareFor, setShareFor] = useState<
-    { kind: "file" | "folder"; id: string; name: string } | null
-  >(null);
-  // Drive stage 5: grants modal opens via the *primary* "Share"
-  // action on a row. The existing ``shareFor`` state still drives
-  // the URL-based ShareLinkDialog (now exposed as a secondary
-  // "Share by link" entry in the context menu).
+  // List vs. grid layout for the browse view. Persisted so the
+  // choice sticks across navigations and reloads.
+  const [viewMode, setViewMode] = useState<ViewMode>(() => readStoredViewMode());
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, viewMode);
+    } catch {
+      /* storage unavailable (private mode) — non-fatal */
+    }
+  }, [viewMode]);
+  // Drive stage 5: the single "Share" row action opens the
+  // peer-to-peer grants modal. Public link sharing has been retired
+  // from the UI.
   const [shareGrantsFor, setShareGrantsFor] = useState<
     {
       kind: "file" | "folder";
@@ -269,13 +290,16 @@ export function FilesPage({
               writable={writable}
               onDrop={handleDropOnto}
             />
-            {writable && (
-              <FolderActions
-                scope={scope}
-                parentId={folderId}
-                onChanged={() => refetch()}
-              />
-            )}
+            <div className="flex items-center gap-2">
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+              {writable && (
+                <FolderActions
+                  scope={scope}
+                  parentId={folderId}
+                  onChanged={() => refetch()}
+                />
+              )}
+            </div>
           </div>
 
           {dropError && (
@@ -316,6 +340,7 @@ export function FilesPage({
             <ContentGrid
               data={data}
               scope={scope}
+              layout={viewMode}
               currentFolderId={folderId}
               onOpenFolder={navigateToFolder}
               onDropOnFolder={handleDropOnto}
@@ -334,7 +359,6 @@ export function FilesPage({
                 }
               }}
               onShare={setShareGrantsFor}
-              onShareLink={setShareFor}
             />
           )}
         </div>
@@ -405,12 +429,6 @@ export function FilesPage({
           }
         }}
         onToggleStar={undefined}
-      />
-
-      <ShareLinkDialog
-        open={!!shareFor}
-        resource={shareFor}
-        onClose={() => setShareFor(null)}
       />
 
       <ShareGrantsModal
@@ -766,16 +784,17 @@ function NewFolderModal({
 function ContentGrid({
   data,
   scope,
+  layout,
   currentFolderId,
   onOpenFolder,
   onDropOnFolder,
   onOpenMove,
   onPreview,
   onShare,
-  onShareLink,
 }: {
   data: { folders: FolderItem[]; files: FileItem[]; writable: boolean };
   scope: FileScope;
+  layout: ViewMode;
   currentFolderId: string | null;
   onOpenFolder: (id: string | null) => void;
   onDropOnFolder: (
@@ -784,7 +803,7 @@ function ContentGrid({
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: (file: FileItem) => void;
-  /** Primary share action — opens the peer-to-peer grants modal.
+  /** Share action — opens the peer-to-peer grants modal.
    *  ``supportsEdit`` is forwarded so the modal knows whether to
    *  surface the "Editor" tier; only Drive Documents accept it. */
   onShare: (r: {
@@ -793,8 +812,6 @@ function ContentGrid({
     name: string;
     supportsEdit?: boolean;
   }) => void;
-  /** Secondary share action — opens the URL/invite-link dialog. */
-  onShareLink: (r: { kind: "file" | "folder"; id: string; name: string }) => void;
 }) {
   const empty = data.folders.length === 0 && data.files.length === 0;
   if (empty) {
@@ -816,48 +833,54 @@ function ContentGrid({
     return aSys - bSys;
   });
 
+  const folderRows = sortedFolders.map((f) => (
+    <FolderRow
+      key={f.id}
+      folder={f}
+      scope={scope}
+      layout={layout}
+      writable={data.writable}
+      currentFolderId={currentFolderId}
+      onOpen={() => onOpenFolder(f.id)}
+      onDropOnFolder={onDropOnFolder}
+      onOpenMove={onOpenMove}
+      onShare={() => onShare({ kind: "folder", id: f.id, name: f.name })}
+    />
+  ));
+  const fileRows = data.files.map((f) => (
+    <FileRow
+      key={f.id}
+      file={f}
+      scope={scope}
+      layout={layout}
+      writable={data.writable}
+      onOpenMove={onOpenMove}
+      onPreview={() => onPreview(f)}
+      onShare={() =>
+        onShare({
+          kind: "file",
+          id: f.id,
+          name: f.filename,
+          supportsEdit: isDocumentFile(f),
+        })
+      }
+    />
+  ));
+
+  if (layout === "grid") {
+    return (
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {folderRows}
+        {fileRows}
+      </ul>
+    );
+  }
+
   return (
     <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
       <ul className="divide-y divide-[var(--border)]">
-        {sortedFolders.map((f) => (
-          <FolderRow
-            key={f.id}
-            folder={f}
-            scope={scope}
-            writable={data.writable}
-            currentFolderId={currentFolderId}
-            onOpen={() => onOpenFolder(f.id)}
-            onDropOnFolder={onDropOnFolder}
-            onOpenMove={onOpenMove}
-            onShare={() =>
-              onShare({ kind: "folder", id: f.id, name: f.name })
-            }
-            onShareLink={() =>
-              onShareLink({ kind: "folder", id: f.id, name: f.name })
-            }
-          />
-        ))}
-        {data.files.map((f) => (
-          <FileRow
-            key={f.id}
-            file={f}
-            scope={scope}
-            writable={data.writable}
-            onOpenMove={onOpenMove}
-            onPreview={() => onPreview(f)}
-            onShare={() =>
-              onShare({
-                kind: "file",
-                id: f.id,
-                name: f.filename,
-                supportsEdit: isDocumentFile(f),
-              })
-            }
-            onShareLink={() =>
-              onShareLink({ kind: "file", id: f.id, name: f.filename })
-            }
-          />
-        ))}
+        {folderRows}
+        {fileRows}
       </ul>
     </div>
   );
@@ -866,16 +889,17 @@ function ContentGrid({
 function FolderRow({
   folder,
   scope,
+  layout,
   writable,
   currentFolderId,
   onOpen,
   onDropOnFolder,
   onOpenMove,
   onShare,
-  onShareLink,
 }: {
   folder: FolderItem;
   scope: FileScope;
+  layout: ViewMode;
   writable: boolean;
   currentFolderId: string | null;
   onOpen: () => void;
@@ -885,7 +909,6 @@ function FolderRow({
   ) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
   onShare: () => void;
-  onShareLink: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -921,14 +944,8 @@ function FolderRow({
             },
         {
           icon: <Share2 className="h-3.5 w-3.5" />,
-          label: "Share with people",
+          label: "Share",
           onClick: onShare,
-          disabled: !writable,
-        },
-        {
-          icon: <Share2 className="h-3.5 w-3.5" />,
-          label: "Share by link",
-          onClick: onShareLink,
           disabled: !writable,
         },
         {
@@ -972,43 +989,148 @@ function FolderRow({
     return dragHasItem(e.dataTransfer);
   };
 
+  const dragProps = {
+    draggable: userCanMutate,
+    onDragStart: (e: React.DragEvent) => {
+      if (!userCanMutate) return;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData(DRAG_FOLDER, folder.id);
+      e.dataTransfer.setData(DRAG_SOURCE_PARENT, folder.parent_id ?? "");
+    },
+    onDragEnter: (e: React.DragEvent) => {
+      if (allowDrop(e)) setOver(true);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (allowDrop(e)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      setOver(false);
+    },
+    onDrop: async (e: React.DragEvent) => {
+      if (!allowDrop(e)) return;
+      e.preventDefault();
+      setOver(false);
+      const payload = readDragPayload(e.dataTransfer);
+      if (!payload) return;
+      await onDropOnFolder(folder.id, payload);
+    },
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault();
+      setCtx({ x: e.clientX, y: e.clientY });
+    },
+  };
+
+  const overlays = (
+    <>
+      <ContextMenu
+        open={ctx !== null}
+        x={ctx?.x ?? 0}
+        y={ctx?.y ?? 0}
+        items={items}
+        onClose={() => setCtx(null)}
+      />
+
+      <InlinePromptModal
+        open={rename.open}
+        title="Rename folder"
+        value={rename.value}
+        onChange={(v) => setRename((r) => ({ ...r, value: v }))}
+        onClose={() => setRename({ open: false, value: folder.name })}
+        onSubmit={async (v) => {
+          await renameFolder.mutateAsync({ id: folder.id, name: v, scope });
+          setRename({ open: false, value: v });
+        }}
+      />
+
+      <ConfirmModal
+        open={trashOpen}
+        title="Move folder to trash?"
+        description={`"${folder.name}" and everything inside it will be moved to the trash. You can restore it from the Trash view.`}
+        confirmLabel="Move to trash"
+        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
+        onClose={() => setTrashOpen(false)}
+        onConfirm={async () => {
+          await trashFolder.mutateAsync({ id: folder.id, scope });
+          setTrashOpen(false);
+        }}
+      />
+    </>
+  );
+
+  if (layout === "grid") {
+    return (
+      <li
+        {...dragProps}
+        onDoubleClick={onOpen}
+        className={cn(
+          "group relative flex flex-col rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 transition",
+          "hover:border-[var(--accent)]/40 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+          userCanMutate && "cursor-grab",
+          over &&
+            "border-[var(--accent)]/60 bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
+        )}
+      >
+        {userCanMutate && (
+          <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
+            <RowMenu
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              items={mutationItems}
+            />
+          </div>
+        )}
+        <button
+          onClick={onOpen}
+          className="flex w-full flex-1 flex-col items-center gap-2 text-center"
+          title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
+        >
+          <SystemAwareFolderIcon kind={folder.system_kind} large />
+          <span className="line-clamp-2 w-full break-words text-xs font-medium">
+            {folder.name}
+          </span>
+        </button>
+        <div className="mt-1.5 flex min-h-[18px] items-center justify-center gap-1">
+          {folder.starred_at && (
+            <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
+          )}
+          {isSystem && (
+            <span className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
+              system
+            </span>
+          )}
+          {currentFolderId !== null && currentFolderId === folder.id && (
+            <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+              current
+            </span>
+          )}
+          {folder.sharing && (
+            <GranteesPill
+              sharing={folder.sharing}
+              variant="compact"
+              className="shrink-0"
+              onClick={
+                folder.sharing.role === "owner"
+                  ? (e) => {
+                      e.stopPropagation();
+                      onShare();
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </div>
+        {overlays}
+      </li>
+    );
+  }
+
   return (
     <li
-      draggable={userCanMutate}
-      onDragStart={(e) => {
-        if (!userCanMutate) return;
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData(DRAG_FOLDER, folder.id);
-        e.dataTransfer.setData(
-          DRAG_SOURCE_PARENT,
-          folder.parent_id ?? ""
-        );
-      }}
-      onDragEnter={(e) => {
-        if (allowDrop(e)) setOver(true);
-      }}
-      onDragOver={(e) => {
-        if (allowDrop(e)) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-        }
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-        setOver(false);
-      }}
-      onDrop={async (e) => {
-        if (!allowDrop(e)) return;
-        e.preventDefault();
-        setOver(false);
-        const payload = readDragPayload(e.dataTransfer);
-        if (!payload) return;
-        await onDropOnFolder(folder.id, payload);
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setCtx({ x: e.clientX, y: e.clientY });
-      }}
+      {...dragProps}
       className={cn(
         "group flex items-center gap-3 px-4 py-3 transition",
         "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
@@ -1069,38 +1191,7 @@ function FolderRow({
         />
       )}
 
-      <ContextMenu
-        open={ctx !== null}
-        x={ctx?.x ?? 0}
-        y={ctx?.y ?? 0}
-        items={items}
-        onClose={() => setCtx(null)}
-      />
-
-      <InlinePromptModal
-        open={rename.open}
-        title="Rename folder"
-        value={rename.value}
-        onChange={(v) => setRename((r) => ({ ...r, value: v }))}
-        onClose={() => setRename({ open: false, value: folder.name })}
-        onSubmit={async (v) => {
-          await renameFolder.mutateAsync({ id: folder.id, name: v, scope });
-          setRename({ open: false, value: v });
-        }}
-      />
-
-      <ConfirmModal
-        open={trashOpen}
-        title="Move folder to trash?"
-        description={`"${folder.name}" and everything inside it will be moved to the trash. You can restore it from the Trash view.`}
-        confirmLabel="Move to trash"
-        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
-        onClose={() => setTrashOpen(false)}
-        onConfirm={async () => {
-          await trashFolder.mutateAsync({ id: folder.id, scope });
-          setTrashOpen(false);
-        }}
-      />
+      {overlays}
     </li>
   );
 }
@@ -1108,19 +1199,19 @@ function FolderRow({
 function FileRow({
   file,
   scope,
+  layout,
   writable,
   onOpenMove,
   onPreview,
   onShare,
-  onShareLink,
 }: {
   file: FileItem;
   scope: FileScope;
+  layout: ViewMode;
   writable: boolean;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: () => void;
   onShare: () => void;
-  onShareLink: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -1160,14 +1251,8 @@ function FileRow({
         },
     {
       icon: <Share2 className="h-3.5 w-3.5" />,
-      label: "Share with people",
+      label: "Share",
       onClick: onShare,
-      disabled: !writable,
-    },
-    {
-      icon: <Share2 className="h-3.5 w-3.5" />,
-      label: "Share by link",
-      onClick: onShareLink,
       disabled: !writable,
     },
     {
@@ -1198,20 +1283,118 @@ function FileRow({
     },
   ];
 
+  const dragProps = {
+    draggable: writable,
+    onDragStart: (e: React.DragEvent) => {
+      if (!writable) return;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData(DRAG_FILE, file.id);
+      e.dataTransfer.setData(DRAG_SOURCE_PARENT, file.folder_id ?? "");
+    },
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault();
+      setCtx({ x: e.clientX, y: e.clientY });
+    },
+    onDoubleClick: onPreview,
+  };
+
+  const overlays = (
+    <>
+      <ContextMenu
+        open={ctx !== null}
+        x={ctx?.x ?? 0}
+        y={ctx?.y ?? 0}
+        items={mutationItems}
+        onClose={() => setCtx(null)}
+      />
+
+      <InlinePromptModal
+        open={rename.open}
+        title="Rename file"
+        value={rename.value}
+        onChange={(v) => setRename((r) => ({ ...r, value: v }))}
+        onClose={() => setRename({ open: false, value: file.filename })}
+        onSubmit={async (v) => {
+          await renameFile.mutateAsync({ id: file.id, filename: v, scope });
+          setRename({ open: false, value: v });
+        }}
+      />
+
+      <ConfirmModal
+        open={trashOpen}
+        title="Move file to trash?"
+        description={`"${file.filename}" will be moved to the trash. You can restore it from the Trash view.`}
+        confirmLabel="Move to trash"
+        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
+        onClose={() => setTrashOpen(false)}
+        onConfirm={async () => {
+          await trashFile.mutateAsync({ id: file.id, scope });
+          setTrashOpen(false);
+        }}
+      />
+    </>
+  );
+
+  if (layout === "grid") {
+    return (
+      <li
+        {...dragProps}
+        className={cn(
+          "group relative flex flex-col rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 transition",
+          "hover:border-[var(--accent)]/40 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+          writable && "cursor-grab"
+        )}
+      >
+        {writable && (
+          <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
+            <RowMenu
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              items={mutationItems.filter((it) => !it.disabled)}
+            />
+          </div>
+        )}
+        <button
+          onClick={onPreview}
+          className="flex w-full flex-1 flex-col items-center gap-2 text-center"
+          title={file.filename}
+        >
+          <FileTypeIcon mime={file.mime_type} large />
+          <span className="line-clamp-2 w-full break-words text-xs font-medium">
+            {file.filename}
+          </span>
+          <span className="text-[10px] text-[var(--text-muted)]">
+            {humanSize(file.size_bytes)}
+          </span>
+        </button>
+        <div className="mt-1.5 flex min-h-[18px] items-center justify-center gap-1">
+          {file.starred_at && (
+            <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
+          )}
+          {file.sharing && (
+            <GranteesPill
+              sharing={file.sharing}
+              variant="compact"
+              className="shrink-0"
+              onClick={
+                file.sharing.role === "owner"
+                  ? (e) => {
+                      e.stopPropagation();
+                      onShare();
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </div>
+        {overlays}
+      </li>
+    );
+  }
+
   return (
     <li
-      draggable={writable}
-      onDragStart={(e) => {
-        if (!writable) return;
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData(DRAG_FILE, file.id);
-        e.dataTransfer.setData(DRAG_SOURCE_PARENT, file.folder_id ?? "");
-      }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setCtx({ x: e.clientX, y: e.clientY });
-      }}
-      onDoubleClick={onPreview}
+      {...dragProps}
       className={cn(
         "group flex items-center gap-3 px-4 py-3 transition",
         "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
@@ -1273,58 +1456,30 @@ function FileRow({
         />
       )}
 
-      <ContextMenu
-        open={ctx !== null}
-        x={ctx?.x ?? 0}
-        y={ctx?.y ?? 0}
-        items={mutationItems}
-        onClose={() => setCtx(null)}
-      />
-
-      <InlinePromptModal
-        open={rename.open}
-        title="Rename file"
-        value={rename.value}
-        onChange={(v) => setRename((r) => ({ ...r, value: v }))}
-        onClose={() => setRename({ open: false, value: file.filename })}
-        onSubmit={async (v) => {
-          await renameFile.mutateAsync({ id: file.id, filename: v, scope });
-          setRename({ open: false, value: v });
-        }}
-      />
-
-      <ConfirmModal
-        open={trashOpen}
-        title="Move file to trash?"
-        description={`"${file.filename}" will be moved to the trash. You can restore it from the Trash view.`}
-        confirmLabel="Move to trash"
-        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
-        onClose={() => setTrashOpen(false)}
-        onConfirm={async () => {
-          await trashFile.mutateAsync({ id: file.id, scope });
-          setTrashOpen(false);
-        }}
-      />
+      {overlays}
     </li>
   );
 }
 
 function SystemAwareFolderIcon({
   kind,
+  large = false,
 }: {
   kind: SystemFolderKind | null;
+  large?: boolean;
 }) {
+  const sz = cn(large ? "h-9 w-9" : "h-5 w-5", "shrink-0 text-[var(--accent)]");
   switch (kind) {
     case "chat_uploads":
-      return <Inbox className="h-5 w-5 shrink-0 text-[var(--accent)]" />;
+      return <Inbox className={sz} />;
     case "generated_root":
-      return <Sparkles className="h-5 w-5 shrink-0 text-[var(--accent)]" />;
+      return <Sparkles className={sz} />;
     case "generated_files":
-      return <FileText className="h-5 w-5 shrink-0 text-[var(--accent)]" />;
+      return <FileText className={sz} />;
     case "generated_media":
-      return <ImageIcon className="h-5 w-5 shrink-0 text-[var(--accent)]" />;
+      return <ImageIcon className={sz} />;
     default:
-      return <FolderClosedIcon className="h-5 w-5 shrink-0 text-[var(--accent)]" />;
+      return <FolderClosedIcon className={sz} />;
   }
 }
 
@@ -1341,18 +1496,60 @@ function systemFolderTooltip(kind: SystemFolderKind): string {
   }
 }
 
-function FileTypeIcon({ mime }: { mime: string }) {
+function FileTypeIcon({ mime, large = false }: { mime: string; large?: boolean }) {
+  const base = large ? "h-9 w-9" : "h-5 w-5";
   if (mime.startsWith("image/")) {
-    return <ImageIcon className="h-5 w-5 shrink-0 text-violet-500" />;
+    return <ImageIcon className={cn(base, "shrink-0 text-violet-500")} />;
   }
   if (
     mime.startsWith("text/") ||
     mime === "application/json" ||
     mime === "application/xml"
   ) {
-    return <FileText className="h-5 w-5 shrink-0 text-sky-500" />;
+    return <FileText className={cn(base, "shrink-0 text-sky-500")} />;
   }
-  return <FileIcon className="h-5 w-5 shrink-0 text-[var(--text-muted)]" />;
+  return <FileIcon className={cn(base, "shrink-0 text-[var(--text-muted)]")} />;
+}
+
+function ViewToggle({
+  mode,
+  onChange,
+}: {
+  mode: ViewMode;
+  onChange: (m: ViewMode) => void;
+}) {
+  const btn = (active: boolean, leading: boolean) =>
+    cn(
+      "px-2 py-1.5 transition",
+      leading && "border-l border-[var(--border)]",
+      active
+        ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+        : "text-[var(--text-muted)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+    );
+  return (
+    <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)]">
+      <button
+        type="button"
+        aria-label="List view"
+        aria-pressed={mode === "list"}
+        title="List view"
+        onClick={() => onChange("list")}
+        className={btn(mode === "list", false)}
+      >
+        <ListIcon className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        aria-label="Grid view"
+        aria-pressed={mode === "grid"}
+        title="Grid view"
+        onClick={() => onChange("grid")}
+        className={btn(mode === "grid", true)}
+      >
+        <LayoutGrid className="h-4 w-4" />
+      </button>
+    </div>
+  );
 }
 
 function RowMenu({

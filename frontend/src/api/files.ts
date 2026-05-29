@@ -533,14 +533,17 @@ export const filesApi = {
   // ----------------------------------------------------------------
   // Drive stage 5 — Peer-to-peer share grants
   // ----------------------------------------------------------------
-  /** Type-ahead user picker for the share modal. ``q`` matches
-   *  username / email by case-insensitive prefix. Pass the
-   *  resource ids so the picker can mark already-granted rows. */
+  /** User picker / directory for the share modal. ``q`` matches
+   *  username / email by case-insensitive prefix; a blank ``q``
+   *  browses the first ``limit`` users so the UI can list who's on
+   *  the app. Pass the resource ids so the picker can mark
+   *  already-granted rows. */
   async searchUsersForShare(
     q: string,
-    resource: { type: ShareableResourceType; id: string } | null
+    resource: { type: ShareableResourceType; id: string } | null,
+    limit = 20
   ): Promise<UserSearchResponse> {
-    const params = new URLSearchParams({ q });
+    const params = new URLSearchParams({ q, limit: String(limit) });
     if (resource) {
       params.set("resource_type", resource.type);
       params.set("resource_id", resource.id);

@@ -37,6 +37,11 @@ interface ModelState {
    *  on non-vision models really do get dropped". */
   visionRelayProviderId: string | null;
   visionRelayModelId: string | null;
+  /** Transient counter bumped whenever some other surface wants the
+   *  TopNav model picker to open (e.g. the "Pick another model" button
+   *  on a stream-error card). The ``ModelSelector`` watches this and
+   *  opens its dropdown on each increment. Not persisted. */
+  pickerOpenNonce: number;
 
   setAvailable: (models: AvailableModel[]) => void;
   setSelection: (providerId: string | null, modelId: string | null) => void;
@@ -66,6 +71,8 @@ interface ModelState {
    *  fallback when the personal default is missing or unavailable:
    *  admin default → first available → blank. */
   applyDefault: () => void;
+  /** Ask the TopNav model picker to open. */
+  requestPickerOpen: () => void;
 }
 
 export const useModelStore = create<ModelState>()(
@@ -80,6 +87,7 @@ export const useModelStore = create<ModelState>()(
       adminDefaultModelId: null,
       visionRelayProviderId: null,
       visionRelayModelId: null,
+      pickerOpenNonce: 0,
 
       setAvailable: (available) => {
         set({ available });
@@ -166,6 +174,8 @@ export const useModelStore = create<ModelState>()(
           selectedModelId: target.model_id,
         });
       },
+      requestPickerOpen: () =>
+        set((s) => ({ pickerOpenNonce: s.pickerOpenNonce + 1 })),
     }),
     {
       name: "promptly.model-selection",

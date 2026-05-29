@@ -64,6 +64,11 @@ class MessageResponse(BaseModel):
     # ``ConversationDetail.collaborators`` to render "from Jane"
     # author chips on shared chats.
     author_user_id: uuid.UUID | None = None
+    # Phase 2.5 — per-response quality signal on assistant replies.
+    # ``None`` when unrated. ``feedback_reason`` carries the optional
+    # short note left on a thumbs-down.
+    feedback: Literal["up", "down"] | None = None
+    feedback_reason: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -102,6 +107,9 @@ class MessageResponse(BaseModel):
                         "ttft_ms",
                         "total_ms",
                         "author_user_id",
+                        "edited_at",
+                        "feedback",
+                        "feedback_reason",
                     )
                 }
                 payload["cost_usd"] = micros / 1_000_000.0
@@ -148,6 +156,10 @@ class ConversationSummary(BaseModel):
     # under a :class:`ChatProject`; surfaced so the sidebar can group
     # chats by project and the breadcrumb can render "Project → Chat".
     project_id: uuid.UUID | None = None
+    # Phase 1 — per-conversation custom instructions. Hydrated into the
+    # chat header's "Instructions" editor so the owner can see / tweak
+    # the per-chat steer. NULL / blank when unset.
+    system_prompt: str | None = None
 
 
 class ConversationParticipantBrief(BaseModel):
@@ -209,6 +221,11 @@ class ConversationUpdate(BaseModel):
     # endpoint. We accept strings here because JSON can't round-trip
     # ``None`` vs "unset" cleanly.
     project_id: uuid.UUID | None = None
+    # Phase 1 — per-conversation custom instructions. ``None`` = leave
+    # unchanged (field absent in the PATCH); an empty string clears it;
+    # any other value sets it (the router trims it). Capped so a runaway
+    # paste can't blow up the system prompt.
+    system_prompt: str | None = Field(default=None, max_length=8000)
 
 
 class SendMessageRequest(BaseModel):
@@ -402,6 +419,19 @@ class PatchAssistantMessageRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     content: str = Field(min_length=1, max_length=200_000)
+
+
+class MessageFeedbackRequest(BaseModel):
+    """Body for ``PUT /conversations/{cid}/messages/{mid}/feedback``.
+
+    Phase 2.5 — thumbs up / down on an assistant reply. ``rating`` of
+    ``None`` clears any existing rating (toggling a thumb off).
+    ``reason`` is an optional short note, typically captured on a
+    thumbs-down; it's cleared whenever the rating is cleared.
+    """
+
+    rating: Literal["up", "down"] | None = None
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class RegenerateMessageRequest(BaseModel):

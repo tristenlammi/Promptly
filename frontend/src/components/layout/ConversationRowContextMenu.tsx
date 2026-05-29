@@ -1,8 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Download, FileCode, FileText, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  Download,
+  FileCode,
+  FileText,
+  FolderKanban,
+  FolderMinus,
+  Loader2,
+} from "lucide-react";
 
 import { chatApi } from "@/api/chat";
+import { useChatProjects } from "@/hooks/useChatProjects";
+import { useUpdateConversation } from "@/hooks/useConversations";
 import { cn } from "@/utils/cn";
 
 type ExportFormat = "markdown" | "json" | "pdf";
@@ -14,6 +27,9 @@ interface Position {
 
 interface Props {
   conversationId: string;
+  /** Project this chat currently belongs to (``null`` for a standalone
+   *  chat). Drives the checkmark + "Remove from project" affordance. */
+  currentProjectId: string | null;
   position: Position;
   onClose: () => void;
 }
@@ -36,6 +52,7 @@ const MENU_MIN_WIDTH = 240;
  *  the scroll viewport. */
 export function ConversationRowContextMenu({
   conversationId,
+  currentProjectId,
   position,
   onClose,
 }: Props) {
@@ -46,6 +63,35 @@ export function ConversationRowContextMenu({
     null
   );
   const [error, setError] = useState<string | null>(null);
+
+  // Phase 3.2 — "Move to project" is a second level inside this menu.
+  const [view, setView] = useState<"main" | "move">("main");
+  // Busy target id during a move; ``"__remove__"`` while detaching.
+  const [movingTo, setMovingTo] = useState<string | null>(null);
+  const projects = useChatProjects({ archived: false });
+  const updateConv = useUpdateConversation();
+  const qc = useQueryClient();
+
+  const doMove = async (targetId: string | null) => {
+    if (movingTo !== null) return;
+    setMovingTo(targetId ?? "__remove__");
+    setError(null);
+    try {
+      await updateConv.mutateAsync({
+        id: conversationId,
+        payload: { project_id: targetId },
+      });
+      // Refresh project membership counts / project conversation lists.
+      qc.invalidateQueries({ queryKey: ["chat-projects"] });
+      onClose();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Couldn't move this chat. Try again."
+      );
+    } finally {
+      setMovingTo(null);
+    }
+  };
 
   // Clamp the menu inside the viewport once we know its rendered
   // size — naively using the click coords can push it under the
@@ -132,41 +178,149 @@ export function ConversationRowContextMenu({
           "border-[var(--border)] bg-[var(--surface)] py-1 text-sm"
         )}
       >
-        <div
-          className={cn(
-            "px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide",
-            "text-[var(--text-muted)]"
-          )}
-        >
-          Download as…
-        </div>
-        <ExportRow
-          label="Markdown"
-          hint="Human-readable transcript"
-          Icon={FileText}
-          busy={busyFmt === "markdown"}
-          done={lastDownloaded === "markdown"}
-          disabled={busyFmt !== null}
-          onSelect={() => void doExport("markdown")}
-        />
-        <ExportRow
-          label="JSON"
-          hint="Full fidelity — re-importable"
-          Icon={FileCode}
-          busy={busyFmt === "json"}
-          done={lastDownloaded === "json"}
-          disabled={busyFmt !== null}
-          onSelect={() => void doExport("json")}
-        />
-        <ExportRow
-          label="PDF"
-          hint="Polished doc for sharing offline"
-          Icon={Download}
-          busy={busyFmt === "pdf"}
-          done={lastDownloaded === "pdf"}
-          disabled={busyFmt !== null}
-          onSelect={() => void doExport("pdf")}
-        />
+        {view === "main" ? (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setView("move")}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
+                  "bg-[var(--accent)]/10 text-[var(--accent)]"
+                )}
+              >
+                <FolderKanban className="h-3 w-3" />
+              </span>
+              <span className="flex-1 font-medium">Move to project…</span>
+              <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+            </button>
+
+            <div className="my-1 border-t border-[var(--border)]" />
+
+            <div
+              className={cn(
+                "px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide",
+                "text-[var(--text-muted)]"
+              )}
+            >
+              Download as…
+            </div>
+            <ExportRow
+              label="Markdown"
+              hint="Human-readable transcript"
+              Icon={FileText}
+              busy={busyFmt === "markdown"}
+              done={lastDownloaded === "markdown"}
+              disabled={busyFmt !== null}
+              onSelect={() => void doExport("markdown")}
+            />
+            <ExportRow
+              label="JSON"
+              hint="Full fidelity — re-importable"
+              Icon={FileCode}
+              busy={busyFmt === "json"}
+              done={lastDownloaded === "json"}
+              disabled={busyFmt !== null}
+              onSelect={() => void doExport("json")}
+            />
+            <ExportRow
+              label="PDF"
+              hint="Polished doc for sharing offline"
+              Icon={Download}
+              busy={busyFmt === "pdf"}
+              done={lastDownloaded === "pdf"}
+              disabled={busyFmt !== null}
+              onSelect={() => void doExport("pdf")}
+            />
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setView("main")}
+              className={cn(
+                "flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide transition",
+                "text-[var(--text-muted)] hover:text-[var(--text)]"
+              )}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Move to project
+            </button>
+
+            {currentProjectId && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={movingTo !== null}
+                onClick={() => void doMove(null)}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                  "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]",
+                  "disabled:cursor-not-allowed disabled:opacity-60"
+                )}
+              >
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                  {movingTo === "__remove__" ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <FolderMinus className="h-3 w-3" />
+                  )}
+                </span>
+                <span className="flex-1">Remove from project</span>
+              </button>
+            )}
+
+            <div className="max-h-60 overflow-y-auto">
+              {projects.isLoading && (
+                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
+                  Loading projects…
+                </div>
+              )}
+              {projects.data && projects.data.length === 0 && (
+                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
+                  No projects yet.
+                </div>
+              )}
+              {projects.data?.map((p) => {
+                const isCurrent = p.id === currentProjectId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="menuitem"
+                    disabled={movingTo !== null || isCurrent}
+                    onClick={() => void doMove(p.id)}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                      "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]",
+                      "disabled:cursor-not-allowed",
+                      isCurrent && "opacity-80"
+                    )}
+                  >
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                      {movingTo === p.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : isCurrent ? (
+                        <Check className="h-3 w-3 text-[var(--accent)]" />
+                      ) : (
+                        <FolderKanban className="h-3 w-3 text-[var(--text-muted)]" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {p.title || "Untitled project"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         {error && (
           <div

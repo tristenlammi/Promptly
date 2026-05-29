@@ -13,6 +13,7 @@ import {
   FileText,
   Image as ImageIcon,
   Loader2,
+  Mic,
   Paperclip,
   Square,
   Upload,
@@ -23,6 +24,7 @@ import { filesApi } from "@/api/files";
 import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useComposerStore } from "@/store/composerStore";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
@@ -35,6 +37,10 @@ import {
   MentionAutocomplete,
   type MentionPickState,
 } from "./MentionAutocomplete";
+import {
+  SlashCommandAutocomplete,
+  type SlashPickState,
+} from "./SlashCommandAutocomplete";
 import { ReasoningEffortToggle } from "./ReasoningEffortToggle";
 import { ToolsToggle } from "./ToolsToggle";
 import { WebSearchToggle } from "./WebSearchToggle";
@@ -139,6 +145,16 @@ export function InputBar({
     },
     []
   );
+  // Same forwarding mechanism for the ``/`` slash-command popover.
+  const slashKeyHandler = useRef<((e: { key: string }) => boolean) | null>(
+    null
+  );
+  const registerSlashKeys = useCallback(
+    (handler: (e: { key: string }) => boolean) => {
+      slashKeyHandler.current = handler;
+    },
+    []
+  );
 
   // Which conversation the current ``value`` / ``attachments`` belong
   // to. Tracked in a ref (not just ``draftKey``) because the route can
@@ -185,6 +201,29 @@ export function InputBar({
       const next = `${before}${token} ${after}`;
       setValue(next);
       const newCaret = pick.startIndex + token.length + 1;
+      setCaret(newCaret);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        try {
+          el.setSelectionRange(newCaret, newCaret);
+        } catch {
+          // older browsers
+        }
+      });
+    },
+    [value]
+  );
+
+  // Phase 3.1 — replace the leading ``/query`` with a saved prompt's
+  // body and drop the caret at the end so the user can keep typing.
+  const handleSlashApply = useCallback(
+    (body: string, pick: SlashPickState) => {
+      const after = value.slice(pick.endIndex);
+      const next = `${body}${after}`;
+      setValue(next);
+      const newCaret = body.length;
       setCaret(newCaret);
       requestAnimationFrame(() => {
         const el = textareaRef.current;
@@ -292,6 +331,23 @@ export function InputBar({
     // as soon as the user opens them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Phase 3.3 — focus on demand from a global shortcut (new chat /
+  // "/"). The store bumps ``focusNonce``; we focus on every change
+  // *after* the initial mount (nonce starts at 0, so the first render
+  // is a no-op and doesn't double up with the autoFocus effect above).
+  const focusNonce = useComposerStore((s) => s.focusNonce);
+  useEffect(() => {
+    if (focusNonce === 0) return;
+    if (disabled) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+    } catch {
+      el.focus();
+    }
+  }, [focusNonce, disabled]);
 
   // ----------------------------------------------------------------
   // Upload helper — dropped files & paste-uploads share this path so the
@@ -482,6 +538,7 @@ export function InputBar({
     // Don't send while a drop is still uploading. Cheaper UX than dropping
     // the file silently.
     if (pending.some((p) => !p.error)) return;
+    if (speech.isListening) speech.stop();
     onSend(trimmed, attachments);
     setValue("");
     setAttachments([]);
@@ -498,6 +555,15 @@ export function InputBar({
     // here and don't fall through to Enter-to-send.
     if (mentionKeyHandler.current) {
       const consumed = mentionKeyHandler.current({ key: e.key });
+      if (consumed) {
+        e.preventDefault();
+        return;
+      }
+    }
+    // Then the ``/`` slash-command popover (mutually exclusive with
+    // the mention popover, so order is harmless).
+    if (slashKeyHandler.current) {
+      const consumed = slashKeyHandler.current({ key: e.key });
       if (consumed) {
         e.preventDefault();
         return;
@@ -526,6 +592,21 @@ export function InputBar({
     setCaret(el.selectionStart ?? 0);
   }, []);
 
+  // Voice dictation (Phase 2.1). The hook delivers finalised chunks via
+  // ``onFinal``; we append each to the composer with sensible spacing.
+  // Hidden entirely when the Web Speech API is unavailable.
+  const speech = useSpeechRecognition({
+    onFinal: (chunk) => {
+      const piece = chunk.trim();
+      if (!piece) return;
+      setValue((prev) => {
+        const needsSpace =
+          prev.length > 0 && !/\s$/.test(prev);
+        return `${prev}${needsSpace ? " " : ""}${piece}`;
+      });
+    },
+  });
+
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
@@ -553,6 +634,14 @@ export function InputBar({
         currentConversationId={currentConversationId}
         projectId={projectId}
         onKeyRegister={registerMentionKeys}
+      />
+
+      <SlashCommandAutocomplete
+        textareaRef={textareaRef}
+        value={value}
+        caret={caret}
+        onApply={handleSlashApply}
+        onKeyRegister={registerSlashKeys}
       />
 
       <div className="mx-auto w-full max-w-3xl">
@@ -615,6 +704,20 @@ export function InputBar({
                 {selectedModel?.display_name ?? "This model"} can't see
                 images natively, so they'll be described by{" "}
                 <span className="font-medium">{relayLabel}</span> first.
+              </span>
+            </div>
+          )}
+          {speech.isListening && (
+            <div
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
+                "bg-red-500/10 text-red-600 dark:text-red-400"
+              )}
+              role="status"
+            >
+              <Mic className="h-3 w-3 shrink-0 animate-pulse" />
+              <span className="leading-snug">
+                {speech.interimText || "Listening… speak now."}
               </span>
             </div>
           )}
@@ -687,6 +790,44 @@ export function InputBar({
                   onToggle={onToolsChange}
                   disabled={disabled || streaming}
                 />
+              )}
+              {speech.supported && (
+                <button
+                  type="button"
+                  onClick={() => speech.toggle()}
+                  disabled={disabled || streaming}
+                  className={cn(
+                    "inline-flex items-center rounded-full border transition",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    speech.isListening
+                      ? "border-red-500/60 bg-red-500/10 text-red-600 dark:text-red-400"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
+                    isMobile
+                      ? "h-9 w-9 justify-center"
+                      : "h-8 gap-1.5 px-2.5 text-xs"
+                  )}
+                  aria-label={
+                    speech.isListening ? "Stop dictation" : "Dictate message"
+                  }
+                  aria-pressed={speech.isListening}
+                  title={
+                    speech.isListening
+                      ? "Stop dictation"
+                      : "Dictate — speak to type"
+                  }
+                >
+                  <Mic
+                    className={cn(
+                      isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
+                      speech.isListening && "animate-pulse"
+                    )}
+                  />
+                  {!isMobile && (
+                    <span className="font-medium">
+                      {speech.isListening ? "Listening…" : "Voice"}
+                    </span>
+                  )}
+                </button>
               )}
             </div>
             {streaming ? (
