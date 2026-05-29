@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Users, User as UserIcon, Loader2, X } from "lucide-react";
+import {
+  Search,
+  Sparkles,
+  Users,
+  User as UserIcon,
+  Loader2,
+  X,
+} from "lucide-react";
 
 import { chatApi } from "@/api/chat";
 import type { ConversationSearchHit } from "@/api/types";
@@ -253,7 +260,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             <KeyHint label="⏎" /> open
             <KeyHint label="Esc" /> close
           </div>
-          <span>Full-text · ranked · last 30 hits</span>
+          <span>Keyword + meaning · ranked</span>
         </div>
       </div>
     </div>
@@ -312,6 +319,15 @@ function Section({
               <span className="truncate">
                 {hit.conversation_title || "Untitled chat"}
               </span>
+              {hit.match === "semantic" && (
+                <span
+                  className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-[var(--accent)]"
+                  title="Found by meaning, not exact words"
+                >
+                  <Sparkles className="h-2.5 w-2.5" />
+                  meaning
+                </span>
+              )}
               <span className="ml-auto shrink-0 text-[10px] text-[var(--text-muted)]">
                 {formatRelative(hit.created_at)}
               </span>

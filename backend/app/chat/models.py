@@ -404,3 +404,34 @@ class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
             f"<ProjectShare id={self.id} project={self.project_id} "
             f"invitee={self.invitee_user_id} status={self.status!r}>"
         )
+
+
+class MessageEmbedding(TimestampMixin, Base):
+    """Per-message embedding vector for semantic conversation search
+    (Phase 7).
+
+    One row per indexed message, populated asynchronously by the
+    background semantic indexer. Stores the vector in the column matching
+    the workspace embedding dim (``embedding_768`` / ``embedding_1536``,
+    mirroring ``knowledge_chunks``); those columns are managed via raw
+    SQL and intentionally not mapped here. ``content_hash`` lets the
+    indexer detect edits and re-embed only what changed.
+    """
+
+    __tablename__ = "message_embeddings"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    content_hash: Mapped[str] = mapped_column(String(32), nullable=False)
+    embed_dim: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<MessageEmbedding msg={self.message_id} dim={self.embed_dim}>"
+        )

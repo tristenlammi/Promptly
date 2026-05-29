@@ -629,6 +629,10 @@ export interface ConversationSearchHit {
   /** Whether the match lives in a conversation the caller owns or
    *  one that was shared to them. Powers the two palette sections. */
   access: "owner" | "collaborator";
+  /** How the hit was found (Phase 7): exact keyword, semantic
+   *  (meaning-based), or both. Absent on older backends → treat as
+   *  keyword. */
+  match?: "keyword" | "semantic" | "hybrid";
 }
 
 export interface SendMessageResponse {

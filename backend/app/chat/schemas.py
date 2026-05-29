@@ -347,6 +347,10 @@ class ConversationSearchHit(BaseModel):
     rank: float
     created_at: datetime
     access: Literal["owner", "collaborator"] = "owner"
+    # Phase 7 — how this hit was found: exact keyword (FTS), semantic
+    # (embedding similarity), or both. Lets the palette badge a result
+    # that surfaced only by meaning. Defaults to keyword for back-compat.
+    match: Literal["keyword", "semantic", "hybrid"] = "keyword"
 
 
 class CompactionResponse(BaseModel):

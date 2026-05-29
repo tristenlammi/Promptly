@@ -26,6 +26,7 @@ from app.observability.capture import (
     install_error_capture,
 )
 from app.chat.temporary_sweeper import start_sweeper
+from app.chat.semantic_index import start_semantic_indexer
 from app.tasks.scheduler import start_scheduler
 from app.redis_client import close_redis, redis
 
@@ -72,11 +73,16 @@ async def lifespan(_: FastAPI):
     # Phase 1 (v2) — start the scheduled-tasks runner. Polls for due
     # automations every minute and dispatches headless runs.
     scheduler_task = start_scheduler()
+    # Phase 7 (v2) — start the semantic conversation indexer. Continuously
+    # embeds messages lacking an up-to-date vector so the search palette
+    # can blend keyword + meaning-based recall. No-op when embeddings
+    # aren't configured.
+    indexer_task = start_semantic_indexer()
     try:
         yield
     finally:
         logger.info("Promptly backend shutting down")
-        for bg in (sweeper_task, scheduler_task):
+        for bg in (sweeper_task, scheduler_task, indexer_task):
             bg.cancel()
             try:
                 await bg

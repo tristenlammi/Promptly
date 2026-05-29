@@ -277,14 +277,31 @@ renderer.
 
 ---
 
-## Phase 7 — Semantic conversation search
+## Phase 7 — Semantic conversation search — ✅ SHIPPED
 
 - **What:** Find chats by meaning, not just keywords ("that chat where we
   fixed the nginx timeout"). The `SearchPalette` already does FTS; this
   adds embedding-based recall.
-- **How (clean UI):** Reuse the embeddings infra already powering RAG
-  (`custom_models` ingestion/retrieval) to index conversations; blend
-  semantic + FTS results in the existing palette.
+- **Shipped:**
+  - A **`message_embeddings`** pgvector table (migration
+    `0058_msg_embeddings`) mirroring the `knowledge_chunks` storage
+    pattern (dual `vector(768)`/`vector(1536)` columns + HNSW cosine
+    indexes), reusing the workspace embedding config + `embed_texts`
+    plumbing that powers RAG.
+  - A **background indexer** (`semantic_index.py`, started in the app
+    lifespan) that continuously embeds any message lacking an up-to-date
+    vector — transparently handling both backfill of existing history and
+    new messages, with **no hooks in the hot chat path**. Re-embeds on
+    content edit (`content_hash`) or when the admin switches embedding
+    model/dim. Small batches + adaptive sleep so it never saturates the
+    provider; no-op when embeddings aren't configured.
+  - **Hybrid search:** `GET /chat/conversations/search` now blends the
+    existing FTS results with semantic (cosine) recall using **reciprocal
+    rank fusion** (k=60). Keyword hits keep their highlighted
+    `ts_headline` snippet; semantic-only hits get a synthesized excerpt
+    and a "meaning" badge in the palette. A min-similarity floor keeps
+    unrelated vectors out. Degrades cleanly to pure keyword search when
+    embeddings are off or the embed call fails.
 - **impact: med · effort: med** · Scaffolding: `SearchPalette.tsx`,
   `custom_models` embeddings, `search/` module.
 

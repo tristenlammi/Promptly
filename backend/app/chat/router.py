@@ -97,6 +97,11 @@ from app.chat.stream_runner import (
     get_session,
 )
 from app.chat.personal_context import build_personal_context_prompt
+from app.chat.semantic_search import (
+    embed_query,
+    get_embedding_config,
+    semantic_search_messages,
+)
 from app.memory.service import (
     build_memory_system_prompt,
     capture_memories,
@@ -209,7 +214,11 @@ async def search_conversations(
     if not accessible_ids:
         return []
 
-    sql = text(
+    # Pull a wider slate from each retriever than the caller asked for so
+    # the fusion below has material to re-rank before we trim to ``limit``.
+    fetch = min(50, max(limit * 2, 30))
+
+    fts_sql = text(
         """
         SELECT
             m.conversation_id            AS conversation_id,
@@ -237,31 +246,121 @@ async def search_conversations(
         LIMIT :limit
         """
     )
-    rows = (
+    fts_rows = (
         await db.execute(
-            sql,
+            fts_sql,
             {
                 "q": cleaned,
                 "conv_ids": accessible_ids,
-                "limit": limit,
+                "limit": fetch,
                 "user_id": user.id,
             },
         )
     ).mappings().all()
 
-    return [
-        ConversationSearchHit(
-            conversation_id=r["conversation_id"],
-            message_id=r["message_id"],
-            conversation_title=r["conversation_title"],
-            role=r["role"],
-            snippet=str(r["snippet"] or ""),
-            rank=float(r["rank"] or 0.0),
-            created_at=r["created_at"],
-            access=r["access"],
+    # Semantic recall — best-effort. Returns nothing when embeddings
+    # aren't configured or the embed call fails, so the palette silently
+    # falls back to pure keyword search.
+    sem_rows: list[dict] = []
+    cfg = await get_embedding_config(db)
+    if cfg is not None:
+        qvec = await embed_query(cfg, cleaned)
+        if qvec is not None:
+            sem_rows = await semantic_search_messages(
+                db,
+                qvec=qvec,
+                cfg=cfg,
+                conv_ids=accessible_ids,
+                user_id=user.id,
+                limit=fetch,
+            )
+
+    return _fuse_search_hits(fts_rows, sem_rows, limit=limit)
+
+
+# Reciprocal-rank-fusion constant. The standard k=60 from the RRF paper —
+# damps the contribution of deep results so the head of each list
+# dominates without one retriever's raw scores swamping the other.
+_RRF_K = 60
+
+
+def _synth_snippet(content: str, max_chars: int = 200) -> str:
+    """Plain (un-highlighted) excerpt for a semantic-only hit, which has
+    no ``ts_headline`` markers of its own."""
+    text_ = " ".join((content or "").split())
+    if len(text_) <= max_chars:
+        return text_
+    return text_[:max_chars].rstrip() + " …"
+
+
+def _fuse_search_hits(
+    fts_rows: list,
+    sem_rows: list[dict],
+    *,
+    limit: int,
+) -> list[ConversationSearchHit]:
+    """Blend keyword + semantic results with reciprocal rank fusion.
+
+    A message that surfaces in both lists is boosted (its fused score is
+    the sum of both contributions) and tagged ``hybrid``; otherwise it's
+    ``keyword`` or ``semantic``. Keyword hits keep their highlighted
+    ``ts_headline`` snippet; semantic-only hits get a plain excerpt.
+    """
+    fused: dict = {}
+
+    def _slot(mid, row, *, source: str):
+        entry = fused.get(mid)
+        if entry is None:
+            entry = {"row": row, "score": 0.0, "sources": set()}
+            fused[mid] = entry
+        entry["sources"].add(source)
+        # Prefer the keyword row as the canonical source for snippet/rank
+        # since it carries highlight markers.
+        if source == "keyword":
+            entry["row"] = row
+        return entry
+
+    for pos, r in enumerate(fts_rows):
+        entry = _slot(r["message_id"], r, source="keyword")
+        entry["score"] += 1.0 / (_RRF_K + pos + 1)
+
+    for pos, r in enumerate(sem_rows):
+        entry = _slot(r["message_id"], r, source="semantic")
+        entry["score"] += 1.0 / (_RRF_K + pos + 1)
+        entry.setdefault("sem_row", r)
+
+    ranked = sorted(fused.values(), key=lambda e: e["score"], reverse=True)
+
+    hits: list[ConversationSearchHit] = []
+    for entry in ranked[:limit]:
+        sources = entry["sources"]
+        if {"keyword", "semantic"} <= sources:
+            match = "hybrid"
+        elif "semantic" in sources:
+            match = "semantic"
+        else:
+            match = "keyword"
+
+        row = entry["row"]
+        if "keyword" in sources:
+            snippet = str(row.get("snippet") or "")
+        else:
+            snippet = _synth_snippet(str(row.get("content") or ""))
+
+        hits.append(
+            ConversationSearchHit(
+                conversation_id=row["conversation_id"],
+                message_id=row["message_id"],
+                conversation_title=row["conversation_title"],
+                role=row["role"],
+                snippet=snippet,
+                rank=float(entry["score"]),
+                created_at=row["created_at"],
+                access=row["access"],
+                match=match,
+            )
         )
-        for r in rows
-    ]
+    return hits
 
 
 @router.get(

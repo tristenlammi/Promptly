@@ -15,6 +15,7 @@ from app.chat.models import (  # noqa: F401
     CompareGroup,
     Conversation,
     Message,
+    MessageEmbedding,
     ProjectShare,
 )
 from app.custom_models.models import (  # noqa: F401
