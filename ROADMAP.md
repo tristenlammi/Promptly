@@ -32,7 +32,7 @@ notes existing code to build on.
 
 ---
 
-## Phase 1 — Scheduled Tasks / Automations  *(the new pillar)*
+## Phase 1 — Scheduled Tasks / Automations  *(the new pillar)* — ✅ SHIPPED
 
 > **The headline feature of v2.** A Task is a saved prompt + a schedule.
 > On schedule it runs **headless** (no human watching) and produces a
