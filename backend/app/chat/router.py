@@ -97,6 +97,11 @@ from app.chat.stream_runner import (
     get_session,
 )
 from app.chat.personal_context import build_personal_context_prompt
+from app.memory.service import (
+    build_memory_system_prompt,
+    capture_memories,
+    should_attempt_capture,
+)
 from app.chat.titler import fallback_title, generate_conversation_title
 from app.chat.versioning import (
     active_path,
@@ -3441,6 +3446,20 @@ async def _stream_generator(
                 personal_context, system_prompt or ""
             )
 
+        # Phase 6 — cross-chat memory. Inject the user's saved durable
+        # facts as background knowledge (same "don't recite it" framing as
+        # personal context) so the assistant carries personalisation across
+        # conversations. Gated by the per-user ``memory_enabled`` switch
+        # (absent = on); returns ``None`` when the user has no memories, so
+        # there's zero token overhead for fresh accounts.
+        memory_enabled = (user.settings or {}).get("memory_enabled", True) is not False
+        if memory_enabled:
+            memory_block = await build_memory_system_prompt(db, user.id)
+            if memory_block:
+                system_prompt = merge_system_prompt(
+                    memory_block, system_prompt or ""
+                )
+
         # Phase C — @-mention resolution. Scan the triggering user
         # message for ``@[title](id)`` tokens, verify the caller has
         # read access to each referenced chat, and prepend a block
@@ -4129,6 +4148,44 @@ async def _stream_generator(
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Post-stream budget check failed for user=%s", user.id
+            )
+
+        # Phase 6 — cross-chat memory capture. Cheap regex pre-filter so
+        # ordinary turns cost nothing; when the user states something
+        # durable (or says "remember…"), run a bounded headless extraction
+        # and persist any genuinely new facts. Surfaced via a
+        # ``memory_saved`` event just before ``done`` so the UI can show a
+        # "saved to memory" affordance. Best-effort — a failure here never
+        # disturbs the reply that's already on disk.
+        memory_saved: list[str] = []
+        if (
+            memory_enabled
+            and trig_row is not None
+            and (trig_row.content or "").strip()
+            and should_attempt_capture(trig_row.content)
+        ):
+            try:
+                memory_saved = await capture_memories(
+                    db,
+                    user_id=user.id,
+                    user_text=trig_row.content,
+                    assistant_text=full,
+                    source_conversation_id=conv.id,
+                    provider=provider,
+                    model_id=ctx["model_id"],
+                )
+                if memory_saved:
+                    await db.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("Memory capture failed for user=%s", user.id)
+                memory_saved = []
+        if memory_saved:
+            yield _sse(
+                {
+                    "event": "memory_saved",
+                    "facts": memory_saved,
+                    "count": len(memory_saved),
+                }
             )
 
         # Auto-title the conversation after the first successful exchange.

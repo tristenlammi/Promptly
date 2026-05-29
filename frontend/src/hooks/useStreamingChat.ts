@@ -84,6 +84,9 @@ interface SSEPayload {
   title?: string;
   // vision_warning event (non-vision model + image attachment, etc.)
   message?: string;
+  // memory_saved event (Phase 6) — durable facts captured this turn.
+  facts?: string[];
+  count?: number;
   // tool_started / tool_finished events (Phase A1)
   id?: string;
   name?: string;
@@ -271,6 +274,14 @@ export function useStreamingChat(): UseStreamingChatResult {
 
         if (data.event === "vision_warning" && data.message) {
           store.addVisionWarning(data.message);
+          continue;
+        }
+        if (
+          data.event === "memory_saved" &&
+          data.facts &&
+          data.facts.length > 0
+        ) {
+          store.setMemorySaved(data.facts);
           continue;
         }
         if (data.event === "vision_relay_started" && data.id) {

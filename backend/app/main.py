@@ -267,6 +267,7 @@ from app.notifications.router import router as notifications_router  # noqa: E40
 from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
+from app.memory.router import router as memory_router  # noqa: E402
 from app.tasks.router import router as tasks_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
@@ -329,6 +330,7 @@ app.include_router(
 )
 app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])
 # Drive Documents API (create doc, mint collab JWT, accept snapshot

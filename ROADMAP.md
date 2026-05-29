@@ -244,15 +244,34 @@ renderer.
 
 ---
 
-## Phase 6 — Cross-chat memory / personalization
+## Phase 6 — Cross-chat memory / personalization — ✅ SHIPPED
 
 - **What:** An auto-memory that remembers durable facts about the user
   across all chats ("I'm a Rust dev", "answer concisely"), with a
   user-managed memory list (view / edit / delete) and a clear "saved to
   memory" affordance when something is captured.
-- **How (clean UI):** A memory store injected into the system prompt;
-  capture either via an explicit "remember this" or a lightweight
-  extraction pass. Management UI lives in account settings.
+- **Shipped:**
+  - A dedicated **`user_memories`** table (migration `0057_user_memory`)
+    holding durable per-user facts with provenance (`manual` vs
+    `auto`-captured + originating conversation). Owner-scoped CRUD at
+    **`/api/memory`** (list / add / edit / delete / clear-all), capped at
+    200 facts with duplicate detection.
+  - **Injection:** `build_memory_system_prompt` renders saved facts into
+    a system-prompt block (same "background knowledge — don't recite it"
+    framing as the personal-context block), prepended in
+    `_stream_generator`. Zero token overhead for users with no memories.
+  - **Capture:** a cheap regex pre-filter (`should_attempt_capture`)
+    means ordinary Q&A turns cost nothing; when the user states something
+    durable or says "remember…", a bounded headless extraction pass
+    (`capture_memories`, mirrors `enhance.py`) pulls JSON facts, dedupes
+    against existing memory, and persists up to 4 new ones per turn.
+  - **Affordance:** a `memory_saved` SSE event drives a transient
+    "Saved to memory · N facts" chip in the chat window listing exactly
+    what was captured.
+  - **Management UI:** a **Memory** panel in account settings — master
+    on/off switch (`users.settings.memory_enabled`, default on), inline
+    add / edit / delete, auto-captured badges, and a "forget everything"
+    button.
 - **impact: high · effort: med** · Scaffolding: per-chat instructions +
   project system-prompt hydration, account settings.
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Eye, X } from "lucide-react";
+import { ArrowDown, Brain, Eye, X } from "lucide-react";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -336,6 +336,7 @@ export function ChatWindow({
         })}
 
         <VisionWarningBanner />
+        <MemorySavedChip />
 
         {showStreamingBubble && (
           <MessageBubble
@@ -380,6 +381,46 @@ export function ChatWindow({
           Jump to latest
         </button>
       )}
+    </div>
+  );
+}
+
+function MemorySavedChip() {
+  const facts = useChatStore((s) => s.memorySaved);
+  const dismiss = useChatStore((s) => s.dismissMemorySaved);
+
+  if (facts.length === 0) return null;
+
+  return (
+    <div className="mx-4 mt-3">
+      <div
+        className={cn(
+          "flex items-start gap-2 rounded-card border px-3 py-2 text-xs",
+          "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--text)]"
+        )}
+        role="status"
+      >
+        <Brain className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+        <div className="flex-1 leading-snug">
+          <span className="font-medium">
+            Saved to memory
+            {facts.length > 1 ? ` · ${facts.length} facts` : ""}
+          </span>
+          <ul className="mt-1 space-y-0.5 text-[var(--text-muted)]">
+            {facts.map((f, i) => (
+              <li key={`${i}-${f.slice(0, 16)}`}>· {f}</li>
+            ))}
+          </ul>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--accent)]/15 hover:text-[var(--text)]"
+          aria-label="Dismiss"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

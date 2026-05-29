@@ -22,6 +22,10 @@ interface ChatState {
    *  per warning, in the order they arrived. Cleared when the next
    *  stream begins. */
   visionWarnings: string[];
+  /** Facts captured into cross-chat memory during the current stream
+   *  (Phase 6). Drives the transient "saved to memory" affordance.
+   *  Cleared at the start of each new stream. */
+  memorySaved: string[];
   /** Live-tracking of tool calls fired during the current stream. Entries
    *  are appended on ``tool_started`` and updated in place on
    *  ``tool_finished``. Cleared at the start of each new stream because
@@ -81,6 +85,9 @@ interface ChatState {
   addVisionWarning: (message: string) => void;
   dismissVisionWarning: (index: number) => void;
   clearVisionWarnings: () => void;
+  /** Record facts the backend just saved to memory this turn. */
+  setMemorySaved: (facts: string[]) => void;
+  dismissMemorySaved: () => void;
   /** Add a freshly-started tool call. No-op if an entry with the same
    *  id already exists (defensive against duplicate ``tool_started``
    *  events from a flaky proxy). */
@@ -146,6 +153,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingContent: "",
   streamingSources: null,
   visionWarnings: [],
+  memorySaved: [],
   toolInvocations: [],
   visionRelayInvocations: [],
   streamingAttachments: null,
@@ -218,6 +226,8 @@ export const useChatStore = create<ChatState>((set) => ({
       visionWarnings: state.visionWarnings.filter((_, i) => i !== index),
     })),
   clearVisionWarnings: () => set({ visionWarnings: [] }),
+  setMemorySaved: (facts) => set({ memorySaved: facts }),
+  dismissMemorySaved: () => set({ memorySaved: [] }),
   startToolInvocation: (id, name) =>
     set((state) => {
       if (state.toolInvocations.some((t) => t.id === id)) return {};
@@ -278,6 +288,7 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingContent: "",
       streamingSources: null,
       visionWarnings: [],
+      memorySaved: [],
       toolInvocations: [],
       visionRelayInvocations: [],
       streamingAttachments: null,

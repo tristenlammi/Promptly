@@ -29,6 +29,7 @@ from app.files.models import (  # noqa: F401
     FileShareLink,
     UserFile,
 )
+from app.memory.models import UserMemory  # noqa: F401
 from app.mfa.models import (  # noqa: F401
     EmailOtpChallenge,
     MfaBackupCode,
