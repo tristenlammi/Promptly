@@ -213,13 +213,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           results panel above can take the full vertical space. */}
       <div
         className={cn(
-          "mt-1 flex-1 overflow-y-auto px-2 pb-2",
+          "promptly-scroll mt-1 flex-1 overflow-y-auto px-2 pb-2",
           searchActive && "hidden"
         )}
       >
         {pinned.length > 0 && (
           <SectionHeader>
-            <Pin className="h-3 w-3" /> Pinned
+            <Pin className="h-3 w-3 fill-current" /> Pinned
           </SectionHeader>
         )}
         {pinned.map((c) => (
@@ -259,7 +259,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+    <div className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
       {children}
     </div>
   );
@@ -468,6 +468,14 @@ function ConversationRow({
           }}
         >
           {conv.starred && <Star className="h-3 w-3 shrink-0 fill-current text-yellow-500" />}
+          {/* Persistent pinned indicator — a small filled pin glyph in
+              the accent colour. Survives the active-row highlight since
+              the icon colour is independent of the row's text colour.
+              The temporary-chat badge takes precedence in the rare
+              overlap so we don't stack two leading glyphs. */}
+          {conv.pinned && conv.temporary_mode !== "one_hour" && (
+            <Pin className="h-3 w-3 shrink-0 fill-current text-[var(--accent)]" />
+          )}
           {conv.temporary_mode === "one_hour" && (
             <TemporaryCountdownBadge expiresAt={conv.expires_at ?? null} />
           )}

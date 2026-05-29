@@ -950,6 +950,7 @@ class ModelRouter:
         temperature: float = 0.7,
         max_tokens: int | None = 4096,
         usage_out: dict[str, Any] | None = None,
+        reasoning_effort: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Yield content tokens from the provider's streaming endpoint.
 
@@ -957,6 +958,12 @@ class ModelRouter:
         the titler / search distiller / study chat keep their text-only
         contract. New code that needs tool calls or richer events should
         use ``stream_chat_events`` directly.
+
+        ``reasoning_effort`` is forwarded to the DeepSeek thinking knobs
+        (ignored for every other provider, see ``stream_chat_events``).
+        Pass ``"off"`` for short utility calls like title generation so a
+        thinking-capable model doesn't burn the whole budget reasoning
+        about a two-word label.
         """
         async for ev in self.stream_chat_events(
             provider=provider,
@@ -966,6 +973,7 @@ class ModelRouter:
             temperature=temperature,
             max_tokens=max_tokens,
             include_usage=usage_out is not None,
+            reasoning_effort=reasoning_effort,
         ):
             if isinstance(ev, TextDelta):
                 yield ev.text

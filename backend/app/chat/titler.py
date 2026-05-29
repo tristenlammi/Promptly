@@ -59,8 +59,35 @@ def fallback_title(user_message: str) -> str:
     return _truncate_to_fit(first_line)
 
 
+def _strip_think_blocks(raw: str) -> str:
+    """Remove chain-of-thought that leaked into the *content* channel.
+
+    Most reasoning models (DeepSeek-R1, Qwen-QwQ, some Gemini/OpenAI-compat
+    proxies) emit their thinking either on a separate ``reasoning_content``
+    channel (which ``stream_chat`` already drops) or wrapped in
+    ``<think>…</think>`` / ``<thinking>…</thinking>`` tags inside the normal
+    content. When it's the latter, naively taking the first line of output
+    grabs the *reasoning* instead of the title — that's how we ended up
+    with garbage labels like "Du" or "Starting a". Strip those blocks
+    (including an unclosed trailing one, which happens when the token
+    budget runs out mid-thought) before we pick a line."""
+    # Drop complete <think>...</think> / <thinking>...</thinking> blocks.
+    cleaned = re.sub(
+        r"<think(?:ing)?>.*?</think(?:ing)?>",
+        " ",
+        raw,
+        flags=re.I | re.S,
+    )
+    # Drop an unclosed trailing block (budget exhausted before </think>).
+    cleaned = re.sub(r"<think(?:ing)?>.*$", " ", cleaned, flags=re.I | re.S)
+    # Drop a dangling opening/closing tag if only one side survived.
+    cleaned = re.sub(r"</?think(?:ing)?>", " ", cleaned, flags=re.I)
+    return cleaned
+
+
 def _sanitize(raw: str) -> str:
     """Clean up raw LLM output into a single-line title."""
+    raw = _strip_think_blocks(raw)
     # Keep only the first non-empty line — some models like to add a
     # "Title:" prefix or follow with a justification.
     candidate = ""
@@ -114,7 +141,19 @@ async def generate_conversation_title(
             messages=[ChatMessage(role="user", content=prompt)],
             system=_TITLE_SYSTEM_PROMPT,
             temperature=0.3,
-            max_tokens=40,
+            # Generous budget: a title is only a handful of tokens, but
+            # thinking-capable models (the user's Gemini Flash, DeepSeek,
+            # etc.) spend tokens reasoning *before* they emit any visible
+            # content. The old 40-token cap was swallowed entirely by
+            # that reasoning, so the model hit the length limit before
+            # producing a title — yielding an empty string (→ fallback to
+            # the raw user message) or a truncated thought fragment. A
+            # plain model still stops after a few tokens, so this costs
+            # almost nothing in the common case.
+            max_tokens=1024,
+            # And tell DeepSeek-family models to skip thinking outright
+            # for this trivial labelling task (no-op on other providers).
+            reasoning_effort="off",
         ):
             chunks.append(token)
         cleaned = _sanitize("".join(chunks))
