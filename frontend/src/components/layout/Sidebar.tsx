@@ -19,7 +19,6 @@ import { useChatStore } from "@/store/chatStore";
 import {
   useConversationsQuery,
   useDeleteConversation,
-  useShareInvites,
   useUpdateConversation,
 } from "@/hooks/useConversations";
 import { useProjectInvites } from "@/hooks/useChatProjects";
@@ -29,14 +28,13 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
 import { authApi } from "@/api/auth";
 import type { ConversationSummary } from "@/api/types";
-import { Inbox, Users } from "lucide-react";
+import { Inbox } from "lucide-react";
 
 import { ConversationSearchBox } from "./ConversationSearchBox";
 import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
 import { DeleteChatModal } from "./DeleteChatModal";
 import { InstallAppButton } from "./InstallAppButton";
 import { NewChatButton } from "./NewChatButton";
-import { ShareConversationDialog } from "@/components/chat/ShareConversationDialog";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -53,13 +51,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
-  const { data: invites } = useShareInvites();
   const { data: projectInvites } = useProjectInvites();
-  // Pill shows the combined total so the user notices new workspace
-  // invites without having to open the sidebar or remember where
-  // project invites live.
-  const inviteCount =
-    (invites?.length ?? 0) + (projectInvites?.length ?? 0);
+  // Pill shows the count of pending project invites (per-chat sharing
+  // was removed) so the user notices new workspace invites.
+  const inviteCount = projectInvites?.length ?? 0;
 
   // Project-scoped chats live exclusively inside their project's
   // detail page now — surfacing them again in the global sidebar
@@ -381,18 +376,11 @@ function ConversationRow({
   const isActive = activeId === conv.id;
   const title = conv.title?.trim() || "New chat";
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
   // Position is in *viewport* coordinates because the menu is rendered
   // through a portal with ``position: fixed``.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(
     null
   );
-
-  // Sharing mirrors the chat page's old top-nav rule: owner-only and
-  // suppressed for one-hour temporary chats (which can't really be
-  // collaborated on without subverting the auto-delete contract).
-  const canShare =
-    conv.role !== "collaborator" && conv.temporary_mode !== "one_hour";
 
   // Long-press → context menu on touch devices. We can't rely on the
   // browser's native ``contextmenu`` event firing consistently after
@@ -480,50 +468,36 @@ function ConversationRow({
             <TemporaryCountdownBadge expiresAt={conv.expires_at ?? null} />
           )}
           <span className="truncate">{title}</span>
-          {conv.role === "collaborator" && (
-            <span
-              className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[var(--accent)]"
-              title="Shared with you"
-            >
-              <Users className="inline h-2.5 w-2.5" />
-            </span>
-          )}
         </button>
-        {/* Pin / delete are owner-only — collaborators on a shared
-            chat shouldn't be able to mutate state out from under the
-            owner. The backend enforces both, this just hides the
-            affordances cleanly. */}
-        {conv.role !== "collaborator" && (
-          <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } });
-              }}
-              className="rounded p-1 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
-              title={conv.pinned ? "Unpin" : "Pin"}
-              aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
-            >
-              <Pin
-                className={cn(
-                  "h-3 w-3",
-                  conv.pinned ? "fill-current text-[var(--accent)]" : ""
-                )}
-              />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmOpen(true);
-              }}
-              className="rounded p-1 text-red-500 hover:bg-red-500/10"
-              title="Delete"
-              aria-label="Delete conversation"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } });
+            }}
+            className="rounded p-1 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+            title={conv.pinned ? "Unpin" : "Pin"}
+            aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+          >
+            <Pin
+              className={cn(
+                "h-3 w-3",
+                conv.pinned ? "fill-current text-[var(--accent)]" : ""
+              )}
+            />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmOpen(true);
+            }}
+            className="rounded p-1 text-red-500 hover:bg-red-500/10"
+            title="Delete"
+            aria-label="Delete conversation"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
       </div>
 
       <DeleteChatModal
@@ -537,17 +511,7 @@ function ConversationRow({
         <ConversationRowContextMenu
           conversationId={conv.id}
           position={menuPos}
-          canShare={canShare}
-          onShare={() => setShareOpen(true)}
           onClose={() => setMenuPos(null)}
-        />
-      )}
-
-      {canShare && shareOpen && (
-        <ShareConversationDialog
-          open={shareOpen}
-          conversationId={conv.id}
-          onClose={() => setShareOpen(false)}
         />
       )}
     </>

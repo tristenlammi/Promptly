@@ -1,13 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  Check,
-  Download,
-  FileCode,
-  FileText,
-  Loader2,
-  Share2,
-} from "lucide-react";
+import { Check, Download, FileCode, FileText, Loader2 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
 import { cn } from "@/utils/cn";
@@ -22,10 +15,6 @@ interface Position {
 interface Props {
   conversationId: string;
   position: Position;
-  /** Owner-only — when ``false`` the Share row is hidden so non-owner
-   *  collaborators don't see an action that would just 403 anyway. */
-  canShare: boolean;
-  onShare: () => void;
   onClose: () => void;
 }
 
@@ -33,11 +22,10 @@ const MENU_MIN_WIDTH = 240;
 
 /** Floating context menu launched from a sidebar conversation row.
  *
- *  Replaces the dedicated Share + Export buttons that used to live in
- *  the chat top-nav. Those actions weren't frequent enough to earn
- *  permanent header real estate, so we hid them behind a right-click
- *  (or long-press on touch) gesture borrowed from native file
- *  managers.
+ *  Hosts the per-conversation Export actions that used to live in the
+ *  chat top-nav. Those weren't frequent enough to earn permanent
+ *  header real estate, so we hid them behind a right-click (or
+ *  long-press on touch) gesture borrowed from native file managers.
  *
  *  Implementation note: a full-screen ``inset-0`` overlay sits behind
  *  the menu and swallows the next mousedown / contextmenu, which is
@@ -49,8 +37,6 @@ const MENU_MIN_WIDTH = 240;
 export function ConversationRowContextMenu({
   conversationId,
   position,
-  canShare,
-  onShare,
   onClose,
 }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -146,34 +132,6 @@ export function ConversationRowContextMenu({
           "border-[var(--border)] bg-[var(--surface)] py-1 text-sm"
         )}
       >
-        {canShare && (
-          <>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                onShare();
-                onClose();
-              }}
-              className={cn(
-                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
-                "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]"
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
-                  "bg-[var(--accent)]/10 text-[var(--accent)]"
-                )}
-              >
-                <Share2 className="h-3 w-3" />
-              </span>
-              <span className="font-medium">Share…</span>
-            </button>
-            <div className="my-1 border-t border-[var(--border)]" />
-          </>
-        )}
-
         <div
           className={cn(
             "px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide",

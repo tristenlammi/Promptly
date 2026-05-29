@@ -4,10 +4,8 @@ import type {
   ConversationDetail,
   ConversationSearchHit,
   ConversationSummary,
-  InviteRow,
   ReasoningEffort,
   SendMessageResponse,
-  ShareRow,
   TemporaryMode,
   WebSearchMode,
 } from "./types";
@@ -343,43 +341,6 @@ export const chatApi = {
       { message_id: messageId }
     );
     return data;
-  },
-
-  // ---- Phase 4b — sharing ----
-  /** Owner: list every share row on a conversation. */
-  async listShares(conversationId: string): Promise<ShareRow[]> {
-    const { data } = await apiClient.get<ShareRow[]>(
-      `/chat/conversations/${conversationId}/shares`
-    );
-    return data;
-  },
-  /** Owner: invite a user (by username or email) to a conversation. */
-  async createShare(
-    conversationId: string,
-    payload: { username?: string; email?: string }
-  ): Promise<ShareRow> {
-    const { data } = await apiClient.post<ShareRow>(
-      `/chat/conversations/${conversationId}/shares`,
-      payload
-    );
-    return data;
-  },
-  /** Owner revokes a share, or invitee leaves a chat. */
-  async deleteShare(conversationId: string, shareId: string): Promise<void> {
-    await apiClient.delete(
-      `/chat/conversations/${conversationId}/shares/${shareId}`
-    );
-  },
-  /** Invitee: pending invites awaiting accept/decline. */
-  async listInvites(): Promise<InviteRow[]> {
-    const { data } = await apiClient.get<InviteRow[]>("/chat/share-invites");
-    return data;
-  },
-  async acceptInvite(shareId: string): Promise<void> {
-    await apiClient.post(`/chat/share-invites/${shareId}/accept`);
-  },
-  async declineInvite(shareId: string): Promise<void> {
-    await apiClient.post(`/chat/share-invites/${shareId}/decline`);
   },
 };
 

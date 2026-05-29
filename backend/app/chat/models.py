@@ -317,61 +317,12 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
         return f"<Message id={self.id} role={self.role}>"
 
 
-class ConversationShare(UUIDPKMixin, TimestampMixin, Base):
-    """Invite-or-collaboration row for shared conversations.
-
-    One row per (conversation, invitee) pair. ``status`` walks
-    ``pending -> accepted`` (invitee accepted) or
-    ``pending -> declined`` (invitee dismissed). Owners revoking simply
-    delete the row; the unique constraint on ``(conversation_id,
-    invitee_user_id)`` then lets them re-invite later.
-
-    Cost falls naturally on whichever account posts a turn — the chat
-    router records usage against the authenticated sender — so this
-    table only needs to model identity and consent.
-    """
-
-    __tablename__ = "conversation_shares"
-
-    conversation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
-    )
-    inviter_user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    invitee_user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    # ``pending`` | ``accepted`` | ``declined``. Free-text rather than a
-    # Postgres ENUM so we can add states later (``muted``?) without DDL.
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="pending", server_default="pending"
-    )
-    accepted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "conversation_id",
-            "invitee_user_id",
-            name="uq_conversation_shares_conv_invitee",
-        ),
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<ConversationShare id={self.id} conv={self.conversation_id} "
-            f"invitee={self.invitee_user_id} status={self.status!r}>"
-        )
-
-
 class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
     """Invite / membership row for shared chat projects (migration 0031).
 
-    Mirrors ``ConversationShare``'s shape one-for-one — same
-    ``pending → accepted`` / ``pending → declined`` lifecycle, same
-    unique constraint idea, same "delete the row to revoke" policy.
+    Same ``pending → accepted`` / ``pending → declined`` lifecycle, a
+    unique ``(project_id, invitee_user_id)`` constraint, and the same
+    "delete the row to revoke" policy.
 
     Semantically this is a *much bigger grant* than a single-chat
     share, though: accepting a project invite gives the invitee

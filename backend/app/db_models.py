@@ -14,7 +14,6 @@ from app.chat.models import (  # noqa: F401
     ChatProjectFile,
     CompareGroup,
     Conversation,
-    ConversationShare,
     Message,
     ProjectShare,
 )

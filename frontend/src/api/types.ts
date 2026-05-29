@@ -584,29 +584,6 @@ export interface ConversationDetail extends ConversationSummary {
   collaborators?: ConversationParticipant[];
 }
 
-/** Phase 4b — share status as stored on ``conversation_shares.status``. */
-export type ShareStatus = "pending" | "accepted" | "declined";
-
-/** One row in the share-management dialog (owner perspective). */
-export interface ShareRow {
-  id: string;
-  conversation_id: string;
-  invitee: ConversationParticipant;
-  status: ShareStatus;
-  created_at: string;
-  accepted_at: string | null;
-}
-
-/** A pending invitation as seen by the *invitee*. Powers the
- *  invites inbox in the sidebar nav. */
-export interface InviteRow {
-  id: string;
-  conversation_id: string;
-  conversation_title: string | null;
-  inviter: ConversationParticipant;
-  created_at: string;
-}
-
 /** One match from ``GET /chat/conversations/search``. The snippet
  *  contains ``<mark>…</mark>`` runs around the matched terms; the
  *  sidebar renders it via ``dangerouslySetInnerHTML`` after the

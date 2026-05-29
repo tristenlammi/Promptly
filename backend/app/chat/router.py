@@ -42,7 +42,6 @@ from app.chat.models import (
     ChatProjectFile,
     CompareGroup,
     Conversation,
-    ConversationShare,
     Message,
 )
 from app.chat.schemas import (
@@ -178,15 +177,14 @@ async def search_conversations(
     ``<mark>…</mark>`` wrapping is sanitised by the markdown
     renderer's allowlist).
 
-    Only the caller's own conversations are searched today; once
-    Phase 4b lands, this widens to include conversations they
-    collaborate on via ``conversation_shares``.
+    Searches the caller's own conversations plus any chat inside a
+    project shared with them.
     """
     cleaned = _to_websearch_query(q)
     if not cleaned:
         return []
 
-    # Phase 4b — search across owned chats *and* accepted shares.
+    # Search across owned chats *and* project-shared chats.
     # Pre-resolving the id list keeps the FTS query simple and lets
     # Postgres reuse the GIN index without a wider join.
     accessible_ids = await list_accessible_conversation_ids(user, db)
@@ -380,23 +378,12 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ConversationSummary]:
-    """List conversations the caller can read (owned + accepted shares).
+    """List conversations the caller owns.
 
-    Phase 4b widened this to include accepted shares: an outer join
-    against ``conversation_shares`` lets a single ORDER BY drive
-    pagination across both relationship types. The ``role`` column
-    on the response is stamped from whether the share row matched —
-    drives the "Shared" sidebar pill without a follow-up request.
+    Per-chat sharing was removed, so the sidebar list is owned-only.
+    (Chats inside a shared *project* are surfaced under the project
+    view, not the global list.)
     """
-    accepted_share = (
-        select(ConversationShare.conversation_id)
-        .where(
-            ConversationShare.invitee_user_id == user.id,
-            ConversationShare.status == "accepted",
-        )
-        .subquery()
-    )
-
     # Phase Z1 — temporary chat filtering:
     #   * Ephemeral chats are never listed; they're meant to be
     #     unfindable once the user navigates away.
@@ -427,14 +414,7 @@ async def list_conversations(
 
     result = await db.execute(
         select(Conversation)
-        .outerjoin(
-            accepted_share,
-            accepted_share.c.conversation_id == Conversation.id,
-        )
-        .where(
-            (Conversation.user_id == user.id)
-            | (accepted_share.c.conversation_id.is_not(None))
-        )
+        .where(Conversation.user_id == user.id)
         .where(
             (Conversation.temporary_mode.is_(None))
             | (Conversation.temporary_mode == "one_hour")
@@ -451,7 +431,7 @@ async def list_conversations(
     out: list[ConversationSummary] = []
     for c in result.scalars().all():
         summary = ConversationSummary.model_validate(c)
-        summary.role = "owner" if c.user_id == user.id else "collaborator"
+        summary.role = "owner"
         out.append(summary)
     return out
 
@@ -4031,11 +4011,3 @@ async def get_active_stream(
 @router.get("/_ping")
 async def ping() -> dict[str, str]:
     return {"module": "chat", "status": "ready"}
-
-
-# ====================================================================
-# Sharing sub-router (Phase 4b) — mounted at the same /api/chat prefix
-# ====================================================================
-from app.chat.shares import router as _shares_router  # noqa: E402,I001
-
-router.include_router(_shares_router)
