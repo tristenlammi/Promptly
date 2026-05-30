@@ -381,6 +381,12 @@ export const filesApi = {
     return `/api/files/${id}/download`;
   },
 
+  /** Build the URL for a small image thumbnail (315xx JPEG). 415 for
+   *  non-images. Caller attaches auth (fetch as a blob → object URL). */
+  thumbnailUrl(id: string): string {
+    return `/api/files/${id}/thumbnail`;
+  },
+
   // ----------------------------------------------------------------
   // Drive stage 1 — Trash
   // ----------------------------------------------------------------

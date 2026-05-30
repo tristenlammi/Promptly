@@ -6,20 +6,16 @@ import {
   ChevronRight,
   Download,
   Eye,
-  File as FileIcon,
   FileText,
   Folder as FolderClosedIcon,
   FolderInput,
   FolderPlus,
   Home,
-  Image as ImageIcon,
-  Inbox,
   LayoutGrid,
   List as ListIcon,
   MoreVertical,
   Pencil,
   Share2,
-  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -45,8 +41,11 @@ import { documentsApi } from "@/api/documents";
 import {
   downloadAuthed,
   extractError,
+  formatRelativeTime,
   humanSize,
 } from "@/components/files/helpers";
+import { DriveItemIcon } from "@/components/files/DriveItemIcon";
+import { DriveThumb } from "@/components/files/DriveThumb";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -989,7 +988,17 @@ function ContentGrid({
   }
 
   return (
-    <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+    <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+      {/* Column header — gives the list a tabular, drive-like read.
+          Desktop only; the columns themselves are hidden on small
+          screens so the row collapses to name-only. */}
+      <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+        <span className="flex-1">Name</span>
+        <span className="hidden w-28 shrink-0 lg:block">Modified</span>
+        <span className="hidden w-16 shrink-0 text-right sm:block">Size</span>
+        {/* Spacer matching the row's trailing action cluster. */}
+        <span className="w-8 shrink-0" aria-hidden />
+      </div>
       <ul className="divide-y divide-[var(--border)]">
         {folderRows}
         {fileRows}
@@ -1214,10 +1223,15 @@ function FolderRow({
         )}
         <button
           onClick={onOpen}
-          className="flex w-full flex-1 flex-col items-center gap-2 text-center"
+          className="flex w-full flex-1 flex-col gap-2 text-left"
           title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
         >
-          <SystemAwareFolderIcon kind={folder.system_kind} large />
+          <div className="flex aspect-square w-full items-center justify-center rounded-md bg-[var(--bg)]">
+            <DriveItemIcon
+              folder={folder}
+              className="h-12 w-12"
+            />
+          </div>
           <span className="line-clamp-2 w-full break-words text-sm font-medium">
             {folder.name}
           </span>
@@ -1279,7 +1293,7 @@ function FolderRow({
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
         title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
       >
-        <SystemAwareFolderIcon kind={folder.system_kind} />
+        <DriveItemIcon folder={folder} />
         <span className="truncate text-sm font-medium">{folder.name}</span>
         {folder.starred_at && (
           <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
@@ -1295,6 +1309,13 @@ function FolderRow({
           </span>
         )}
       </button>
+
+      {/* Modified column to line up with file rows; folders have no
+          size so that column stays blank. */}
+      <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
+        {folder.updated_at ? formatRelativeTime(folder.updated_at) : ""}
+      </span>
+      <span className="hidden w-16 shrink-0 sm:block" aria-hidden />
 
       {/* Drive stage 5 — peer-to-peer share grants. Sits inline at
           the right edge (just left of the row menu). Owners get a
@@ -1509,10 +1530,13 @@ function FileRow({
         )}
         <button
           onClick={onPreview}
-          className="flex w-full flex-1 flex-col items-center gap-2 text-center"
+          className="flex w-full flex-1 flex-col gap-2 text-left"
           title={file.filename}
         >
-          <FileTypeIcon mime={file.mime_type} large />
+          <DriveThumb
+            file={file}
+            className="aspect-square w-full rounded-md border border-[var(--border)]"
+          />
           <span className="line-clamp-2 w-full break-words text-sm font-medium">
             {file.filename}
           </span>
@@ -1565,19 +1589,23 @@ function FileRow({
         onClick={onPreview}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <FileTypeIcon mime={file.mime_type} />
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 truncate text-sm">
-            <span className="truncate">{file.filename}</span>
-            {file.starred_at && (
-              <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
-            )}
-          </div>
-          <div className="text-xs text-[var(--text-muted)]">
-            {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
-          </div>
-        </div>
+        <DriveItemIcon file={file} />
+        <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+          <span className="truncate">{file.filename}</span>
+          {file.starred_at && (
+            <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
+          )}
+        </span>
       </button>
+
+      {/* Tabular columns — desktop only; on mobile the name carries
+          the row and the metadata is reachable via preview. */}
+      <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
+        {file.updated_at ? formatRelativeTime(file.updated_at) : ""}
+      </span>
+      <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)] sm:block">
+        {humanSize(file.size_bytes)}
+      </span>
 
       <button
         onClick={() => downloadAuthed(file)}
@@ -1659,28 +1687,6 @@ function SelectCheckbox({
   );
 }
 
-function SystemAwareFolderIcon({
-  kind,
-  large = false,
-}: {
-  kind: SystemFolderKind | null;
-  large?: boolean;
-}) {
-  const sz = cn(large ? "h-9 w-9" : "h-5 w-5", "shrink-0 text-[var(--accent)]");
-  switch (kind) {
-    case "chat_uploads":
-      return <Inbox className={sz} />;
-    case "generated_root":
-      return <Sparkles className={sz} />;
-    case "generated_files":
-      return <FileText className={sz} />;
-    case "generated_media":
-      return <ImageIcon className={sz} />;
-    default:
-      return <FolderClosedIcon className={sz} />;
-  }
-}
-
 function systemFolderTooltip(kind: SystemFolderKind): string {
   switch (kind) {
     case "chat_uploads":
@@ -1692,21 +1698,6 @@ function systemFolderTooltip(kind: SystemFolderKind): string {
     case "generated_media":
       return "Generated images, audio, and video.";
   }
-}
-
-function FileTypeIcon({ mime, large = false }: { mime: string; large?: boolean }) {
-  const base = large ? "h-9 w-9" : "h-5 w-5";
-  if (mime.startsWith("image/")) {
-    return <ImageIcon className={cn(base, "shrink-0 text-violet-500")} />;
-  }
-  if (
-    mime.startsWith("text/") ||
-    mime === "application/json" ||
-    mime === "application/xml"
-  ) {
-    return <FileText className={cn(base, "shrink-0 text-sky-500")} />;
-  }
-  return <FileIcon className={cn(base, "shrink-0 text-[var(--text-muted)]")} />;
 }
 
 function ViewToggle({
