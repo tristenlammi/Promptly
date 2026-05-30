@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   filesApi,
   type BrowseResult,
+  type BulkIds,
   type DriveSort,
   type FileScope,
   type FileSearchResponse,
@@ -90,6 +91,39 @@ export function useCreateFolder() {
       parentId: string | null;
     }) => filesApi.createFolder(args.scope, args.name, args.parentId),
     onSuccess: (_data, vars) => invalidate(vars.scope),
+  });
+}
+
+// ---- Bulk multi-select actions ----
+export function useBulkTrash() {
+  const invalidate = useInvalidateFiles();
+  return useMutation({
+    mutationFn: (ids: BulkIds) => filesApi.bulkTrash(ids),
+    onSuccess: () => invalidate(),
+  });
+}
+export function useBulkRestore() {
+  const invalidate = useInvalidateFiles();
+  return useMutation({
+    mutationFn: (ids: BulkIds) => filesApi.bulkRestore(ids),
+    onSuccess: () => invalidate(),
+  });
+}
+export function useBulkMove() {
+  const invalidate = useInvalidateFiles();
+  return useMutation({
+    mutationFn: (
+      args: BulkIds & { target_folder_id?: string | null; move_to_root?: boolean }
+    ) => filesApi.bulkMove(args),
+    onSuccess: () => invalidate(),
+  });
+}
+export function useBulkStar() {
+  const invalidate = useInvalidateFiles();
+  return useMutation({
+    mutationFn: (args: BulkIds & { star: boolean }) =>
+      args.star ? filesApi.bulkStar(args) : filesApi.bulkUnstar(args),
+    onSuccess: () => invalidate(),
   });
 }
 

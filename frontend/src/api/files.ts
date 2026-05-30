@@ -9,6 +9,15 @@ export interface DriveSort {
   dir: DriveSortDir;
 }
 
+export interface BulkIds {
+  file_ids: string[];
+  folder_ids: string[];
+}
+export interface BulkResult {
+  files: number;
+  folders: number;
+}
+
 /** Identifies a folder created and managed by the system (e.g. "Chat
  * Uploads"). Mirrors ``app.files.system_folders.SystemKind`` on the
  * backend; ``null`` for normal user-created folders. */
@@ -433,6 +442,52 @@ export const filesApi = {
   },
   async emptyTrash(scope: FileScope): Promise<void> {
     await apiClient.delete(`/files/trash?scope=${scope}`);
+  },
+
+  // ----------------------------------------------------------------
+  // Bulk operations — one atomic request per multi-select action.
+  // ----------------------------------------------------------------
+  async bulkTrash(ids: BulkIds): Promise<BulkResult> {
+    const { data } = await apiClient.post<BulkResult>("/files/bulk/trash", ids);
+    return data;
+  },
+  async bulkRestore(ids: BulkIds): Promise<BulkResult> {
+    const { data } = await apiClient.post<BulkResult>(
+      "/files/bulk/restore",
+      ids
+    );
+    return data;
+  },
+  async bulkMove(
+    ids: BulkIds & { target_folder_id?: string | null; move_to_root?: boolean }
+  ): Promise<BulkResult> {
+    const { data } = await apiClient.post<BulkResult>("/files/bulk/move", ids);
+    return data;
+  },
+  async bulkStar(ids: BulkIds): Promise<BulkResult> {
+    const { data } = await apiClient.post<BulkResult>("/files/bulk/star", ids);
+    return data;
+  },
+  async bulkUnstar(ids: BulkIds): Promise<BulkResult> {
+    const { data } = await apiClient.post<BulkResult>(
+      "/files/bulk/unstar",
+      ids
+    );
+    return data;
+  },
+  /** Stream a zip of the selection and trigger a browser download. */
+  async bulkZipDownload(ids: BulkIds): Promise<void> {
+    const res = await apiClient.post<Blob>("/files/bulk/zip", ids, {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(res.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "promptly-files.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1500);
   },
 
   // ----------------------------------------------------------------

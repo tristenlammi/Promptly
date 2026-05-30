@@ -50,6 +50,7 @@ import {
   humanSize,
 } from "@/components/files/helpers";
 import { DriveItemIcon } from "@/components/files/DriveItemIcon";
+import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
 import { DriveThumb } from "@/components/files/DriveThumb";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
@@ -58,6 +59,8 @@ import { Modal } from "@/components/shared/Modal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import {
   useBrowseFiles,
+  useBulkStar,
+  useBulkTrash,
   useCreateFolder,
   useMoveFile,
   useMoveFolder,
@@ -274,9 +277,13 @@ export function FilesPage({
   const [selFiles, setSelFiles] = useState<Set<string>>(new Set());
   const [selFolders, setSelFolders] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const bulkTrashFile = useTrashFile();
-  const bulkTrashFolder = useTrashFolder();
+  const bulkTrash = useBulkTrash();
+  const bulkStar = useBulkStar();
   const selectionCount = selFiles.size + selFolders.size;
+  const bulkIds = () => ({
+    file_ids: [...selFiles],
+    folder_ids: [...selFolders],
+  });
 
   useEffect(() => {
     setSelFiles(new Set());
@@ -307,9 +314,7 @@ export function FilesPage({
   }, []);
 
   const handleBulkTrash = useCallback(async () => {
-    const fileIds = [...selFiles];
-    const folderIds = [...selFolders];
-    const count = fileIds.length + folderIds.length;
+    const count = selFiles.size + selFolders.size;
     if (count === 0) return;
     const ok = await confirm({
       title: "Move to trash?",
@@ -320,20 +325,46 @@ export function FilesPage({
     if (!ok) return;
     setBulkBusy(true);
     try {
-      await Promise.all([
-        ...fileIds.map((id) => bulkTrashFile.mutateAsync({ id, scope })),
-        ...folderIds.map((id) => bulkTrashFolder.mutateAsync({ id, scope })),
-      ]);
-      toast.success(
-        `Moved ${count} item${count === 1 ? "" : "s"} to trash`
-      );
+      await bulkTrash.mutateAsync(bulkIds());
+      toast.success(`Moved ${count} item${count === 1 ? "" : "s"} to trash`);
       clearSelection();
     } catch (e) {
       toast.error(extractError(e));
     } finally {
       setBulkBusy(false);
     }
-  }, [selFiles, selFolders, scope, bulkTrashFile, bulkTrashFolder, clearSelection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selFiles, selFolders, bulkTrash, clearSelection]);
+
+  const handleBulkStar = useCallback(
+    async (star: boolean) => {
+      if (selFiles.size + selFolders.size === 0) return;
+      setBulkBusy(true);
+      try {
+        await bulkStar.mutateAsync({ ...bulkIds(), star });
+        clearSelection();
+      } catch (e) {
+        toast.error(extractError(e));
+      } finally {
+        setBulkBusy(false);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [selFiles, selFolders, bulkStar, clearSelection]
+  );
+
+  const handleBulkDownload = useCallback(async () => {
+    if (selFiles.size + selFolders.size === 0) return;
+    setBulkBusy(true);
+    try {
+      await filesApi.bulkZipDownload(bulkIds());
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBulkBusy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selFiles, selFolders]);
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
@@ -530,27 +561,15 @@ export function FilesPage({
             </div>
           )}
 
-          {selectionCount > 0 && (
-            <div className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-3 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-sm">
-              <span className="text-sm font-medium">
-                {selectionCount} selected
-              </span>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={clearSelection}>
-                  Clear
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  loading={bulkBusy}
-                  leftIcon={<Trash2 className="h-3.5 w-3.5" />}
-                  onClick={() => void handleBulkTrash()}
-                >
-                  Move to trash
-                </Button>
-              </div>
-            </div>
-          )}
+          <DriveSelectionBar
+            count={selectionCount}
+            busy={bulkBusy}
+            onClear={clearSelection}
+            onDownload={() => void handleBulkDownload()}
+            onStar={() => void handleBulkStar(true)}
+            onUnstar={() => void handleBulkStar(false)}
+            onTrash={() => void handleBulkTrash()}
+          />
 
           {data && (
             <ContentGrid

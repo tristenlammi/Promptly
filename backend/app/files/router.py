@@ -41,6 +41,8 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete as sa_delete, func, nullslast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1873,6 +1875,259 @@ async def restore_folder(
     await db.commit()
     await db.refresh(folder)
     return _folder_to_response(folder, caller=user)
+
+
+# --------------------------------------------------------------------
+# Bulk operations — one atomic call per multi-select action so the
+# client doesn't have to fan out N requests. Each authorises per item
+# and silently skips anything the caller can't touch (a stale id can't
+# fail the whole batch). Returns how many of each kind were affected.
+# --------------------------------------------------------------------
+class _BulkIds(BaseModel):
+    file_ids: list[uuid.UUID] = Field(default_factory=list)
+    folder_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class _BulkMove(_BulkIds):
+    target_folder_id: uuid.UUID | None = None
+    move_to_root: bool = False
+
+
+class _BulkResult(BaseModel):
+    files: int
+    folders: int
+
+
+async def _bulk_load_file(db, fid, user):
+    try:
+        return await _load_writable_file(db, fid, user)
+    except HTTPException:
+        return None
+
+
+async def _bulk_load_folder(db, did, user):
+    try:
+        return await _load_writable_folder(db, did, user)
+    except HTTPException:
+        return None
+
+
+@router.post("/bulk/trash", response_model=_BulkResult)
+async def bulk_trash(
+    payload: _BulkIds,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> _BulkResult:
+    from sqlalchemy import update
+
+    now = datetime.now(timezone.utc)
+    nf = nd = 0
+    for fid in payload.file_ids:
+        row = await _bulk_load_file(db, fid, user)
+        if row is None:
+            continue
+        row.trashed_at = now
+        nf += 1
+    for did in payload.folder_ids:
+        folder = await _bulk_load_folder(db, did, user)
+        if folder is None or folder.system_kind is not None:
+            continue
+        ids = await _descendant_folder_ids(db, folder.id)
+        await db.execute(
+            update(FileFolder).where(FileFolder.id.in_(ids)).values(trashed_at=now)
+        )
+        await db.execute(
+            update(UserFile)
+            .where(UserFile.folder_id.in_(ids))
+            .values(trashed_at=now)
+        )
+        nd += 1
+    await db.commit()
+    return _BulkResult(files=nf, folders=nd)
+
+
+@router.post("/bulk/restore", response_model=_BulkResult)
+async def bulk_restore(
+    payload: _BulkIds,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> _BulkResult:
+    from sqlalchemy import update
+
+    nf = nd = 0
+    for fid in payload.file_ids:
+        row = await _bulk_load_file(db, fid, user)
+        if row is None:
+            continue
+        row.trashed_at = None
+        nf += 1
+    for did in payload.folder_ids:
+        folder = await _bulk_load_folder(db, did, user)
+        if folder is None:
+            continue
+        ids = await _descendant_folder_ids(db, folder.id)
+        await db.execute(
+            update(FileFolder).where(FileFolder.id.in_(ids)).values(trashed_at=None)
+        )
+        await db.execute(
+            update(UserFile)
+            .where(
+                UserFile.folder_id.in_(ids),
+                UserFile.trashed_at.is_not(None),
+            )
+            .values(trashed_at=None)
+        )
+        nd += 1
+    await db.commit()
+    return _BulkResult(files=nf, folders=nd)
+
+
+@router.post("/bulk/move", response_model=_BulkResult)
+async def bulk_move(
+    payload: _BulkMove,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> _BulkResult:
+    target: FileFolder | None = None
+    if not payload.move_to_root and payload.target_folder_id is not None:
+        target = await _load_writable_folder(db, payload.target_folder_id, user)
+
+    nf = nd = 0
+    for fid in payload.file_ids:
+        row = await _bulk_load_file(db, fid, user)
+        if row is None:
+            continue
+        row.folder_id = target.id if target else None
+        nf += 1
+    for did in payload.folder_ids:
+        folder = await _bulk_load_folder(db, did, user)
+        if folder is None or folder.system_kind is not None:
+            continue
+        if target is not None and (
+            folder.id == target.id
+            or await _would_create_cycle(db, moving=folder, new_parent=target)
+        ):
+            continue  # skip an illegal move rather than fail the batch
+        folder.parent_id = target.id if target else None
+        nd += 1
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A name collision occurred while moving items.",
+        )
+    return _BulkResult(files=nf, folders=nd)
+
+
+@router.post("/bulk/star", response_model=_BulkResult)
+async def bulk_star(
+    payload: _BulkIds,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> _BulkResult:
+    return await _bulk_set_star(db, user, payload, star=True)
+
+
+@router.post("/bulk/unstar", response_model=_BulkResult)
+async def bulk_unstar(
+    payload: _BulkIds,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> _BulkResult:
+    return await _bulk_set_star(db, user, payload, star=False)
+
+
+async def _bulk_set_star(db, user, payload: _BulkIds, star: bool) -> _BulkResult:
+    when = datetime.now(timezone.utc) if star else None
+    nf = nd = 0
+    for fid in payload.file_ids:
+        row = await _bulk_load_file(db, fid, user)
+        if row is None:
+            continue
+        row.starred_at = when
+        nf += 1
+    for did in payload.folder_ids:
+        folder = await _bulk_load_folder(db, did, user)
+        if folder is None:
+            continue
+        folder.starred_at = when
+        nd += 1
+    await db.commit()
+    return _BulkResult(files=nf, folders=nd)
+
+
+@router.post("/bulk/zip")
+async def bulk_zip(
+    payload: _BulkIds,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream a zip of the selected files (and the files under any
+    selected folders, preserving folder names). Skips anything the
+    caller can't read; 400 if the selection resolves to nothing."""
+    import io
+    import zipfile
+
+    # Collect (arcname, absolute_path) pairs, de-duped by arcname.
+    entries: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+
+    def _add(arcname: str, rel_path: str) -> None:
+        ap = absolute_path(rel_path)
+        if not ap.exists():
+            return
+        name = arcname
+        i = 1
+        while name in seen:
+            stem, _, ext = arcname.rpartition(".")
+            name = f"{stem} ({i}).{ext}" if stem else f"{arcname} ({i})"
+            i += 1
+        seen.add(name)
+        entries.append((name, ap))
+
+    for fid in payload.file_ids:
+        row = await _bulk_load_file(db, fid, user)
+        if row is not None and row.trashed_at is None:
+            _add(row.filename, row.storage_path)
+
+    for did in payload.folder_ids:
+        folder = await _bulk_load_folder(db, did, user)
+        if folder is None:
+            continue
+        ids = await _descendant_folder_ids(db, folder.id)
+        files = (
+            await db.execute(
+                select(UserFile).where(
+                    UserFile.folder_id.in_(ids),
+                    UserFile.trashed_at.is_(None),
+                )
+            )
+        ).scalars().all()
+        for f in files:
+            _add(f"{folder.name}/{f.filename}", f.storage_path)
+
+    if not entries:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing to download.",
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for arcname, ap in entries:
+            zf.write(ap, arcname=arcname)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="promptly-files.zip"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/trash", response_model=TrashListResponse)
