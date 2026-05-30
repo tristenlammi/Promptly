@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Check,
   Download,
   Eye,
   Folder as FolderIcon,
@@ -37,7 +38,14 @@ export interface RowActions {
   onDeleteForever?: () => void;
 }
 
-interface DriveFileRowProps {
+interface SelectionProps {
+  /** When provided, the row shows a multi-select checkbox. */
+  selected?: boolean;
+  selectionActive?: boolean;
+  onToggleSelect?: () => void;
+}
+
+interface DriveFileRowProps extends SelectionProps {
   file: FileItem;
   actions: RowActions;
   /** Extra text in the metadata line (breadcrumb / snippet etc). */
@@ -51,6 +59,9 @@ export function DriveFileRow({
   actions,
   extra,
   onClick,
+  selected,
+  selectionActive,
+  onToggleSelect,
 }: DriveFileRowProps) {
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -66,8 +77,18 @@ export function DriveFileRow({
         setCtx({ x: e.clientX, y: e.clientY });
       }}
       onDoubleClick={() => actions.onPreview?.()}
-      className="group flex items-center gap-3 px-3 py-2 transition hover:bg-[var(--hover)]"
+      className={cn(
+        "group flex items-center gap-3 px-3 py-2 transition",
+        selected ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]"
+      )}
     >
+      {onToggleSelect && (
+        <DriveRowCheckbox
+          checked={!!selected}
+          active={!!selectionActive}
+          onToggle={onToggleSelect}
+        />
+      )}
       <button
         onClick={click}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -135,7 +156,7 @@ export function DriveFileRow({
   );
 }
 
-interface DriveFolderRowProps {
+interface DriveFolderRowProps extends SelectionProps {
   folder: FolderItem;
   actions: RowActions;
   onOpen: () => void;
@@ -145,6 +166,9 @@ export function DriveFolderRow({
   folder,
   actions,
   onOpen,
+  selected,
+  selectionActive,
+  onToggleSelect,
 }: DriveFolderRowProps) {
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -157,8 +181,18 @@ export function DriveFolderRow({
         e.preventDefault();
         setCtx({ x: e.clientX, y: e.clientY });
       }}
-      className="group flex items-center gap-3 px-3 py-2 transition hover:bg-[var(--hover)]"
+      className={cn(
+        "group flex items-center gap-3 px-3 py-2 transition",
+        selected ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]"
+      )}
     >
+      {onToggleSelect && (
+        <DriveRowCheckbox
+          checked={!!selected}
+          active={!!selectionActive}
+          onToggle={onToggleSelect}
+        />
+      )}
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -233,6 +267,41 @@ function RowIconButton({
       )}
     >
       {children}
+    </button>
+  );
+}
+
+/** Multi-select checkbox for a Drive row. Hidden until hover / selection
+ *  mode (so the quiet list still reads as a plain table) and always shown
+ *  once checked. */
+function DriveRowCheckbox({
+  checked,
+  active,
+  onToggle,
+}: {
+  checked: boolean;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={checked ? "Deselect item" : "Select item"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
+        checked
+          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+          : "border-[var(--border)] bg-[var(--surface)] text-transparent hover:border-[var(--accent)]/60",
+        !checked && !active && "opacity-0 group-hover:opacity-100"
+      )}
+    >
+      <Check className="h-3.5 w-3.5" />
     </button>
   );
 }

@@ -59,6 +59,7 @@ import { Modal } from "@/components/shared/Modal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import {
   useBrowseFiles,
+  useBulkMove,
   useBulkStar,
   useBulkTrash,
   useCreateFolder,
@@ -277,8 +278,10 @@ export function FilesPage({
   const [selFiles, setSelFiles] = useState<Set<string>>(new Set());
   const [selFolders, setSelFolders] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const bulkTrash = useBulkTrash();
   const bulkStar = useBulkStar();
+  const bulkMove = useBulkMove();
   const selectionCount = selFiles.size + selFolders.size;
   const bulkIds = () => ({
     file_ids: [...selFiles],
@@ -365,6 +368,22 @@ export function FilesPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selFiles, selFolders]);
+
+  const handleBulkMove = useCallback(
+    async (target: string | null) => {
+      const count = selFiles.size + selFolders.size;
+      await bulkMove.mutateAsync({
+        ...bulkIds(),
+        target_folder_id: target,
+        move_to_root: target === null,
+      });
+      toast.success(`Moved ${count} item${count === 1 ? "" : "s"}`);
+      setBulkMoveOpen(false);
+      clearSelection();
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selFiles, selFolders, bulkMove, clearSelection]
+  );
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
@@ -568,6 +587,7 @@ export function FilesPage({
             onDownload={() => void handleBulkDownload()}
             onStar={() => void handleBulkStar(true)}
             onUnstar={() => void handleBulkStar(false)}
+            onMove={writable ? () => setBulkMoveOpen(true) : undefined}
             onTrash={() => void handleBulkTrash()}
           />
 
@@ -631,6 +651,22 @@ export function FilesPage({
             }
             setMoveModal(null);
           }}
+        />
+      )}
+
+      {/* Batch move — reuses the folder picker. ``kind="file"`` so it
+          doesn't try to hide a single source folder; the backend skips
+          any illegal per-item move (e.g. a folder into its own subtree). */}
+      {bulkMoveOpen && (
+        <MoveItemModal
+          open={bulkMoveOpen}
+          scope={scope}
+          kind="file"
+          itemId=""
+          itemName={`${selectionCount} item${selectionCount === 1 ? "" : "s"}`}
+          currentParentId={folderId}
+          onClose={() => setBulkMoveOpen(false)}
+          onSubmit={handleBulkMove}
         />
       )}
 

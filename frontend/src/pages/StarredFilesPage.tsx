@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 
-import { isDocumentFile, type FileItem } from "@/api/files";
+import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import {
@@ -12,18 +12,23 @@ import {
   DriveFileRow,
   DriveFolderRow,
 } from "@/components/files/DriveRows";
+import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
+  useBulkStar,
+  useBulkTrash,
   useStarredFiles,
   useTrashFile,
   useTrashFolder,
   useUnstarFile,
   useUnstarFolder,
 } from "@/hooks/useFiles";
-import { downloadAuthed } from "@/components/files/helpers";
+import { useDriveSelection } from "@/hooks/useDriveSelection";
+import { downloadAuthed, extractError } from "@/components/files/helpers";
+import { toast } from "@/store/toastStore";
 
 // Drive stage 5 — Starred is always "mine". Grantees can preview a
 // shared folder/file but can't star it (stars live on the owner's
@@ -62,6 +67,36 @@ export function StarredFilesPage() {
   const files = useMemo(() => data?.files ?? [], [data]);
   const empty = folders.length === 0 && files.length === 0;
 
+  // Multi-select + bulk actions.
+  const sel = useDriveSelection();
+  const bulkStar = useBulkStar();
+  const bulkTrash = useBulkTrash();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  useEffect(() => {
+    sel.prune(
+      new Set(files.map((f) => f.id)),
+      new Set(folders.map((f) => f.id))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+  const bulkIds = () => ({
+    file_ids: [...sel.files],
+    folder_ids: [...sel.folders],
+  });
+
+  const runBulk = async (fn: () => Promise<unknown>, done?: string) => {
+    setBulkBusy(true);
+    try {
+      await fn();
+      if (done) toast.success(done);
+      sel.clear();
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <>
       <TopNav
@@ -85,6 +120,27 @@ export function StarredFilesPage() {
             />
           )}
 
+          <DriveSelectionBar
+            count={sel.count}
+            busy={bulkBusy}
+            onClear={sel.clear}
+            onDownload={() =>
+              void runBulk(() => filesApi.bulkZipDownload(bulkIds()))
+            }
+            onUnstar={() =>
+              void runBulk(
+                () => bulkStar.mutateAsync({ ...bulkIds(), star: false }),
+                "Unstarred"
+              )
+            }
+            onTrash={() =>
+              void runBulk(
+                () => bulkTrash.mutateAsync(bulkIds()),
+                `Moved ${sel.count} item${sel.count === 1 ? "" : "s"} to trash`
+              )
+            }
+          />
+
           {!empty && (
             <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
               <DriveColumnsHeader />
@@ -93,6 +149,9 @@ export function StarredFilesPage() {
                   <DriveFolderRow
                     key={f.id}
                     folder={f}
+                    selected={sel.isFolderSelected(f.id)}
+                    selectionActive={sel.count > 0}
+                    onToggleSelect={() => sel.toggleFolder(f.id)}
                     onOpen={() => navigate(`/files/folder/${f.id}`)}
                     actions={{
                       onUnstar: () =>
@@ -112,6 +171,9 @@ export function StarredFilesPage() {
                   <DriveFileRow
                     key={f.id}
                     file={f}
+                    selected={sel.isFileSelected(f.id)}
+                    selectionActive={sel.count > 0}
+                    onToggleSelect={() => sel.toggleFile(f.id)}
                     actions={{
                       onPreview: () => openFile(f),
                       onDownload: () => downloadAuthed(f),

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import type { FileItem } from "@/api/files";
@@ -9,12 +9,15 @@ import {
   DriveFileRow,
   DriveFolderRow,
 } from "@/components/files/DriveRows";
+import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { Modal } from "@/components/shared/Modal";
 import {
+  useBulkRestore,
   useDeleteFile,
   useDeleteFolder,
   useEmptyTrash,
@@ -22,7 +25,9 @@ import {
   useRestoreFolder,
   useTrashContents,
 } from "@/hooks/useFiles";
+import { useDriveSelection } from "@/hooks/useDriveSelection";
 import { downloadAuthed, extractError } from "@/components/files/helpers";
+import { toast } from "@/store/toastStore";
 
 // Drive stage 5 — Trash is always "mine". The backend ignores the
 // scope parameter (shared resources belong to their owner's trash,
@@ -42,10 +47,66 @@ export function TrashPage() {
   const restoreFolder = useRestoreFolder();
   const deleteFile = useDeleteFile();
   const deleteFolder = useDeleteFolder();
+  const bulkRestore = useBulkRestore();
 
   const folders = data?.folders ?? [];
   const files = useMemo(() => data?.files ?? [], [data]);
   const empty = folders.length === 0 && files.length === 0;
+
+  // Multi-select + bulk actions.
+  const sel = useDriveSelection();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  useEffect(() => {
+    sel.prune(
+      new Set(files.map((f) => f.id)),
+      new Set(folders.map((f) => f.id))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const handleBulkRestore = async () => {
+    setBulkBusy(true);
+    try {
+      await bulkRestore.mutateAsync({
+        file_ids: [...sel.files],
+        folder_ids: [...sel.folders],
+      });
+      toast.success(`Restored ${sel.count} item${sel.count === 1 ? "" : "s"}`);
+      sel.clear();
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkDeleteForever = async () => {
+    const count = sel.count;
+    const ok = await confirm({
+      title: "Delete forever?",
+      message: `${count} item${count === 1 ? "" : "s"} will be permanently deleted. This can't be undone.`,
+      confirmLabel: "Delete forever",
+      danger: true,
+    });
+    if (!ok) return;
+    setBulkBusy(true);
+    try {
+      await Promise.all([
+        ...[...sel.files].map((id) =>
+          deleteFile.mutateAsync({ id, scope: SCOPE })
+        ),
+        ...[...sel.folders].map((id) =>
+          deleteFolder.mutateAsync({ id, scope: SCOPE })
+        ),
+      ]);
+      toast.success(`Deleted ${count} item${count === 1 ? "" : "s"}`);
+      sel.clear();
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const onEmpty = async () => {
     setEmptyError(null);
@@ -93,6 +154,14 @@ export function TrashPage() {
             />
           )}
 
+          <DriveSelectionBar
+            count={sel.count}
+            busy={bulkBusy}
+            onClear={sel.clear}
+            onRestore={() => void handleBulkRestore()}
+            onDeleteForever={() => void handleBulkDeleteForever()}
+          />
+
           {!empty && (
             <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
               <DriveColumnsHeader />
@@ -101,6 +170,9 @@ export function TrashPage() {
                   <DriveFolderRow
                     key={f.id}
                     folder={f}
+                    selected={sel.isFolderSelected(f.id)}
+                    selectionActive={sel.count > 0}
+                    onToggleSelect={() => sel.toggleFolder(f.id)}
                     onOpen={() => {
                       /* Trashed folders are read-only; clicking
                          restore is the useful action, so ignore
@@ -118,6 +190,9 @@ export function TrashPage() {
                   <DriveFileRow
                     key={f.id}
                     file={f}
+                    selected={sel.isFileSelected(f.id)}
+                    selectionActive={sel.count > 0}
+                    onToggleSelect={() => sel.toggleFile(f.id)}
                     actions={{
                       onPreview: () => setPreview(f),
                       onDownload: () => downloadAuthed(f),
