@@ -7,6 +7,7 @@ import { isDocumentFile, type FileItem } from "@/api/files";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import {
+  DriveColumnsHeader,
   DriveEmptyState,
   DriveFileRow,
   DriveFolderRow,
@@ -85,7 +86,8 @@ export function StarredFilesPage() {
           )}
 
           {!empty && (
-            <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+              <DriveColumnsHeader />
               <ul className="divide-y divide-[var(--border)]">
                 {folders.map((f) => (
                   <DriveFolderRow

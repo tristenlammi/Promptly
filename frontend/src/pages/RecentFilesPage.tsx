@@ -6,7 +6,11 @@ import { Clock } from "lucide-react";
 import { isDocumentFile, type FileItem } from "@/api/files";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
-import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
+import {
+  DriveColumnsHeader,
+  DriveEmptyState,
+  DriveFileRow,
+} from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { TopNav } from "@/components/layout/TopNav";
@@ -70,7 +74,8 @@ export function RecentFilesPage() {
           )}
 
           {files.length > 0 && (
-            <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+              <DriveColumnsHeader />
               <ul className="divide-y divide-[var(--border)]">
                 {files.map((f) => (
                   <DriveFileRow

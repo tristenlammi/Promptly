@@ -6,7 +6,11 @@ import { Search } from "lucide-react";
 import { isDocumentFile, type FileItem } from "@/api/files";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
-import { DriveEmptyState, DriveFileRow } from "@/components/files/DriveRows";
+import {
+  DriveColumnsHeader,
+  DriveEmptyState,
+  DriveFileRow,
+} from "@/components/files/DriveRows";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
@@ -79,7 +83,8 @@ export function SearchResultsPage() {
           )}
 
           {hits.length > 0 && (
-            <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+              <DriveColumnsHeader />
               <ul className="divide-y divide-[var(--border)]">
                 {hits.map((hit) => (
                   <DriveFileRow

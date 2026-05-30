@@ -2,10 +2,7 @@ import { useState } from "react";
 import {
   Download,
   Eye,
-  File as FileIcon,
-  FileText,
   Folder as FolderIcon,
-  Image as ImageIcon,
   MoreVertical,
   Pencil,
   RotateCcw,
@@ -16,6 +13,7 @@ import {
 
 import type { FileItem, FolderItem } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { DriveItemIcon } from "./DriveItemIcon";
 import { GranteesPill } from "./GranteesPill";
 import { cn } from "@/utils/cn";
 
@@ -68,45 +66,42 @@ export function DriveFileRow({
         setCtx({ x: e.clientX, y: e.clientY });
       }}
       onDoubleClick={() => actions.onPreview?.()}
-      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--hover)]"
+      className="group flex items-center gap-3 px-3 py-2 transition hover:bg-[var(--hover)]"
     >
       <button
         onClick={click}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <FileTypeIcon mime={file.mime_type} />
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5 truncate text-sm">
+        <DriveItemIcon file={file} />
+        <span className="flex min-w-0 flex-col">
+          <span className="flex items-center gap-1.5 truncate text-sm">
             <span className="truncate">{file.filename}</span>
             {file.starred_at && (
               <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
             )}
-          </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-muted)]">
-            <span className="truncate">
-              {humanSize(file.size_bytes)} · {file.mime_type || "unknown"}
-              {file.updated_at && ` · ${formatRelativeTime(file.updated_at)}`}
+          </span>
+          {(file.sharing || extra) && (
+            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--text-muted)]">
+              {file.sharing && (
+                <GranteesPill sharing={file.sharing} variant="compact" />
+              )}
+              {extra}
             </span>
-            {file.sharing && (
-              <GranteesPill sharing={file.sharing} variant="compact" />
-            )}
-            {extra}
-          </div>
-        </div>
+          )}
+        </span>
       </button>
+
+      {/* Tabular columns — desktop only, matching the browse view. */}
+      <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
+        {file.updated_at ? formatRelativeTime(file.updated_at) : ""}
+      </span>
+      <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)] sm:block">
+        {humanSize(file.size_bytes)}
+      </span>
 
       {/* Desktop quick-action icons — hover-only so they stay out of
           the visual noise on a dense row. Hidden on mobile because
           there's no hover state to reveal them. */}
-      {actions.onPreview && (
-        <RowIconButton
-          label="Preview"
-          onClick={() => actions.onPreview!()}
-          className="hidden md:inline-flex"
-        >
-          <Eye className="h-4 w-4" />
-        </RowIconButton>
-      )}
       {actions.onDownload && (
         <RowIconButton
           label="Download"
@@ -162,32 +157,34 @@ export function DriveFolderRow({
         e.preventDefault();
         setCtx({ x: e.clientX, y: e.clientY });
       }}
-      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--hover)]"
+      className="group flex items-center gap-3 px-3 py-2 transition hover:bg-[var(--hover)]"
     >
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <FolderIcon className="h-5 w-5 shrink-0 text-[var(--accent)]" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 truncate text-sm font-medium">
+        <DriveItemIcon folder={folder} />
+        <span className="flex min-w-0 flex-col">
+          <span className="flex items-center gap-1.5 truncate text-sm font-medium">
             <span className="truncate">{folder.name}</span>
             {folder.starred_at && (
               <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
             )}
-          </div>
-          {folder.sharing && (
-            <div className="mt-0.5">
-              <GranteesPill sharing={folder.sharing} variant="compact" />
-            </div>
-          )}
-        </div>
-        {folder.updated_at && (
-          <span className="ml-auto hidden shrink-0 text-xs text-[var(--text-muted)] md:block">
-            {formatRelativeTime(folder.updated_at)}
           </span>
-        )}
+          {folder.sharing && (
+            <span className="mt-0.5">
+              <GranteesPill sharing={folder.sharing} variant="compact" />
+            </span>
+          )}
+        </span>
       </button>
+
+      {/* Modified column to line up with file rows; folders have no
+          size so that column stays blank. */}
+      <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
+        {folder.updated_at ? formatRelativeTime(folder.updated_at) : ""}
+      </span>
+      <span className="hidden w-16 shrink-0 sm:block" aria-hidden />
 
       {/* Mobile-always / desktop-hover menu — see DriveFileRow. */}
       {items.length > 1 && (
@@ -306,20 +303,6 @@ function RowMenuButton({
       )}
     </div>
   );
-}
-
-function FileTypeIcon({ mime }: { mime: string }) {
-  if (mime.startsWith("image/")) {
-    return <ImageIcon className="h-5 w-5 shrink-0 text-violet-500" />;
-  }
-  if (
-    mime.startsWith("text/") ||
-    mime === "application/json" ||
-    mime === "application/xml"
-  ) {
-    return <FileText className="h-5 w-5 shrink-0 text-sky-500" />;
-  }
-  return <FileIcon className="h-5 w-5 shrink-0 text-[var(--text-muted)]" />;
 }
 
 function buildFileContextItems(
@@ -473,6 +456,20 @@ function buildFolderContextItems(
     });
   }
   return items;
+}
+
+/** Static column header (Name / Modified / Size) for the secondary Drive
+ *  list views, matching the browse page's tabular look. These views have
+ *  a fixed sort order, so the header is non-interactive. */
+export function DriveColumnsHeader() {
+  return (
+    <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+      <span className="flex-1">Name</span>
+      <span className="hidden w-28 shrink-0 lg:block">Modified</span>
+      <span className="hidden w-16 shrink-0 text-right sm:block">Size</span>
+      <span className="w-8 shrink-0" aria-hidden />
+    </div>
+  );
 }
 
 /** Small shared "Nothing here yet" card used by Drive views. */

@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import type { FileItem } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import {
+  DriveColumnsHeader,
   DriveEmptyState,
   DriveFileRow,
   DriveFolderRow,
@@ -93,7 +94,8 @@ export function TrashPage() {
           )}
 
           {!empty && (
-            <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+            <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+              <DriveColumnsHeader />
               <ul className="divide-y divide-[var(--border)]">
                 {folders.map((f) => (
                   <DriveFolderRow
