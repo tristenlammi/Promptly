@@ -339,12 +339,14 @@ function extractTextFromNode(node: unknown): string {
 // half-typed equation mid-stream (e.g. an unmatched ``$``) from
 // blowing up the whole bubble — KaTeX just renders the raw source in
 // the error colour until the closing delimiter arrives.
-// ``singleDollarTextMath: false`` stops a lone ``$`` from opening inline
-// math, so currency amounts ("$965 billion") render as plain text instead
-// of being parsed as garbled LaTeX. Real math can still use ``$$…$$``.
+// Single-dollar inline math is enabled so the model's ``$x^2$`` /
+// ``$21\text{m}^2$`` style renders properly. Currency ("$5 and $10") is
+// kept safe by ``protectCurrencyDollars`` below, which escapes any
+// single-``$`` span that doesn't contain a LaTeX signal *before* this
+// plugin sees it — so prose dollars never get parsed as garbled math.
 const REMARK_PLUGINS: Options["remarkPlugins"] = [
   remarkGfm,
-  [remarkMath, { singleDollarTextMath: false }],
+  [remarkMath, { singleDollarTextMath: true }],
 ];
 const REHYPE_PLUGINS_WITH_HIGHLIGHT: Options["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false }],
@@ -356,6 +358,32 @@ const REHYPE_PLUGINS_WITH_HIGHLIGHT: Options["rehypePlugins"] = [
 const REHYPE_PLUGINS_NONE: Options["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false }],
 ];
+
+// A single-``$`` span counts as real inline math only when it contains a
+// LaTeX signal: a backslash command, a sup/sub (``^`` / ``_``) or braces.
+const LATEX_SIGNAL = /[\\^_{}]/;
+
+/**
+ * Guard currency / prose against single-dollar math parsing. With
+ * ``singleDollarTextMath`` on, remark-math would pair *every* lone ``$``
+ * ("$5 and $10" → garbled math). We pre-escape the delimiters of any
+ * single-``$`` span that doesn't look like LaTeX, so those render as
+ * literal dollars while genuine inline math ($x^2$, $\text{m}^2$) is left
+ * for KaTeX. Fenced/inline code and ``$$…$$`` display math are split out
+ * first so we never rewrite dollars inside them.
+ */
+function protectCurrencyDollars(markdown: string): string {
+  return markdown
+    .split(/(```[\s\S]*?```|`[^`\n]*`|\$\$[\s\S]*?\$\$)/g)
+    .map((seg, i) => {
+      // Odd indices are the captured code / display-math segments.
+      if (i % 2 === 1) return seg;
+      return seg.replace(/\$([^$\n]*?)\$/g, (whole, inner) =>
+        LATEX_SIGNAL.test(inner) ? whole : "\\$" + inner + "\\$",
+      );
+    })
+    .join("");
+}
 
 /** Code blocks longer than this (in lines) start collapsed so a big
  *  reply with several long snippets doesn't become an endless scroll.
@@ -722,7 +750,10 @@ function MessageBubbleImpl({
   // batching), so keeping these string passes out of the hot render
   // path matters. Only the assistant prose path uses it.
   const processedMarkdown = useMemo(
-    () => rewriteMentionsForMarkdown(stripInlineCitations(content || "")),
+    () =>
+      protectCurrencyDollars(
+        rewriteMentionsForMarkdown(stripInlineCitations(content || "")),
+      ),
     [content],
   );
   // Memoise the rendered markdown *element* on [content, streaming].
