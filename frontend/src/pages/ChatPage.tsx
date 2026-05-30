@@ -19,6 +19,7 @@ import { SummariseToProjectButton } from "@/components/chat/SummariseToProjectBu
 import type { RegenerateOverride } from "@/components/chat/MessageBubble";
 import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
+import { StreamingAnnouncer } from "@/components/chat/StreamingAnnouncer";
 import { InputBar } from "@/components/chat/InputBar";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ConversationInstructionsButton } from "@/components/chat/ConversationInstructionsButton";
@@ -881,6 +882,7 @@ export function ChatPage() {
               onCompact={handleCompact}
             />
           )}
+          <StreamingAnnouncer streaming={isStreaming} />
           {(id || isStreaming) && (hasMessages || isStreaming) ? (
             <ChatWindow
               onEditAndResend={handleEditAndResend}
@@ -899,6 +901,8 @@ export function ChatPage() {
             <div className="flex flex-1 items-center justify-center">
               <EmptyState
                 hasModel={Boolean(selectedModel)}
+                modelName={selectedModel?.display_name ?? null}
+                projectId={conversation?.project_id ?? null}
                 onSuggestion={(s) => handleSend(s)}
               />
             </div>

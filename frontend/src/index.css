@@ -162,6 +162,32 @@ body,
   animation: promptly-toast-in 0.18s ease-out;
 }
 
+/* Skeleton placeholder pulse. Neutralised by the reduced-motion block
+   above. */
+@keyframes promptly-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.promptly-skeleton {
+  animation: promptly-skeleton-pulse 1.5s ease-in-out infinite;
+  background: var(--surface-2);
+}
+
+/* Keyboard-only focus ring. ``:focus-visible`` means pointer users never
+   see it, but keyboard navigators get a clear, consistent accent outline
+   on any control that doesn't define its own focus style. Components that
+   opt out with ``focus:outline-none`` (and usually supply their own ring)
+   keep precedence via class specificity, so this never double-rings. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 body {
   margin: 0;
   font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",

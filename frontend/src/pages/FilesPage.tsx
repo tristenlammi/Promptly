@@ -15,7 +15,6 @@ import {
   Inbox,
   LayoutGrid,
   List as ListIcon,
-  Loader2,
   MoreVertical,
   Pencil,
   Share2,
@@ -50,6 +49,7 @@ import {
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
+import { Skeleton } from "@/components/shared/Skeleton";
 import {
   useBrowseFiles,
   useCreateFolder,
@@ -301,16 +301,35 @@ export function FilesPage({
             </div>
           </div>
 
-          {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-            </div>
-          )}
+          {isLoading &&
+            (viewMode === "grid" ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-3"
+                  >
+                    <Skeleton className="aspect-square w-full" />
+                    <Skeleton className="mt-2 h-3 w-3/4" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-2 py-2">
+                    <Skeleton className="h-8 w-8" />
+                    <Skeleton className="h-3.5 w-1/3" />
+                    <Skeleton className="ml-auto h-3 w-16" />
+                  </div>
+                ))}
+              </div>
+            ))}
 
           {isError && (
             <div
               role="alert"
-              className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400"
+              className="rounded-card border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger)]"
             >
               Failed to load files: {error instanceof Error ? error.message : "Unknown"}
               <Button size="sm" variant="ghost" className="ml-3" onClick={() => refetch()}>

@@ -210,7 +210,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
 
         <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
           {error && (
-            <div className="px-3 py-4 text-xs text-red-600 dark:text-red-400">
+            <div className="px-3 py-4 text-xs text-[var(--danger)]">
               {error}
             </div>
           )}

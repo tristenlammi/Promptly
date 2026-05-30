@@ -938,6 +938,7 @@ function MessageBubbleImpl({
     <div
       id={messageId ? `m-${messageId}` : undefined}
       data-message-id={messageId}
+      aria-busy={streaming || undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={cancelLongPress}
@@ -1033,8 +1034,7 @@ function MessageBubbleImpl({
           <div
             className={cn(
               "mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-xs",
-              "border border-amber-500/30 bg-amber-500/10 text-amber-700",
-              "dark:text-amber-300"
+              "border border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]"
             )}
           >
             <RefreshCw className="h-3.5 w-3.5 shrink-0" />
@@ -1047,8 +1047,7 @@ function MessageBubbleImpl({
                 onClick={() => void onContinue()}
                 className={cn(
                   "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium transition",
-                  "bg-amber-500/20 hover:bg-amber-500/30",
-                  "text-amber-800 dark:text-amber-200"
+                  "bg-[var(--accent)]/15 text-[var(--accent)] hover:bg-[var(--accent)]/25"
                 )}
               >
                 <ArrowDownToLine className="h-3.5 w-3.5" />

@@ -26,6 +26,7 @@ import { useProjectInvites } from "@/hooks/useChatProjects";
 import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
 import { authApi } from "@/api/auth";
 import type { ConversationSummary } from "@/api/types";
@@ -52,7 +53,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Study is desktop/tablet only — the chat/whiteboard split and the
   // interactive exercises are too cramped below the md breakpoint (<768px).
   const isMobile = useIsMobile();
-  useConversationsQuery(); // drives store
+  const { isLoading: convLoading } = useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
   const { data: projectInvites } = useProjectInvites();
@@ -243,7 +244,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           );
         })}
 
-        {personalConversations.length === 0 && (
+        {convLoading && personalConversations.length === 0 && (
+          <ChatListSkeleton />
+        )}
+
+        {!convLoading && personalConversations.length === 0 && (
           <div className="mt-6 px-2 text-xs text-[var(--text-muted)]">
             No personal chats yet. Start a new chat or open a project.
           </div>
@@ -258,6 +263,23 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         onClose={() => setInvitesOpen(false)}
       />
     </aside>
+  );
+}
+
+/** Placeholder list shown while the first conversations load — mocks a
+ *  couple of date-bucketed groups so the sidebar doesn't flash empty. */
+function ChatListSkeleton() {
+  return (
+    <div className="mt-2 space-y-4" aria-hidden>
+      {[4, 3].map((count, gi) => (
+        <div key={gi} className="space-y-1.5">
+          <Skeleton className="ml-2 h-3 w-16" />
+          {Array.from({ length: count }).map((_, i) => (
+            <Skeleton key={i} className="h-7 w-full" />
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

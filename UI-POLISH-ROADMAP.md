@@ -89,21 +89,31 @@ one-offs and keep the UI consistent.
       becomes a horizontal run-selector strip on mobile so the report gets full
       width; vertical rail stays on desktop.
 
-## Phase 4 — First-impression polish *(the first 10 seconds)*
+## Phase 4 — First-impression polish ✅
 
-- [ ] **4.1 Skeleton loaders** — chat list, Files grid, Tasks cards (replace
-      bare spinners). *(med · low-med)*
-- [ ] **4.2 Context-aware empty states** — project name / recent topics + a
-      one-line "what this does". *(med · low)*
-- [ ] **4.3 Soften the truncation banner** — neutral, not alarming amber.
-      *(low · low)*
+- [x] **4.1 Skeleton loaders** — shared `Skeleton` primitive (pulse animation,
+      reduced-motion-safe) used for the chat list (Sidebar), Files grid/list,
+      and Tasks cards, replacing bare spinners / "Loading…" text.
+- [x] **4.2 Context-aware empty states** — the chat empty state now greets with
+      the project name + project-flavoured starters when inside a project,
+      names the active model, and teaches capabilities (attach / web search)
+      in its one-liner.
+- [x] **4.3 Soften the truncation banner** — recoloured from alarming amber to
+      a neutral surface tone; Continue is the accent action.
 
-## Phase 5 — Power-user & accessibility finish *(invisible to casuals)*
+## Phase 5 — Power-user & accessibility finish ✅
 
-- [ ] **5.1 Keyboard nav + shortcut hints** — tab order in action rows,
-      focusable popovers. *(low-med · med)*
-- [ ] **5.2 `aria-live` on streaming + screen-reader pass** *(med · med)*
-- [ ] **5.3 Reduced-motion + contrast audit** *(low · low)*
+- [x] **5.1 Keyboard nav + shortcut hints** — global `:focus-visible` accent
+      ring (keyboard-only; components with their own ring keep precedence).
+      SearchPalette already surfaces ↑↓/⏎/Esc hints; modals trap+restore focus
+      (Phase 1.4).
+- [x] **5.2 `aria-live` on streaming + SR pass** — a visually-hidden polite
+      `StreamingAnnouncer` announces "responding…/response ready" without
+      reading every token; streaming bubbles carry `aria-busy`.
+- [x] **5.3 Reduced-motion + contrast audit** — confirmed the global
+      `prefers-reduced-motion` block neutralises the new toast/skeleton
+      animations; status tokens are background tints / icon colours with
+      acceptable contrast.
 
 ---
 

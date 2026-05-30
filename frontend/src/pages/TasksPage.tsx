@@ -21,6 +21,7 @@ import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
+import { Skeleton } from "@/components/shared/Skeleton";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -68,7 +69,21 @@ export function TasksPage() {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4 py-6">
           {isLoading ? (
-        <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4"
+            >
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="mt-3 h-3 w-1/3" />
+              <div className="mt-4 flex items-center justify-between">
+                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-5 w-16" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : !tasks || tasks.length === 0 ? (
         <EmptyState onCreate={openNew} />
       ) : (
