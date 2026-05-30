@@ -20,6 +20,8 @@ import { tasksApi } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { TaskRunDocument } from "@/components/tasks/TaskRunDocument";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
+import { TopNav } from "@/components/layout/TopNav";
+import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
 
 function fmtDate(iso: string): string {
@@ -116,43 +118,49 @@ export function TaskDetailPage() {
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-4 py-4">
-      {/* Header */}
-      <div className="mb-4 flex items-center gap-3">
-        <button
-          onClick={() => navigate("/tasks")}
-          className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover-strong)]"
-          aria-label="Back to tasks"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold">
-            {task?.title ?? "Task"}
-          </h1>
-          {task && (
-            <p className="text-xs text-[var(--text-muted)]">
-              {task.schedule_label}
-              {!task.enabled && " · Paused"}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={() => setEditOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--hover)]"
-        >
-          <Pencil className="h-3.5 w-3.5" /> Edit
-        </button>
-        <button
-          onClick={() => void onRunNow()}
-          disabled={runTask.isPending}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          <Play className="h-3.5 w-3.5" /> Run now
-        </button>
-      </div>
+    <>
+      <TopNav
+        title={
+          <span className="flex items-center gap-1.5">
+            <button
+              onClick={() => navigate("/tasks")}
+              className="-ml-1 shrink-0 rounded-md p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              aria-label="Back to tasks"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <span className="truncate">{task?.title ?? "Task"}</span>
+          </span>
+        }
+        subtitle={
+          task
+            ? `${task.schedule_label}${!task.enabled ? " · Paused" : ""}`
+            : undefined
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Pencil className="h-3.5 w-3.5" />}
+              onClick={() => setEditOpen(true)}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Play className="h-3.5 w-3.5" />}
+              onClick={() => void onRunNow()}
+              loading={runTask.isPending}
+            >
+              Run now
+            </Button>
+          </>
+        }
+      />
 
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 gap-4 px-4 py-4">
         {/* Run history rail */}
         <aside className="promptly-scroll w-56 shrink-0 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-2">
           <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -217,7 +225,7 @@ export function TaskDetailPage() {
                       className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--hover)]"
                     >
                       {copied ? (
-                        <Check className="h-3.5 w-3.5 text-green-500" />
+                        <Check className="h-3.5 w-3.5 text-[var(--success)]" />
                       ) : (
                         <Copy className="h-3.5 w-3.5" />
                       )}
@@ -232,7 +240,7 @@ export function TaskDetailPage() {
                     <button
                       onClick={() => void onDownloadPdf()}
                       disabled={actionBusy === "pdf"}
-                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-black/[0.04] disabled:opacity-50 dark:hover:bg-white/[0.06]"
+                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--hover)] disabled:opacity-50"
                     >
                       <FileDown className="h-3.5 w-3.5" />
                       {actionBusy === "pdf" ? "Rendering…" : "PDF"}
@@ -263,6 +271,6 @@ export function TaskDetailPage() {
           task={task}
         />
       )}
-    </div>
+    </>
   );
 }

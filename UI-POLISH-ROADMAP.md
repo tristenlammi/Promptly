@@ -59,14 +59,19 @@ one-offs and keep the UI consistent.
       new shared `usePopoverDismiss` hook consolidates the outside-click +
       Escape contract (pairs with `usePopoverFlip`). *(med · med)*
 
-## Phase 2 — Consistent app shell
+## Phase 2 — Consistent app shell ✅
 
-- [ ] **2.1 Shared `TopNav` on Tasks + Account** — retire the two bespoke
-      headers. *(med · low)*
-- [ ] **2.2 Account settings nav** — sticky section rail / tabs instead of a
-      7-panel scroll. *(med · low-med)*
-- [ ] **2.3 Header / spacing / card audit** — one card + section pattern
-      across all pages. *(low-med · low)*
+- [x] **2.1 Shared `TopNav` on Tasks + Account** — retired the bespoke headers.
+      Bonus: this restored the **mobile nav hamburger**, which those pages
+      were missing entirely (AppLayout expects each page's TopNav to host it).
+- [x] **2.2 Account settings nav** — section rail (sticky vertical on desktop,
+      scrollable chip strip on mobile) with IntersectionObserver scroll-spy +
+      smooth-scroll jump, over 7 grouped sections.
+- [x] **2.3 Header / spacing / card audit** — also moved **TaskDetailPage** and
+      **CompareArchivePage** onto `TopNav` (both were bespoke + missing the
+      mobile hamburger); tokenised stray `text-green-500`/`text-red-500` and a
+      missed hover pair. *(ComparePage's live multi-column surface keeps its
+      own full-screen header by design.)*
 
 ## Phase 3 — Mobile structural fix + discoverability *(the casual surface)*
 

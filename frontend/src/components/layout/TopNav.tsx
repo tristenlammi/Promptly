@@ -43,7 +43,7 @@ export function TopNav({ title, subtitle, actions, className }: TopNavProps) {
             className={cn(
               "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
               "text-[var(--text-muted)] transition",
-              "hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+              "hover:bg-[var(--hover)] hover:text-[var(--text)]"
             )}
           >
             <Menu className="h-5 w-5" />

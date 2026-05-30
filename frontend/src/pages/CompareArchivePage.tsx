@@ -8,6 +8,7 @@ import {
   type CompareArchiveFilter,
   type CompareGroupSummary,
 } from "@/api/compare";
+import { TopNav } from "@/components/layout/TopNav";
 import { cn } from "@/utils/cn";
 
 /**
@@ -39,30 +40,23 @@ export function CompareArchivePage() {
   }, [data]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
-      <header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
-        <button
-          type="button"
-          onClick={() => navigate("/chat")}
-          className="inline-flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to chat
-        </button>
-        <h1 className="flex items-center gap-2 text-lg font-semibold text-[var(--text)]">
-          <Split className="h-4 w-4" />
-          Compares
-        </h1>
-        <div className="ml-auto flex items-center gap-2">
-          <FilterPill value="all" current={filter} onChange={setFilter}>
-            All
-          </FilterPill>
-          <FilterPill value="active" current={filter} onChange={setFilter}>
-            Active
-          </FilterPill>
-          <FilterPill value="archived" current={filter} onChange={setFilter}>
-            Archived
-          </FilterPill>
+    <>
+      <TopNav
+        title={
+          <span className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => navigate("/chat")}
+              className="-ml-1 shrink-0 rounded-md p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              aria-label="Back to chat"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <Split className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+            <span className="truncate">Compares</span>
+          </span>
+        }
+        actions={
           <Link
             to="/chat/compare/new"
             className={cn(
@@ -73,16 +67,32 @@ export function CompareArchivePage() {
             <Plus className="h-3 w-3" />
             New compare
           </Link>
-        </div>
-      </header>
+        }
+      />
 
-      <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-5">
-        {isLoading && (
-          <div className="text-sm text-[var(--text-muted)]">Loading…</div>
-        )}
-        {isError && (
-          <div className="text-sm text-red-500">Couldn't load compares.</div>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-4xl px-4 py-5">
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            <FilterPill value="all" current={filter} onChange={setFilter}>
+              All
+            </FilterPill>
+            <FilterPill value="active" current={filter} onChange={setFilter}>
+              Active
+            </FilterPill>
+            <FilterPill value="archived" current={filter} onChange={setFilter}>
+              Archived
+            </FilterPill>
+          </div>
+
+          <div className="space-y-6">
+            {isLoading && (
+              <div className="text-sm text-[var(--text-muted)]">Loading…</div>
+            )}
+            {isError && (
+              <div className="text-sm text-[var(--danger)]">
+                Couldn't load compares.
+              </div>
+            )}
 
         {!isLoading && !isError && data.length === 0 && (
           <EmptyState />
@@ -102,15 +112,17 @@ export function CompareArchivePage() {
             ))}
           </Section>
         )}
-        {grouped.archived.length > 0 && (
-          <Section title="Archived">
-            {grouped.archived.map((g) => (
-              <GroupRow key={g.id} group={g} />
-            ))}
-          </Section>
-        )}
+            {grouped.archived.length > 0 && (
+              <Section title="Archived">
+                {grouped.archived.map((g) => (
+                  <GroupRow key={g.id} group={g} />
+                ))}
+              </Section>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

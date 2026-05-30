@@ -19,6 +19,8 @@ import {
 import type { Task } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
+import { TopNav } from "@/components/layout/TopNav";
+import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -49,26 +51,23 @@ export function TasksPage() {
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4 py-6">
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <CalendarClock className="h-5 w-5 text-[var(--accent)]" />
-            Tasks
-          </h1>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Scheduled prompts that produce a fresh report on their own.
-          </p>
-        </div>
-        <button
-          onClick={openNew}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white"
-        >
-          <Plus className="h-4 w-4" /> New task
-        </button>
-      </div>
-
-      {isLoading ? (
+    <>
+      <TopNav
+        title="Tasks"
+        subtitle="Scheduled prompts that produce a fresh report on their own"
+        actions={
+          <Button
+            variant="primary"
+            leftIcon={<Plus className="h-4 w-4" />}
+            onClick={openNew}
+          >
+            New task
+          </Button>
+        }
+      />
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4 py-6">
+          {isLoading ? (
         <div className="text-sm text-[var(--text-muted)]">Loading…</div>
       ) : !tasks || tasks.length === 0 ? (
         <EmptyState onCreate={openNew} />
@@ -193,15 +192,17 @@ export function TasksPage() {
         </div>
       )}
 
-      <TaskFormModal
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        task={editing}
-        onSaved={(t) => {
-          if (!editing) navigate(`/tasks/${t.id}`);
-        }}
-      />
-    </div>
+          <TaskFormModal
+            open={formOpen}
+            onClose={() => setFormOpen(false)}
+            task={editing}
+            onSaved={(t) => {
+              if (!editing) navigate(`/tasks/${t.id}`);
+            }}
+          />
+        </div>
+      </div>
+    </>
   );
 }
 
