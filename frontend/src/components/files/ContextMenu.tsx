@@ -86,7 +86,7 @@ export function ContextMenu({ open, x, y, onClose, items }: ContextMenuProps) {
                 ? "cursor-not-allowed text-[var(--text-muted)] opacity-60"
                 : it.destructive
                   ? "text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                  : "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                  : "hover:bg-[var(--hover)]"
             )}
           >
             {it.icon && <span className="shrink-0">{it.icon}</span>}

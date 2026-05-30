@@ -132,7 +132,7 @@ export function EditableTitle({
       className={cn(
         "group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-0.5 -ml-2",
         "text-sm font-semibold tracking-tight text-[var(--text)]",
-        "transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+        "transition hover:bg-[var(--hover)]",
         "focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]",
         "disabled:cursor-wait disabled:opacity-70",
         className

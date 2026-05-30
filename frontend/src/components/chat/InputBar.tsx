@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ArrowUp,
+  Brain,
   Check,
   Eye,
   File as FileIcon,
@@ -16,6 +17,7 @@ import {
   Loader2,
   Mic,
   Paperclip,
+  SlidersHorizontal,
   Sparkles,
   Square,
   Upload,
@@ -44,7 +46,10 @@ import {
   SlashCommandAutocomplete,
   type SlashPickState,
 } from "./SlashCommandAutocomplete";
-import { ReasoningEffortToggle } from "./ReasoningEffortToggle";
+import {
+  EFFORT_META,
+  EFFORT_ORDER,
+} from "./ReasoningEffortToggle";
 import { ToolsToggle } from "./ToolsToggle";
 import { WebSearchToggle } from "./WebSearchToggle";
 
@@ -800,7 +805,7 @@ export function InputBar({
               </span>
               <button
                 onClick={dismissEnhance}
-                className="shrink-0 rounded p-0.5 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                className="shrink-0 rounded p-0.5 hover:bg-[var(--hover-strong)]"
                 aria-label="Dismiss"
               >
                 <X className="h-3 w-3" />
@@ -830,7 +835,7 @@ export function InputBar({
                 </button>
                 <button
                   onClick={dismissEnhance}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] hover:bg-[var(--hover)]"
                 >
                   Keep mine
                 </button>
@@ -893,13 +898,6 @@ export function InputBar({
                   disabled={disabled || streaming}
                 />
               )}
-              {onReasoningEffortChange && (
-                <ReasoningEffortToggle
-                  effort={reasoningEffort}
-                  onChange={onReasoningEffortChange}
-                  disabled={disabled || streaming}
-                />
-              )}
               {onToolsChange && (
                 <ToolsToggle
                   enabled={toolsEnabled}
@@ -945,39 +943,19 @@ export function InputBar({
                   )}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => void handleEnhance()}
-                disabled={
+              <ComposerMoreMenu
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={onReasoningEffortChange}
+                onEnhance={() => void handleEnhance()}
+                enhanceLoading={enhanceStatus === "loading"}
+                enhanceDisabled={
                   disabled ||
                   streaming ||
                   value.trim().length === 0 ||
                   enhanceStatus === "loading"
                 }
-                className={cn(
-                  "inline-flex items-center rounded-full border transition",
-                  "border-[var(--border)] text-[var(--text-muted)]",
-                  "hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                  isMobile
-                    ? "h-9 w-9 justify-center"
-                    : "h-8 gap-1.5 px-2.5 text-xs"
-                )}
-                aria-label="Enhance prompt"
-                title="Enhance prompt — rewrite it for a better answer"
-              >
-                {enhanceStatus === "loading" ? (
-                  <Loader2
-                    className={cn(
-                      isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
-                      "animate-spin"
-                    )}
-                  />
-                ) : (
-                  <Sparkles className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
-                )}
-                {!isMobile && <span className="font-medium">Enhance</span>}
-              </button>
+                disabled={disabled || streaming}
+              />
             </div>
             {streaming ? (
               <button
@@ -1058,6 +1036,177 @@ export function InputBar({
             setPickerOpen(false);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Composer "More" menu — keeps the action row uncluttered for casual
+// users by tucking the lower-frequency controls (reasoning effort,
+// enhance-prompt) behind a single ⋯-style affordance. Power users get
+// everything one tap deeper. The reasoning options render *inline*
+// here rather than nesting the standalone ReasoningEffortToggle's own
+// popover (which would clip), reusing its shared EFFORT_META/ORDER.
+// Opens upward like the other composer popovers.
+// ----------------------------------------------------------------
+function ComposerMoreMenu({
+  reasoningEffort,
+  onReasoningEffortChange,
+  onEnhance,
+  enhanceLoading,
+  enhanceDisabled,
+  disabled,
+}: {
+  reasoningEffort: ReasoningEffort | null;
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
+  onEnhance: () => void;
+  enhanceLoading: boolean;
+  enhanceDisabled: boolean;
+  disabled?: boolean;
+}) {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent | TouchEvent) => {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("touchstart", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("touchstart", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // `null` means "provider default"; show DeepSeek's own default
+  // (medium) as the checked row rather than an empty selection.
+  const displayEffort: ReasoningEffort = reasoningEffort ?? "medium";
+  // Light the trigger up when a non-default reasoning level is engaged,
+  // so the curated bar still signals that a power option is active.
+  const reasoningActive =
+    !!onReasoningEffortChange &&
+    reasoningEffort !== null &&
+    reasoningEffort !== "off";
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More options"
+        title="More — reasoning effort, enhance prompt"
+        className={cn(
+          "inline-flex items-center rounded-full border transition",
+          "disabled:cursor-not-allowed disabled:opacity-40",
+          isMobile ? "h-9 w-9 justify-center" : "h-8 gap-1.5 px-2.5 text-xs",
+          open || reasoningActive
+            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+            : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
+        )}
+      >
+        <SlidersHorizontal className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+        {!isMobile && <span className="font-medium">More</span>}
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className={cn(
+            "absolute bottom-full left-0 z-30 mb-2 w-64 origin-bottom-left",
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-lg",
+            "p-1 text-sm"
+          )}
+        >
+          {onReasoningEffortChange && (
+            <>
+              <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                <Brain className="h-3 w-3" />
+                Reasoning effort
+              </div>
+              {EFFORT_ORDER.map((value) => {
+                const m = EFFORT_META[value];
+                const selected = value === displayEffort;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    onClick={() => onReasoningEffortChange(value)}
+                    title={m.description}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition",
+                      "hover:bg-[var(--accent)]/[0.08]",
+                      selected && "bg-[var(--accent)]/[0.06]"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex h-4 w-4 shrink-0 items-center justify-center",
+                        selected ? "text-[var(--accent)]" : "text-transparent"
+                      )}
+                      aria-hidden
+                    >
+                      <Check className="h-4 w-4" />
+                    </span>
+                    <span
+                      className={cn(
+                        "text-sm font-medium",
+                        selected ? "text-[var(--accent)]" : "text-[var(--text)]"
+                      )}
+                    >
+                      {m.label}
+                    </span>
+                  </button>
+                );
+              })}
+              <div className="my-1 border-t border-[var(--border)]" />
+            </>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onEnhance();
+            }}
+            disabled={enhanceDisabled}
+            title="Enhance prompt — rewrite it for a better answer"
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition",
+              "hover:bg-[var(--accent)]/[0.08]",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+            )}
+          >
+            {enhanceLoading ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
+            ) : (
+              <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--text)]">
+                Enhance prompt
+              </span>
+              <span className="block text-xs leading-snug text-[var(--text-muted)]">
+                Rewrite your draft for a sharper answer.
+              </span>
+            </span>
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1163,7 +1312,7 @@ function PendingChip({
       <span className="truncate">{pending.filename}</span>
       <button
         onClick={onRemove}
-        className="ml-0.5 rounded-full p-0.5 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+        className="ml-0.5 rounded-full p-0.5 hover:bg-[var(--hover-strong)]"
         aria-label={`Remove ${pending.filename}`}
         title="Remove"
       >

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import {
   useDeleteLocalModel,
   useHardwareProbe,
@@ -79,14 +80,14 @@ export function LocalModelsPanel() {
                 key={m.name}
                 model={m}
                 deleting={del.isPending}
-                onDelete={() => {
-                  if (
-                    !window.confirm(
-                      `Delete ${m.name}? This frees disk space but users of custom models using it will lose the backend.`
-                    )
-                  )
-                    return;
-                  del.mutate(m.name);
+                onDelete={async () => {
+                  const ok = await confirm({
+                    title: "Delete local model",
+                    message: `Delete ${m.name}? This frees disk space but users of custom models using it will lose the backend.`,
+                    confirmLabel: "Delete",
+                    danger: true,
+                  });
+                  if (ok) del.mutate(m.name);
                 }}
               />
             ))}

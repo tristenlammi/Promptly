@@ -164,7 +164,7 @@ export function MyFilesPicker({
               key={d.id}
               type="button"
               onClick={() => setFolderId(d.id)}
-              className="flex w-full items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-sm hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+              className="flex w-full items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
             >
               <Folder className="h-4 w-4 text-[var(--text-muted)]" />
               <span className="flex-1 truncate">{d.name}</span>
@@ -177,7 +177,7 @@ export function MyFilesPicker({
             return (
               <label
                 key={f.id}
-                className="flex w-full cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-sm hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+                className="flex w-full cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
               >
                 <input
                   type="checkbox"

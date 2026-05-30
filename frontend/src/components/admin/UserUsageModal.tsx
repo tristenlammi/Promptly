@@ -42,7 +42,7 @@ export function UserUsageModal({ open, user, onClose }: UserUsageModalProps) {
           className={cn(
             "inline-flex items-center justify-center rounded-input border px-3.5 py-1.5 text-sm",
             "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-            "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            "hover:bg-[var(--hover)]"
           )}
         >
           Close

@@ -48,7 +48,7 @@ export function ThemeToggle() {
               "inline-flex h-7 w-7 items-center justify-center rounded-full transition",
               active
                 ? "bg-[var(--accent)] text-white"
-                : "text-[var(--text-muted)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
             )}
           >
             <Icon className="h-3.5 w-3.5" />

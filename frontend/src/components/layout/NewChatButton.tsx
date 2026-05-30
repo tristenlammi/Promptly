@@ -201,7 +201,7 @@ function PopoverItem({
       role="menuitem"
       className={cn(
         "flex w-full items-start gap-3 px-3 py-2.5 text-left transition",
-        "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+        "hover:bg-[var(--hover)]"
       )}
     >
       <span className="mt-0.5 text-[var(--accent)]">{icon}</span>

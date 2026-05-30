@@ -430,7 +430,7 @@ function FolderRowCompact({
     <li>
       <button
         onClick={onOpen}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-[var(--hover)]"
       >
         <FolderIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" />
         <span className="flex-1 truncate">{folder.name}</span>
@@ -460,7 +460,7 @@ function FileRowCompact({
           "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition",
           disabled
             ? "cursor-not-allowed opacity-60"
-            : "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
+            : "hover:bg-[var(--hover)]",
           selected && "bg-[var(--accent)]/10"
         )}
       >

@@ -133,7 +133,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
           className={cn(
             "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
             "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-            "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+            "hover:bg-[var(--hover)]"
           )}
         >
           {/* Tiny vision dot in the top-right corner so power users
@@ -155,7 +155,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
           className={cn(
             "inline-flex items-center gap-1.5 rounded-input border px-3 py-1.5 text-xs",
             "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-            "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+            "hover:bg-[var(--hover)]"
           )}
           aria-haspopup="listbox"
           aria-expanded={open}
@@ -202,7 +202,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
                     }}
                     className={cn(
                       "flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition",
-                      "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+                      "hover:bg-[var(--hover)]",
                       active && "bg-[var(--accent)]/10"
                     )}
                   >

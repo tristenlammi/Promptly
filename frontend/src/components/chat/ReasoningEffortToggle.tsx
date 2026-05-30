@@ -31,7 +31,7 @@ interface EffortMeta {
 //   * "medium" -> thinking enabled, medium effort (DeepSeek's own default)
 //   * "high"   -> thinking enabled, high effort (deepest reasoning, slowest)
 // The mapping lives on the server in `provider.py::stream_chat_events`.
-const EFFORT_META: Record<ReasoningEffort, EffortMeta> = {
+export const EFFORT_META: Record<ReasoningEffort, EffortMeta> = {
   off: {
     label: "Off",
     description: "Skip the thinking trace. Fastest replies, no reasoning tax.",
@@ -50,7 +50,7 @@ const EFFORT_META: Record<ReasoningEffort, EffortMeta> = {
   },
 };
 
-const EFFORT_ORDER: ReasoningEffort[] = ["off", "low", "medium", "high"];
+export const EFFORT_ORDER: ReasoningEffort[] = ["off", "low", "medium", "high"];
 
 export function ReasoningEffortToggle({
   effort,

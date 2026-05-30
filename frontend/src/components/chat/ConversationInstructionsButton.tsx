@@ -77,7 +77,7 @@ export function ConversationInstructionsButton({
         className={cn(
           "relative inline-flex items-center gap-1.5 rounded-input border text-xs",
           "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-          "hover:bg-black/[0.03] dark:hover:bg-white/[0.04]",
+          "hover:bg-[var(--hover)]",
           compact ? "h-9 w-9 justify-center" : "px-3 py-1.5"
         )}
       >

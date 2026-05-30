@@ -118,14 +118,14 @@ export class ErrorBoundary extends Component<
             <button
               type="button"
               onClick={this.hardReload}
-              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-3 text-sm font-medium transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-3 text-sm font-medium transition hover:bg-[var(--hover)]"
             >
               Reload page
             </button>
             <button
               type="button"
               onClick={this.copyStack}
-              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-3 text-sm font-medium transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-3 text-sm font-medium transition hover:bg-[var(--hover)]"
             >
               Copy details
             </button>

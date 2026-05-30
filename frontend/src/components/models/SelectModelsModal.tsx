@@ -195,7 +195,7 @@ export function SelectModelsModal({
                       className={cn(
                         "flex w-full items-center gap-3 px-3 py-2 text-left transition",
                         "border-b border-[var(--border)] last:border-b-0",
-                        "hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+                        "hover:bg-[var(--hover)]"
                       )}
                     >
                       <span

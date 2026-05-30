@@ -393,7 +393,7 @@ export function UserFormModal({
                             "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs transition",
                             checked
                               ? "bg-[var(--accent)]/10"
-                              : "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                              : "hover:bg-[var(--hover)]"
                           )}
                         >
                           <input
@@ -510,7 +510,7 @@ function RoleOption({
         "flex flex-1 flex-col gap-1 rounded-card border px-3 py-2.5 text-left transition",
         active
           ? "border-[var(--accent)]/60 bg-[var(--accent)]/10"
-          : "border-[var(--border)] hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+          : "border-[var(--border)] hover:bg-[var(--hover)]"
       )}
     >
       <div className="flex items-center gap-2 text-sm font-semibold">
@@ -541,7 +541,7 @@ function AccessOption({
         "flex flex-1 flex-col gap-0.5 rounded-card border px-3 py-2 text-left transition",
         active
           ? "border-[var(--accent)]/60 bg-[var(--accent)]/10"
-          : "border-[var(--border)] hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+          : "border-[var(--border)] hover:bg-[var(--hover)]"
       )}
     >
       <span className="text-xs font-semibold">{title}</span>

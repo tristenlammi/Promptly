@@ -19,6 +19,8 @@ import {
 import type { Task } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
+import { confirm } from "@/components/shared/ConfirmDialog";
+import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 export function TasksPage() {
@@ -90,7 +92,7 @@ export function TasksPage() {
                       e.stopPropagation();
                       setMenuFor(menuFor === task.id ? null : task.id);
                     }}
-                    className="rounded p-1 text-[var(--text-muted)] hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+                    className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover-strong)]"
                     aria-label="Task actions"
                   >
                     <MoreVertical className="h-4 w-4" />
@@ -102,18 +104,30 @@ export function TasksPage() {
                     >
                       <button
                         onClick={() => openEdit(task)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
                       >
                         <Pencil className="h-3.5 w-3.5" /> Edit
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete "${task.title}" and its runs?`)) {
-                            remove.mutate(task.id);
-                          }
+                        onClick={async () => {
                           setMenuFor(null);
+                          const ok = await confirm({
+                            title: "Delete task",
+                            message: `Delete "${task.title}" and its runs? This can't be undone.`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          try {
+                            await remove.mutateAsync(task.id);
+                            toast.success("Task deleted");
+                          } catch {
+                            toast.error(
+                              "Couldn't delete the task. Please try again."
+                            );
+                          }
                         }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-500 hover:bg-red-500/10"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                       >
                         <Trash2 className="h-3.5 w-3.5" /> Delete
                       </button>
@@ -159,7 +173,7 @@ export function TasksPage() {
                         input: { enabled: !task.enabled },
                       });
                     }}
-                    className="rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+                    className="rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover-strong)]"
                   >
                     {task.enabled ? "Pause" : "Resume"}
                   </button>

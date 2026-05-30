@@ -1,8 +1,17 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { cn } from "@/utils/cn";
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 interface ModalProps {
   open: boolean;
@@ -23,11 +32,38 @@ export function Modal({
   footer,
   widthClass = "max-w-lg",
 }: ModalProps) {
-  // Close on Escape.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on Escape + trap Tab focus inside the dialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusable = Array.from(
+        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) {
+        e.preventDefault();
+        root.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      // Wrap around at the ends so focus never escapes the dialog.
+      if (e.shiftKey && (active === first || !root.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -40,6 +76,28 @@ export function Modal({
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  // Move focus into the dialog on open; restore it to the previously
+  // focused element on close (so keyboard users aren't dumped at the
+  // top of the page).
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    // Defer to next frame so the portal content is mounted first.
+    const raf = requestAnimationFrame(() => {
+      const root = dialogRef.current;
+      if (!root) return;
+      const target =
+        root.querySelector<HTMLElement>("[autofocus]") ??
+        root.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ??
+        root;
+      target.focus();
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      previouslyFocused?.focus?.();
     };
   }, [open]);
 
@@ -58,8 +116,10 @@ export function Modal({
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
       />
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className={cn(
-          "relative w-full overflow-hidden rounded-card border shadow-xl",
+          "relative w-full overflow-hidden rounded-card border shadow-xl outline-none",
           "bg-[var(--surface)] text-[var(--text)]",
           "border-[var(--border)]",
           widthClass
@@ -80,7 +140,7 @@ export function Modal({
           <button
             aria-label="Close"
             onClick={onClose}
-            className="rounded-md p-1 text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+            className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
           >
             <X className="h-4 w-4" />
           </button>

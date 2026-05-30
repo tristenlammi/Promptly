@@ -4,6 +4,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
 import { AdminPage } from "@/pages/AdminPage";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ToastViewport } from "@/components/shared/ToastViewport";
+import { ConfirmHost } from "@/components/shared/ConfirmDialog";
 import { ChatPage } from "@/pages/ChatPage";
 import { ComparePage } from "@/pages/ComparePage";
 import { CompareArchivePage } from "@/pages/CompareArchivePage";
@@ -187,6 +189,7 @@ export default function App() {
   }
 
   return (
+    <>
     <Routes>
       <Route path="/login" element={<Navigate to="/chat" replace />} />
       <Route path="/setup" element={<Navigate to="/chat" replace />} />
@@ -270,5 +273,8 @@ export default function App() {
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>
+    <ToastViewport />
+    <ConfirmHost />
+    </>
   );
 }

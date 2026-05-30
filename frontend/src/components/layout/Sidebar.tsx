@@ -104,7 +104,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       >
         <button
           onClick={onToggle}
-          className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+          className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]"
           aria-label="Expand sidebar"
           title="Expand sidebar"
         >
@@ -483,7 +483,7 @@ function ConversationRow({
               e.stopPropagation();
               update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } });
             }}
-            className="rounded p-1 hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+            className="rounded p-1 hover:bg-[var(--hover-strong)]"
             title={conv.pinned ? "Unpin" : "Pin"}
             aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
           >

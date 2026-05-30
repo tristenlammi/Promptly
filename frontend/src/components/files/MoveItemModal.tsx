@@ -184,7 +184,7 @@ export function MoveItemModal({
               ? "cursor-not-allowed border-[var(--border)] bg-[var(--bg)] opacity-60"
               : rootSelected
                 ? "border-[var(--accent)] bg-[var(--accent)]/10"
-                : "border-[var(--border)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                : "border-[var(--border)] hover:bg-[var(--hover)]"
           )}
         >
           <Home className="h-4 w-4 text-[var(--text-muted)]" />
@@ -265,7 +265,7 @@ function TreeRow({
         <button
           type="button"
           onClick={() => onToggle(node)}
-          className="rounded p-1 text-[var(--text-muted)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+          className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"
           aria-label={node.expanded ? "Collapse" : "Expand"}
         >
           {node.loading ? (
@@ -284,7 +284,7 @@ function TreeRow({
             "flex flex-1 items-center gap-2 truncate rounded px-2 py-1 text-left text-sm transition",
             isCurrent
               ? "cursor-not-allowed text-[var(--text-muted)]"
-              : "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              : "hover:bg-[var(--hover)]"
           )}
         >
           <FolderIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" />

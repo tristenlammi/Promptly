@@ -74,7 +74,7 @@ export function ExamBreakdown({ exams, units }: ExamBreakdownProps) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 rounded-card px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+        className="flex w-full items-center justify-between gap-3 rounded-card px-4 py-3 text-left transition hover:bg-[var(--hover)]"
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">

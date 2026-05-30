@@ -65,6 +65,7 @@ import {
   useUnstarFolder,
 } from "@/hooks/useFiles";
 import { useUploadStore } from "@/store/uploadStore";
+import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 const DRAG_FILE = "application/x-promptly-file";
@@ -175,7 +176,6 @@ export function FilesPage({
   const moveFile = useMoveFile();
   const moveFolder = useMoveFolder();
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
-  const [dropError, setDropError] = useState<string | null>(null);
 
   // Drive stage 1 — preview / share / star state.
   const [preview, setPreview] = useState<FileItem | null>(null);
@@ -241,11 +241,10 @@ export function FilesPage({
             scope,
           });
         }
-        setDropError(null);
         return { ok: true };
       } catch (e) {
         const msg = extractError(e);
-        setDropError(msg);
+        toast.error(msg);
         return { ok: false, error: msg };
       }
     },
@@ -301,22 +300,6 @@ export function FilesPage({
               )}
             </div>
           </div>
-
-          {dropError && (
-            <div
-              role="alert"
-              className="mb-3 flex items-center justify-between gap-3 rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
-            >
-              <span>{dropError}</span>
-              <button
-                onClick={() => setDropError(null)}
-                className="rounded p-1 hover:bg-red-500/10"
-                aria-label="Dismiss"
-              >
-                ×
-              </button>
-            </div>
-          )}
 
           {isLoading && (
             <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
@@ -1068,7 +1051,7 @@ function FolderRow({
         onDoubleClick={onOpen}
         className={cn(
           "group relative flex flex-col rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 transition",
-          "hover:border-[var(--accent)]/40 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+          "hover:border-[var(--accent)]/40 hover:bg-[var(--hover)]",
           userCanMutate && "cursor-grab",
           over &&
             "border-[var(--accent)]/60 bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
@@ -1133,7 +1116,7 @@ function FolderRow({
       {...dragProps}
       className={cn(
         "group flex items-center gap-3 px-4 py-3 transition",
-        "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+        "hover:bg-[var(--hover)]",
         userCanMutate && "cursor-grab",
         over && "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
       )}
@@ -1341,7 +1324,7 @@ function FileRow({
         {...dragProps}
         className={cn(
           "group relative flex flex-col rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 transition",
-          "hover:border-[var(--accent)]/40 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+          "hover:border-[var(--accent)]/40 hover:bg-[var(--hover)]",
           writable && "cursor-grab"
         )}
       >
@@ -1397,7 +1380,7 @@ function FileRow({
       {...dragProps}
       className={cn(
         "group flex items-center gap-3 px-4 py-3 transition",
-        "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+        "hover:bg-[var(--hover)]",
         writable && "cursor-grab"
       )}
     >
@@ -1524,7 +1507,7 @@ function ViewToggle({
       leading && "border-l border-[var(--border)]",
       active
         ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-        : "text-[var(--text-muted)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+        : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
     );
   return (
     <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)]">
@@ -1588,7 +1571,7 @@ function RowMenu({
                   "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
                   it.destructive
                     ? "text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                    : "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                    : "hover:bg-[var(--hover)]"
                 )}
               >
                 {it.icon}

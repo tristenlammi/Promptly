@@ -1043,7 +1043,7 @@ function ErrorNotice({
         onClick={onRetry}
         className={cn(
           "mt-2 inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-semibold",
-          "border-[var(--border)] hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+          "border-[var(--border)] hover:bg-[var(--hover-strong)]"
         )}
       >
         Try again

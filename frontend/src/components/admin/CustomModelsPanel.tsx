@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { Modal } from "@/components/shared/Modal";
 import { useAvailableModels, useProviders } from "@/hooks/useProviders";
 import {
@@ -758,14 +759,14 @@ function CustomModelRow({
     return hit?.display_name ?? model.base_model_id;
   }, [available, model]);
 
-  const onDelete = () => {
-    if (
-      !window.confirm(
-        `Delete "${model.display_name}"? This removes the assistant and its knowledge library chunks. The underlying source files in My Files are not touched.`
-      )
-    )
-      return;
-    del.mutate(model.id);
+  const onDelete = async () => {
+    const ok = await confirm({
+      title: "Delete assistant",
+      message: `Delete "${model.display_name}"? This removes the assistant and its knowledge library chunks. The underlying source files in My Files are not touched.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok) del.mutate(model.id);
   };
 
   return (

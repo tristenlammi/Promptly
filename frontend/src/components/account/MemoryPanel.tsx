@@ -5,6 +5,7 @@ import { Brain, Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { authApi } from "@/api/auth";
 import { memoryApi, type Memory } from "@/api/memory";
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
@@ -274,16 +275,17 @@ export function MemoryPanel() {
                   variant="ghost"
                   size="sm"
                   disabled={clearMut.isPending}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        "Forget everything? This permanently deletes all saved memories."
-                      )
-                    ) {
-                      clearMut.mutate();
-                    }
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: "Forget everything?",
+                      message:
+                        "This permanently deletes all saved memories. It can't be undone.",
+                      confirmLabel: "Forget all",
+                      danger: true,
+                    });
+                    if (ok) clearMut.mutate();
                   }}
-                  className="text-red-500 hover:bg-red-500/10"
+                  className="text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                 >
                   {clearMut.isPending ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -17,6 +17,7 @@ import { useAvailableModels } from "@/hooks/useProviders";
 import type { AvailableModel } from "@/api/types";
 import { CompareColumn } from "@/components/compare/CompareColumn";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/utils/cn";
 
 const MAX_COLUMNS = 4;
@@ -441,15 +442,20 @@ function CompareRun({ groupId }: { groupId: string }) {
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (window.confirm("Delete this compare and all its non-crowned columns?")) {
-              deleteMut.mutate();
-            }
+          onClick={async () => {
+            const ok = await confirm({
+              title: "Delete compare",
+              message:
+                "Delete this compare and all its non-crowned columns? This can't be undone.",
+              confirmLabel: "Delete",
+              danger: true,
+            });
+            if (ok) deleteMut.mutate();
           }}
           disabled={deleteMut.isPending}
           className={cn(
             "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs",
-            "border-red-500/40 text-red-500 hover:bg-red-500/10"
+            "border-[var(--danger-border)] text-[var(--danger)] hover:bg-[var(--danger-bg)]"
           )}
         >
           <Trash2 className="h-3 w-3" />
@@ -495,15 +501,15 @@ function CompareRun({ groupId }: { groupId: string }) {
                 headerLabel={label || "Column"}
                 isCrowned={col.is_crowned}
                 crownDisabled={isLocked && !col.is_crowned}
-                onCrown={() => {
+                onCrown={async () => {
                   if (col.is_crowned) return;
-                  if (
-                    window.confirm(
-                      "Crown this column as the winner? The other columns will be archived but you can still open them from the compare archive."
-                    )
-                  ) {
-                    crownMut.mutate(col.conversation_id);
-                  }
+                  const ok = await confirm({
+                    title: "Crown the winner",
+                    message:
+                      "Crown this column as the winner? The other columns will be archived but you can still open them from the compare archive.",
+                    confirmLabel: "Crown",
+                  });
+                  if (ok) crownMut.mutate(col.conversation_id);
                 }}
                 activeStreamId={activeStreams[col.conversation_id] ?? null}
                 onStreamEnded={() => onStreamEnded(col.conversation_id)}

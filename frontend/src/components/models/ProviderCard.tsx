@@ -17,6 +17,7 @@ import {
   useUpdateProvider,
 } from "@/hooks/useProviders";
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/utils/cn";
 
 import { SelectModelsModal } from "./SelectModelsModal";
@@ -67,10 +68,14 @@ export function ProviderCard({ provider }: { provider: Provider }) {
     fetchModels.mutate(provider.id);
   };
 
-  const onDelete = () => {
-    if (window.confirm(`Delete provider "${provider.name}"?`)) {
-      remove.mutate(provider.id);
-    }
+  const onDelete = async () => {
+    const ok = await confirm({
+      title: "Delete provider",
+      message: `Delete provider "${provider.name}"? Models from this provider will no longer be available.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok) remove.mutate(provider.id);
   };
 
   return (

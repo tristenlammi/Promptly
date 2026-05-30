@@ -266,7 +266,7 @@ function ModeButton({
         "flex items-start gap-2 rounded-md border p-3 text-left transition",
         active
           ? "border-[var(--accent)] bg-[var(--accent)]/10"
-          : "border-[var(--border)] hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
+          : "border-[var(--border)] hover:bg-[var(--hover)]"
       )}
     >
       <div

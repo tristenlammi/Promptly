@@ -711,7 +711,7 @@ function SharedFolderRow({
   onOpen: () => void;
 }) {
   return (
-    <li className="group flex items-center gap-3 px-4 py-3 transition hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
+    <li className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--hover)]">
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -734,7 +734,7 @@ function SharedFileRow({
 }) {
   return (
     <li
-      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--hover)]"
       onDoubleClick={onPreview}
     >
       <button

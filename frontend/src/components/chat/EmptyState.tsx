@@ -36,7 +36,7 @@ export function EmptyState({ onSuggestion, hasModel }: EmptyStateProps) {
             <button
               key={s}
               onClick={() => onSuggestion?.(s)}
-              className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left text-sm text-[var(--text)] transition hover:border-[var(--accent)]/50 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+              className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left text-sm text-[var(--text)] transition hover:border-[var(--accent)]/50 hover:bg-[var(--hover)]"
             >
               {s}
             </button>

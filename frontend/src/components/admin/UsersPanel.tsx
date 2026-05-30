@@ -589,7 +589,7 @@ function MenuItem({
         "disabled:cursor-not-allowed disabled:opacity-50",
         tone === "danger"
           ? "text-red-600 hover:bg-red-500/10 dark:text-red-400"
-          : "text-[var(--text)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+          : "text-[var(--text)] hover:bg-[var(--hover)]"
       )}
     >
       {icon}

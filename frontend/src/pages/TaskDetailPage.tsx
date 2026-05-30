@@ -121,7 +121,7 @@ export function TaskDetailPage() {
       <div className="mb-4 flex items-center gap-3">
         <button
           onClick={() => navigate("/tasks")}
-          className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+          className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover-strong)]"
           aria-label="Back to tasks"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -139,7 +139,7 @@ export function TaskDetailPage() {
         </div>
         <button
           onClick={() => setEditOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--hover)]"
         >
           <Pencil className="h-3.5 w-3.5" /> Edit
         </button>
@@ -172,7 +172,7 @@ export function TaskDetailPage() {
                       "flex w-full flex-col items-start gap-1 rounded-md px-2 py-2 text-left text-sm transition",
                       r.id === selectedRunId
                         ? "bg-[var(--accent)]/10"
-                        : "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                        : "hover:bg-[var(--hover)]"
                     )}
                   >
                     <span className="text-xs">{fmtDate(r.created_at)}</span>
@@ -214,7 +214,7 @@ export function TaskDetailPage() {
                   <div className="ml-auto flex items-center gap-1">
                     <button
                       onClick={() => void onCopy()}
-                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--hover)]"
                     >
                       {copied ? (
                         <Check className="h-3.5 w-3.5 text-green-500" />
@@ -225,7 +225,7 @@ export function TaskDetailPage() {
                     </button>
                     <button
                       onClick={onDownloadMd}
-                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--hover)]"
                     >
                       <FileDown className="h-3.5 w-3.5" /> .md
                     </button>

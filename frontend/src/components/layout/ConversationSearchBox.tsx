@@ -191,7 +191,7 @@ function SearchResults({
                 className={cn(
                   "rounded-md border border-transparent px-2 py-1.5 text-left text-xs",
                   "text-[var(--text)] transition",
-                  "hover:border-[var(--border)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                  "hover:border-[var(--border)] hover:bg-[var(--hover)]"
                 )}
               >
                 <div className="mb-0.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">

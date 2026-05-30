@@ -29,6 +29,7 @@ import {
   FileText,
   GitBranch,
   Image as ImageIcon,
+  MoreHorizontal,
   PanelRight as PanelRightIcon,
   Pencil,
   Puzzle,
@@ -61,6 +62,7 @@ import {
 import { useEditorStore } from "@/store/editorStore";
 import { useModelStore } from "@/store/modelStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { usePopoverFlip } from "@/hooks/usePopoverFlip";
 import { cn } from "@/utils/cn";
 
 /** Override passed to a regenerate handler. ``null`` regenerates with
@@ -771,6 +773,11 @@ function MessageBubbleImpl({
   // changing.
   const canCopy = !streaming && !!content && content.trim().length > 0;
 
+  // Mobile collapses the action row to icon-only buttons and tucks the
+  // low-frequency actions (Branch, Delete) behind a ⋯ overflow menu so
+  // the row never wraps on a phone.
+  const isMobile = useIsMobile();
+
   const [editing, setEditing] = useState(false);
   const [copiedFlash, setCopiedFlash] = useState(false);
   const [copyClicked, setCopyClicked] = useState(false);
@@ -854,6 +861,10 @@ function MessageBubbleImpl({
     !!versionIndex;
   const [reasonOpen, setReasonOpen] = useState(false);
   const [reasonDraft, setReasonDraft] = useState("");
+  const thumbDownRef = useRef<HTMLButtonElement | null>(null);
+  // Flip the "what went wrong?" note above the thumb when it's near the
+  // bottom of the viewport (e.g. the last reply, just above the input).
+  const reasonFlipUp = usePopoverFlip(reasonOpen, thumbDownRef, 180);
   const handleThumb = (rating: "up" | "down") => {
     if (!onFeedback) return;
     if (feedback === rating) {
@@ -1104,9 +1115,11 @@ function MessageBubbleImpl({
                 }
               >
                 <Puzzle className="h-3 w-3" />
-                <span>
-                  {exerciseReviewed ? "Revisit exercise" : "Open exercise"}
-                </span>
+                {!isMobile && (
+                  <span>
+                    {exerciseReviewed ? "Revisit exercise" : "Open exercise"}
+                  </span>
+                )}
               </button>
             )}
             {canCopy && (
@@ -1140,7 +1153,7 @@ function MessageBubbleImpl({
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
-                <span>{copyClicked ? "Copied" : "Copy"}</span>
+                {!isMobile && <span>{copyClicked ? "Copied" : "Copy"}</span>}
               </button>
             )}
             {canReadAloud && (
@@ -1163,7 +1176,7 @@ function MessageBubbleImpl({
                 ) : (
                   <Volume2 className="h-3 w-3" />
                 )}
-                <span>{speaking ? "Stop" : "Listen"}</span>
+                {!isMobile && <span>{speaking ? "Stop" : "Listen"}</span>}
               </button>
             )}
             {canEdit && !editing && (
@@ -1186,13 +1199,13 @@ function MessageBubbleImpl({
                 }
               >
                 <Pencil className="h-3 w-3" />
-                <span>Edit</span>
+                {!isMobile && <span>Edit</span>}
               </button>
             )}
             {onRegenerate && !streaming && (
               <RegenerateControl onRegenerate={onRegenerate} />
             )}
-            {onBranch && !streaming && (
+            {!isMobile && onBranch && !streaming && (
               <button
                 type="button"
                 onClick={() => void onBranch()}
@@ -1209,7 +1222,7 @@ function MessageBubbleImpl({
                 <span>Branch</span>
               </button>
             )}
-            {onDelete && !streaming && (
+            {!isMobile && onDelete && !streaming && (
               <button
                 type="button"
                 onClick={() => void onDelete()}
@@ -1249,6 +1262,7 @@ function MessageBubbleImpl({
                 </button>
                 <div className="relative">
                   <button
+                    ref={thumbDownRef}
                     type="button"
                     onClick={() => handleThumb("down")}
                     className={cn(
@@ -1271,8 +1285,13 @@ function MessageBubbleImpl({
                   {reasonOpen && (
                     <div
                       className={cn(
-                        "absolute left-0 top-full z-20 mt-1 w-64 rounded-card border p-2 shadow-lg",
-                        "border-[var(--border)] bg-[var(--surface)]"
+                        // Anchor to the right edge so the 16rem note never
+                        // runs off the right of the screen (the thumb sits
+                        // near the end of the action row), and flip above
+                        // when there's no room below.
+                        "absolute right-0 z-20 w-64 rounded-card border p-2 shadow-lg",
+                        "border-[var(--border)] bg-[var(--surface)]",
+                        reasonFlipUp ? "bottom-full mb-1" : "top-full mt-1"
                       )}
                     >
                       <label className="mb-1 block text-[11px] font-medium text-[var(--text-muted)]">
@@ -1310,6 +1329,12 @@ function MessageBubbleImpl({
                   )}
                 </div>
               </>
+            )}
+            {isMobile && !streaming && (onBranch || onDelete) && (
+              <MessageActionOverflow
+                onBranch={onBranch}
+                onDelete={onDelete}
+              />
             )}
           </div>
         )}
@@ -1664,7 +1689,7 @@ function ImageAttachmentTile({
         className={cn(
           "relative flex h-40 w-full items-center justify-center overflow-hidden",
           "bg-black/[0.04] transition dark:bg-white/[0.04]",
-          "cursor-zoom-in hover:bg-black/[0.06] dark:hover:bg-white/[0.06]"
+          "cursor-zoom-in hover:bg-[var(--hover-strong)]"
         )}
       >
         {blobUrl ? (
@@ -1889,6 +1914,110 @@ function VersionPager({
   );
 }
 
+/** Mobile-only ⋯ overflow menu for the low-frequency message actions
+ *  (Branch, Delete). Keeps the icon-only mobile action row from
+ *  widening with rarely-tapped controls while still exposing them one
+ *  tap deeper. Desktop renders these inline instead. */
+function MessageActionOverflow({
+  onBranch,
+  onDelete,
+}: {
+  onBranch?: () => Promise<void> | void;
+  onDelete?: () => Promise<void> | void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const flipUp = usePopoverFlip(open, btnRef, 120);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent | TouchEvent) => {
+      if (!wrapRef.current) return;
+      if (wrapRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("touchstart", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("touchstart", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex items-center rounded-md px-1.5 py-1 text-xs transition",
+          "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)]",
+          "dark:hover:bg-white/[0.06]",
+          open && "bg-black/[0.05] text-[var(--text)] dark:bg-white/[0.08]"
+        )}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        title="More actions"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className={cn(
+            "absolute right-0 z-20 min-w-[150px] overflow-hidden rounded-md border py-1 shadow-lg",
+            "border-[var(--border)] bg-[var(--surface)]",
+            flipUp ? "bottom-full mb-1" : "top-full mt-1"
+          )}
+        >
+          {onBranch && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void onBranch();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                "text-[var(--text)] hover:bg-[var(--hover)]"
+              )}
+            >
+              <GitBranch className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              Branch from here
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void onDelete();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                "text-rose-500 hover:bg-rose-500/10"
+              )}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete message
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Split-button regenerate control.
  *
  *  Left half: primary click → re-run the reply with whatever model is
@@ -1913,11 +2042,14 @@ function RegenerateControl({
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const setSelection = useModelStore((s) => s.setSelection);
 
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
-  const [flipUp, setFlipUp] = useState(false);
   const [busy, setBusy] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const chevronRef = useRef<HTMLButtonElement | null>(null);
+  // Shared geometry helper: open the model list upward when the button
+  // is near the bottom of the viewport (long conversations).
+  const flipUp = usePopoverFlip(open, chevronRef);
 
   useEffect(() => {
     if (!open) return;
@@ -1935,19 +2067,6 @@ function RegenerateControl({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
-
-  // Decide flip direction based on viewport geometry *at open time*.
-  // Done once per open rather than reactively on scroll; the popover
-  // is short-lived so we don't need to re-measure.
-  useEffect(() => {
-    if (!open) return;
-    const anchor = chevronRef.current;
-    if (!anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
-    setFlipUp(spaceBelow < 240 && spaceAbove > spaceBelow);
   }, [open]);
 
   const doRegenerate = async (override: RegenerateOverride | null) => {
@@ -1982,7 +2101,7 @@ function RegenerateControl({
         aria-label="Regenerate reply"
       >
         <RefreshCw className={cn("h-3 w-3", busy && "animate-spin")} />
-        <span>Regenerate</span>
+        {!isMobile && <span>Regenerate</span>}
       </button>
       {hasChoices && (
         <button

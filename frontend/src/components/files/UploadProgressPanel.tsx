@@ -123,7 +123,7 @@ export function UploadProgressPanel() {
           )}
         </div>
         <span
-          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--hover)]"
           aria-hidden="true"
         >
           {collapsed ? (

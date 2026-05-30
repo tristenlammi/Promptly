@@ -68,7 +68,7 @@ export function DriveFileRow({
         setCtx({ x: e.clientX, y: e.clientY });
       }}
       onDoubleClick={() => actions.onPreview?.()}
-      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--hover)]"
     >
       <button
         onClick={click}
@@ -162,7 +162,7 @@ export function DriveFolderRow({
         e.preventDefault();
         setCtx({ x: e.clientX, y: e.clientY });
       }}
-      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+      className="group flex items-center gap-3 px-4 py-3 transition hover:bg-[var(--hover)]"
     >
       <button
         onClick={onOpen}
@@ -293,7 +293,7 @@ function RowMenuButton({
                   "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
                   it.destructive
                     ? "text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                    : "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+                    : "hover:bg-[var(--hover)]",
                   it.disabled && "cursor-not-allowed opacity-50"
                 )}
               >

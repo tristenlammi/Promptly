@@ -604,7 +604,7 @@ function RolePicker({
               idx > 0 && "border-l border-[var(--border)]",
               selected
                 ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-                : "text-[var(--text-muted)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+                : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
               disabled && "cursor-not-allowed"
             )}
           >

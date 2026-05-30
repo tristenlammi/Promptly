@@ -27,6 +27,20 @@
   --text: #1A1A19;
   --text-muted: #6B7280;
   --accent: #D97757;
+  /* Darkened accent for hover on filled accent buttons. */
+  --accent-hover: #C2613E;
+  /* Raised/recessed neutral surfaces above --surface, used for
+     toolbars, table headers, selected/hover rows and inset panels.
+     --surface-1 is the faint raised tone; --surface-2 is the slightly
+     stronger hover/selected tone. The remaining names are semantic
+     aliases so existing component class-strings resolve cleanly. */
+  --surface-1: #F2F0EC;
+  --surface-2: #EBE8E3;
+  --surface-hover: var(--surface-2);
+  --surface-muted: var(--surface-2);
+  --bg-muted: var(--surface-2);
+  --background: var(--bg);
+  --muted: var(--text-muted);
   --radius-card: 0.75rem;
   --radius-input: 1.5rem;
   /* Scrollbar thumb — subtle by default, a touch stronger on hover.
@@ -35,6 +49,23 @@
      the chunky native look. */
   --scrollbar-thumb: rgba(0, 0, 0, 0.16);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.30);
+  /* Neutral hover wash for ghost/icon buttons and list rows. Replaces
+     the ad-hoc `hover:bg-black/[0.04] dark:hover:bg-white/[0.06]` pairs
+     so the whole app shares one tunable hover intensity. */
+  --hover: rgba(0, 0, 0, 0.04);
+  --hover-strong: rgba(0, 0, 0, 0.07);
+  /* Semantic status colours. The `-bg` tints are alpha-based so they
+     read the same in both themes; the text/icon colours are tuned per
+     theme below (darker on light, lighter on dark) for contrast. */
+  --danger: #DC2626;
+  --danger-bg: rgba(220, 38, 38, 0.10);
+  --danger-border: rgba(220, 38, 38, 0.38);
+  --warning: #B45309;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.38);
+  --success: #059669;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-border: rgba(16, 185, 129, 0.38);
 }
 
 html.dark {
@@ -43,8 +74,23 @@ html.dark {
   --border: rgba(255, 255, 255, 0.08);
   --text: #F5F5F4;
   --text-muted: #A8A29E;
+  /* Hover brightens the accent on dark (vs. darkening on light). */
+  --accent-hover: #E08A6E;
+  /* Raised surfaces step lighter than --surface (#27231E) on dark.
+     The --surface-hover / --surface-muted / --bg-muted / --background
+     / --muted aliases defined in :root resolve dynamically against
+     these dark values, so they need no override here. */
+  --surface-1: #2E2A24;
+  --surface-2: #36312A;
   --scrollbar-thumb: rgba(255, 255, 255, 0.14);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.26);
+  --hover: rgba(255, 255, 255, 0.06);
+  --hover-strong: rgba(255, 255, 255, 0.10);
+  /* Lighter status text/icons for legibility on the dark surface; the
+     `-bg`/`-border` alpha tints carry over from :root unchanged. */
+  --danger: #F87171;
+  --warning: #FBBF24;
+  --success: #34D399;
 }
 
 html,
@@ -97,6 +143,23 @@ body,
     min-height: 40px;
     min-width: 40px;
   }
+}
+
+/* Toast entrance — slides down from just above its resting spot and
+   fades in. Honoured by the prefers-reduced-motion block above (it
+   neutralises all animations to ~0ms). */
+@keyframes promptly-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.promptly-toast-in {
+  animation: promptly-toast-in 0.18s ease-out;
 }
 
 body {
