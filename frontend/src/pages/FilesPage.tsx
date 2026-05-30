@@ -18,6 +18,7 @@ import {
   List as ListIcon,
   MoreVertical,
   Pencil,
+  Plus,
   Share2,
   Star,
   Trash2,
@@ -68,6 +69,7 @@ import {
   useRenameFile,
   useRenameFolder,
   useStarFile,
+  useStorageQuota,
   useStarFolder,
   useTrashFile,
   useTrashFolder,
@@ -240,6 +242,14 @@ export function FilesPage({
   const crumbs = data?.breadcrumbs ?? [];
   const writable = data?.writable ?? false;
 
+  // Surface storage pressure: a warning chip once the user is ≥80% of a
+  // capped quota, so they notice before an upload is refused.
+  const { data: quota } = useStorageQuota();
+  const quotaPct =
+    quota?.cap_bytes && quota.cap_bytes > 0
+      ? quota.used_bytes / quota.cap_bytes
+      : 0;
+
   const moveFile = useMoveFile();
   const moveFolder = useMoveFolder();
   const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
@@ -384,6 +394,40 @@ export function FilesPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selFiles, selFolders, bulkMove, clearSelection]
   );
+
+  // Drive-style keyboard shortcuts: Ctrl/Cmd+A select all, Esc clear,
+  // Delete/Backspace move the selection to trash. Ignored while typing
+  // in a field or when a modal/picker owns the keyboard.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === "a" || e.key === "A")) {
+        const allFiles = (data?.files ?? []).map((f) => f.id);
+        const allFolders = (data?.folders ?? []).map((f) => f.id);
+        if (allFiles.length + allFolders.length === 0) return;
+        e.preventDefault();
+        setSelFiles(new Set(allFiles));
+        setSelFolders(new Set(allFolders));
+        return;
+      }
+      if (e.key === "Escape" && selFiles.size + selFolders.size > 0) {
+        clearSelection();
+        return;
+      }
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selFiles.size + selFolders.size > 0
+      ) {
+        e.preventDefault();
+        void handleBulkTrash();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [data, selFiles, selFolders, clearSelection, handleBulkTrash]);
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
@@ -577,6 +621,28 @@ export function FilesPage({
               <Button size="sm" variant="ghost" className="ml-3" onClick={() => refetch()}>
                 Retry
               </Button>
+            </div>
+          )}
+
+          {quotaPct >= 0.8 && quota?.cap_bytes != null && (
+            <div
+              role="status"
+              className={cn(
+                "mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-card border px-3 py-2 text-xs",
+                quotaPct >= 0.95
+                  ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
+                  : "border-[var(--warning-border)] bg-[var(--warning-bg)] text-[var(--warning)]"
+              )}
+            >
+              <span className="font-medium">
+                Storage {Math.round(quotaPct * 100)}% full
+              </span>
+              <span className="text-[var(--text-muted)]">
+                {humanSize(quota.used_bytes)} of {humanSize(quota.cap_bytes)} used
+                {quotaPct >= 0.95
+                  ? " — uploads may be refused. Free up space in Trash."
+                  : " — consider clearing space soon."}
+              </span>
             </div>
           )}
 
@@ -868,8 +934,10 @@ function FolderActions({
 }) {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [creatingDoc, setCreatingDoc] = useState(false);
-  const [docError, setDocError] = useState<string | null>(null);
   const [activeDocument, setActiveDocument] = useState<FileItem | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  usePopoverDismiss(menuOpen, menuRef, () => setMenuOpen(false));
   const createFolder = useCreateFolder();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const startUploads = useUploadStore((s) => s.startUploads);
@@ -877,7 +945,6 @@ function FolderActions({
   const handleNewDocument = async () => {
     if (creatingDoc) return;
     setCreatingDoc(true);
-    setDocError(null);
     try {
       const doc = await documentsApi.create({
         scope,
@@ -886,7 +953,7 @@ function FolderActions({
       setActiveDocument(doc);
       onChanged();
     } catch (e) {
-      setDocError(extractError(e));
+      toast.error(extractError(e));
     } finally {
       setCreatingDoc(false);
     }
@@ -920,29 +987,10 @@ function FolderActions({
   };
 
   return (
-    // Three actions on mobile now (New file / New folder / Upload) so
-    // the row expands to ``grid-cols-3`` on phones. Desktop still gets
-    // the inline flex layout.
-    <div className="grid shrink-0 grid-cols-3 items-center gap-2 sm:flex">
-      <Button
-        size="sm"
-        variant="secondary"
-        leftIcon={<FileText className="h-3.5 w-3.5" />}
-        onClick={handleNewDocument}
-        loading={creatingDoc}
-        className="w-full sm:w-auto"
-      >
-        New file
-      </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        leftIcon={<FolderPlus className="h-3.5 w-3.5" />}
-        onClick={() => setShowNewFolder(true)}
-        className="w-full sm:w-auto"
-      >
-        New folder
-      </Button>
+    // One primary "+ New" affordance (upload / new folder / new document)
+    // — clean on desktop and on mobile, where three stacked buttons used
+    // to chew up a third of the screen.
+    <div ref={menuRef} className="relative shrink-0">
       <input
         ref={fileInputRef}
         type="file"
@@ -953,16 +1001,42 @@ function FolderActions({
       <Button
         size="sm"
         variant="primary"
-        leftIcon={<Upload className="h-3.5 w-3.5" />}
-        onClick={() => fileInputRef.current?.click()}
-        className="w-full sm:w-auto"
+        leftIcon={<Plus className="h-3.5 w-3.5" />}
+        onClick={() => setMenuOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
       >
-        Upload
+        New
       </Button>
-
-      {docError && (
-        <div className="col-span-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-500 sm:col-span-1">
-          {docError}
+      {menuOpen && (
+        <div
+          role="menu"
+          className="absolute right-0 top-9 z-30 w-48 overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 text-sm shadow-lg"
+        >
+          <NewMenuItem
+            icon={<Upload className="h-4 w-4" />}
+            label="Upload files"
+            onClick={() => {
+              setMenuOpen(false);
+              fileInputRef.current?.click();
+            }}
+          />
+          <NewMenuItem
+            icon={<FolderPlus className="h-4 w-4" />}
+            label="New folder"
+            onClick={() => {
+              setMenuOpen(false);
+              setShowNewFolder(true);
+            }}
+          />
+          <NewMenuItem
+            icon={<FileText className="h-4 w-4" />}
+            label="New document"
+            onClick={() => {
+              setMenuOpen(false);
+              void handleNewDocument();
+            }}
+          />
         </div>
       )}
 
@@ -987,6 +1061,28 @@ function FolderActions({
         />
       )}
     </div>
+  );
+}
+
+function NewMenuItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[var(--hover)]"
+    >
+      <span className="text-[var(--text-muted)]">{icon}</span>
+      {label}
+    </button>
   );
 }
 
