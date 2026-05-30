@@ -529,7 +529,18 @@ async def list_conversations(
         .subquery()
     )
 
-    result = await db.execute(
+    # Conversations the user has explicitly hidden from *their own*
+    # sidebar ("remove from my history"). Parse the opaque id strings to
+    # UUIDs, skipping any that don't parse so a malformed entry can't 500
+    # the whole list.
+    hidden_ids: list[uuid.UUID] = []
+    for raw in (user.settings or {}).get("hidden_conversations", []) or []:
+        try:
+            hidden_ids.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+
+    query = (
         select(Conversation)
         .where(Conversation.user_id == user.id)
         .where(
@@ -541,6 +552,11 @@ async def list_conversations(
             | (Conversation.expires_at > now)
         )
         .where(Conversation.id.not_in(select(non_crowned_compare)))
+    )
+    if hidden_ids:
+        query = query.where(Conversation.id.not_in(hidden_ids))
+    result = await db.execute(
+        query
         .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
         .limit(limit)
         .offset(offset)
@@ -3551,7 +3567,20 @@ async def _stream_generator(
         # conversations. Gated by the per-user ``memory_enabled`` switch
         # (absent = on); returns ``None`` when the user has no memories, so
         # there's zero token overhead for fresh accounts.
-        memory_enabled = (user.settings or {}).get("memory_enabled", True) is not False
+        # Resolve the memory mode (off / auto / manual). ``memory_mode``
+        # supersedes the legacy ``memory_enabled`` boolean; fall back to
+        # it for accounts that predate the three-way setting.
+        _mem_settings = user.settings or {}
+        memory_mode = _mem_settings.get("memory_mode")
+        if memory_mode not in ("off", "auto", "manual"):
+            memory_mode = (
+                "off"
+                if _mem_settings.get("memory_enabled", True) is False
+                else "auto"
+            )
+        # Saved facts are injected in both auto and manual modes — manual
+        # only changes whether we *capture* new ones (see below).
+        memory_enabled = memory_mode != "off"
         if memory_enabled:
             memory_block = await build_memory_system_prompt(db, user.id)
             if memory_block:
@@ -4258,7 +4287,9 @@ async def _stream_generator(
         # disturbs the reply that's already on disk.
         memory_saved: list[str] = []
         if (
-            memory_enabled
+            # Auto-capture only in "auto" mode; "manual" injects saved
+            # facts but never volunteers new ones.
+            memory_mode == "auto"
             and trig_row is not None
             and (trig_row.content or "").strip()
             and should_attempt_capture(trig_row.content)
@@ -4289,6 +4320,19 @@ async def _stream_generator(
 
         # Auto-title the conversation after the first successful exchange.
         # Anything the user has already renamed is left untouched.
+        #
+        # A second, one-shot pass re-titles once the chat has more shape
+        # (~5 messages): the opening title is generated off a single
+        # exchange and is often vague, so we sharpen it from a transcript
+        # digest once there's real context. ``title_refined`` guards it so
+        # it never re-titles on every subsequent turn.
+        total_messages = len(history_rows) + 1  # + the reply just saved
+        should_refine = (
+            not is_first_turn
+            and not conv.title_manually_set
+            and not conv.title_refined
+            and total_messages >= 5
+        )
         if is_first_turn and not conv.title_manually_set:
             try:
                 new_title = await generate_conversation_title(
@@ -4304,6 +4348,34 @@ async def _stream_generator(
                 conv.title = new_title
                 await db.commit()
                 yield _sse({"event": "title_updated", "title": new_title})
+        elif should_refine:
+            # Build a compact transcript so the titler sees the whole
+            # thread, not just the opening line. The titler truncates to
+            # its own source-char cap, so this stays bounded.
+            transcript = "\n".join(
+                f"{m.role}: {(m.content or '').strip()}"
+                for m in history_rows
+                if m.role in ("user", "assistant") and (m.content or "").strip()
+            )
+            conv.title_refined = True
+            try:
+                new_title = await generate_conversation_title(
+                    user_message=transcript or first_user_message,
+                    assistant_message=full,
+                    llm_provider=provider,
+                    llm_model_id=ctx["model_id"],
+                )
+            except Exception:  # pragma: no cover
+                logger.exception("Title refine crashed; keeping title")
+                new_title = ""
+            # Persist the ``title_refined`` flag regardless, so a failed
+            # refine doesn't retry every turn.
+            if new_title and new_title != conv.title:
+                conv.title = new_title
+                await db.commit()
+                yield _sse({"event": "title_updated", "title": new_title})
+            else:
+                await db.commit()
 
         yield _sse(
             {

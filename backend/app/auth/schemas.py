@@ -163,7 +163,20 @@ class UserPreferencesUpdate(BaseModel):
     # Master switch for cross-chat memory (Phase 6). When off, the
     # post-turn extraction pass is skipped and saved facts are not
     # injected into the system prompt. Absent = on (the default).
+    # Retained for backwards compatibility; ``memory_mode`` supersedes it.
     memory_enabled: bool | None = None
+    # Memory behaviour (supersedes ``memory_enabled``):
+    #   * ``"off"``    — never inject, never auto-capture.
+    #   * ``"auto"``   — inject saved facts AND auto-capture durable ones.
+    #   * ``"manual"`` — inject saved facts, but only the user adds them;
+    #     the post-turn auto-capture pass is skipped. Lets a user curate
+    #     their own persona without the AI volunteering facts.
+    memory_mode: Literal["off", "auto", "manual"] | None = None
+    # Conversations the user has hidden from *their own* sidebar. Used as
+    # a "remove from my history" that never touches another user's copy
+    # (e.g. a chat that reached them before per-chat sharing was retired,
+    # which they don't own and so can't delete). Stored as id strings.
+    hidden_conversations: list[str] | None = None
 
     @field_validator("hidden_nav")
     @classmethod
@@ -178,6 +191,24 @@ class UserPreferencesUpdate(BaseModel):
             key = str(item).strip().lower()
             if key in allowed and key not in seen:
                 seen.append(key)
+        return seen
+
+    @field_validator("hidden_conversations")
+    @classmethod
+    def _clean_hidden_conversations(
+        cls, v: list[str] | None
+    ) -> list[str] | None:
+        if v is None:
+            return None
+        # Dedupe, keep insertion order, cap the list so a buggy client
+        # can't bloat the settings blob. Values are opaque id strings.
+        seen: list[str] = []
+        for item in v:
+            key = str(item).strip()
+            if key and key not in seen:
+                seen.append(key)
+            if len(seen) >= 500:
+                break
         return seen
 
     @field_validator("location")

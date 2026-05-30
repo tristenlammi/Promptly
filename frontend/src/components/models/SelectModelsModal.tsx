@@ -43,6 +43,11 @@ export function SelectModelsModal({
   }, [provider.enabled_models, catalog]);
 
   const [selected, setSelected] = useState<Set<string>>(initialSelected);
+  // Snapshot of what was selected when the modal opened. We sort *this*
+  // set to the top rather than the live `selected` so a model the user
+  // just toggled doesn't jump out from under the cursor — the order only
+  // re-settles on the next open.
+  const [sortSnapshot, setSortSnapshot] = useState<Set<string>>(initialSelected);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +57,7 @@ export function SelectModelsModal({
   useEffect(() => {
     if (open) {
       setSelected(new Set(initialSelected));
+      setSortSnapshot(new Set(initialSelected));
       setQuery("");
       setError(null);
     }
@@ -59,12 +65,20 @@ export function SelectModelsModal({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return catalog;
-    return catalog.filter((m) => {
-      const hay = `${m.id} ${m.display_name}`.toLowerCase();
-      return hay.includes(q);
+    const base = !q
+      ? catalog
+      : catalog.filter((m) => {
+          const hay = `${m.id} ${m.display_name}`.toLowerCase();
+          return hay.includes(q);
+        });
+    // Already-enabled models first (stable within each group), so the
+    // user can deselect without scrolling past the long catalog.
+    return [...base].sort((a, b) => {
+      const aSel = sortSnapshot.has(a.id) ? 0 : 1;
+      const bSel = sortSnapshot.has(b.id) ? 0 : 1;
+      return aSel - bSel;
     });
-  }, [catalog, query]);
+  }, [catalog, query, sortSnapshot]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {

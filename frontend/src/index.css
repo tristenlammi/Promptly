@@ -23,7 +23,10 @@
 :root {
   --bg: #FAF9F7;
   --surface: #FFFFFF;
-  --border: rgba(0, 0, 0, 0.08);
+  /* Warm "mushroom" taupe rather than a cool black-alpha hairline, so
+     borders sit with the warm bg/accent palette instead of reading as
+     a grey line. */
+  --border: rgba(122, 105, 95, 0.16);
   --text: #1A1A19;
   --text-muted: #6B7280;
   --accent: #D97757;
@@ -71,7 +74,9 @@
 html.dark {
   --bg: #1C1917;
   --surface: #27231E;
-  --border: rgba(255, 255, 255, 0.08);
+  /* Warm mushroom/taupe instead of the cool white-alpha hairline that
+     read as a faint whitish line on the warm brown surfaces. */
+  --border: rgba(168, 148, 132, 0.18);
   --text: #F5F5F4;
   --text-muted: #A8A29E;
   /* Hover brightens the accent on dark (vs. darkening on light). */

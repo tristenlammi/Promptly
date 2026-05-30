@@ -53,9 +53,15 @@ export interface UserSettings {
    *  sidebar (purely cosmetic — routes still work). One of
    *  ``"projects" | "study" | "tasks"``. Absent / ``[]`` = show all. */
   hidden_nav?: string[];
-  /** Master switch for cross-chat memory (Phase 6). Absent = on; set to
-   *  ``false`` to stop the assistant capturing and using saved facts. */
+  /** Legacy master switch for cross-chat memory (Phase 6). Superseded by
+   *  ``memory_mode``; kept for back-compat reads. */
   memory_enabled?: boolean;
+  /** Memory behaviour: ``"off"`` (none), ``"auto"`` (capture + inject),
+   *  or ``"manual"`` (inject saved facts, user adds them — no auto
+   *  capture). Absent = derive from ``memory_enabled`` (on → auto). */
+  memory_mode?: "off" | "auto" | "manual";
+  /** Conversation ids the user has hidden from their own sidebar. */
+  hidden_conversations?: string[];
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -76,8 +82,12 @@ export interface UserPreferencesUpdate {
   default_provider_id?: string;
   /** Replace the full set of hidden nav surfaces. ``[]`` shows all. */
   hidden_nav?: string[];
-  /** Toggle cross-chat memory capture + injection. */
+  /** Toggle cross-chat memory capture + injection (legacy). */
   memory_enabled?: boolean;
+  /** Memory behaviour: off / auto / manual. */
+  memory_mode?: "off" | "auto" | "manual";
+  /** Replace the full set of conversation ids hidden from the sidebar. */
+  hidden_conversations?: string[];
 }
 
 export interface User {

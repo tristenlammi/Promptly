@@ -9,6 +9,22 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
+type MemoryMode = "off" | "auto" | "manual";
+
+const MODE_OPTIONS: { value: MemoryMode; label: string; title: string }[] = [
+  { value: "off", label: "Off", title: "Don't capture or use any memories" },
+  {
+    value: "auto",
+    label: "Auto",
+    title: "Capture durable facts automatically and use them everywhere",
+  },
+  {
+    value: "manual",
+    label: "Self-managed",
+    title: "Only you add memories — Promptly never captures on its own",
+  },
+];
+
 /** Cross-chat memory management (Phase 6).
  *
  * Lets the user see, edit, and delete the durable facts the assistant
@@ -25,10 +41,16 @@ export function MemoryPanel() {
   const patchSettings = useAuthStore((s) => s.patchSettings);
   const setUser = useAuthStore((s) => s.setUser);
 
-  const enabled = user?.settings?.memory_enabled !== false;
+  // Resolve the three-way mode, falling back to the legacy boolean for
+  // accounts that predate it (enabled → auto, disabled → off).
+  const mode: MemoryMode =
+    user?.settings?.memory_mode ??
+    (user?.settings?.memory_enabled === false ? "off" : "auto");
+  const enabled = mode !== "off";
   const [toggleBusy, setToggleBusy] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [filter, setFilter] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -79,15 +101,19 @@ export function MemoryPanel() {
       setActionError(err instanceof Error ? err.message : String(err)),
   });
 
-  const toggleEnabled = async (next: boolean) => {
+  const setMode = async (next: MemoryMode) => {
+    if (next === mode) return;
     setToggleError(null);
     setToggleBusy(true);
-    patchSettings({ memory_enabled: next });
+    // Keep the legacy boolean in sync so older code paths still read a
+    // sensible value.
+    const patch = { memory_mode: next, memory_enabled: next !== "off" };
+    patchSettings(patch);
     try {
-      const fresh = await authApi.updatePreferences({ memory_enabled: next });
+      const fresh = await authApi.updatePreferences(patch);
       setUser(fresh);
     } catch (err) {
-      patchSettings({ memory_enabled: !next });
+      patchSettings({ memory_mode: mode, memory_enabled: mode !== "off" });
       setToggleError(err instanceof Error ? err.message : String(err));
     } finally {
       setToggleBusy(false);
@@ -100,29 +126,34 @@ export function MemoryPanel() {
     setActionError(null);
   };
 
+  const filterText = filter.trim().toLowerCase();
+  const filteredMemories = filterText
+    ? memories.filter((m) => m.content.toLowerCase().includes(filterText))
+    : memories;
+
   return (
     <section className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
-      <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-[var(--text-muted)]">
             <Brain className="h-4 w-4" />
           </span>
           <h3 className="text-sm font-semibold">Memory</h3>
         </div>
-        <Toggle
-          checked={enabled}
-          onChange={(v) => void toggleEnabled(v)}
+        <ModeSelector
+          value={mode}
+          onChange={(v) => void setMode(v)}
           disabled={toggleBusy}
         />
       </header>
 
       <div className="space-y-4 px-4 py-4">
         <p className="text-xs leading-relaxed text-[var(--text-muted)]">
-          Promptly remembers durable facts you share (your name, role, the
-          tools you use, how you like answers) and applies them across all
-          your chats. Say "remember that…" to save something on purpose, or
-          edit the list below. Turning memory off stops new capture and
-          stops using saved facts — nothing is deleted.
+          {mode === "off"
+            ? "Memory is off. Promptly won't capture new facts or use saved ones — nothing is deleted, so you can turn it back on anytime."
+            : mode === "manual"
+              ? "Self-managed: Promptly uses the facts you add below across all your chats, but never captures anything on its own. You have full control over what it remembers about you."
+              : "Automatic: Promptly remembers durable facts you share (your name, role, tools, how you like answers) and applies them across all your chats. Say “remember that…” to save one on purpose, or add your own below."}
         </p>
 
         {toggleError && (
@@ -185,11 +216,40 @@ export function MemoryPanel() {
               </div>
             ) : memories.length === 0 ? (
               <p className="py-2 text-xs text-[var(--text-muted)]">
-                Nothing saved yet. Memories appear here as you chat.
+                {mode === "manual"
+                  ? "Nothing saved yet. Add a fact above and Promptly will use it everywhere."
+                  : "Nothing saved yet. Memories appear here as you chat."}
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--border)] rounded-input border border-[var(--border)]">
-                {memories.map((m) => (
+              <div className="space-y-2">
+                {/* Count + filter — keeps the panel usable with hundreds
+                    of memories instead of an endless inline wall. */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                    {memories.length}{" "}
+                    {memories.length === 1 ? "memory" : "memories"}
+                  </span>
+                  {memories.length > 6 && (
+                    <input
+                      type="search"
+                      value={filter}
+                      onChange={(e) => setFilter(e.target.value)}
+                      placeholder="Filter…"
+                      className={cn(
+                        "h-7 w-36 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2.5 text-xs",
+                        "text-[var(--text)] placeholder:text-[var(--text-muted)]",
+                        "focus:border-[var(--accent)] focus:outline-none"
+                      )}
+                    />
+                  )}
+                </div>
+                {filteredMemories.length === 0 ? (
+                  <p className="py-2 text-xs text-[var(--text-muted)]">
+                    No memories match “{filter.trim()}”.
+                  </p>
+                ) : (
+                  <ul className="promptly-scroll max-h-80 divide-y divide-[var(--border)] overflow-y-auto rounded-input border border-[var(--border)]">
+                    {filteredMemories.map((m) => (
                   <li key={m.id} className="px-3 py-2.5">
                     {editingId === m.id ? (
                       <div className="flex items-start gap-2">
@@ -226,7 +286,7 @@ export function MemoryPanel() {
                             setEditingId(null);
                             setEditText("");
                           }}
-                          className="mt-0.5 rounded p-1 text-[var(--text-muted)] hover:bg-black/5 dark:hover:bg-white/5"
+                          className="mt-0.5 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"
                         >
                           <X className="h-4 w-4" />
                         </button>
@@ -248,7 +308,7 @@ export function MemoryPanel() {
                             type="button"
                             aria-label="Edit"
                             onClick={() => startEdit(m)}
-                            className="rounded p-1 text-[var(--text-muted)] hover:bg-black/5 hover:text-[var(--text)] dark:hover:bg-white/5"
+                            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
@@ -257,7 +317,7 @@ export function MemoryPanel() {
                             aria-label="Delete"
                             disabled={deleteMut.isPending}
                             onClick={() => deleteMut.mutate(m.id)}
-                            className="rounded p-1 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500"
+                            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -266,7 +326,9 @@ export function MemoryPanel() {
                     )}
                   </li>
                 ))}
-              </ul>
+                  </ul>
+                )}
+              </div>
             )}
 
             {memories.length > 0 && (
@@ -313,14 +375,14 @@ function ErrorBox({
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 rounded-input border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+      className="flex items-start gap-2 rounded-input border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs text-[var(--danger)]"
     >
       <span className="flex-1">{message}</span>
       <button
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="rounded p-0.5 hover:bg-red-500/20"
+        className="rounded p-0.5 hover:bg-[var(--danger-bg)]"
       >
         <X className="h-3 w-3" />
       </button>
@@ -328,36 +390,44 @@ function ErrorBox({
   );
 }
 
-function Toggle({
-  checked,
+function ModeSelector({
+  value,
   onChange,
   disabled,
 }: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
+  value: MemoryMode;
+  onChange: (v: MemoryMode) => void;
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      disabled={disabled}
-      className={cn(
-        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition",
-        checked ? "bg-[var(--accent)]" : "bg-black/15 dark:bg-white/15",
-        "disabled:cursor-not-allowed disabled:opacity-60",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
-      )}
+    <div
+      role="radiogroup"
+      aria-label="Memory mode"
+      className="inline-flex rounded-input border border-[var(--border)] p-0.5"
     >
-      <span
-        aria-hidden
-        className={cn(
-          "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
-          checked ? "translate-x-5" : "translate-x-0.5"
-        )}
-      />
-    </button>
+      {MODE_OPTIONS.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            disabled={disabled}
+            title={opt.title}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              "rounded-[1.25rem] px-2.5 py-1 text-xs font-medium transition",
+              "disabled:cursor-not-allowed disabled:opacity-60",
+              active
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

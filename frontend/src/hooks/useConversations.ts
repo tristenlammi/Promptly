@@ -1,9 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { authApi } from "@/api/auth";
 import { chatApi, type UpdateConversationPayload } from "@/api/chat";
+import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 
 const CONVERSATIONS_KEY = ["conversations"] as const;
+
+/**
+ * Remove a conversation from *this user's own* sidebar without deleting
+ * the underlying chat — the "remove from my history" fallback for a chat
+ * you can see but don't own (e.g. one that reached you before per-chat
+ * sharing was retired, which the delete endpoint refuses to remove).
+ * Persists the hidden id to ``users.settings.hidden_conversations`` so it
+ * stays gone across reloads, and drops it from the local store now.
+ */
+export async function hideConversationFromHistory(id: string): Promise<void> {
+  const settings = useAuthStore.getState().user?.settings;
+  const current = Array.isArray(settings?.hidden_conversations)
+    ? (settings!.hidden_conversations as string[])
+    : [];
+  if (!current.includes(id)) {
+    const fresh = await authApi.updatePreferences({
+      hidden_conversations: [...current, id],
+    });
+    useAuthStore.getState().setUser(fresh);
+  }
+  useChatStore.getState().removeConversation(id);
+}
 
 export function useConversationsQuery() {
   const setConversations = useChatStore((s) => s.setConversations);

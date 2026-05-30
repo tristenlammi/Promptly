@@ -18,6 +18,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import {
+  hideConversationFromHistory,
   useConversationsQuery,
   useDeleteConversation,
   useUpdateConversation,
@@ -450,7 +451,25 @@ function ConversationRow({
           setConfirmOpen(false);
           resolve();
         },
-        onError: (err) => {
+        onError: async (err) => {
+          // A chat we can see but don't own (e.g. one shared to us before
+          // per-chat sharing was retired) returns 404/403 from delete.
+          // Fall back to hiding it from our own history so the row always
+          // clears — without touching the owner's copy.
+          const status = (err as { response?: { status?: number } })?.response
+            ?.status;
+          if (status === 404 || status === 403) {
+            try {
+              await hideConversationFromHistory(conv.id);
+              if (isActive) navigate("/chat");
+              setConfirmOpen(false);
+              resolve();
+              return;
+            } catch (e2) {
+              reject(e2 instanceof Error ? e2 : new Error(String(e2)));
+              return;
+            }
+          }
           reject(err instanceof Error ? err : new Error(String(err)));
         },
       });

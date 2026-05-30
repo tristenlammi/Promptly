@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  Check,
   ChevronRight,
   Download,
   Eye,
@@ -48,6 +49,7 @@ import {
 } from "@/components/files/helpers";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { Modal } from "@/components/shared/Modal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import {
@@ -204,6 +206,74 @@ export function FilesPage({
   >(null);
   const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
 
+  // Multi-select for bulk actions. Kept as separate file / folder id sets
+  // so a bulk delete routes each id to the right trash mutation. Cleared
+  // whenever the view changes (navigating folders or switching scope) so a
+  // stale selection can't leak across folders.
+  const [selFiles, setSelFiles] = useState<Set<string>>(new Set());
+  const [selFolders, setSelFolders] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkTrashFile = useTrashFile();
+  const bulkTrashFolder = useTrashFolder();
+  const selectionCount = selFiles.size + selFolders.size;
+
+  useEffect(() => {
+    setSelFiles(new Set());
+    setSelFolders(new Set());
+  }, [folderId, scope]);
+
+  const toggleFile = useCallback(
+    (id: string) =>
+      setSelFiles((prev) => {
+        const next = new Set(prev);
+        next.has(id) ? next.delete(id) : next.add(id);
+        return next;
+      }),
+    []
+  );
+  const toggleFolder = useCallback(
+    (id: string) =>
+      setSelFolders((prev) => {
+        const next = new Set(prev);
+        next.has(id) ? next.delete(id) : next.add(id);
+        return next;
+      }),
+    []
+  );
+  const clearSelection = useCallback(() => {
+    setSelFiles(new Set());
+    setSelFolders(new Set());
+  }, []);
+
+  const handleBulkTrash = useCallback(async () => {
+    const fileIds = [...selFiles];
+    const folderIds = [...selFolders];
+    const count = fileIds.length + folderIds.length;
+    if (count === 0) return;
+    const ok = await confirm({
+      title: "Move to trash?",
+      message: `${count} item${count === 1 ? "" : "s"} will be moved to the trash. You can restore ${count === 1 ? "it" : "them"} from the Trash view.`,
+      confirmLabel: "Move to trash",
+      danger: true,
+    });
+    if (!ok) return;
+    setBulkBusy(true);
+    try {
+      await Promise.all([
+        ...fileIds.map((id) => bulkTrashFile.mutateAsync({ id, scope })),
+        ...folderIds.map((id) => bulkTrashFolder.mutateAsync({ id, scope })),
+      ]);
+      toast.success(
+        `Moved ${count} item${count === 1 ? "" : "s"} to trash`
+      );
+      clearSelection();
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [selFiles, selFolders, scope, bulkTrashFile, bulkTrashFolder, clearSelection]);
+
   const navigateToFolder = useCallback(
     (id: string | null) => {
       // Keep URLs deep-linkable: sidebar / Drive PWA start_url both
@@ -338,12 +408,38 @@ export function FilesPage({
             </div>
           )}
 
+          {selectionCount > 0 && (
+            <div className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-3 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 shadow-sm">
+              <span className="text-sm font-medium">
+                {selectionCount} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={clearSelection}>
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  loading={bulkBusy}
+                  leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                  onClick={() => void handleBulkTrash()}
+                >
+                  Move to trash
+                </Button>
+              </div>
+            </div>
+          )}
+
           {data && (
             <ContentGrid
               data={data}
               scope={scope}
               layout={viewMode}
               currentFolderId={folderId}
+              selFiles={selFiles}
+              selFolders={selFolders}
+              onToggleFile={toggleFile}
+              onToggleFolder={toggleFolder}
               onOpenFolder={navigateToFolder}
               onDropOnFolder={handleDropOnto}
               onOpenMove={openMoveModal}
@@ -788,6 +884,10 @@ function ContentGrid({
   scope,
   layout,
   currentFolderId,
+  selFiles,
+  selFolders,
+  onToggleFile,
+  onToggleFolder,
   onOpenFolder,
   onDropOnFolder,
   onOpenMove,
@@ -798,6 +898,10 @@ function ContentGrid({
   scope: FileScope;
   layout: ViewMode;
   currentFolderId: string | null;
+  selFiles: Set<string>;
+  selFolders: Set<string>;
+  onToggleFile: (id: string) => void;
+  onToggleFolder: (id: string) => void;
   onOpenFolder: (id: string | null) => void;
   onDropOnFolder: (
     targetFolderId: string | null,
@@ -843,6 +947,9 @@ function ContentGrid({
       layout={layout}
       writable={data.writable}
       currentFolderId={currentFolderId}
+      selected={selFolders.has(f.id)}
+      selectionActive={selFiles.size + selFolders.size > 0}
+      onToggleSelect={() => onToggleFolder(f.id)}
       onOpen={() => onOpenFolder(f.id)}
       onDropOnFolder={onDropOnFolder}
       onOpenMove={onOpenMove}
@@ -856,6 +963,9 @@ function ContentGrid({
       scope={scope}
       layout={layout}
       writable={data.writable}
+      selected={selFiles.has(f.id)}
+      selectionActive={selFiles.size + selFolders.size > 0}
+      onToggleSelect={() => onToggleFile(f.id)}
       onOpenMove={onOpenMove}
       onPreview={() => onPreview(f)}
       onShare={() =>
@@ -894,6 +1004,9 @@ function FolderRow({
   layout,
   writable,
   currentFolderId,
+  selected,
+  selectionActive,
+  onToggleSelect,
   onOpen,
   onDropOnFolder,
   onOpenMove,
@@ -904,6 +1017,9 @@ function FolderRow({
   layout: ViewMode;
   writable: boolean;
   currentFolderId: string | null;
+  selected: boolean;
+  selectionActive: boolean;
+  onToggleSelect: () => void;
   onOpen: () => void;
   onDropOnFolder: (
     targetFolderId: string | null,
@@ -1069,13 +1185,24 @@ function FolderRow({
         {...dragProps}
         onDoubleClick={onOpen}
         className={cn(
-          "group relative flex flex-col rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 transition",
-          "hover:border-[var(--accent)]/40 hover:bg-[var(--hover)]",
+          "group relative flex flex-col rounded-card border bg-[var(--surface)] p-3 transition",
+          "hover:border-[var(--accent)]/60 hover:shadow-sm",
+          selected
+            ? "border-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40"
+            : "border-[var(--border)]",
           userCanMutate && "cursor-grab",
           over &&
             "border-[var(--accent)]/60 bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
         )}
       >
+        {userCanMutate && (
+          <SelectCheckbox
+            checked={selected}
+            active={selectionActive}
+            onToggle={onToggleSelect}
+            className="absolute left-1.5 top-1.5"
+          />
+        )}
         {userCanMutate && (
           <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
             <RowMenu
@@ -1091,7 +1218,7 @@ function FolderRow({
           title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
         >
           <SystemAwareFolderIcon kind={folder.system_kind} large />
-          <span className="line-clamp-2 w-full break-words text-xs font-medium">
+          <span className="line-clamp-2 w-full break-words text-sm font-medium">
             {folder.name}
           </span>
         </button>
@@ -1134,12 +1261,19 @@ function FolderRow({
     <li
       {...dragProps}
       className={cn(
-        "group flex items-center gap-3 px-4 py-3 transition",
-        "hover:bg-[var(--hover)]",
+        "group flex items-center gap-3 px-3 py-2 transition",
+        selected ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]",
         userCanMutate && "cursor-grab",
         over && "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
       )}
     >
+      {userCanMutate && (
+        <SelectCheckbox
+          checked={selected}
+          active={selectionActive}
+          onToggle={onToggleSelect}
+        />
+      )}
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -1203,6 +1337,9 @@ function FileRow({
   scope,
   layout,
   writable,
+  selected,
+  selectionActive,
+  onToggleSelect,
   onOpenMove,
   onPreview,
   onShare,
@@ -1211,6 +1348,9 @@ function FileRow({
   scope: FileScope;
   layout: ViewMode;
   writable: boolean;
+  selected: boolean;
+  selectionActive: boolean;
+  onToggleSelect: () => void;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: () => void;
   onShare: () => void;
@@ -1342,11 +1482,22 @@ function FileRow({
       <li
         {...dragProps}
         className={cn(
-          "group relative flex flex-col rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 transition",
-          "hover:border-[var(--accent)]/40 hover:bg-[var(--hover)]",
+          "group relative flex flex-col rounded-card border bg-[var(--surface)] p-3 transition",
+          "hover:border-[var(--accent)]/60 hover:shadow-sm",
+          selected
+            ? "border-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40"
+            : "border-[var(--border)]",
           writable && "cursor-grab"
         )}
       >
+        {writable && (
+          <SelectCheckbox
+            checked={selected}
+            active={selectionActive}
+            onToggle={onToggleSelect}
+            className="absolute left-1.5 top-1.5"
+          />
+        )}
         {writable && (
           <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
             <RowMenu
@@ -1362,7 +1513,7 @@ function FileRow({
           title={file.filename}
         >
           <FileTypeIcon mime={file.mime_type} large />
-          <span className="line-clamp-2 w-full break-words text-xs font-medium">
+          <span className="line-clamp-2 w-full break-words text-sm font-medium">
             {file.filename}
           </span>
           <span className="text-[10px] text-[var(--text-muted)]">
@@ -1398,11 +1549,18 @@ function FileRow({
     <li
       {...dragProps}
       className={cn(
-        "group flex items-center gap-3 px-4 py-3 transition",
-        "hover:bg-[var(--hover)]",
+        "group flex items-center gap-3 px-3 py-2 transition",
+        selected ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]",
         writable && "cursor-grab"
       )}
     >
+      {writable && (
+        <SelectCheckbox
+          checked={selected}
+          active={selectionActive}
+          onToggle={onToggleSelect}
+        />
+      )}
       <button
         onClick={onPreview}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -1425,7 +1583,7 @@ function FileRow({
         onClick={() => downloadAuthed(file)}
         title="Download"
         aria-label={`Download ${file.filename}`}
-        className="rounded-md p-1.5 text-[var(--text-muted)] opacity-0 transition hover:bg-black/[0.04] hover:text-[var(--text)] group-hover:opacity-100 dark:hover:bg-white/[0.06]"
+        className="rounded-md p-1.5 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text)] group-hover:opacity-100"
       >
         <Download className="h-4 w-4" />
       </button>
@@ -1460,6 +1618,44 @@ function FileRow({
 
       {overlays}
     </li>
+  );
+}
+
+/** Selection checkbox for a file/folder row. Hidden until the row is
+ *  hovered (desktop) or selection mode is active, so it doesn't clutter
+ *  the default browse view; always visible once checked. */
+function SelectCheckbox({
+  checked,
+  active,
+  onToggle,
+  className,
+}: {
+  checked: boolean;
+  active: boolean;
+  onToggle: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={checked ? "Deselect item" : "Select item"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
+        checked
+          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+          : "border-[var(--border)] bg-[var(--surface)] text-transparent hover:border-[var(--accent)]/60",
+        !checked && !active && "opacity-0 group-hover:opacity-100",
+        className
+      )}
+    >
+      <Check className="h-3.5 w-3.5" />
+    </button>
   );
 }
 

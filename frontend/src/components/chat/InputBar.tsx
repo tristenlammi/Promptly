@@ -792,6 +792,18 @@ export function InputBar({
               </span>
             </div>
           )}
+          {enhanceStatus === "loading" && (
+            <div
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
+                "bg-[var(--accent)]/10 text-[var(--accent)]"
+              )}
+              role="status"
+            >
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+              <span className="leading-snug">Enhancing your prompt…</span>
+            </div>
+          )}
           {enhanceStatus === "error" && enhanceError && (
             <div
               className={cn(

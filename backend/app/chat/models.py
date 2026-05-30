@@ -76,6 +76,14 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # True once we've re-generated the title with deeper context (around
+    # the 5-message mark). One-shot: the first auto-title fires after the
+    # opening exchange off thin context; this lets us sharpen it once the
+    # conversation has a real shape, without re-titling on every turn.
+    title_refined: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # Phase 4c — branching. Populated when this chat was forked from
     # another via ``POST /conversations/{id}/branch``. ``ON DELETE
     # SET NULL`` on both FKs (declared in the migration) keeps the
