@@ -2,6 +2,13 @@ import { apiClient } from "./client";
 
 export type FileScope = "mine" | "shared";
 
+export type DriveSortKey = "name" | "modified" | "size";
+export type DriveSortDir = "asc" | "desc";
+export interface DriveSort {
+  key: DriveSortKey;
+  dir: DriveSortDir;
+}
+
 /** Identifies a folder created and managed by the system (e.g. "Chat
  * Uploads"). Mirrors ``app.files.system_folders.SystemKind`` on the
  * backend; ``null`` for normal user-created folders. */
@@ -274,9 +281,17 @@ export interface FileSourceContent {
 }
 
 export const filesApi = {
-  async browse(scope: FileScope, folderId: string | null): Promise<BrowseResult> {
+  async browse(
+    scope: FileScope,
+    folderId: string | null,
+    sort?: DriveSort
+  ): Promise<BrowseResult> {
     const params = new URLSearchParams({ scope });
     if (folderId) params.set("folder_id", folderId);
+    if (sort) {
+      params.set("sort", sort.key);
+      params.set("dir", sort.dir);
+    }
     const { data } = await apiClient.get<BrowseResult>(
       `/files/browse?${params.toString()}`
     );

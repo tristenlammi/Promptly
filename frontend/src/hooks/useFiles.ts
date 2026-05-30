@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   filesApi,
   type BrowseResult,
+  type DriveSort,
   type FileScope,
   type FileSearchResponse,
   type RecentFilesResponse,
@@ -26,10 +27,16 @@ export function browseKey(scope: FileScope, folderId: string | null) {
   return [BROWSE_KEY, scope, folderId ?? "root"] as const;
 }
 
-export function useBrowseFiles(scope: FileScope, folderId: string | null) {
+export function useBrowseFiles(
+  scope: FileScope,
+  folderId: string | null,
+  sort?: DriveSort
+) {
   return useQuery<BrowseResult>({
-    queryKey: browseKey(scope, folderId),
-    queryFn: () => filesApi.browse(scope, folderId),
+    // Sort is part of the key so changing it refetches; browseKey stays
+    // the prefix used for invalidation after mutations.
+    queryKey: [...browseKey(scope, folderId), sort?.key ?? "name", sort?.dir ?? "asc"],
+    queryFn: () => filesApi.browse(scope, folderId, sort),
     staleTime: 10_000,
   });
 }

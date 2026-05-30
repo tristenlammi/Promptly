@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  ArrowDown,
+  ArrowDownUp,
+  ArrowUp,
   Check,
   ChevronRight,
   Download,
@@ -24,6 +27,8 @@ import {
 import {
   filesApi,
   isDocumentFile,
+  type DriveSort,
+  type DriveSortKey,
   type FileItem,
   type FileScope,
   type FolderItem,
@@ -65,6 +70,7 @@ import {
   useUnstarFile,
   useUnstarFolder,
 } from "@/hooks/useFiles";
+import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { useUploadStore } from "@/store/uploadStore";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -75,6 +81,13 @@ const DRAG_SOURCE_PARENT = "application/x-promptly-source-parent";
 
 type ViewMode = "list" | "grid";
 const VIEW_MODE_KEY = "promptly.filesViewMode";
+const SORT_KEY = "promptly.filesSort";
+const GRID_TILE_KEY = "promptly.filesGridTile";
+
+// Grid tile size (px min-width) bounds for the resize slider.
+const GRID_TILE_MIN = 96;
+const GRID_TILE_MAX = 200;
+const GRID_TILE_DEFAULT = 132;
 
 function readStoredViewMode(): ViewMode {
   if (typeof window === "undefined") return "list";
@@ -85,6 +98,36 @@ function readStoredViewMode(): ViewMode {
   } catch {
     return "list";
   }
+}
+
+function readStoredSort(): DriveSort {
+  if (typeof window === "undefined") return { key: "name", dir: "asc" };
+  try {
+    const raw = window.localStorage.getItem(SORT_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as DriveSort;
+      if (
+        (p.key === "name" || p.key === "modified" || p.key === "size") &&
+        (p.dir === "asc" || p.dir === "desc")
+      )
+        return p;
+    }
+  } catch {
+    /* ignore */
+  }
+  return { key: "name", dir: "asc" };
+}
+
+function readStoredGridTile(): number {
+  if (typeof window === "undefined") return GRID_TILE_DEFAULT;
+  try {
+    const n = Number(window.localStorage.getItem(GRID_TILE_KEY));
+    if (Number.isFinite(n) && n >= GRID_TILE_MIN && n <= GRID_TILE_MAX)
+      return n;
+  } catch {
+    /* ignore */
+  }
+  return GRID_TILE_DEFAULT;
 }
 
 interface DragPayload {
@@ -165,10 +208,29 @@ export function FilesPage({
     setFolderId(routeFolderId);
   }, [routeFolderId]);
 
+  // Sort + grid tile size — persisted view preferences (like viewMode).
+  const [sort, setSort] = useState<DriveSort>(() => readStoredSort());
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_KEY, JSON.stringify(sort));
+    } catch {
+      /* non-fatal */
+    }
+  }, [sort]);
+  const [gridTile, setGridTile] = useState<number>(() => readStoredGridTile());
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GRID_TILE_KEY, String(gridTile));
+    } catch {
+      /* non-fatal */
+    }
+  }, [gridTile]);
+
   const qc = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useBrowseFiles(
     scope,
-    folderId
+    folderId,
+    sort
   );
 
   const crumbs = data?.breadcrumbs ?? [];
@@ -359,6 +421,12 @@ export function FilesPage({
               onDrop={handleDropOnto}
             />
             <div className="flex items-center gap-2">
+              {/* Grid icon-size slider — only meaningful (and shown) in
+                  grid view; lets the user "zoom" the tiles like a drive. */}
+              {viewMode === "grid" && (
+                <GridSizeSlider value={gridTile} onChange={setGridTile} />
+              )}
+              <SortControl sort={sort} onChange={setSort} />
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {writable && (
                 <FolderActions
@@ -435,6 +503,9 @@ export function FilesPage({
               scope={scope}
               layout={viewMode}
               currentFolderId={folderId}
+              sort={sort}
+              onSort={setSort}
+              gridTile={gridTile}
               selFiles={selFiles}
               selFolders={selFolders}
               onToggleFile={toggleFile}
@@ -883,6 +954,9 @@ function ContentGrid({
   scope,
   layout,
   currentFolderId,
+  sort,
+  onSort,
+  gridTile,
   selFiles,
   selFolders,
   onToggleFile,
@@ -897,6 +971,9 @@ function ContentGrid({
   scope: FileScope;
   layout: ViewMode;
   currentFolderId: string | null;
+  sort: DriveSort;
+  onSort: (s: DriveSort) => void;
+  gridTile: number;
   selFiles: Set<string>;
   selFolders: Set<string>;
   onToggleFile: (id: string) => void;
@@ -980,7 +1057,12 @@ function ContentGrid({
 
   if (layout === "grid") {
     return (
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <ul
+        className="grid gap-3"
+        style={{
+          gridTemplateColumns: `repeat(auto-fill, minmax(${gridTile}px, 1fr))`,
+        }}
+      >
         {folderRows}
         {fileRows}
       </ul>
@@ -989,13 +1071,32 @@ function ContentGrid({
 
   return (
     <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
-      {/* Column header — gives the list a tabular, drive-like read.
-          Desktop only; the columns themselves are hidden on small
-          screens so the row collapses to name-only. */}
+      {/* Column header — clickable to sort, giving the list a tabular,
+          drive-like read. Columns hide on small screens so the row
+          collapses to name-only. */}
       <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-        <span className="flex-1">Name</span>
-        <span className="hidden w-28 shrink-0 lg:block">Modified</span>
-        <span className="hidden w-16 shrink-0 text-right sm:block">Size</span>
+        <SortHeader
+          className="flex-1"
+          label="Name"
+          col="name"
+          sort={sort}
+          onSort={onSort}
+        />
+        <SortHeader
+          className="hidden w-28 shrink-0 lg:block"
+          label="Modified"
+          col="modified"
+          sort={sort}
+          onSort={onSort}
+        />
+        <SortHeader
+          className="hidden w-16 shrink-0 sm:block"
+          align="right"
+          label="Size"
+          col="size"
+          sort={sort}
+          onSort={onSort}
+        />
         {/* Spacer matching the row's trailing action cluster. */}
         <span className="w-8 shrink-0" aria-hidden />
       </div>
@@ -1004,6 +1105,52 @@ function ContentGrid({
         {fileRows}
       </ul>
     </div>
+  );
+}
+
+/** A clickable column header that toggles the sort. Clicking the active
+ *  column flips direction; clicking another switches to it (asc). */
+function SortHeader({
+  label,
+  col,
+  sort,
+  onSort,
+  className,
+  align = "left",
+}: {
+  label: string;
+  col: DriveSortKey;
+  sort: DriveSort;
+  onSort: (s: DriveSort) => void;
+  className?: string;
+  align?: "left" | "right";
+}) {
+  const active = sort.key === col;
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        onSort(
+          active
+            ? { key: col, dir: sort.dir === "asc" ? "desc" : "asc" }
+            : { key: col, dir: "asc" }
+        )
+      }
+      className={cn(
+        "flex items-center gap-1 uppercase tracking-wide transition hover:text-[var(--text)]",
+        active && "text-[var(--text)]",
+        align === "right" && "justify-end text-right",
+        className
+      )}
+    >
+      <span>{label}</span>
+      {active &&
+        (sort.dir === "asc" ? (
+          <ArrowUp className="h-3 w-3" />
+        ) : (
+          <ArrowDown className="h-3 w-3" />
+        ))}
+    </button>
   );
 }
 
@@ -1738,6 +1885,109 @@ function ViewToggle({
         <LayoutGrid className="h-4 w-4" />
       </button>
     </div>
+  );
+}
+
+const SORT_LABELS: Record<DriveSortKey, string> = {
+  name: "Name",
+  modified: "Last modified",
+  size: "Size",
+};
+
+/** Compact sort picker. Works in both list and grid (the list also has
+ *  clickable column headers, but this keeps sorting reachable in grid
+ *  view and on mobile). */
+function SortControl({
+  sort,
+  onChange,
+}: {
+  sort: DriveSort;
+  onChange: (s: DriveSort) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  usePopoverDismiss(open, ref, () => setOpen(false));
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Sort"
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 text-xs text-[var(--text-muted)] transition hover:text-[var(--text)]"
+      >
+        <ArrowDownUp className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">{SORT_LABELS[sort.key]}</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 text-sm shadow-lg"
+        >
+          {(Object.keys(SORT_LABELS) as DriveSortKey[]).map((key) => {
+            const active = sort.key === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                onClick={() =>
+                  onChange(
+                    active
+                      ? { key, dir: sort.dir === "asc" ? "desc" : "asc" }
+                      : { key, dir: "asc" }
+                  )
+                }
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left transition hover:bg-[var(--hover)]",
+                  active && "text-[var(--accent)]"
+                )}
+              >
+                <span>{SORT_LABELS[key]}</span>
+                {active &&
+                  (sort.dir === "asc" ? (
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  ))}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Small slider that "zooms" the grid tiles, like a drive's icon-size
+ *  control. Hidden in list view (the caller only renders it for grid). */
+function GridSizeSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label
+      className="hidden items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 sm:inline-flex"
+      title="Icon size"
+    >
+      <LayoutGrid className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+      <input
+        type="range"
+        min={GRID_TILE_MIN}
+        max={GRID_TILE_MAX}
+        step={4}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Grid icon size"
+        className="h-8 w-20 cursor-ew-resize accent-[var(--accent)]"
+      />
+    </label>
   );
 }
 

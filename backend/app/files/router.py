@@ -41,7 +41,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
-from sqlalchemy import and_, delete as sa_delete, func, select
+from sqlalchemy import and_, delete as sa_delete, func, nullslast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -403,10 +403,35 @@ async def _build_breadcrumbs(
 # --------------------------------------------------------------------
 # Browse
 # --------------------------------------------------------------------
+_SORT_KEYS = ("name", "modified", "size")
+
+
+def _folder_order(sort: str, direction: str):
+    """ORDER BY clause for folder rows. Folders have no size, so a
+    ``size`` sort falls back to name for them (files still sort by size)."""
+    col = {
+        "name": FileFolder.name,
+        "modified": FileFolder.updated_at,
+        "size": FileFolder.name,
+    }.get(sort, FileFolder.name)
+    return nullslast(col.desc() if direction == "desc" else col.asc())
+
+
+def _file_order(sort: str, direction: str):
+    col = {
+        "name": UserFile.filename,
+        "modified": UserFile.updated_at,
+        "size": UserFile.size_bytes,
+    }.get(sort, UserFile.filename)
+    return nullslast(col.desc() if direction == "desc" else col.asc())
+
+
 @router.get("/browse", response_model=BrowseResponse)
 async def browse(
     scope: Scope = Query("mine"),
     folder_id: uuid.UUID | None = Query(default=None),
+    sort: str = Query("name"),
+    direction: str = Query("asc", alias="dir"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> BrowseResponse:
@@ -426,13 +451,22 @@ async def browse(
     if folder_id is not None:
         parent = await _load_readable_folder(db, folder_id, user)
 
+    # Normalise the sort knobs defensively so a stale/hostile client
+    # can't reach the ORDER BY with a bad column name.
+    sort = sort if sort in _SORT_KEYS else "name"
+    direction = "desc" if direction == "desc" else "asc"
+
     if scope == "mine":
-        return await _browse_mine(db, user, parent)
+        return await _browse_mine(db, user, parent, sort, direction)
     return await _browse_shared(db, user, parent)
 
 
 async def _browse_mine(
-    db: AsyncSession, user: User, parent: FileFolder | None
+    db: AsyncSession,
+    user: User,
+    parent: FileFolder | None,
+    sort: str = "name",
+    direction: str = "asc",
 ) -> BrowseResponse:
     if parent is not None and parent.user_id != user.id:
         # The caller can read this folder via a grant, but it's not
@@ -453,7 +487,7 @@ async def _browse_mine(
         await db.execute(
             select(FileFolder)
             .where(folder_filter)
-            .order_by(FileFolder.name.asc())
+            .order_by(_folder_order(sort, direction))
         )
     ).scalars().all()
 
@@ -469,7 +503,7 @@ async def _browse_mine(
         await db.execute(
             select(UserFile)
             .where(file_filter)
-            .order_by(UserFile.filename.asc())
+            .order_by(_file_order(sort, direction))
         )
     ).scalars().all()
 
