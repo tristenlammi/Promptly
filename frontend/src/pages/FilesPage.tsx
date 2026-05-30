@@ -388,6 +388,42 @@ export function FilesPage({
 
   const visibleFiles = data?.files ?? [];
 
+  // Drag-to-upload: drop OS files anywhere on the page to upload them
+  // into the current folder. Gated on the native "Files" drag type so it
+  // never collides with the *internal* file/folder move drags (which use
+  // custom MIME types) — those keep flowing to the row/breadcrumb drop
+  // targets untouched.
+  const startUploads = useUploadStore((s) => s.startUploads);
+  const [externalDragOver, setExternalDragOver] = useState(false);
+  const isExternalFileDrag = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types || []).includes("Files");
+
+  const handlePageDragOver = (e: React.DragEvent) => {
+    if (!writable || !isExternalFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!externalDragOver) setExternalDragOver(true);
+  };
+  const handlePageDragLeave = (e: React.DragEvent) => {
+    if (!externalDragOver) return;
+    // Only dismiss when the pointer actually leaves the dropzone, not
+    // when it crosses between child rows inside it.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setExternalDragOver(false);
+  };
+  const handlePageDrop = (e: React.DragEvent) => {
+    if (!writable || !isExternalFileDrag(e)) return;
+    e.preventDefault();
+    setExternalDragOver(false);
+    const dropped = Array.from(e.dataTransfer.files || []);
+    if (dropped.length === 0) return;
+    startUploads({ files: dropped, scope, folderId });
+    toast.info(
+      `Uploading ${dropped.length} file${dropped.length === 1 ? "" : "s"}…`
+    );
+    void refetch();
+  };
+
   return (
     <>
       <TopNav
@@ -397,7 +433,26 @@ export function FilesPage({
       />
       <DriveSubNav />
 
-      <div className="promptly-scroll flex-1 overflow-y-auto">
+      <div
+        className="promptly-scroll relative flex-1 overflow-y-auto"
+        onDragEnter={handlePageDragOver}
+        onDragOver={handlePageDragOver}
+        onDragLeave={handlePageDragLeave}
+        onDrop={handlePageDrop}
+      >
+        {externalDragOver && (
+          <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 backdrop-blur-[1px]">
+            <div className="flex flex-col items-center gap-2 rounded-card border-2 border-dashed border-[var(--accent)] bg-[var(--surface)] px-8 py-6 shadow-lg">
+              <Upload className="h-7 w-7 text-[var(--accent)]" />
+              <span className="text-sm font-medium text-[var(--text)]">
+                Drop files to upload
+              </span>
+              <span className="text-xs text-[var(--text-muted)]">
+                They'll land in this folder
+              </span>
+            </div>
+          </div>
+        )}
         <div className="mx-auto w-full max-w-4xl px-4 py-4 md:px-6 md:py-6">
           {/* Drive stage 5 — the legacy "My files / Shared pool" scope
               toggle was retired here. Switching between owned files
