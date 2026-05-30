@@ -73,15 +73,21 @@ one-offs and keep the UI consistent.
       missed hover pair. *(ComparePage's live multi-column surface keeps its
       own full-screen header by design.)*
 
-## Phase 3 — Mobile structural fix + discoverability *(the casual surface)*
+## Phase 3 — Mobile structural fix + discoverability ✅
 
-- [ ] **3.1 Single-tree layout** — replace the 768px conditional remount with a
-      CSS-driven sidebar/drawer; no scroll/state loss on rotate or
-      window-drag. *(high · med-high)*
-- [ ] **3.2 Visible `⋯` on touch conversation rows** — pin/rename/delete/export
-      via the overflow pattern (no hidden long-press). *(med · low)*
-- [ ] **3.3 Secondary-page mobile pass** — Task-detail run rail → bottom sheet,
-      etc. *(med · med)*
+- [x] **3.1 Single-tree layout** — AppLayout now renders one tree for both form
+      factors; only class names / a11y attrs differ across 768px, so the
+      `<Outlet>` and `<Sidebar>` keep their tree position and **re-style rather
+      than remount**. Chat scroll position + in-flight state survive rotation /
+      window-resize. Bonus: the drawer now sizes to the sidebar's natural 288px
+      instead of `85vw`, fixing the "drawer too wide in landscape" issue.
+- [x] **3.2 Visible `⋯` on touch conversation rows** — touch rows show an
+      always-visible ⋯ that opens the full action menu; **added Pin + Delete to
+      that menu** (it previously only had Move/Export, so touch users couldn't
+      pin or delete at all). Desktop keeps hover quick-actions + right-click.
+- [x] **3.3 Secondary-page mobile pass** — TaskDetailPage's 224px run rail
+      becomes a horizontal run-selector strip on mobile so the report gets full
+      width; vertical rail stays on desktop.
 
 ## Phase 4 — First-impression polish *(the first 10 seconds)*
 

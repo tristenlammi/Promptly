@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   Clock,
   LogOut,
+  MoreHorizontal,
   Pin,
   PanelLeftClose,
   PanelLeftOpen,
@@ -381,6 +382,7 @@ function ConversationRow({
   const navigate = useNavigate();
   const update = useUpdateConversation();
   const remove = useDeleteConversation();
+  const isMobile = useIsMobile();
   const isActive = activeId === conv.id;
   const title = conv.title?.trim() || "New chat";
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -438,8 +440,8 @@ function ConversationRow({
         className={cn(
           "group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition",
           isActive
-            ? "bg-black/[0.05] text-[var(--text)] dark:bg-white/[0.06]"
-            : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+            ? "bg-[var(--hover-strong)] text-[var(--text)]"
+            : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
         )}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -477,35 +479,57 @@ function ConversationRow({
           )}
           <span className="truncate">{title}</span>
         </button>
-        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {isMobile ? (
+          // Touch: a single always-visible ⋯ opens the full action menu
+          // (pin / delete / move / export). Hover quick-actions don't
+          // exist on touch, and a 500ms long-press is undiscoverable.
           <button
             onClick={(e) => {
               e.stopPropagation();
-              update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } });
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setMenuPos({ x: r.left, y: r.bottom + 4 });
             }}
-            className="rounded p-1 hover:bg-[var(--hover-strong)]"
-            title={conv.pinned ? "Unpin" : "Pin"}
-            aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+            className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover-strong)]"
+            aria-label="Conversation actions"
           >
-            <Pin
-              className={cn(
-                "h-3 w-3",
-                conv.pinned ? "fill-current text-[var(--accent)]" : ""
-              )}
-            />
+            <MoreHorizontal className="h-4 w-4" />
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmOpen(true);
-            }}
-            className="rounded p-1 text-red-500 hover:bg-red-500/10"
-            title="Delete"
-            aria-label="Delete conversation"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
-        </div>
+        ) : (
+          // Desktop: hover-revealed quick actions, plus right-click for
+          // the full menu.
+          <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                update.mutate({
+                  id: conv.id,
+                  payload: { pinned: !conv.pinned },
+                });
+              }}
+              className="rounded p-1 hover:bg-[var(--hover-strong)]"
+              title={conv.pinned ? "Unpin" : "Pin"}
+              aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+            >
+              <Pin
+                className={cn(
+                  "h-3 w-3",
+                  conv.pinned ? "fill-current text-[var(--accent)]" : ""
+                )}
+              />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmOpen(true);
+              }}
+              className="rounded p-1 text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+              title="Delete"
+              aria-label="Delete conversation"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        )}
       </div>
 
       <DeleteChatModal
@@ -519,6 +543,11 @@ function ConversationRow({
         <ConversationRowContextMenu
           conversationId={conv.id}
           currentProjectId={conv.project_id ?? null}
+          pinned={!!conv.pinned}
+          onTogglePin={() =>
+            update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } })
+          }
+          onRequestDelete={() => setConfirmOpen(true)}
           position={menuPos}
           onClose={() => setMenuPos(null)}
         />

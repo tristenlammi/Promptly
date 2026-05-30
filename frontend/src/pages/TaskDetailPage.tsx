@@ -160,9 +160,33 @@ export function TaskDetailPage() {
         }
       />
 
-      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 gap-4 px-4 py-4">
-        {/* Run history rail */}
-        <aside className="promptly-scroll w-56 shrink-0 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-2">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-3 px-4 py-4 md:flex-row md:gap-4">
+        {/* Mobile run selector — a horizontal strip so the report gets
+            the full width instead of a cramped 224px side rail. */}
+        {(runs ?? []).length > 0 && (
+          <div className="shrink-0 md:hidden">
+            <div className="promptly-scroll flex gap-1.5 overflow-x-auto pb-1">
+              {(runs ?? []).map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedRunId(r.id)}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition",
+                    r.id === selectedRunId
+                      ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                  )}
+                >
+                  <RunStatusChip status={r.status} />
+                  <span>{fmtDate(r.created_at)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Run history rail — desktop only; mobile uses the strip above. */}
+        <aside className="promptly-scroll hidden w-56 shrink-0 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-2 md:block">
           <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             Runs {runsPolling && "· live"}
           </div>

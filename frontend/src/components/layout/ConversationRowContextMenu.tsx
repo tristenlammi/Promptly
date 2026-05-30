@@ -11,6 +11,8 @@ import {
   FolderKanban,
   FolderMinus,
   Loader2,
+  Pin,
+  Trash2,
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -30,6 +32,12 @@ interface Props {
   /** Project this chat currently belongs to (``null`` for a standalone
    *  chat). Drives the checkmark + "Remove from project" affordance. */
   currentProjectId: string | null;
+  /** Current pinned state — drives the Pin/Unpin label. */
+  pinned: boolean;
+  /** Toggle the pin. The row owns the mutation; the menu just fires it. */
+  onTogglePin: () => void;
+  /** Open the delete confirmation. The row owns the modal. */
+  onRequestDelete: () => void;
   position: Position;
   onClose: () => void;
 }
@@ -53,6 +61,9 @@ const MENU_MIN_WIDTH = 240;
 export function ConversationRowContextMenu({
   conversationId,
   currentProjectId,
+  pinned,
+  onTogglePin,
+  onRequestDelete,
   position,
   onClose,
 }: Props) {
@@ -180,6 +191,52 @@ export function ConversationRowContextMenu({
       >
         {view === "main" ? (
           <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onTogglePin();
+                onClose();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]"
+              )}
+            >
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                <Pin
+                  className={cn(
+                    "h-3.5 w-3.5",
+                    pinned
+                      ? "fill-current text-[var(--accent)]"
+                      : "text-[var(--text-muted)]"
+                  )}
+                />
+              </span>
+              <span className="flex-1 font-medium">
+                {pinned ? "Unpin" : "Pin to top"}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onClose();
+                onRequestDelete();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                "text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+              )}
+            >
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                <Trash2 className="h-3.5 w-3.5" />
+              </span>
+              <span className="flex-1 font-medium">Delete</span>
+            </button>
+
+            <div className="my-1 border-t border-[var(--border)]" />
+
             <button
               type="button"
               role="menuitem"
@@ -327,7 +384,7 @@ export function ConversationRowContextMenu({
             role="alert"
             className={cn(
               "mx-2 mb-2 mt-1 rounded border px-2 py-1.5 text-[11px]",
-              "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+              "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
             )}
           >
             {error}
