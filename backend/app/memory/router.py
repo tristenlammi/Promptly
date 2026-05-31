@@ -18,7 +18,12 @@ from app.database import get_db
 from app.memory.constants import MAX_MEMORIES
 from app.memory.models import UserMemory
 from app.memory.schemas import MemoryCreate, MemoryResponse, MemoryUpdate
-from app.memory.service import _is_duplicate, _normalise, load_memories
+from app.memory.service import (
+    _is_duplicate,
+    _normalise,
+    embed_memory_row,
+    load_memories,
+)
 
 router = APIRouter()
 
@@ -72,6 +77,8 @@ async def create_memory(
 
     row = UserMemory(user_id=user.id, content=content, source="manual")
     db.add(row)
+    await db.flush()  # assign id before embedding
+    await embed_memory_row(db, row)  # best-effort; no-op without embeddings
     await db.commit()
     await db.refresh(row)
     return row
@@ -92,6 +99,9 @@ async def update_memory(
             detail="Memory text is required",
         )
     row.content = content
+    # Re-embed: the vector must track the edited text.
+    await db.flush()
+    await embed_memory_row(db, row)
     await db.commit()
     await db.refresh(row)
     return row

@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -42,6 +42,17 @@ class UserMemory(UUIDPKMixin, TimestampMixin, Base):
     source_conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         nullable=True
     )
+
+    # Semantic-retrieval embedding (Memory Overhaul Phase 1). The actual
+    # ``embedding_768`` / ``embedding_1536`` pgvector columns exist in the
+    # DB (migration 0060) but are NOT mapped here — like message_embeddings,
+    # they're read/written via raw SQL with text-literal casts, since the
+    # app image ships no pgvector Python type. We map only the scalar
+    # bookkeeping columns. ``content_hash`` (md5 of embedded text) detects
+    # edits; ``embed_dim`` records which vector column is populated. Both
+    # NULL until embedded (or forever when embeddings aren't configured).
+    embed_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     def __repr__(self) -> str:
         return f"<UserMemory id={self.id} user={self.user_id} src={self.source}>"

@@ -11,15 +11,22 @@ Two jobs:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from typing import Final
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.titler import _strip_think_blocks
+from app.custom_models.embedding import (
+    embed_texts,
+    normalise_for_embedding,
+    vector_literal,
+)
+from app.chat.semantic_search import EmbeddingConfig, get_embedding_config
 from app.memory.constants import (
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
@@ -30,6 +37,65 @@ from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, model_router
 
 logger = logging.getLogger("promptly.memory")
+
+
+def _content_hash(content: str) -> str:
+    """Fingerprint of the embedded text so the indexer can detect edits."""
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+
+async def embed_memory_row(
+    db: AsyncSession,
+    memory: UserMemory,
+    cfg: EmbeddingConfig | None = None,
+) -> bool:
+    """Embed one memory's content and write the vector onto its row.
+
+    Best-effort: returns ``True`` if a vector was written, ``False`` when
+    embeddings aren't configured or the provider call fails (the row just
+    stays un-embedded and falls back to recency retrieval). Does NOT
+    commit — the caller owns the transaction.
+    """
+    if cfg is None:
+        cfg = await get_embedding_config(db)
+    if cfg is None:
+        return False
+    cleaned = normalise_for_embedding(memory.content or "")
+    if not cleaned:
+        return False
+    try:
+        vectors = await embed_texts(
+            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+        )
+    except Exception as exc:  # noqa: BLE001 — never break the caller
+        logger.warning("memory embed failed id=%s: %s", memory.id, exc)
+        return False
+    if not vectors:
+        return False
+    # Write via raw SQL CAST so pgvector accepts the literal regardless of
+    # which dim column is active; NULL the other dim so a model switch
+    # leaves a single source of truth.
+    col = f"embedding_{cfg.dim}"
+    other = f"embedding_{1536 if cfg.dim == 768 else 768}"
+    await db.execute(
+        text(
+            f"""
+            UPDATE user_memories
+               SET {col} = CAST(:vec AS vector({cfg.dim})),
+                   {other} = NULL,
+                   embed_dim = :dim,
+                   content_hash = :chash
+             WHERE id = :mid
+            """
+        ),
+        {
+            "vec": vector_literal(vectors[0]),
+            "dim": cfg.dim,
+            "chash": _content_hash(memory.content or ""),
+            "mid": memory.id,
+        },
+    )
+    return True
 
 # ----------------------------------------------------------------------
 # Capture pre-filter
@@ -253,20 +319,21 @@ async def capture_memories(
         return []
 
     saved: list[str] = []
+    new_rows: list[UserMemory] = []
     room = MAX_MEMORIES - len(existing)
     for fact in candidates:
         if len(saved) >= MAX_NEW_PER_TURN or len(saved) >= room:
             break
         if _is_duplicate(fact, existing_keys):
             continue
-        db.add(
-            UserMemory(
-                user_id=user_id,
-                content=fact,
-                source="auto",
-                source_conversation_id=source_conversation_id,
-            )
+        row = UserMemory(
+            user_id=user_id,
+            content=fact,
+            source="auto",
+            source_conversation_id=source_conversation_id,
         )
+        db.add(row)
+        new_rows.append(row)
         saved.append(fact)
         existing_keys.append(_normalise(fact))
 
@@ -276,4 +343,13 @@ async def capture_memories(
         except Exception:  # noqa: BLE001
             logger.exception("Memory persist flush failed user=%s", user_id)
             return []
+        # Embed the new facts so they're retrievable (best-effort; a
+        # single config lookup shared across the batch). Never fatal.
+        try:
+            cfg = await get_embedding_config(db)
+            if cfg is not None:
+                for row in new_rows:
+                    await embed_memory_row(db, row, cfg)
+        except Exception:  # noqa: BLE001
+            logger.warning("memory embed-on-capture failed user=%s", user_id)
     return saved
