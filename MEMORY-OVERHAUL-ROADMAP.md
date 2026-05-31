@@ -51,23 +51,26 @@ primitives, account section nav.
 The headline change: stop dumping all facts; retrieve the relevant ones, and
 let capture **update** memory instead of only appending.
 
-- [ ] **1.1 Embed memories.** Migration: add `embedding_768`/`embedding_1536`
-      (vector) + `content_hash` + `embed_dim` to `user_memories`, HNSW cosine
-      indexes — mirror `message_embeddings`. A tiny background indexer (or
-      inline-on-write, since volume is low) embeds new/changed facts. No-op when
-      embeddings aren't configured.
-- [ ] **1.2 Retrieved injection.** At chat time, embed the user's turn and
-      inject **top-K by cosine** (K≈8–12) instead of all 200. Always-include a
-      small set of **pinned/core** facts (Phase 2.1) regardless of score.
-      Fallback to recency when embeddings are off. Big token savings + relevance.
-- [ ] **1.3 Merge-on-capture.** Extraction pass also receives the *existing
-      related* facts (semantic lookup on the turn) and returns structured ops —
-      `add` / `update(id)` / `delete(id)` — so "I moved to Rust" updates the
-      Python fact instead of stacking a contradiction. New prompt + a small
-      op-applier; bounded per turn; best-effort, never breaks the turn.
-- [ ] **1.4 Semantic dedup.** On add/update, reject/merge a candidate whose
-      cosine similarity to an existing fact exceeds a threshold (replaces the
-      brittle substring check).
+- [x] **1.1 Embed memories.** Migration 0060: `embedding_768/1536` (raw-SQL
+      vector cols) + `content_hash` + `embed_dim` on `user_memories` with
+      partial HNSW cosine indexes (mirrors `message_embeddings`; no pgvector
+      Python type — vectors written as text-literal casts). Embed-on-write
+      (`embed_memory_row`) on manual create/edit + auto-capture, since volume is
+      low (≤200/user). No-op when embeddings aren't configured.
+- [x] **1.2 Retrieved injection.** `retrieve_relevant_memories` embeds the
+      user's turn and injects the **top-K (10) by cosine**, preserving order.
+      Falls back to recency when embeddings are off / query empty / nothing
+      embedded yet. Wired into the chat stream. *(Pinned/core always-include
+      comes with Phase 2.1.)*
+- [x] **1.3 Merge-on-capture.** Capture now reconciles: the extraction pass
+      receives the related existing facts (with ids) and returns `add` /
+      `update(id)` / `delete(id)` ops, applied with strict id-validation. "I
+      moved to Rust" updates the stale fact instead of stacking. Bounded per
+      turn; best-effort.
+- [x] **1.4 Semantic dedup.** `_nearest_similarity` cosine guard on the
+      auto-capture add path (threshold 0.90) catches near-identical restatements
+      the substring check misses. Manual user adds left untouched. No-op without
+      embeddings.
 
 **impact: very high · effort: high** · Scaffolding: `embed_texts`, pgvector,
 `semantic_index.py` pattern, `capture_memories`, `build_memory_system_prompt`.
