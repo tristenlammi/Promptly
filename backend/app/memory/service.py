@@ -127,25 +127,6 @@ _CAPTURE_HINT_RE: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-_EXTRACT_SYSTEM_PROMPT: Final[str] = (
-    "You maintain a long-term memory of durable facts about a user for an "
-    "AI assistant. You are given the latest exchange between the user and "
-    "the assistant. Extract ONLY durable, reusable facts about the USER "
-    "that would help personalise FUTURE, unrelated conversations.\n\n"
-    "Capture things like: their name or what to call them, role/profession, "
-    "the tools/languages/frameworks they use, stable preferences (tone, "
-    "format, units), ongoing projects, and explicit 'remember this' "
-    "requests.\n\n"
-    "Do NOT capture: one-off task details, the answer to their question, "
-    "transient state, anything time-bound ('I'm tired today'), sensitive "
-    "data they didn't ask you to remember (passwords, full card/ID "
-    "numbers), or things already obvious.\n\n"
-    "Write each fact as a single concise third-person statement starting "
-    "with 'User ' (e.g. 'User is a Rust developer', 'User prefers concise "
-    "answers'). Output STRICTLY a JSON array of strings and nothing else. "
-    "If there is nothing worth remembering, output []."
-)
-
 _MAX_USER_CHARS: Final[int] = 4000
 _MAX_ASSISTANT_CHARS: Final[int] = 2000
 _MAX_EXTRACT_TOKENS: Final[int] = 400
@@ -312,34 +293,6 @@ async def build_memory_system_prompt(
     else:
         memories = await load_memories(db, user_id, limit=k)
     return build_memory_prompt(memories)
-
-
-def _parse_facts(raw: str) -> list[str]:
-    """Pull a JSON array of strings out of a model response, tolerating a
-    stray code-fence or preamble."""
-    cleaned = _strip_think_blocks(raw).strip()
-    if not cleaned:
-        return []
-    # Isolate the outermost [...] so a chatty model that adds "Here are
-    # the facts:" doesn't break json.loads.
-    start = cleaned.find("[")
-    end = cleaned.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        return []
-    try:
-        parsed = json.loads(cleaned[start : end + 1])
-    except (ValueError, TypeError):
-        return []
-    if not isinstance(parsed, list):
-        return []
-    facts: list[str] = []
-    for item in parsed:
-        if not isinstance(item, str):
-            continue
-        fact = item.strip()
-        if fact:
-            facts.append(fact[:MAX_CONTENT_CHARS])
-    return facts
 
 
 # Reconciliation prompt (Memory Overhaul 1.3). Unlike the append-only
