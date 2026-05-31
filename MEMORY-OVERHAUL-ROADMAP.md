@@ -77,17 +77,22 @@ let capture **update** memory instead of only appending.
 
 ## Phase 2 — Structure + trust *(make it legible and correctable)*
 
-- [ ] **2.1 Categories + pinned/core facts.** Add `category`
-      (identity | preferences | projects | context) + `pinned` bool. Grouped UI;
-      pinned facts always inject. Extraction tags category.
-- [ ] **2.2 Inline undo + correct on the capture chip.** "Saved 2 facts · Undo"
-      that actually deletes the just-added rows; quick-edit a captured fact in
-      place. Turns capture into a trusted loop. (chip → `MemorySavedChip`,
-      `memory_saved` SSE already carries the facts; add their ids.)
-- [ ] **2.3 Provenance UI.** Show the source conversation on each auto fact +
-      deep-link to it; show "added / last used" timestamps.
-- [ ] **2.4 Management UX.** Group by category, bulk select/delete, sort
-      (recent / most-used / category). Builds on the Files selection patterns.
+- [x] **2.1 Categories + pinned/core facts.** Migration 0061: `category`
+      (VARCHAR 20, identity|preferences|projects|context) + `pinned` (BOOLEAN)
+      on `user_memories` with partial index. Pinned facts always inject first
+      regardless of K. Reconcile prompt tags each op with a category. Partial
+      PATCH endpoint — pin toggle or category change doesn't need content.
+- [x] **2.2 Inline undo + correct on the capture chip.** `capture_memories`
+      returns `list[dict]` with id + content; SSE carries `ids[]`; chip shows
+      "Saved N facts · **Undo**" that bulk-deletes all captured ids and
+      invalidates the memories query. Forward-compatible with older backends.
+- [x] **2.3 Provenance UI.** Each row shows relative timestamp (created_at),
+      auto/manual badge, and a deep-link icon to the source conversation for
+      auto-captured facts.
+- [x] **2.4 Management UX.** MemoryPanel fully redesigned: grouped by sort
+      mode (Recent | Pinned first | Category groups with section headers); inline
+      pin toggle (filled icon = always injected); category badge; bulk-select mode
+      with Delete bar; sort dropdown; category selector on add-new + inline edit.
 
 **impact: high · effort: med** · Scaffolding: MemoryPanel, MemorySavedChip,
 `source_conversation_id` (already stored), DriveSelection patterns.
