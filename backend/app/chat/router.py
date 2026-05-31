@@ -3579,6 +3579,14 @@ async def _stream_generator(
                 if _mem_settings.get("memory_enabled", True) is False
                 else "auto"
             )
+        # Resolve the triggering user message early — both memory
+        # retrieval (below) and @-mention resolution (further down) key
+        # off its text. Defined here so the memory block can use it.
+        trig_row = next(
+            (m for m in history_rows if m.id == triggering_user_msg_id),
+            None,
+        )
+
         # Saved facts are injected in both auto and manual modes — manual
         # only changes whether we *capture* new ones (see below).
         memory_enabled = memory_mode != "off"
@@ -3604,10 +3612,6 @@ async def _stream_generator(
         # error, inaccessible id, chat too short) drop individual
         # references without blocking the send — the raw tokens
         # still render as chips in the user's message.
-        trig_row = next(
-            (m for m in history_rows if m.id == triggering_user_msg_id),
-            None,
-        )
         if trig_row is not None and trig_row.content:
             mentions_found = extract_mentions(trig_row.content)
             if mentions_found:
