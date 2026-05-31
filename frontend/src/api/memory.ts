@@ -11,8 +11,17 @@ export interface Memory {
   category: string | null;
   /** Pinned facts are always injected into the system prompt (Phase 2.1). */
   pinned: boolean;
+  /** Usage signals (Phase 3.1): how many turns retrieved this fact. */
+  times_used: number;
+  last_used_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface MemoryImportResult {
+  imported: number;
+  skipped: number;
+  errors: number;
 }
 
 export interface MemoryPatch {
@@ -53,5 +62,14 @@ export const memoryApi = {
   },
   async clear(): Promise<void> {
     await apiClient.delete("/memory");
+  },
+  /** Download all memories as a JSON file (Phase 3.5). */
+  exportUrl(): string {
+    return "/api/memory/export";
+  },
+  /** Import memories from a parsed JSON array (Phase 3.5). */
+  async import(items: unknown[]): Promise<MemoryImportResult> {
+    const { data } = await apiClient.post<MemoryImportResult>("/memory/import", items);
+    return data;
   },
 };

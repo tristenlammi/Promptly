@@ -294,6 +294,21 @@ export function useStreamingChat(): UseStreamingChatResult {
           store.setMemorySaved(items);
           continue;
         }
+        if (
+          data.event === "memory_used" &&
+          data.facts &&
+          data.facts.length > 0
+        ) {
+          // Phase 3.2 — in-chat transparency: which memories were injected.
+          const items = data.facts.map(
+            (content: string, i: number) => ({
+              id: data.ids?.[i] ?? "",
+              content,
+            })
+          );
+          store.setMemoriesUsed(items);
+          continue;
+        }
         if (data.event === "vision_relay_started" && data.id) {
           store.startVisionRelay({
             id: data.id,

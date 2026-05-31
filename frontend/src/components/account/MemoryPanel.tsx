@@ -1,20 +1,23 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   Check,
   ChevronDown,
+  Download,
   ExternalLink,
   Loader2,
   Pencil,
   Pin,
   Plus,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
-import { memoryApi, type Memory, MEMORY_CATEGORIES } from "@/api/memory";
+import { memoryApi, type Memory, type MemoryImportResult, MEMORY_CATEGORIES } from "@/api/memory";
+import { useToastStore } from "@/store/toastStore";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { formatRelativeTime } from "@/components/files/helpers";
@@ -95,6 +98,8 @@ export function MemoryPanel() {
   const user = useAuthStore((s) => s.user);
   const patchSettings = useAuthStore((s) => s.patchSettings);
   const setUser = useAuthStore((s) => s.setUser);
+  const pushToast = useToastStore((s) => s.push);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const mode: MemoryMode =
     user?.settings?.memory_mode ??
@@ -195,6 +200,38 @@ export function MemoryPanel() {
     onError: (err) =>
       setActionError(err instanceof Error ? err.message : String(err)),
   });
+
+  const importMut = useMutation({
+    mutationFn: (items: unknown[]) => memoryApi.import(items),
+    onSuccess: (result: MemoryImportResult) => {
+      void invalidate();
+      pushToast({
+        message: `Imported ${result.imported} ${result.imported === 1 ? "memory" : "memories"}` +
+          (result.skipped ? ` · ${result.skipped} skipped` : "") +
+          (result.errors ? ` · ${result.errors} errors` : ""),
+        type: result.errors > 0 ? "warning" : "success",
+      });
+    },
+    onError: (err) =>
+      setActionError(err instanceof Error ? err.message : String(err)),
+  });
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) {
+        setActionError("Import file must be a JSON array.");
+        return;
+      }
+      importMut.mutate(parsed);
+    } catch {
+      setActionError("Could not parse the import file. Make sure it's a valid Promptly memory export.");
+    }
+  };
 
   const setMode = async (next: MemoryMode) => {
     if (next === mode) return;
@@ -549,31 +586,74 @@ export function MemoryPanel() {
               </div>
             )}
 
-            {memories.length > 0 && !selectMode && (
-              <div className="flex justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={clearMut.isPending}
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: "Forget everything?",
-                      message:
-                        "This permanently deletes all saved memories. It can't be undone.",
-                      confirmLabel: "Forget all",
-                      danger: true,
-                    });
-                    if (ok) clearMut.mutate();
-                  }}
-                  className="text-[var(--danger)] hover:bg-[var(--danger-bg)]"
-                >
-                  {clearMut.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                  Forget everything
-                </Button>
+            {/* ── Footer: Export / Import / Forget ─────────────────────── */}
+            {!selectMode && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* Export + Import */}
+                <div className="flex items-center gap-1.5">
+                  <a
+                    href={memoryApi.exportUrl()}
+                    download="promptly-memories.json"
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs",
+                      "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]",
+                      "hover:bg-[var(--hover)] hover:text-[var(--text)]",
+                      memories.length === 0 && "pointer-events-none opacity-40"
+                    )}
+                    aria-disabled={memories.length === 0}
+                  >
+                    <Download className="h-3 w-3" />
+                    Export
+                  </a>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={importMut.isPending}
+                    onClick={() => importFileRef.current?.click()}
+                    className="border border-[var(--border)] text-[var(--text-muted)]"
+                  >
+                    {importMut.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="h-3.5 w-3.5" />
+                    )}
+                    Import
+                  </Button>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={(e) => void handleImportFile(e)}
+                  />
+                </div>
+
+                {/* Forget everything */}
+                {memories.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={clearMut.isPending}
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: "Forget everything?",
+                        message:
+                          "This permanently deletes all saved memories. It can't be undone.",
+                        confirmLabel: "Forget all",
+                        danger: true,
+                      });
+                      if (ok) clearMut.mutate();
+                    }}
+                    className="text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                  >
+                    {clearMut.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Forget everything
+                  </Button>
+                )}
               </div>
             )}
           </>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Brain, Eye, RotateCcw, X } from "lucide-react";
+import { ArrowDown, Brain, ChevronDown, Eye, RotateCcw, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuthStore } from "@/store/authStore";
@@ -12,6 +12,7 @@ import {
   isCompactedSummary,
 } from "./CompactedSummaryRow";
 import { MessageBubble, type RegenerateOverride } from "./MessageBubble";
+import { RememberModal } from "./RememberModal";
 import { StreamErrorCard } from "./StreamErrorCard";
 import { ThinkingBubble } from "./ThinkingBubble";
 
@@ -101,6 +102,9 @@ export function ChatWindow({
   const endRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  // Phase 3.3 — "Remember this" modal state. ``rememberText`` is the
+  // message content pre-filled in the modal; null = modal closed.
+  const [rememberText, setRememberText] = useState<string | null>(null);
   const messagesCountRef = useRef(messages.length);
   // Tracks which conversation we've already snapped to the bottom for.
   // ``null`` means "no conversation initialised yet" — set to the
@@ -332,11 +336,13 @@ export function ChatWindow({
               versionCount={m.version_count ?? undefined}
               siblingIds={m.sibling_ids ?? undefined}
               onSelectVersion={onSelectVersion}
+              onRemember={(text) => setRememberText(text)}
             />
           );
         })}
 
         <VisionWarningBanner />
+        <MemoryUsedChip />
         <MemorySavedChip />
 
         {showStreamingBubble && (
@@ -382,6 +388,77 @@ export function ChatWindow({
           Jump to latest
         </button>
       )}
+
+      {/* Phase 3.3 — "Remember this" modal */}
+      {rememberText !== null && (
+        <RememberModal
+          initialText={rememberText}
+          onClose={() => setRememberText(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Phase 3.2 — subtle "N memories in context" chip shown at the start of
+ *  a stream. Collapsed by default (shows count only); click to expand
+ *  and read which facts were injected. Clears on the next stream. */
+function MemoryUsedChip() {
+  const items = useChatStore((s) => s.memoriesUsed);
+  const dismiss = useChatStore((s) => s.dismissMemoriesUsed);
+  const [expanded, setExpanded] = useState(false);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mx-4 mb-1">
+      <div
+        className={cn(
+          "inline-flex flex-col rounded-full border px-2.5 py-1 text-xs",
+          "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]",
+          expanded && "w-full rounded-card px-3 py-2"
+        )}
+        role="status"
+        aria-label={`${items.length} memories used in this response`}
+      >
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+        >
+          <Brain className="h-3 w-3 shrink-0 text-[var(--accent)]/70" />
+          <span>
+            {items.length} {items.length === 1 ? "memory" : "memories"} in context
+          </span>
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform",
+              expanded && "rotate-180"
+            )}
+          />
+        </button>
+        {expanded && (
+          <div className="mt-2 space-y-1">
+            <ul className="space-y-0.5">
+              {items.map((item, i) => (
+                <li key={`${i}-${item.id}`} className="flex items-start gap-1">
+                  <span className="mt-0.5 shrink-0 text-[var(--accent)]/60">·</span>
+                  <span className="text-[var(--text)]">{item.content}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={dismiss}
+                className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)]"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -27,6 +27,7 @@ import {
   ExternalLink,
   File as FileIcon,
   FileText,
+  Brain,
   GitBranch,
   Image as ImageIcon,
   MoreHorizontal,
@@ -154,6 +155,10 @@ interface MessageBubbleProps {
    *  in the row's overflow menu. The parent confirms + removes the
    *  message; the bubble just invokes the callback. */
   onDelete?: () => Promise<void> | void;
+  /** Phase 3.3 — "Remember this" action. When provided, a Brain icon shows
+   *  in the action row. The callback receives the cleaned message content
+   *  so the parent can open the RememberModal. */
+  onRemember?: (content: string) => void;
   /** Phase 2.5 — current thumbs rating on this assistant reply
    *  (``null`` when unrated) and its optional reason note. */
   feedback?: "up" | "down" | null;
@@ -725,6 +730,7 @@ function MessageBubbleImpl({
   onRegenerate,
   onContinue,
   onDelete,
+  onRemember,
   feedback,
   feedbackReason,
   onFeedback,
@@ -803,6 +809,8 @@ function MessageBubbleImpl({
   // roles). Skipped only while streaming, since the content is still
   // changing.
   const canCopy = !streaming && !!content && content.trim().length > 0;
+  // Phase 3.3 — "Remember this": available on all persisted messages.
+  const canRemember = !!onRemember && !streaming && !!content && content.trim().length > 0;
 
   // Mobile collapses the action row to icon-only buttons and tucks the
   // low-frequency actions (Branch, Delete) behind a ⋯ overflow menu so
@@ -1113,6 +1121,7 @@ function MessageBubbleImpl({
           (onRegenerate && !streaming) ||
           (onDelete && !streaming) ||
           canCopy ||
+          canRemember ||
           canReadAloud ||
           canFeedback ||
           (showVersionPager && !streaming) ||
@@ -1184,6 +1193,22 @@ function MessageBubbleImpl({
                   <Copy className="h-3 w-3" />
                 )}
                 {!isMobile && <span>{copyClicked ? "Copied" : "Copy"}</span>}
+              </button>
+            )}
+            {canRemember && (
+              <button
+                type="button"
+                onClick={() => onRemember!(isUser ? content! : stripInlineCitations(content!))}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+                  "text-[var(--text-muted)] transition",
+                  "hover:bg-[var(--accent)]/[0.08] hover:text-[var(--accent)]",
+                )}
+                title="Save to memory"
+                aria-label="Remember this"
+              >
+                <Brain className="h-3 w-3" />
+                {!isMobile && <span>Remember</span>}
               </button>
             )}
             {canReadAloud && (

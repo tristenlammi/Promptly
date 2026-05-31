@@ -3590,10 +3590,14 @@ async def _stream_generator(
         # Saved facts are injected in both auto and manual modes — manual
         # only changes whether we *capture* new ones (see below).
         memory_enabled = memory_mode != "off"
+        # memories_used: the facts actually injected this turn; emitted via
+        # a ``memory_used`` SSE event for in-chat transparency (Phase 3.2).
+        memories_used = []
         if memory_enabled:
             # Inject only the facts relevant to this turn (semantic top-K);
             # falls back to most-recent when embeddings aren't configured.
-            memory_block = await build_memory_system_prompt(
+            # Returns (rendered_block | None, list[UserMemory]) (Phase 3.2).
+            memory_block, memories_used = await build_memory_system_prompt(
                 db,
                 user.id,
                 query=(trig_row.content if trig_row is not None else None),
@@ -3717,6 +3721,19 @@ async def _stream_generator(
                 system_prompt = merge_system_prompt(
                     "\n\n".join(blocks), system_prompt or ""
                 )
+
+        # Phase 3.2 — in-chat transparency. Emit which facts were injected
+        # this turn so the UI can show a "🧠 N memories in context" chip.
+        # Best-effort: never blocks the stream if it fails.
+        if memories_used:
+            yield _sse(
+                {
+                    "event": "memory_used",
+                    "facts": [m.content for m in memories_used],
+                    "ids": [str(m.id) for m in memories_used],
+                    "count": len(memories_used),
+                }
+            )
 
         # Holds the final hop's ``finish_reason`` after the loop breaks
         # so the ``done`` event can flag truncation (``"length"``).

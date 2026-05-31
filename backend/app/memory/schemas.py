@@ -50,5 +50,7 @@ class MemoryResponse(BaseModel):
     source_conversation_id: uuid.UUID | None
     category: str | None
     pinned: bool
+    times_used: int
+    last_used_at: datetime | None
     created_at: datetime
     updated_at: datetime

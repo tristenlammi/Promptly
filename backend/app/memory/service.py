@@ -115,18 +115,35 @@ async def embed_memory_row(
 _CAPTURE_HINT_RE: Final[re.Pattern[str]] = re.compile(
     r"""
     \b(
-        remember\s+(that|this|my|i|to|me)         # "remember that I…"
+        # Explicit save requests (any phrasing)
+        remember\s+(that|this|my|i|to|me|the|we)
       | don'?t\s+forget
       | note\s+that
       | keep\s+in\s+mind
       | for\s+(future|next\s+time|reference)
       | from\s+now\s+on
+      | store\s+this
+      | save\s+this
+      | make\s+a\s+note
+
+        # First-person identity/preference
       | call\s+me
       | my\s+name\s+is
-      | i\s?'?\s?a?m\s+(a|an)\b                    # "I'm a…", "I am an…"
+      | i\s?'?\s?a?m\s+(a|an)\b
       | i\s+(prefer|like|love|hate|use|work|live|need|want|always|usually|never)\b
-      | i\s?'?\s?m\s+(working|building|using|learning|studying)
-      | my\s+(favou?rite|preferred|goal|job|role|team|stack|company|timezone|pronouns)
+      | i\s?'?\s?m\s+(working|building|using|learning|studying|based)
+      | my\s+(favou?rite|preferred|goal|job|role|team|stack|company|timezone|pronouns|project)
+
+        # Second-person (assistant noting something about the user)
+      | you\s+(are|were|have|prefer|use|work|like|need|always|usually|never)\b
+      | your\s+(name|role|job|team|stack|project|goal|company|timezone)\s+is
+
+        # Collective "we" — often about the project/team
+      | we\s+(use|prefer|chose|decided|standardis|settled\s+on|are\s+using|are\s+building)
+      | we'?\s*re\s+(using|building|migrating|moving|switching)
+
+        # Passive / project context
+      | (the\s+)?(project|app|system|repo|codebase|stack|database)\s+is\s+(called|named|built|using|based)
     )\b
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -324,13 +341,18 @@ async def build_memory_system_prompt(
     *,
     query: str | None = None,
     k: int = MAX_MEMORIES,
-) -> str | None:
-    """Convenience: load + render in one call for the chat router.
+) -> tuple[str | None, list[UserMemory]]:
+    """Load, render, and stamp usage for a chat turn's system-prompt block.
+
+    Returns ``(rendered_block | None, memories_injected)``.
 
     Pinned facts are always injected first (Phase 2.1). The remaining
     ``k - len(pinned)`` slots are filled with the top-K semantically
     relevant facts (or recency fallback) excluding the already-pinned ones.
     Degrades gracefully when embeddings aren't configured.
+
+    Phase 3.1: stamps ``times_used`` / ``last_used_at`` on every injected
+    fact as a best-effort UPDATE (never fails the chat turn on error).
     """
     pinned = await load_pinned_memories(db, user_id)
     pinned_ids = {m.id for m in pinned}
@@ -348,7 +370,27 @@ async def build_memory_system_prompt(
         retrieved = []
 
     all_memories = pinned + retrieved
-    return build_memory_prompt(all_memories)
+
+    # Stamp usage signals on every injected fact (Phase 3.1). Best-effort —
+    # a failure here never disturbs the chat turn.
+    if all_memories:
+        ids = [m.id for m in all_memories]
+        try:
+            await db.execute(
+                text(
+                    """
+                    UPDATE user_memories
+                       SET times_used = times_used + 1,
+                           last_used_at = NOW()
+                     WHERE id = ANY(:ids)
+                    """
+                ),
+                {"ids": ids},
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("memory usage stamp failed user=%s", user_id)
+
+    return build_memory_prompt(all_memories), all_memories
 
 
 # Reconciliation prompt (Memory Overhaul 1.3 + 2.1). Unlike the append-only

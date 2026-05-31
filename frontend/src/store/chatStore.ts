@@ -27,6 +27,10 @@ interface ChatState {
    *  with Undo support. Each entry carries the DB id so the chip can
    *  delete individual facts. Cleared at the start of each new stream. */
   memorySaved: Array<{ id: string; content: string }>;
+  /** Facts that were retrieved and injected into this turn's system prompt
+   *  (Phase 3.2). Drives the in-chat "🧠 N memories in context" chip.
+   *  Cleared at the start of each new stream. */
+  memoriesUsed: Array<{ id: string; content: string }>;
   /** Live-tracking of tool calls fired during the current stream. Entries
    *  are appended on ``tool_started`` and updated in place on
    *  ``tool_finished``. Cleared at the start of each new stream because
@@ -89,6 +93,9 @@ interface ChatState {
   /** Record facts the backend just saved to memory this turn. */
   setMemorySaved: (facts: Array<{ id: string; content: string }>) => void;
   dismissMemorySaved: () => void;
+  /** Record which facts were injected into this turn's system prompt (Phase 3.2). */
+  setMemoriesUsed: (facts: Array<{ id: string; content: string }>) => void;
+  dismissMemoriesUsed: () => void;
   /** Add a freshly-started tool call. No-op if an entry with the same
    *  id already exists (defensive against duplicate ``tool_started``
    *  events from a flaky proxy). */
@@ -155,6 +162,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingSources: null,
   visionWarnings: [],
   memorySaved: [],
+  memoriesUsed: [],
   toolInvocations: [],
   visionRelayInvocations: [],
   streamingAttachments: null,
@@ -229,6 +237,8 @@ export const useChatStore = create<ChatState>((set) => ({
   clearVisionWarnings: () => set({ visionWarnings: [] }),
   setMemorySaved: (facts) => set({ memorySaved: facts }),
   dismissMemorySaved: () => set({ memorySaved: [] }),
+  setMemoriesUsed: (facts) => set({ memoriesUsed: facts }),
+  dismissMemoriesUsed: () => set({ memoriesUsed: [] }),
   startToolInvocation: (id, name) =>
     set((state) => {
       if (state.toolInvocations.some((t) => t.id === id)) return {};
@@ -290,6 +300,7 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingSources: null,
       visionWarnings: [],
       memorySaved: [],
+      memoriesUsed: [],
       toolInvocations: [],
       visionRelayInvocations: [],
       streamingAttachments: null,

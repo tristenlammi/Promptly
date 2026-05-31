@@ -10,7 +10,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -56,6 +58,17 @@ class UserMemory(UUIDPKMixin, TimestampMixin, Base):
     # know at all times (e.g. their name, their primary language).
     pinned: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    # Usage signals (Phase 3.1). Incremented each time this fact is
+    # retrieved and injected into a chat's system prompt. Used to break
+    # tie-breaks in retrieval (more-used facts preferred) and to guide
+    # eviction at the 200-fact cap (rarely-used auto facts evicted first).
+    times_used: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Semantic-retrieval embedding (Memory Overhaul Phase 1). The actual
