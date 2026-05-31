@@ -31,6 +31,7 @@ from app.memory.constants import (
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
     MAX_NEW_PER_TURN,
+    SEMANTIC_DUP_THRESHOLD,
 )
 from app.memory.models import UserMemory
 from app.models_config.models import ModelProvider
@@ -414,6 +415,44 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
     return ops
 
 
+async def _nearest_similarity(
+    db: AsyncSession, user_id, cfg: EmbeddingConfig, candidate: str
+) -> float:
+    """Best cosine similarity (0–1) between ``candidate`` and any of the
+    user's existing embedded memories. ``0.0`` when nothing is embedded or
+    the embed/query fails — i.e. "no semantic duplicate found"."""
+    cleaned = normalise_for_embedding(candidate)
+    if not cleaned:
+        return 0.0
+    try:
+        vectors = await embed_texts(
+            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+        )
+    except Exception:  # noqa: BLE001
+        return 0.0
+    if not vectors:
+        return 0.0
+    col = f"embedding_{cfg.dim}"
+    sql = text(
+        f"""
+        SELECT 1 - ({col} <=> CAST(:qvec AS vector({cfg.dim}))) AS sim
+        FROM user_memories
+        WHERE user_id = :uid AND {col} IS NOT NULL
+        ORDER BY {col} <=> CAST(:qvec AS vector({cfg.dim}))
+        LIMIT 1
+        """
+    )
+    try:
+        row = (
+            await db.execute(
+                sql, {"uid": user_id, "qvec": vector_literal(vectors[0])}
+            )
+        ).first()
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return float(row[0]) if row and row[0] is not None else 0.0
+
+
 async def capture_memories(
     db: AsyncSession,
     *,
@@ -513,6 +552,14 @@ async def capture_memories(
             continue
         fact = op["text"]
         if _is_duplicate(fact, list(existing_keys)):
+            continue
+        # Semantic safety net: skip a near-identical restatement the
+        # substring check would miss ("User is a dev" vs "User works as a
+        # software engineer"). Only when embeddings are configured.
+        if cfg is not None and (
+            await _nearest_similarity(db, user_id, cfg, fact)
+            >= SEMANTIC_DUP_THRESHOLD
+        ):
             continue
         row = UserMemory(
             user_id=user_id,

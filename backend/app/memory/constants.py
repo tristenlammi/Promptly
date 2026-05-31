@@ -25,3 +25,11 @@ MAX_NEW_PER_TURN: Final[int] = 4
 # facts beats dumping the whole store, and it keeps prompt overhead tiny.
 # Falls back to recency (same K) when embeddings are off.
 RETRIEVAL_K: Final[int] = 10
+
+# Cosine-similarity at/above which an auto-captured candidate is treated as
+# a semantic duplicate of an existing fact and skipped (Memory Overhaul
+# 1.4). A safety net behind the reconciliation prompt — set high so it only
+# catches near-identical restatements ("User is a developer" vs "User works
+# as a software engineer"), not merely topical overlap. Only applied to the
+# auto-capture add path; user-typed manual adds are never blocked this way.
+SEMANTIC_DUP_THRESHOLD: Final[float] = 0.90
