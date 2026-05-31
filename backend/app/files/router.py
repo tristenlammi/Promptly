@@ -2114,6 +2114,30 @@ async def bulk_zip(
             detail="Nothing to download.",
         )
 
+    # Bound the in-memory archive so a huge selection can't OOM the API
+    # (the zip is built in a BytesIO before streaming). Caps are generous
+    # for normal use; over them, ask the user to batch.
+    _MAX_ZIP_FILES = 1000
+    _MAX_ZIP_BYTES = 1024 * 1024 * 1024  # 1 GB of source data
+    if len(entries) > _MAX_ZIP_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Too many files to zip at once (max {_MAX_ZIP_FILES}). "
+            "Select fewer items.",
+        )
+    total_bytes = 0
+    for _, ap in entries:
+        try:
+            total_bytes += ap.stat().st_size
+        except OSError:
+            continue
+    if total_bytes > _MAX_ZIP_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Selection is too large to zip in one go (max 1 GB). "
+            "Download in smaller batches.",
+        )
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for arcname, ap in entries:
