@@ -99,21 +99,24 @@ let capture **update** memory instead of only appending.
 
 ## Phase 3 — Relevance, transparency & power
 
-- [ ] **3.1 Usage + importance signals.** Track `times_used` / `last_used_at`
-      (incremented when a fact is retrieved into a turn); use them to break ties
-      in retrieval and to choose what to drop at the cap. Optional gentle decay.
-- [ ] **3.2 In-chat transparency.** A subtle "used N memories" affordance on an
-      assistant turn that lists which facts were in scope (expand on hover/tap).
-      Reuses the tool-chip rendering pattern.
-- [ ] **3.3 "Remember this" inline action.** A message action that sends the
-      selected text/message straight to memory (manual source) — capture without
-      waiting for the regex gate.
-- [ ] **3.4 Broader capture gate.** Replace the first-person-only regex with a
-      cheaper/looser trigger (or a tiny classifier) so durable facts stated in
-      other phrasings ("we standardised on Postgres") aren't missed — guarded by
-      the same cost controls.
-- [ ] **3.5 Export / import.** JSON download + restore, so memory is portable
-      and backup-able.
+- [x] **3.1 Usage + importance signals.** Migration 0062: `times_used` (int) +
+      `last_used_at` (timestamptz) on `user_memories`. `build_memory_system_prompt`
+      stamps both fields on every injected fact. Exposed in `MemoryResponse`.
+- [x] **3.2 In-chat transparency.** `memory_used` SSE event emitted before the
+      LLM stream; `chatStore` tracks `memoriesUsed[]`; `MemoryUsedChip` shows a
+      collapsible "🧠 N memories in context" pill above the streaming bubble.
+- [x] **3.3 "Remember this" inline action.** `Brain` icon in the MessageBubble
+      action row (both roles, hidden while streaming). Opens `RememberModal` —
+      pre-fills the message, lets user edit text + choose category + pin, then
+      saves as a manual memory.
+- [x] **3.4 Broader capture gate.** `_CAPTURE_HINT_RE` expanded with second-
+      person ("your name is", "you work"), collective "we" ("we use", "we
+      decided"), passive project constructions ("project is called"), explicit
+      save phrases ("store this", "make a note").
+- [x] **3.5 Export / import.** `GET /memory/export` → named JSON file;
+      `POST /memory/import` → merge array, skip dupes + cap, re-embed. UI:
+      Export link + Import file picker in MemoryPanel footer; import result
+      surfaces as a push toast.
 
 **impact: med · effort: med** · Scaffolding: MessageBubble action row +
 tool-chip rendering, SSE plumbing.
