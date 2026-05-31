@@ -341,6 +341,79 @@ def _parse_facts(raw: str) -> list[str]:
     return facts
 
 
+# Reconciliation prompt (Memory Overhaul 1.3). Unlike the append-only
+# extractor, this one sees the user's EXISTING related facts (with ids)
+# and returns operations, so a contradiction ("I moved to Rust") updates
+# the stale fact in place instead of stacking a duplicate.
+_RECONCILE_SYSTEM_PROMPT: Final[str] = (
+    "You maintain a long-term memory of durable facts about a user for an "
+    "AI assistant. You are given the latest exchange between the user and "
+    "the assistant, plus the user's EXISTING saved facts (each with an id). "
+    "Decide how the exchange should change memory and output ONLY a JSON "
+    "array of operation objects.\n\n"
+    "Operations:\n"
+    '  {"op": "add", "text": "<new durable fact>"} — a genuinely new fact '
+    "not already covered by the existing list.\n"
+    '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>"} '
+    "— when the exchange refines or CONTRADICTS an existing fact (e.g. the "
+    "user switched their main language); rewrite that fact in place.\n"
+    '  {"op": "delete", "id": "<existing id>"} — when an existing fact is no '
+    "longer true and has no replacement.\n\n"
+    "Capture durable, reusable facts about the USER: their name or what to "
+    "call them, role/profession, tools/languages/frameworks, stable "
+    "preferences (tone, format, units), ongoing projects, and explicit "
+    "'remember this' requests.\n"
+    "Do NOT capture: one-off task details, the answer to their question, "
+    "transient state, time-bound statements ('I'm tired today'), sensitive "
+    "data they didn't ask you to remember (passwords, full card/ID "
+    "numbers), or facts already present AND unchanged.\n\n"
+    "Write each fact as a single concise third-person statement starting "
+    "with 'User ' (e.g. 'User is a Rust developer'). Only use ids that "
+    "appear in the existing list. If nothing should change, output []."
+)
+
+
+def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
+    """Parse the reconciliation model's JSON op array, tolerating preamble.
+
+    Returns a list of validated op dicts. ``update``/``delete`` are dropped
+    unless their id is one we actually supplied (never act on an arbitrary
+    id the model hallucinated). ``add``/``update`` require non-empty text.
+    """
+    cleaned = _strip_think_blocks(raw).strip()
+    start = cleaned.find("[")
+    end = cleaned.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        parsed = json.loads(cleaned[start : end + 1])
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    ops: list[dict] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        op = item.get("op")
+        if op == "add":
+            txt = (item.get("text") or "").strip()
+            if txt:
+                ops.append({"op": "add", "text": txt[:MAX_CONTENT_CHARS]})
+        elif op == "update":
+            mid = str(item.get("id") or "")
+            txt = (item.get("text") or "").strip()
+            if mid in valid_ids and txt:
+                ops.append(
+                    {"op": "update", "id": mid, "text": txt[:MAX_CONTENT_CHARS]}
+                )
+        elif op == "delete":
+            mid = str(item.get("id") or "")
+            if mid in valid_ids:
+                ops.append({"op": "delete", "id": mid})
+    return ops
+
+
 async def capture_memories(
     db: AsyncSession,
     *,
@@ -365,13 +438,31 @@ async def capture_memories(
 
     assistant_text = (assistant_text or "").strip()[:_MAX_ASSISTANT_CHARS]
 
-    existing = await load_memories(db, user_id)
-    if len(existing) >= MAX_MEMORIES:
-        # Store is full — don't spend a model call we can't act on.
-        return []
-    existing_keys = [_normalise(m.content) for m in existing]
+    cfg = await get_embedding_config(db)
+    total = await count_memories(db, user_id)
 
-    payload = f"User said:\n{user_text}"
+    # Show the model the existing facts most RELATED to this turn (with
+    # ids) so it can update/contradict them rather than stack duplicates.
+    # Falls back to most-recent when embeddings are off. Bounded so the
+    # prompt stays cheap regardless of store size.
+    related = await retrieve_relevant_memories(
+        db, user_id, query=user_text, k=15, cfg=cfg
+    )
+    existing_keys = {_normalise(m.content) for m in related}
+    valid_ids = {str(m.id) for m in related}
+    by_id = {str(m.id): m for m in related}
+
+    if related:
+        existing_block = "\n".join(
+            f'- id={m.id}: {m.content}' for m in related
+        )
+    else:
+        existing_block = "(none yet)"
+
+    payload = (
+        f"EXISTING FACTS:\n{existing_block}\n\n"
+        f"LATEST EXCHANGE:\nUser said:\n{user_text}"
+    )
     if assistant_text:
         payload += f"\n\nAssistant replied:\n{assistant_text}"
 
@@ -381,7 +472,7 @@ async def capture_memories(
             provider=provider,
             model_id=model_id,
             messages=[ChatMessage(role="user", content=payload)],
-            system=_EXTRACT_SYSTEM_PROMPT,
+            system=_RECONCILE_SYSTEM_PROMPT,
             temperature=0.0,
             max_tokens=_MAX_EXTRACT_TOKENS,
             reasoning_effort="off",
@@ -391,17 +482,37 @@ async def capture_memories(
         logger.exception("Memory extraction call failed user=%s", user_id)
         return []
 
-    candidates = _parse_facts("".join(chunks))
-    if not candidates:
+    ops = _parse_ops("".join(chunks), valid_ids)
+    if not ops:
         return []
 
-    saved: list[str] = []
+    saved: list[str] = []  # added/updated fact text → drives the chip
     new_rows: list[UserMemory] = []
-    room = MAX_MEMORIES - len(existing)
-    for fact in candidates:
-        if len(saved) >= MAX_NEW_PER_TURN or len(saved) >= room:
-            break
-        if _is_duplicate(fact, existing_keys):
+    updated_rows: list[UserMemory] = []
+    room = MAX_MEMORIES - total
+    for op in ops:
+        kind = op["op"]
+        if kind == "delete":
+            row = by_id.get(op["id"])
+            if row is not None:
+                await db.delete(row)
+            continue
+        if kind == "update":
+            row = by_id.get(op["id"])
+            if row is None:
+                continue
+            new_text = op["text"]
+            if _normalise(new_text) == _normalise(row.content):
+                continue  # no real change
+            row.content = new_text
+            updated_rows.append(row)
+            saved.append(new_text)
+            continue
+        # add
+        if len(new_rows) >= MAX_NEW_PER_TURN or len(new_rows) >= room:
+            continue
+        fact = op["text"]
+        if _is_duplicate(fact, list(existing_keys)):
             continue
         row = UserMemory(
             user_id=user_id,
@@ -412,21 +523,22 @@ async def capture_memories(
         db.add(row)
         new_rows.append(row)
         saved.append(fact)
-        existing_keys.append(_normalise(fact))
+        existing_keys.add(_normalise(fact))
 
-    if saved:
+    if new_rows or updated_rows:
         try:
             await db.flush()
         except Exception:  # noqa: BLE001
             logger.exception("Memory persist flush failed user=%s", user_id)
             return []
-        # Embed the new facts so they're retrievable (best-effort; a
-        # single config lookup shared across the batch). Never fatal.
-        try:
-            cfg = await get_embedding_config(db)
-            if cfg is not None:
-                for row in new_rows:
+        # (Re-)embed added + updated facts so retrieval stays accurate.
+        # Best-effort; ``cfg`` was resolved once above. Never fatal.
+        if cfg is not None:
+            try:
+                for row in (*new_rows, *updated_rows):
                     await embed_memory_row(db, row, cfg)
-        except Exception:  # noqa: BLE001
-            logger.warning("memory embed-on-capture failed user=%s", user_id)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "memory embed-on-capture failed user=%s", user_id
+                )
     return saved
