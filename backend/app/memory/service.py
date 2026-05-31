@@ -230,9 +230,86 @@ async def count_memories(db: AsyncSession, user_id) -> int:
     )
 
 
-async def build_memory_system_prompt(db: AsyncSession, user_id) -> str | None:
-    """Convenience: load + render in one call for the chat router."""
-    memories = await load_memories(db, user_id)
+async def retrieve_relevant_memories(
+    db: AsyncSession,
+    user_id,
+    *,
+    query: str | None,
+    k: int,
+    cfg: EmbeddingConfig | None = None,
+) -> list[UserMemory]:
+    """Return the ``k`` memories most relevant to ``query`` by cosine
+    similarity, falling back to most-recent-first when embeddings aren't
+    configured, the query is empty, the lookup fails, or nothing is
+    embedded yet. Best-effort — retrieval must never break a chat turn.
+    """
+    cleaned = normalise_for_embedding(query or "")
+    if cfg is None:
+        cfg = await get_embedding_config(db)
+    if cfg is None or not cleaned:
+        return await load_memories(db, user_id, limit=k)
+    try:
+        vectors = await embed_texts(
+            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("memory retrieval embed failed user=%s: %s", user_id, exc)
+        return await load_memories(db, user_id, limit=k)
+    if not vectors:
+        return await load_memories(db, user_id, limit=k)
+
+    col = f"embedding_{cfg.dim}"
+    sql = text(
+        f"""
+        SELECT id
+        FROM user_memories
+        WHERE user_id = :uid AND {col} IS NOT NULL
+        ORDER BY {col} <=> CAST(:qvec AS vector({cfg.dim}))
+        LIMIT :k
+        """
+    )
+    try:
+        rows = (
+            await db.execute(
+                sql,
+                {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": k},
+            )
+        ).all()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("memory retrieval query failed user=%s: %s", user_id, exc)
+        return await load_memories(db, user_id, limit=k)
+
+    ids = [r[0] for r in rows]
+    if not ids:
+        # Embeddings configured but nothing embedded yet — don't silently
+        # show nothing; fall back to recency.
+        return await load_memories(db, user_id, limit=k)
+    fetched = (
+        (await db.execute(select(UserMemory).where(UserMemory.id.in_(ids))))
+        .scalars()
+        .all()
+    )
+    # Preserve the cosine ordering (SQL IN doesn't guarantee it).
+    by_id = {m.id: m for m in fetched}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+async def build_memory_system_prompt(
+    db: AsyncSession,
+    user_id,
+    *,
+    query: str | None = None,
+    k: int = MAX_MEMORIES,
+) -> str | None:
+    """Convenience: load + render in one call for the chat router.
+
+    With ``query`` set and embeddings configured, injects only the top-``k``
+    relevant facts (token saving + relevance); otherwise renders the most
+    recent ``k`` (pre-overhaul behaviour)."""
+    if query is not None:
+        memories = await retrieve_relevant_memories(db, user_id, query=query, k=k)
+    else:
+        memories = await load_memories(db, user_id, limit=k)
     return build_memory_prompt(memories)
 
 

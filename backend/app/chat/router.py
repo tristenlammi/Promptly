@@ -102,6 +102,7 @@ from app.chat.semantic_search import (
     get_embedding_config,
     semantic_search_messages,
 )
+from app.memory.constants import RETRIEVAL_K as MEMORY_RETRIEVAL_K
 from app.memory.service import (
     build_memory_system_prompt,
     capture_memories,
@@ -3582,7 +3583,14 @@ async def _stream_generator(
         # only changes whether we *capture* new ones (see below).
         memory_enabled = memory_mode != "off"
         if memory_enabled:
-            memory_block = await build_memory_system_prompt(db, user.id)
+            # Inject only the facts relevant to this turn (semantic top-K);
+            # falls back to most-recent when embeddings aren't configured.
+            memory_block = await build_memory_system_prompt(
+                db,
+                user.id,
+                query=(trig_row.content if trig_row is not None else None),
+                k=MEMORY_RETRIEVAL_K,
+            )
             if memory_block:
                 system_prompt = merge_system_prompt(
                     memory_block, system_prompt or ""

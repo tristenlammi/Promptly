@@ -19,3 +19,9 @@ MAX_MEMORIES: Final[int] = 200
 # Most a single turn's extraction pass may add. Stops a chatty turn from
 # flooding the store with near-duplicate trivia.
 MAX_NEW_PER_TURN: Final[int] = 4
+
+# How many relevant facts to inject per chat turn under semantic retrieval
+# (Memory Overhaul Phase 1.2). Small on purpose: a handful of on-point
+# facts beats dumping the whole store, and it keeps prompt overhead tiny.
+# Falls back to recency (same K) when embeddings are off.
+RETRIEVAL_K: Final[int] = 10
