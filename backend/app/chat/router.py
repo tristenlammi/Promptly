@@ -4297,7 +4297,9 @@ async def _stream_generator(
         # ``memory_saved`` event just before ``done`` so the UI can show a
         # "saved to memory" affordance. Best-effort — a failure here never
         # disturbs the reply that's already on disk.
-        memory_saved: list[str] = []
+        # capture_memories now returns list[dict] with {"id", "content"}
+        # so the UI can undo individual facts by id (Phase 2.2).
+        memory_saved: list[dict] = []
         if (
             # Auto-capture only in "auto" mode; "manual" injects saved
             # facts but never volunteers new ones.
@@ -4325,7 +4327,8 @@ async def _stream_generator(
             yield _sse(
                 {
                     "event": "memory_saved",
-                    "facts": memory_saved,
+                    "facts": [m["content"] for m in memory_saved],
+                    "ids": [m["id"] for m in memory_saved],
                     "count": len(memory_saved),
                 }
             )

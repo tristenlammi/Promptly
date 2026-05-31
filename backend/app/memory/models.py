@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -41,6 +41,21 @@ class UserMemory(UUIDPKMixin, TimestampMixin, Base):
     # cascade-delete the memory it produced — the fact outlives the chat.
     source_conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         nullable=True
+    )
+
+    # Category tag (Phase 2.1) — one of the four controlled values in
+    # ``MEMORY_CATEGORIES`` (identity | preferences | projects | context)
+    # or NULL for uncategorised facts. Set by the extraction model; the
+    # user can also edit it manually. Stored as a plain string so it
+    # survives future category additions without a migration.
+    category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # Pinned facts (Phase 2.1) are always injected into every chat's
+    # system prompt, regardless of the top-K retrieval cap. Intended for
+    # the handful of things the user absolutely wants the assistant to
+    # know at all times (e.g. their name, their primary language).
+    pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
 
     # Semantic-retrieval embedding (Memory Overhaul Phase 1). The actual

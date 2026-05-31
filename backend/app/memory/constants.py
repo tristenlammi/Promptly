@@ -33,3 +33,14 @@ RETRIEVAL_K: Final[int] = 10
 # as a software engineer"), not merely topical overlap. Only applied to the
 # auto-capture add path; user-typed manual adds are never blocked this way.
 SEMANTIC_DUP_THRESHOLD: Final[float] = 0.90
+
+# Controlled vocabulary for memory categories (Phase 2.1). Extraction
+# prompt asks the model to tag each fact; unrecognised values are coerced
+# to None (displayed as "Other" in the UI). Order here is the preferred
+# display order in the management panel.
+MEMORY_CATEGORIES: Final[tuple[str, ...]] = (
+    "identity",
+    "preferences",
+    "projects",
+    "context",
+)

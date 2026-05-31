@@ -1,13 +1,14 @@
-"""Cross-chat memory: prompt injection, capture, and helpers (Phase 6).
+"""Cross-chat memory: prompt injection, capture, and helpers (Phase 6 + Overhaul).
 
 Two jobs:
 
-1. **Injection** — :func:`build_memory_prompt` renders the user's saved
-   facts into a system-prompt block, mirroring the ambient personal-context
-   block so the assistant "just knows" durable things across chats.
+1. **Injection** — :func:`build_memory_system_prompt` renders the user's saved
+   facts into a system-prompt block, always including pinned facts first,
+   then filling remaining slots with the top-K retrieved (or recency) facts.
 2. **Capture** — :func:`capture_memories` runs a cheap, bounded headless
    extraction over the latest turn (gated by :func:`should_attempt_capture`
-   so ordinary turns cost nothing) and persists any genuinely new facts.
+   so ordinary turns cost nothing) and persists any genuinely new facts via
+   a reconciliation pass that can add, update, or delete existing rows.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from app.memory.constants import (
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
     MAX_NEW_PER_TURN,
+    MEMORY_CATEGORIES,
     SEMANTIC_DUP_THRESHOLD,
 )
 from app.memory.models import UserMemory
@@ -38,6 +40,8 @@ from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, model_router
 
 logger = logging.getLogger("promptly.memory")
+
+_VALID_CATEGORIES: frozenset[str] = frozenset(MEMORY_CATEGORIES)
 
 
 def _content_hash(content: str) -> str:
@@ -98,6 +102,7 @@ async def embed_memory_row(
     )
     return True
 
+
 # ----------------------------------------------------------------------
 # Capture pre-filter
 # ----------------------------------------------------------------------
@@ -129,7 +134,7 @@ _CAPTURE_HINT_RE: Final[re.Pattern[str]] = re.compile(
 
 _MAX_USER_CHARS: Final[int] = 4000
 _MAX_ASSISTANT_CHARS: Final[int] = 2000
-_MAX_EXTRACT_TOKENS: Final[int] = 400
+_MAX_EXTRACT_TOKENS: Final[int] = 500
 
 
 def should_attempt_capture(user_text: str | None) -> bool:
@@ -201,6 +206,29 @@ async def load_memories(
     return list(rows)
 
 
+async def load_pinned_memories(
+    db: AsyncSession, user_id
+) -> list[UserMemory]:
+    """All pinned facts for a user (typically a small set).
+
+    These are always injected regardless of the top-K retrieval cap — the
+    user's explicit "must-know" facts. Uses the partial index on
+    ``(user_id) WHERE pinned = true`` added in migration 0061.
+    """
+    rows = (
+        (
+            await db.execute(
+                select(UserMemory)
+                .where(UserMemory.user_id == user_id, UserMemory.pinned.is_(True))
+                .order_by(UserMemory.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
 async def count_memories(db: AsyncSession, user_id) -> int:
     return int(
         await db.scalar(
@@ -219,28 +247,41 @@ async def retrieve_relevant_memories(
     query: str | None,
     k: int,
     cfg: EmbeddingConfig | None = None,
+    exclude_ids: set | None = None,
 ) -> list[UserMemory]:
-    """Return the ``k`` memories most relevant to ``query`` by cosine
+    """Return up to ``k`` memories most relevant to ``query`` by cosine
     similarity, falling back to most-recent-first when embeddings aren't
     configured, the query is empty, the lookup fails, or nothing is
     embedded yet. Best-effort — retrieval must never break a chat turn.
+
+    ``exclude_ids`` — skip these memory ids (used to avoid re-including
+    pinned facts that are already being added separately).
     """
     cleaned = normalise_for_embedding(query or "")
     if cfg is None:
         cfg = await get_embedding_config(db)
+
+    _excl = exclude_ids or set()
+
     if cfg is None or not cleaned:
-        return await load_memories(db, user_id, limit=k)
+        rows = await load_memories(db, user_id, limit=k + len(_excl))
+        return [m for m in rows if m.id not in _excl][:k]
+
     try:
         vectors = await embed_texts(
             provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval embed failed user=%s: %s", user_id, exc)
-        return await load_memories(db, user_id, limit=k)
+        rows = await load_memories(db, user_id, limit=k + len(_excl))
+        return [m for m in rows if m.id not in _excl][:k]
     if not vectors:
-        return await load_memories(db, user_id, limit=k)
+        rows = await load_memories(db, user_id, limit=k + len(_excl))
+        return [m for m in rows if m.id not in _excl][:k]
 
     col = f"embedding_{cfg.dim}"
+    # Fetch k + buffer to account for excluded ids without a second query.
+    fetch_k = k + len(_excl) + 5
     sql = text(
         f"""
         SELECT id
@@ -251,21 +292,22 @@ async def retrieve_relevant_memories(
         """
     )
     try:
-        rows = (
+        rows_raw = (
             await db.execute(
                 sql,
-                {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": k},
+                {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k},
             )
         ).all()
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval query failed user=%s: %s", user_id, exc)
-        return await load_memories(db, user_id, limit=k)
+        rows = await load_memories(db, user_id, limit=k + len(_excl))
+        return [m for m in rows if m.id not in _excl][:k]
 
-    ids = [r[0] for r in rows]
+    ids = [r[0] for r in rows_raw if r[0] not in _excl][:k]
     if not ids:
-        # Embeddings configured but nothing embedded yet — don't silently
-        # show nothing; fall back to recency.
-        return await load_memories(db, user_id, limit=k)
+        rows = await load_memories(db, user_id, limit=k + len(_excl))
+        return [m for m in rows if m.id not in _excl][:k]
+
     fetched = (
         (await db.execute(select(UserMemory).where(UserMemory.id.in_(ids))))
         .scalars()
@@ -285,20 +327,36 @@ async def build_memory_system_prompt(
 ) -> str | None:
     """Convenience: load + render in one call for the chat router.
 
-    With ``query`` set and embeddings configured, injects only the top-``k``
-    relevant facts (token saving + relevance); otherwise renders the most
-    recent ``k`` (pre-overhaul behaviour)."""
-    if query is not None:
-        memories = await retrieve_relevant_memories(db, user_id, query=query, k=k)
+    Pinned facts are always injected first (Phase 2.1). The remaining
+    ``k - len(pinned)`` slots are filled with the top-K semantically
+    relevant facts (or recency fallback) excluding the already-pinned ones.
+    Degrades gracefully when embeddings aren't configured.
+    """
+    pinned = await load_pinned_memories(db, user_id)
+    pinned_ids = {m.id for m in pinned}
+    remaining_k = max(0, k - len(pinned))
+
+    if remaining_k > 0:
+        retrieved = await retrieve_relevant_memories(
+            db,
+            user_id,
+            query=query,
+            k=remaining_k,
+            exclude_ids=pinned_ids,
+        )
     else:
-        memories = await load_memories(db, user_id, limit=k)
-    return build_memory_prompt(memories)
+        retrieved = []
+
+    all_memories = pinned + retrieved
+    return build_memory_prompt(all_memories)
 
 
-# Reconciliation prompt (Memory Overhaul 1.3). Unlike the append-only
+# Reconciliation prompt (Memory Overhaul 1.3 + 2.1). Unlike the append-only
 # extractor, this one sees the user's EXISTING related facts (with ids)
 # and returns operations, so a contradiction ("I moved to Rust") updates
-# the stale fact in place instead of stacking a duplicate.
+# the stale fact in place instead of stacking a duplicate. Phase 2.1 adds
+# category tagging to each add/update op.
+_CATEGORY_LIST = " | ".join(MEMORY_CATEGORIES)
 _RECONCILE_SYSTEM_PROMPT: Final[str] = (
     "You maintain a long-term memory of durable facts about a user for an "
     "AI assistant. You are given the latest exchange between the user and "
@@ -306,13 +364,18 @@ _RECONCILE_SYSTEM_PROMPT: Final[str] = (
     "Decide how the exchange should change memory and output ONLY a JSON "
     "array of operation objects.\n\n"
     "Operations:\n"
-    '  {"op": "add", "text": "<new durable fact>"} — a genuinely new fact '
-    "not already covered by the existing list.\n"
-    '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>"} '
+    '  {"op": "add", "text": "<new durable fact>", "category": "<cat>"} — '
+    "a genuinely new fact not already covered by the existing list.\n"
+    '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>", "category": "<cat>"} '
     "— when the exchange refines or CONTRADICTS an existing fact (e.g. the "
     "user switched their main language); rewrite that fact in place.\n"
     '  {"op": "delete", "id": "<existing id>"} — when an existing fact is no '
     "longer true and has no replacement.\n\n"
+    f"Categories (use exactly one per add/update): {_CATEGORY_LIST}\n"
+    "  identity = name, role, occupation, location, pronouns\n"
+    "  preferences = tools, languages, formats, style, units\n"
+    "  projects = active work, goals, ongoing builds\n"
+    "  context = other durable background facts\n\n"
     "Capture durable, reusable facts about the USER: their name or what to "
     "call them, role/profession, tools/languages/frameworks, stable "
     "preferences (tone, format, units), ongoing projects, and explicit "
@@ -333,6 +396,8 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
     Returns a list of validated op dicts. ``update``/``delete`` are dropped
     unless their id is one we actually supplied (never act on an arbitrary
     id the model hallucinated). ``add``/``update`` require non-empty text.
+    Category is extracted and validated against the controlled vocabulary;
+    unknown values are coerced to None.
     """
     cleaned = _strip_think_blocks(raw).strip()
     start = cleaned.find("[")
@@ -350,16 +415,23 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
         if not isinstance(item, dict):
             continue
         op = item.get("op")
+        raw_cat = (item.get("category") or "").strip().lower()
+        category = raw_cat if raw_cat in _VALID_CATEGORIES else None
         if op == "add":
             txt = (item.get("text") or "").strip()
             if txt:
-                ops.append({"op": "add", "text": txt[:MAX_CONTENT_CHARS]})
+                ops.append({"op": "add", "text": txt[:MAX_CONTENT_CHARS], "category": category})
         elif op == "update":
             mid = str(item.get("id") or "")
             txt = (item.get("text") or "").strip()
             if mid in valid_ids and txt:
                 ops.append(
-                    {"op": "update", "id": mid, "text": txt[:MAX_CONTENT_CHARS]}
+                    {
+                        "op": "update",
+                        "id": mid,
+                        "text": txt[:MAX_CONTENT_CHARS],
+                        "category": category,
+                    }
                 )
         elif op == "delete":
             mid = str(item.get("id") or "")
@@ -415,14 +487,16 @@ async def capture_memories(
     source_conversation_id,
     provider: ModelProvider,
     model_id: str,
-) -> list[str]:
+) -> list[dict]:
     """Extract durable facts from the latest turn and persist the new ones.
 
-    Returns the list of fact strings that were actually saved (so the
-    caller can surface a "saved to memory" affordance). Best-effort: any
-    failure logs and returns ``[]`` without disturbing the chat turn.
-    Adds + flushes the new rows but leaves the commit to the caller so it
-    lands in the same transaction as the rest of the post-turn writes.
+    Returns a list of ``{"id": str, "content": str}`` dicts for every fact
+    that was actually saved (added or updated), so the caller can surface
+    a "saved to memory" affordance with the ability to undo by id.
+    Best-effort: any failure logs and returns ``[]`` without disturbing the
+    chat turn. Adds + flushes the new rows but leaves the commit to the
+    caller so it lands in the same transaction as the rest of the
+    post-turn writes.
     """
     user_text = (user_text or "").strip()[:_MAX_USER_CHARS]
     if not user_text:
@@ -478,10 +552,13 @@ async def capture_memories(
     if not ops:
         return []
 
-    saved: list[str] = []  # added/updated fact text → drives the chip
+    # Separate tracking: updates know their id immediately (the row already
+    # exists); new rows get their id after flush().
+    saved_updates: list[dict] = []
     new_rows: list[UserMemory] = []
     updated_rows: list[UserMemory] = []
     room = MAX_MEMORIES - total
+
     for op in ops:
         kind = op["op"]
         if kind == "delete":
@@ -497,8 +574,11 @@ async def capture_memories(
             if _normalise(new_text) == _normalise(row.content):
                 continue  # no real change
             row.content = new_text
+            # Update category if the model provided one.
+            if op.get("category"):
+                row.category = op["category"]
             updated_rows.append(row)
-            saved.append(new_text)
+            saved_updates.append({"id": str(row.id), "content": new_text})
             continue
         # add
         if len(new_rows) >= MAX_NEW_PER_TURN or len(new_rows) >= room:
@@ -519,10 +599,10 @@ async def capture_memories(
             content=fact,
             source="auto",
             source_conversation_id=source_conversation_id,
+            category=op.get("category"),
         )
         db.add(row)
         new_rows.append(row)
-        saved.append(fact)
         existing_keys.add(_normalise(fact))
 
     if new_rows or updated_rows:
@@ -531,6 +611,8 @@ async def capture_memories(
         except Exception:  # noqa: BLE001
             logger.exception("Memory persist flush failed user=%s", user_id)
             return []
+        # After flush, new_rows have their DB-assigned ids.
+        saved_new = [{"id": str(r.id), "content": r.content} for r in new_rows]
         # (Re-)embed added + updated facts so retrieval stays accurate.
         # Best-effort; ``cfg`` was resolved once above. Never fatal.
         if cfg is not None:
@@ -541,4 +623,7 @@ async def capture_memories(
                 logger.warning(
                     "memory embed-on-capture failed user=%s", user_id
                 )
-    return saved
+    else:
+        saved_new = []
+
+    return saved_updates + saved_new

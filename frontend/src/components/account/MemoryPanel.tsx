@@ -1,11 +1,23 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Brain,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Loader2,
+  Pencil,
+  Pin,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { authApi } from "@/api/auth";
-import { memoryApi, type Memory } from "@/api/memory";
+import { memoryApi, type Memory, MEMORY_CATEGORIES } from "@/api/memory";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { formatRelativeTime } from "@/components/files/helpers";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
@@ -25,15 +37,58 @@ const MODE_OPTIONS: { value: MemoryMode; label: string; title: string }[] = [
   },
 ];
 
-/** Cross-chat memory management (Phase 6).
+type SortMode = "recent" | "pinned" | "category";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  identity: "Identity",
+  preferences: "Preferences",
+  projects: "Projects",
+  context: "Context",
+};
+
+const CATEGORY_ORDER = ["identity", "preferences", "projects", "context"];
+
+/** Sort + group memories by the chosen mode. */
+function groupMemories(
+  memories: Memory[],
+  sortMode: SortMode
+): { label: string | null; items: Memory[] }[] {
+  if (sortMode === "pinned") {
+    const pinned = memories.filter((m) => m.pinned);
+    const rest = memories.filter((m) => !m.pinned);
+    const groups: { label: string | null; items: Memory[] }[] = [];
+    if (pinned.length) groups.push({ label: "Pinned", items: pinned });
+    if (rest.length) groups.push({ label: null, items: rest });
+    return groups;
+  }
+  if (sortMode === "category") {
+    const byCategory = new Map<string, Memory[]>();
+    for (const m of memories) {
+      const key = m.category && CATEGORY_LABELS[m.category] ? m.category : "__other__";
+      if (!byCategory.has(key)) byCategory.set(key, []);
+      byCategory.get(key)!.push(m);
+    }
+    const ordered = [
+      ...CATEGORY_ORDER.filter((c) => byCategory.has(c)),
+      ...(byCategory.has("__other__") ? ["__other__"] : []),
+    ];
+    return ordered.map((key) => ({
+      label: key === "__other__" ? "Other" : CATEGORY_LABELS[key],
+      items: byCategory.get(key)!,
+    }));
+  }
+  // recent — flat, no grouping label
+  return [{ label: null, items: [...memories].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )}];
+}
+
+/** Cross-chat memory management (Phase 6 + Phase 2 overhaul).
  *
  * Lets the user see, edit, and delete the durable facts the assistant
  * has remembered about them across conversations, add their own, and
- * toggle the whole feature off. Memory is injected into every chat's
- * system prompt and captured automatically from what the user shares
- * (or explicitly via "remember this"). Persists the on/off switch to
- * ``users.settings.memory_enabled``; the facts themselves live in the
- * dedicated ``/memory`` API.
+ * toggle the whole feature off. Memories are grouped by category, can be
+ * pinned so they always inject, and include provenance (source + timestamp).
  */
 export function MemoryPanel() {
   const qc = useQueryClient();
@@ -41,18 +96,33 @@ export function MemoryPanel() {
   const patchSettings = useAuthStore((s) => s.patchSettings);
   const setUser = useAuthStore((s) => s.setUser);
 
-  // Resolve the three-way mode, falling back to the legacy boolean for
-  // accounts that predate it (enabled → auto, disabled → off).
   const mode: MemoryMode =
     user?.settings?.memory_mode ??
     (user?.settings?.memory_enabled === false ? "off" : "auto");
   const enabled = mode !== "off";
+
   const [toggleBusy, setToggleBusy] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
+
+  // Add-new form
   const [draft, setDraft] = useState("");
-  const [filter, setFilter] = useState("");
+  const [draftCategory, setDraftCategory] = useState<string>("");
+  const [draftPinned, setDraftPinned] = useState(false);
+
+  // Inline-edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [editCategory, setEditCategory] = useState<string>("");
+
+  // List controls
+  const [filter, setFilter] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [sortOpen, setSortOpen] = useState(false);
+
+  // Bulk select
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+
   const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: memories = [], isLoading } = useQuery({
@@ -60,13 +130,18 @@ export function MemoryPanel() {
     queryFn: memoryApi.list,
   });
 
-  const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["memories"] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["memories"] });
 
   const createMut = useMutation({
-    mutationFn: (content: string) => memoryApi.create(content),
+    mutationFn: () =>
+      memoryApi.create(draft.trim(), {
+        category: draftCategory || null,
+        pinned: draftPinned,
+      }),
     onSuccess: () => {
       setDraft("");
+      setDraftCategory("");
+      setDraftPinned(false);
       setActionError(null);
       void invalidate();
     },
@@ -75,11 +150,12 @@ export function MemoryPanel() {
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, content }: { id: string; content: string }) =>
-      memoryApi.update(id, content),
+    mutationFn: ({ id, patch }: { id: string; patch: Parameters<typeof memoryApi.update>[1] }) =>
+      memoryApi.update(id, patch),
     onSuccess: () => {
       setEditingId(null);
       setEditText("");
+      setEditCategory("");
       setActionError(null);
       void invalidate();
     },
@@ -101,12 +177,29 @@ export function MemoryPanel() {
       setActionError(err instanceof Error ? err.message : String(err)),
   });
 
+  const bulkDeleteMut = useMutation({
+    mutationFn: (ids: string[]) => memoryApi.bulkRemove(ids),
+    onSuccess: () => {
+      setSelected(new Set());
+      setSelectMode(false);
+      void invalidate();
+    },
+    onError: (err) =>
+      setActionError(err instanceof Error ? err.message : String(err)),
+  });
+
+  const pinMut = useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      memoryApi.update(id, { pinned }),
+    onSuccess: () => void invalidate(),
+    onError: (err) =>
+      setActionError(err instanceof Error ? err.message : String(err)),
+  });
+
   const setMode = async (next: MemoryMode) => {
     if (next === mode) return;
     setToggleError(null);
     setToggleBusy(true);
-    // Keep the legacy boolean in sync so older code paths still read a
-    // sensible value.
     const patch = { memory_mode: next, memory_enabled: next !== "off" };
     patchSettings(patch);
     try {
@@ -123,13 +216,31 @@ export function MemoryPanel() {
   const startEdit = (m: Memory) => {
     setEditingId(m.id);
     setEditText(m.content);
+    setEditCategory(m.category ?? "");
     setActionError(null);
   };
 
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const filterText = filter.trim().toLowerCase();
-  const filteredMemories = filterText
+  const filtered = filterText
     ? memories.filter((m) => m.content.toLowerCase().includes(filterText))
     : memories;
+
+  const groups = groupMemories(filtered, sortMode);
+
+  const SORT_LABELS: Record<SortMode, string> = {
+    recent: "Recent",
+    pinned: "Pinned first",
+    category: "Category",
+  };
 
   return (
     <section className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
@@ -165,40 +276,69 @@ export function MemoryPanel() {
 
         {enabled && (
           <>
-            {/* Add new */}
+            {/* ── Add new ───────────────────────────────────────────────── */}
             <form
-              className="flex items-start gap-2"
+              className="space-y-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                const text = draft.trim();
-                if (text) createMut.mutate(text);
+                if (draft.trim()) createMut.mutate();
               }}
             >
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Add something for Promptly to remember…"
-                rows={1}
-                maxLength={600}
-                className={cn(
-                  "min-h-[38px] flex-1 resize-y rounded-input border border-[var(--border)]",
-                  "bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)]",
-                  "placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
-                )}
-              />
-              <Button
-                type="submit"
-                size="sm"
-                disabled={!draft.trim() || createMut.isPending}
-                className="mt-0.5 shrink-0"
-              >
-                {createMut.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-                Add
-              </Button>
+              <div className="flex items-start gap-2">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Add something for Promptly to remember…"
+                  rows={1}
+                  maxLength={600}
+                  className={cn(
+                    "min-h-[38px] flex-1 resize-y rounded-input border border-[var(--border)]",
+                    "bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)]",
+                    "placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
+                  )}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!draft.trim() || createMut.isPending}
+                  className="mt-0.5 shrink-0"
+                >
+                  {createMut.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" />
+                  )}
+                  Add
+                </Button>
+              </div>
+              {/* Category + pin for new fact */}
+              <div className="flex items-center gap-3">
+                <select
+                  value={draftCategory}
+                  onChange={(e) => setDraftCategory(e.target.value)}
+                  className={cn(
+                    "h-7 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2 text-xs",
+                    "text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
+                  )}
+                >
+                  <option value="">No category</option>
+                  {MEMORY_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                  <input
+                    type="checkbox"
+                    checked={draftPinned}
+                    onChange={(e) => setDraftPinned(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[var(--accent)]"
+                  />
+                  <Pin className="h-3 w-3" />
+                  Always inject
+                </label>
+              </div>
             </form>
 
             {actionError && (
@@ -208,7 +348,7 @@ export function MemoryPanel() {
               />
             )}
 
-            {/* List */}
+            {/* ── Memory list ───────────────────────────────────────────── */}
             {isLoading ? (
               <div className="flex items-center gap-2 py-4 text-xs text-[var(--text-muted)]">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -222,116 +362,194 @@ export function MemoryPanel() {
               </p>
             ) : (
               <div className="space-y-2">
-                {/* Count + filter — keeps the panel usable with hundreds
-                    of memories instead of an endless inline wall. */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                    {memories.length}{" "}
-                    {memories.length === 1 ? "memory" : "memories"}
-                  </span>
-                  {memories.length > 6 && (
-                    <input
-                      type="search"
-                      value={filter}
-                      onChange={(e) => setFilter(e.target.value)}
-                      placeholder="Filter…"
-                      className={cn(
-                        "h-7 w-36 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2.5 text-xs",
-                        "text-[var(--text)] placeholder:text-[var(--text-muted)]",
-                        "focus:border-[var(--accent)] focus:outline-none"
-                      )}
-                    />
-                  )}
-                </div>
-                {filteredMemories.length === 0 ? (
-                  <p className="py-2 text-xs text-[var(--text-muted)]">
-                    No memories match “{filter.trim()}”.
-                  </p>
+                {/* Toolbar */}
+                {selectMode && selected.size > 0 ? (
+                  <div className="flex items-center justify-between gap-2 rounded-input border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
+                    <span className="text-xs font-medium text-[var(--text)]">
+                      {selected.size} selected
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSelected(new Set());
+                          setSelectMode(false);
+                        }}
+                        className="text-[var(--text-muted)]"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={bulkDeleteMut.isPending}
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: `Delete ${selected.size} ${selected.size === 1 ? "memory" : "memories"}?`,
+                            message: "This can't be undone.",
+                            confirmLabel: "Delete",
+                            danger: true,
+                          });
+                          if (ok) bulkDeleteMut.mutate([...selected]);
+                        }}
+                        className="text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                      >
+                        {bulkDeleteMut.isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
                 ) : (
-                  <ul className="promptly-scroll max-h-80 divide-y divide-[var(--border)] overflow-y-auto rounded-input border border-[var(--border)]">
-                    {filteredMemories.map((m) => (
-                  <li key={m.id} className="px-3 py-2.5">
-                    {editingId === m.id ? (
-                      <div className="flex items-start gap-2">
-                        <textarea
-                          value={editText}
-                          onChange={(e) => setEditText(e.target.value)}
-                          rows={2}
-                          maxLength={600}
-                          autoFocus
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                        {memories.length}{" "}
+                        {memories.length === 1 ? "memory" : "memories"}
+                      </span>
+                      {/* Sort dropdown */}
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setSortOpen((o) => !o)}
                           className={cn(
-                            "flex-1 resize-y rounded-input border border-[var(--border)]",
-                            "bg-[var(--bg)] px-2 py-1.5 text-sm text-[var(--text)]",
+                            "flex h-6 items-center gap-1 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2",
+                            "text-[10px] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                          )}
+                        >
+                          {SORT_LABELS[sortMode]}
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                        {sortOpen && (
+                          <div
+                            className="absolute left-0 top-full z-20 mt-1 min-w-[130px] rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+                            onMouseLeave={() => setSortOpen(false)}
+                          >
+                            {(["recent", "pinned", "category"] as SortMode[]).map(
+                              (s) => (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => {
+                                    setSortMode(s);
+                                    setSortOpen(false);
+                                  }}
+                                  className={cn(
+                                    "flex w-full items-center gap-2 px-3 py-1.5 text-xs",
+                                    "hover:bg-[var(--hover)]",
+                                    s === sortMode
+                                      ? "text-[var(--accent)]"
+                                      : "text-[var(--text)]"
+                                  )}
+                                >
+                                  {s === sortMode && <Check className="h-3 w-3" />}
+                                  {SORT_LABELS[s]}
+                                </button>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {memories.length > 6 && (
+                        <input
+                          type="search"
+                          value={filter}
+                          onChange={(e) => setFilter(e.target.value)}
+                          placeholder="Filter…"
+                          className={cn(
+                            "h-7 w-28 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2.5 text-xs",
+                            "text-[var(--text)] placeholder:text-[var(--text-muted)]",
                             "focus:border-[var(--accent)] focus:outline-none"
                           )}
                         />
-                        <button
-                          type="button"
-                          aria-label="Save"
-                          disabled={!editText.trim() || updateMut.isPending}
-                          onClick={() =>
-                            updateMut.mutate({
-                              id: m.id,
-                              content: editText.trim(),
-                            })
-                          }
-                          className="mt-0.5 rounded p-1 text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-50"
-                        >
-                          <Check className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Cancel"
-                          onClick={() => {
-                            setEditingId(null);
-                            setEditText("");
-                          }}
-                          className="mt-0.5 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-[var(--text)]">
-                            {m.content}
-                          </p>
-                          {m.source === "auto" && (
-                            <span className="mt-0.5 inline-block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                              Auto-captured
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectMode((s) => !s);
+                          setSelected(new Set());
+                        }}
+                        className={cn(
+                          "h-7 rounded-input border px-2.5 text-xs",
+                          selectMode
+                            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                            : "border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                        )}
+                      >
+                        Select
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {filtered.length === 0 ? (
+                  <p className="py-2 text-xs text-[var(--text-muted)]">
+                    No memories match "{filter.trim()}".
+                  </p>
+                ) : (
+                  <div className="promptly-scroll max-h-[28rem] space-y-3 overflow-y-auto">
+                    {groups.map((group, gi) => (
+                      <div key={gi}>
+                        {group.label && (
+                          <div className="mb-1 flex items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                              {group.label}
                             </span>
-                          )}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-0.5">
-                          <button
-                            type="button"
-                            aria-label="Edit"
-                            onClick={() => startEdit(m)}
-                            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Delete"
-                            disabled={deleteMut.isPending}
-                            onClick={() => deleteMut.mutate(m.id)}
-                            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                            <div className="h-px flex-1 bg-[var(--border)]" />
+                          </div>
+                        )}
+                        <ul className="divide-y divide-[var(--border)] rounded-input border border-[var(--border)]">
+                          {group.items.map((m) => (
+                            <MemoryRow
+                              key={m.id}
+                              memory={m}
+                              editingId={editingId}
+                              editText={editText}
+                              editCategory={editCategory}
+                              onEditTextChange={setEditText}
+                              onEditCategoryChange={setEditCategory}
+                              onStartEdit={startEdit}
+                              onSaveEdit={() =>
+                                updateMut.mutate({
+                                  id: m.id,
+                                  patch: {
+                                    content: editText.trim(),
+                                    category: editCategory || null,
+                                  },
+                                })
+                              }
+                              onCancelEdit={() => {
+                                setEditingId(null);
+                                setEditText("");
+                                setEditCategory("");
+                              }}
+                              onDelete={() => deleteMut.mutate(m.id)}
+                              onPin={() =>
+                                pinMut.mutate({ id: m.id, pinned: !m.pinned })
+                              }
+                              updatePending={updateMut.isPending}
+                              deletePending={deleteMut.isPending}
+                              pinPending={pinMut.isPending}
+                              selectMode={selectMode}
+                              selected={selected.has(m.id)}
+                              onToggleSelect={() => toggleSelect(m.id)}
+                            />
+                          ))}
+                        </ul>
                       </div>
-                    )}
-                  </li>
-                ))}
-                  </ul>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
 
-            {memories.length > 0 && (
+            {memories.length > 0 && !selectMode && (
               <div className="flex justify-end">
                 <Button
                   variant="ghost"
@@ -362,6 +580,196 @@ export function MemoryPanel() {
         )}
       </div>
     </section>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Sub-components
+// ──────────────────────────────────────────────────────────────────────────
+
+interface MemoryRowProps {
+  memory: Memory;
+  editingId: string | null;
+  editText: string;
+  editCategory: string;
+  onEditTextChange: (v: string) => void;
+  onEditCategoryChange: (v: string) => void;
+  onStartEdit: (m: Memory) => void;
+  onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  onDelete: () => void;
+  onPin: () => void;
+  updatePending: boolean;
+  deletePending: boolean;
+  pinPending: boolean;
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
+}
+
+function MemoryRow({
+  memory: m,
+  editingId,
+  editText,
+  editCategory,
+  onEditTextChange,
+  onEditCategoryChange,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+  onPin,
+  updatePending,
+  deletePending,
+  pinPending,
+  selectMode,
+  selected,
+  onToggleSelect,
+}: MemoryRowProps) {
+  const isEditing = editingId === m.id;
+
+  return (
+    <li
+      className={cn(
+        "px-3 py-2.5 transition-colors",
+        selected && "bg-[var(--accent)]/5"
+      )}
+    >
+      {isEditing ? (
+        /* ── Edit mode ────────────────────────────────────────────── */
+        <div className="space-y-2">
+          <div className="flex items-start gap-2">
+            <textarea
+              value={editText}
+              onChange={(e) => onEditTextChange(e.target.value)}
+              rows={2}
+              maxLength={600}
+              autoFocus
+              className={cn(
+                "flex-1 resize-y rounded-input border border-[var(--border)]",
+                "bg-[var(--bg)] px-2 py-1.5 text-sm text-[var(--text)]",
+                "focus:border-[var(--accent)] focus:outline-none"
+              )}
+            />
+            <button
+              type="button"
+              aria-label="Save"
+              disabled={!editText.trim() || updatePending}
+              onClick={onSaveEdit}
+              className="mt-0.5 rounded p-1 text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-50"
+            >
+              <Check className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Cancel"
+              onClick={onCancelEdit}
+              className="mt-0.5 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <select
+            value={editCategory}
+            onChange={(e) => onEditCategoryChange(e.target.value)}
+            className={cn(
+              "h-7 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2 text-xs",
+              "text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
+            )}
+          >
+            <option value="">No category</option>
+            {MEMORY_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        /* ── View mode ────────────────────────────────────────────── */
+        <div className="flex items-start gap-2">
+          {/* Select checkbox */}
+          {selectMode && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
+            />
+          )}
+
+          {/* Pin indicator */}
+          <button
+            type="button"
+            aria-label={m.pinned ? "Unpin" : "Pin"}
+            disabled={pinPending}
+            onClick={onPin}
+            title={m.pinned ? "Pinned — always injected. Click to unpin." : "Pin to always inject"}
+            className={cn(
+              "mt-0.5 shrink-0 rounded p-0.5 transition-colors disabled:opacity-50",
+              m.pinned
+                ? "text-[var(--accent)]"
+                : "text-[var(--border)] hover:text-[var(--text-muted)]"
+            )}
+          >
+            <Pin className="h-3 w-3" fill={m.pinned ? "currentColor" : "none"} />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-[var(--text)]">{m.content}</p>
+            {/* Provenance row */}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              {m.category && CATEGORY_LABELS[m.category] && (
+                <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium uppercase tracking-wide text-[var(--accent)] bg-[var(--accent)]/10">
+                  {CATEGORY_LABELS[m.category]}
+                </span>
+              )}
+              {m.source === "auto" && (
+                <span className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                  Auto
+                </span>
+              )}
+              <span className="text-[10px] text-[var(--text-muted)]">
+                {formatRelativeTime(m.created_at)}
+              </span>
+              {m.source === "auto" && m.source_conversation_id && (
+                <a
+                  href={`/chat/${m.source_conversation_id}`}
+                  title="Open source conversation"
+                  target="_self"
+                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)]"
+                >
+                  <ExternalLink className="inline h-2.5 w-2.5" />
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          {!selectMode && (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                aria-label="Edit"
+                onClick={() => onStartEdit(m)}
+                className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Delete"
+                disabled={deletePending}
+                onClick={onDelete}
+                className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 

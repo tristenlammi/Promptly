@@ -23,9 +23,10 @@ interface ChatState {
    *  stream begins. */
   visionWarnings: string[];
   /** Facts captured into cross-chat memory during the current stream
-   *  (Phase 6). Drives the transient "saved to memory" affordance.
-   *  Cleared at the start of each new stream. */
-  memorySaved: string[];
+   *  (Phase 6 + 2.2). Drives the transient "saved to memory" affordance
+   *  with Undo support. Each entry carries the DB id so the chip can
+   *  delete individual facts. Cleared at the start of each new stream. */
+  memorySaved: Array<{ id: string; content: string }>;
   /** Live-tracking of tool calls fired during the current stream. Entries
    *  are appended on ``tool_started`` and updated in place on
    *  ``tool_finished``. Cleared at the start of each new stream because
@@ -86,7 +87,7 @@ interface ChatState {
   dismissVisionWarning: (index: number) => void;
   clearVisionWarnings: () => void;
   /** Record facts the backend just saved to memory this turn. */
-  setMemorySaved: (facts: string[]) => void;
+  setMemorySaved: (facts: Array<{ id: string; content: string }>) => void;
   dismissMemorySaved: () => void;
   /** Add a freshly-started tool call. No-op if an entry with the same
    *  id already exists (defensive against duplicate ``tool_started``

@@ -1,4 +1,4 @@
-"""Cross-chat memory management API (Phase 6).
+"""Cross-chat memory management API (Phase 6 + Phase 2 overhaul).
 
 User-facing CRUD over the caller's own saved facts. Every endpoint is
 owner-scoped via ``get_current_user``; a memory belonging to someone
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
-from app.memory.constants import MAX_MEMORIES
+from app.memory.constants import MAX_MEMORIES, MEMORY_CATEGORIES
 from app.memory.models import UserMemory
 from app.memory.schemas import MemoryCreate, MemoryResponse, MemoryUpdate
 from app.memory.service import (
@@ -26,6 +26,8 @@ from app.memory.service import (
 )
 
 router = APIRouter()
+
+_VALID_CATEGORIES = set(MEMORY_CATEGORIES)
 
 
 async def _get_owned(
@@ -75,7 +77,16 @@ async def create_memory(
             detail="That's already in your memory.",
         )
 
-    row = UserMemory(user_id=user.id, content=content, source="manual")
+    # Coerce invalid categories to None silently.
+    category = payload.category if payload.category in _VALID_CATEGORIES else None
+
+    row = UserMemory(
+        user_id=user.id,
+        content=content,
+        source="manual",
+        category=category,
+        pinned=payload.pinned,
+    )
     db.add(row)
     await db.flush()  # assign id before embedding
     await embed_memory_row(db, row)  # best-effort; no-op without embeddings
@@ -92,16 +103,35 @@ async def update_memory(
     db: AsyncSession = Depends(get_db),
 ) -> UserMemory:
     row = await _get_owned(memory_id, user, db)
-    content = payload.content.strip()
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Memory text is required",
+    should_reembed = False
+
+    if payload.content is not None:
+        content = payload.content.strip()
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Memory text is required",
+            )
+        row.content = content
+        should_reembed = True
+
+    if payload.category is not None:
+        # Empty string → clear the category; invalid → None
+        row.category = (
+            payload.category if payload.category in _VALID_CATEGORIES else None
         )
-    row.content = content
-    # Re-embed: the vector must track the edited text.
-    await db.flush()
-    await embed_memory_row(db, row)
+    elif "category" in payload.model_fields_set and payload.category is None:
+        # Explicit null clears the category
+        row.category = None
+
+    if payload.pinned is not None:
+        row.pinned = payload.pinned
+
+    # Re-embed only when the text changed (vectors must track the text).
+    if should_reembed:
+        await db.flush()
+        await embed_memory_row(db, row)
+
     await db.commit()
     await db.refresh(row)
     return row

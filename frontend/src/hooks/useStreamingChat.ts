@@ -84,8 +84,10 @@ interface SSEPayload {
   title?: string;
   // vision_warning event (non-vision model + image attachment, etc.)
   message?: string;
-  // memory_saved event (Phase 6) — durable facts captured this turn.
+  // memory_saved event (Phase 6 + 2.2) — durable facts captured this turn.
+  // ``ids`` (Phase 2.2) maps 1:1 with ``facts`` so the UI can undo by id.
   facts?: string[];
+  ids?: string[];
   count?: number;
   // tool_started / tool_finished events (Phase A1)
   id?: string;
@@ -281,7 +283,15 @@ export function useStreamingChat(): UseStreamingChatResult {
           data.facts &&
           data.facts.length > 0
         ) {
-          store.setMemorySaved(data.facts);
+          // Pair facts with their ids (Phase 2.2 — Undo support).
+          // Falls back to empty-string ids for older backends.
+          const items = data.facts.map(
+            (content: string, i: number) => ({
+              id: data.ids?.[i] ?? "",
+              content,
+            })
+          );
+          store.setMemorySaved(items);
           continue;
         }
         if (data.event === "vision_relay_started" && data.id) {
