@@ -542,9 +542,12 @@ async def refresh(
             detail=f"decode_failed: {e}",
         )
         await db.commit()
+        # Don't echo the decode-exception text to the client — it can leak
+        # library/decode detail. The real reason is already in the audit
+        # row above; the client just gets a generic message.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid refresh token: {e}",
+            detail="Invalid refresh token",
         )
 
     user = await db.get(User, user_id)

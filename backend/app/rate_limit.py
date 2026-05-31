@@ -179,6 +179,12 @@ RateLimitMfaVerify = Annotated[
 RateLimitMfaEmailSend = Annotated[
     None, Depends(rate_limit(_LIMIT_MFA_EMAIL_SEND, bucket="mfa_email_send"))
 ]
+# Per-IP cap on the anonymous share-link password check so a leaked share
+# URL can't have its password brute-forced. Tight on purpose (a human
+# typing a password never needs more than a handful of tries per minute).
+RateLimitShareUnlock = Annotated[
+    None, Depends(rate_limit(parse("10/minute"), bucket="share_unlock"))
+]
 
 
 # ---------------------------------------------------------------------

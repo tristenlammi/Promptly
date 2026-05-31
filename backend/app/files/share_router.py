@@ -54,6 +54,7 @@ from app.auth.models import User
 from app.auth.utils import JWT_ALGORITHM, verify_password
 from app.config import get_settings
 from app.database import get_db
+from app.rate_limit import RateLimitShareUnlock
 from app.files.models import (
     FileFolder,
     FileShareGrant,
@@ -384,6 +385,7 @@ async def get_share_meta(
 async def unlock_share(
     token: str,
     payload: ShareLinkUnlockRequest,
+    _rl: RateLimitShareUnlock,
     db: AsyncSession = Depends(get_db),
 ) -> ShareLinkUnlockResponse:
     link = await _load_live_link(db, token)

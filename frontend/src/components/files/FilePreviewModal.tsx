@@ -64,6 +64,27 @@ interface FilePreviewModalProps {
   onCopyToMine?: (file: FileItem) => void;
 }
 
+// Hosts allowed as <iframe> embeds inside rendered documents — matches
+// what the TipTap editor actually emits. Anything else is stripped.
+const ALLOWED_EMBED_SRC =
+  /^https:\/\/(www\.youtube-nocookie\.com|www\.youtube\.com|player\.vimeo\.com)\//i;
+
+/** Remove any <iframe> whose src isn't on the embed-host allowlist from
+ *  an already-DOMPurify-sanitized HTML string. Parsed in an inert
+ *  document so nothing executes during the scrub. */
+function stripDisallowedIframes(sanitizedHtml: string): string {
+  try {
+    const doc = new DOMParser().parseFromString(sanitizedHtml, "text/html");
+    doc.querySelectorAll("iframe").forEach((el) => {
+      if (!ALLOWED_EMBED_SRC.test(el.getAttribute("src") || "")) el.remove();
+    });
+    return doc.body.innerHTML;
+  } catch {
+    // If parsing fails, fall back to dropping all iframes.
+    return sanitizedHtml.replace(/<iframe[\s\S]*?<\/iframe>/gi, "");
+  }
+}
+
 /**
  * Stage 1 preview surface — the main new UX for Drive.
  *
@@ -416,7 +437,7 @@ function DocumentPreview({ file }: { file: FileItem }) {
         if (cancelled) return;
         // ADD_TAGS covers the TipTap-specific elements we emit
         // server-side (details/summary, <audio>, YouTube iframe).
-        const safe = DOMPurify.sanitize(body, {
+        const sanitized = DOMPurify.sanitize(body, {
           ADD_TAGS: ["iframe", "details", "summary", "audio", "source"],
           ADD_ATTR: [
             "allow",
@@ -433,6 +454,12 @@ function DocumentPreview({ file }: { file: FileItem }) {
           ],
           FORBID_TAGS: ["script", "style"],
         });
+        // Constrain <iframe src> to an allowlist. The editor only emits
+        // youtube-nocookie embeds, but a tampered/shared document blob
+        // could carry <iframe src="https://evil/"> that DOMPurify keeps
+        // (src is in ADD_ATTR). Post-process the sanitized string in a
+        // throwaway document and drop any iframe whose src isn't allowed.
+        const safe = stripDisallowedIframes(sanitized);
         setHtml(safe);
       } catch (e) {
         if (!cancelled) setErr(extractError(e));

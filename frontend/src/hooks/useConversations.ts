@@ -15,18 +15,30 @@ const CONVERSATIONS_KEY = ["conversations"] as const;
  * Persists the hidden id to ``users.settings.hidden_conversations`` so it
  * stays gone across reloads, and drops it from the local store now.
  */
-export async function hideConversationFromHistory(id: string): Promise<void> {
-  const settings = useAuthStore.getState().user?.settings;
-  const current = Array.isArray(settings?.hidden_conversations)
-    ? (settings!.hidden_conversations as string[])
-    : [];
-  if (!current.includes(id)) {
-    const fresh = await authApi.updatePreferences({
-      hidden_conversations: [...current, id],
-    });
-    useAuthStore.getState().setUser(fresh);
-  }
+// Serialise hide writes. The PATCH is a read-modify-write of the whole
+// hidden_conversations array, so two near-simultaneous hides could each
+// read the same base array and the second would clobber the first. We
+// chain them so each link re-reads the latest settings (after the prior
+// link's setUser committed) before building its new array.
+let _hideChain: Promise<void> = Promise.resolve();
+
+export function hideConversationFromHistory(id: string): Promise<void> {
+  // Drop from the sidebar immediately for snappy UX.
   useChatStore.getState().removeConversation(id);
+  _hideChain = _hideChain
+    .catch(() => {}) // a prior hide's failure must not block later ones
+    .then(async () => {
+      const settings = useAuthStore.getState().user?.settings;
+      const current = Array.isArray(settings?.hidden_conversations)
+        ? (settings!.hidden_conversations as string[])
+        : [];
+      if (current.includes(id)) return;
+      const fresh = await authApi.updatePreferences({
+        hidden_conversations: [...current, id],
+      });
+      useAuthStore.getState().setUser(fresh);
+    });
+  return _hideChain;
 }
 
 export function useConversationsQuery() {

@@ -25,10 +25,12 @@ Isolation is layered:
 from __future__ import annotations
 
 import base64
+import hmac
 import mimetypes
 import os
 import resource
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -174,7 +176,13 @@ def execute(
     req: ExecuteRequest,
     x_sandbox_secret: str = Header(default=""),
 ) -> ExecuteResponse:
-    if SECRET and x_sandbox_secret != SECRET:
+    # Fail CLOSED: if no shared secret is configured, refuse every request
+    # rather than silently accepting them. When set, constant-time compare.
+    if not SECRET:
+        raise HTTPException(
+            status_code=503, detail="sandbox not configured for requests"
+        )
+    if not hmac.compare_digest(x_sandbox_secret, SECRET):
         raise HTTPException(status_code=401, detail="bad sandbox secret")
 
     if len(req.files) > MAX_INPUT_FILES:
@@ -225,28 +233,38 @@ def execute(
         }
         timed_out = False
         exit_code: int | None
+        # Popen + communicate (not subprocess.run) so a timeout can SIGKILL
+        # the whole process GROUP, not just the immediate child.
+        # ``_set_limits`` calls os.setsid() to put the child in its own
+        # session/group; on timeout we kill that group so grandchildren the
+        # user code forked die too instead of lingering until their own
+        # rlimits fire.
+        proc = subprocess.Popen(
+            [sys.executable, "-I", script_name],
+            cwd=str(workdir),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            preexec_fn=_set_limits,
+        )
         try:
-            proc = subprocess.run(
-                [sys.executable, "-I", script_name],
-                cwd=str(workdir),
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                preexec_fn=_set_limits,
-            )
-            stdout, stderr = proc.stdout, proc.stderr
+            stdout, stderr = proc.communicate(timeout=timeout)
             exit_code = proc.returncode
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             timed_out = True
             exit_code = None
-            stdout = e.stdout or ""
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode("utf-8", "replace")
-            stderr = (e.stderr or "")
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode("utf-8", "replace")
-            stderr += (
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()  # fall back to killing just the direct child
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = "", ""
+            stdout = stdout or ""
+            stderr = (stderr or "") + (
                 f"\n[sandbox] Execution exceeded the {timeout}s time limit "
                 "and was killed."
             )
