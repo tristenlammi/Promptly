@@ -31,6 +31,15 @@ from pathlib import Path
 import filetype
 from PIL import Image, UnidentifiedImageError
 
+# Decompression-bomb guard (process-wide). ``Image`` is a module
+# singleton, so setting the cap in this startup-imported module applies
+# to EVERY ``Image.open`` in the backend (EXIF strip, /thumbnail, code
+# interpreter). Without it a tiny file declaring a huge canvas decodes to
+# multiple GB and can OOM the unsandboxed API process; Pillow raises
+# DecompressionBombError once a frame exceeds 2x this before allocating.
+# ~40 MP covers legitimate photos (8000x5000 = 40 MP).
+Image.MAX_IMAGE_PIXELS = 40_000_000
+
 logger = logging.getLogger("promptly.files.safety")
 
 # --------------------------------------------------------------------

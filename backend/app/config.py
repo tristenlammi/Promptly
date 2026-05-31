@@ -239,6 +239,29 @@ class Settings(BaseSettings):
                 "SECRET_KEY is shorter than 32 chars — too weak for JWT signing "
                 "and at-rest encryption. Use 64+ random URL-safe chars."
             )
+        # SINGLE_USER_MODE returns the admin user with NO token check, so
+        # it must never run on a network-reachable host. Allow it only for
+        # localhost / private-LAN / dev. ``getattr`` keeps this resilient
+        # if a field is renamed (the guard simply won't false-trigger).
+        if getattr(self, "SINGLE_USER_MODE", False) and not getattr(
+            self, "DEV_MODE", False
+        ):
+            domain = (getattr(self, "DOMAIN", "") or "").strip().lower()
+            is_local = (
+                domain == ""
+                or "localhost" in domain
+                or "127.0.0.1" in domain
+                or "::1" in domain
+                or domain.startswith("192.168.")
+                or domain.startswith("10.")
+            )
+            if not is_local:
+                errors.append(
+                    "SINGLE_USER_MODE=true with a public DOMAIN "
+                    f"({getattr(self, 'DOMAIN', None)!r}) — this disables ALL "
+                    "authentication on a network-reachable deployment. Set "
+                    "SINGLE_USER_MODE=false (or only enable it on localhost/dev)."
+                )
         return errors
 
     # Backwards-compat alias for any third-party code (or older
