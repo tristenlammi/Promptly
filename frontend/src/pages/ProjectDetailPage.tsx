@@ -11,6 +11,7 @@ import {
   CircleAlert,
   FileText,
   FolderMinus,
+  FolderX,
   Gauge,
   Lightbulb,
   RefreshCw,
@@ -43,6 +44,7 @@ import type { ConversationSummary } from "@/api/types";
 import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
 import {
   useArchiveChatProject,
+  useBulkRemoveConversationsFromProject,
   useChatProject,
   useChatProjectConversations,
   useChatProjectUsage,
@@ -85,6 +87,7 @@ export function ProjectDetailPage() {
   const archive = useArchiveChatProject();
   const unarchive = useUnarchiveChatProject();
   const remove = useDeleteChatProject();
+  const bulkRemoveConversations = useBulkRemoveConversationsFromProject(id ?? "");
 
   if (!id) return null;
 
@@ -160,20 +163,35 @@ export function ProjectDetailPage() {
           ) : (
             <>
               {isArchived && (
-                <div className="mb-4 flex items-center justify-between rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
+                <div className="mb-4 flex items-center justify-between gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
                   <span className="inline-flex items-center gap-2 text-[var(--text-muted)]">
                     <Archive className="h-3.5 w-3.5" />
                     This project is archived. Unarchive to start new chats
                     under it.
                   </span>
                   {isOwner && (
-                    <Button
-                      variant="ghost"
-                      leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
-                      onClick={() => unarchive.mutate(project.id)}
-                    >
-                      Unarchive
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {(conversations?.length ?? 0) > 0 && (
+                        <Button
+                          variant="ghost"
+                          leftIcon={<FolderX className="h-3.5 w-3.5" />}
+                          onClick={() => bulkRemoveConversations.mutate()}
+                          disabled={bulkRemoveConversations.isPending}
+                          title="Move all chats back to your top-level list"
+                        >
+                          {bulkRemoveConversations.isPending
+                            ? "Moving…"
+                            : "Move all chats out"}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
+                        onClick={() => unarchive.mutate(project.id)}
+                      >
+                        Unarchive
+                      </Button>
+                    </div>
                   )}
                 </div>
               )}
@@ -1003,41 +1021,70 @@ function FilesTab({
 
 /** Per-turn context cost readout. Makes the otherwise-invisible "every
  *  chat pays for the pinned files on every message" tax legible, and
- *  explains when retrieval has kicked in to cap it. */
+ *  explains when retrieval has kicked in to cap it.
+ *
+ *  Also shows a first-run nudge when the workspace hasn't configured an
+ *  embedding provider yet — so the user understands why files stay in
+ *  full-dump mode even after pinning lots of content. */
 function ContextBudgetBar({
   project,
 }: {
   project: NonNullable<ReturnType<typeof useChatProject>["data"]>;
 }) {
-  const { per_turn_tokens, retrieval_active, indexing_count } = project;
+  const {
+    per_turn_tokens,
+    retrieval_active,
+    indexing_count,
+    embeddings_configured,
+    files,
+  } = project;
   // Mirror the instructions editor's green/amber/red tiers.
   let tone = "text-emerald-500";
   if (per_turn_tokens >= 8000) tone = "text-red-500";
   else if (per_turn_tokens >= 3000) tone = "text-amber-500";
 
+  // Show the onboarding nudge when files are pinned but embeddings
+  // aren't configured — distinguishes "small project (full-dump is fine)"
+  // from "admin hasn't set up semantic search yet".
+  const showEmbeddingsNudge = !embeddings_configured && files.length > 0;
+
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
-      <span className="inline-flex items-center gap-1.5">
-        <Gauge className="h-3.5 w-3.5" />
-        Per-turn context:{" "}
-        <span className={cn("font-medium", tone)}>
-          ~{formatTokens(per_turn_tokens)} tokens
-        </span>
-      </span>
-      {retrieval_active ? (
-        <span className="inline-flex items-center gap-1 text-[var(--accent)]">
-          <Zap className="h-3.5 w-3.5" />
-          Retrieval on — only the most relevant chunks are sent each turn
-        </span>
-      ) : (
-        <span>Pinned files are sent in full on every turn</span>
+    <div className="mb-4 space-y-2">
+      {showEmbeddingsNudge && (
+        <div className="flex items-start gap-2 rounded-card border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+          <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <span>
+            <span className="font-semibold">Semantic search not configured</span>
+            {" — "}pinned files are injected in full on every turn. To enable
+            retrieval-based context (so large projects don't blow the context
+            window), ask your admin to set up an embedding provider in{" "}
+            <span className="font-medium">Settings → Models → Defaults</span>.
+          </span>
+        </div>
       )}
-      {indexing_count > 0 && (
-        <span className="inline-flex items-center gap-1">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Indexing {indexing_count} file{indexing_count > 1 ? "s" : ""}…
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1.5">
+          <Gauge className="h-3.5 w-3.5" />
+          Per-turn context:{" "}
+          <span className={cn("font-medium", tone)}>
+            ~{formatTokens(per_turn_tokens)} tokens
+          </span>
         </span>
-      )}
+        {retrieval_active ? (
+          <span className="inline-flex items-center gap-1 text-[var(--accent)]">
+            <Zap className="h-3.5 w-3.5" />
+            Retrieval on — only the most relevant chunks are sent each turn
+          </span>
+        ) : (
+          <span>Pinned files are sent in full on every turn</span>
+        )}
+        {indexing_count > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Indexing {indexing_count} file{indexing_count > 1 ? "s" : ""}…
+          </span>
+        )}
+      </div>
     </div>
   );
 }

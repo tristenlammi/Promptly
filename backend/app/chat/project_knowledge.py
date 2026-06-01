@@ -352,6 +352,10 @@ class ProjectContextStats:
     per_turn_tokens: int
     retrieval_active: bool
     indexing_count: int
+    # True when the workspace has an embedding provider configured so
+    # retrieval can run at all. False → files are always in full-dump mode;
+    # surfaced in the detail payload so the UI can show an onboarding nudge.
+    embeddings_configured: bool = False
 
 
 async def project_context_stats(
@@ -366,8 +370,9 @@ async def project_context_stats(
     instruction_tokens = _estimate_tokens(system_prompt)
     pinned_file_tokens = await _indexed_token_total(db, project_id)
     cfg = await get_embedding_config(db)
+    embeddings_configured = cfg is not None
     retrieval_active = (
-        cfg is not None and pinned_file_tokens > PROJECT_RETRIEVAL_TOKEN_BUDGET
+        embeddings_configured and pinned_file_tokens > PROJECT_RETRIEVAL_TOKEN_BUDGET
     )
     # Files still mid-index — surfaced so the UI can show "indexing N…".
     indexing_count = int(
@@ -394,6 +399,7 @@ async def project_context_stats(
         per_turn_tokens=per_turn,
         retrieval_active=retrieval_active,
         indexing_count=indexing_count,
+        embeddings_configured=embeddings_configured,
     )
 
 

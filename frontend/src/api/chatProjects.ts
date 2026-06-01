@@ -72,6 +72,10 @@ export interface ChatProjectDetail extends ChatProjectSummary {
   access_role: "owner" | "editor" | "viewer";
   /** Opt-in rolling project memory. */
   auto_memory_enabled: boolean;
+  /** True when the workspace has an embedding provider configured.
+   *  False → files stay in full-dump mode regardless of size;
+   *  the Files tab shows an onboarding nudge when this is false. */
+  embeddings_configured: boolean;
 }
 
 export type ProjectShareRole = "editor" | "viewer";
@@ -202,6 +206,16 @@ export const chatProjectsApi = {
 
   async reindex(id: string): Promise<void> {
     await apiClient.post(`/chat/projects/${id}/reindex`);
+  },
+
+  /** Bulk-detach every conversation from this project (project_id → null).
+   *  Conversations are preserved; they move back to the top-level list.
+   *  Returns the count of affected conversations. */
+  async removeAllConversations(id: string): Promise<{ removed: number }> {
+    const { data } = await apiClient.delete<{ removed: number }>(
+      `/chat/projects/${id}/conversations`
+    );
+    return data;
   },
 
   async pinFile(id: string, fileId: string): Promise<ChatProjectFilePin> {

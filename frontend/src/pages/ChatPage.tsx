@@ -7,6 +7,7 @@ import {
   FolderKanban,
   Ghost,
   GitBranch,
+  Zap,
 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
@@ -1055,7 +1056,12 @@ interface BranchBannerProps {
  *  :class:`ChatProject`. Fetches the project title on demand so the
  *  bar actually reads as "Project: X" rather than just an ID link.
  *  Cheap single-query hit cached by TanStack — the project list /
- *  detail page queries share the cache key. */
+ *  detail page queries share the cache key.
+ *
+ *  Also surfaces a "Retrieval on" badge when the project has flipped
+ *  to semantic retrieval mode (indexed text exceeds ~6k tokens) so
+ *  users understand why they might not see every pinned file verbatim
+ *  in the context. */
 function ProjectBreadcrumb({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const { data: project } = useChatProject(projectId);
@@ -1087,6 +1093,15 @@ function ProjectBreadcrumb({ projectId }: { projectId: string }) {
           {project?.title ?? "Project"}
         </span>
       </span>
+      {project?.retrieval_active && (
+        <span
+          title="This project uses semantic retrieval — only the most relevant chunks are included in context each turn"
+          className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+        >
+          <Zap className="h-2.5 w-2.5" />
+          Retrieval on
+        </span>
+      )}
     </div>
   );
 }

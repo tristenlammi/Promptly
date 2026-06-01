@@ -350,6 +350,7 @@ async def get_project(
         indexing_count=stats.indexing_count,
         access_role=access_role,
         auto_memory_enabled=proj.auto_memory_enabled,
+        embeddings_configured=stats.embeddings_configured,
     )
 
 
@@ -490,6 +491,41 @@ async def list_project_conversations(
     return [
         ConversationSummary.model_validate(c) for c in res.scalars().all()
     ]
+
+
+@router.delete(
+    "/{project_id}/conversations",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+)
+async def remove_all_conversations_from_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Bulk-detach every conversation from this project.
+
+    Sets ``project_id = NULL`` on every conversation currently under the
+    project. Conversations are *preserved* — they move back to the
+    top-level chat list. Useful when you want to dissolve an archived
+    project without losing history.
+
+    Owner-only: collaborators don't have permission to reorganise the
+    project's conversation list in bulk.
+    """
+    proj = await _get_owned_project(project_id, user, db)
+    result = await db.execute(
+        select(Conversation).where(Conversation.project_id == proj.id)
+    )
+    convs = result.scalars().all()
+    removed = 0
+    for conv in convs:
+        conv.project_id = None
+        removed += 1
+    if removed:
+        proj.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"removed": removed}
 
 
 # ---------------------------------------------------------------------

@@ -123,6 +123,10 @@ class ChatProjectDetail(ChatProjectSummary):
     access_role: str = "owner"
     # Opt-in rolling project memory toggle (Phase 4).
     auto_memory_enabled: bool = False
+    # True when the workspace has an embedding provider configured so
+    # semantic retrieval can actually run. Shown in the Files tab so
+    # users understand why pinned files stay in full-dump mode.
+    embeddings_configured: bool = False
 
 
 # ---------------------------------------------------------------------

@@ -276,3 +276,21 @@ export function useReindexProject(projectId: string) {
     },
   });
 }
+
+/** Bulk-detach every conversation from the project (set project_id → null).
+ *  Conversations are preserved and return to the top-level chat list.
+ *  Owner-only; used from the archived-project banner as a "dissolve" action. */
+export function useBulkRemoveConversationsFromProject(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => chatProjectsApi.removeAllConversations(projectId),
+    onSuccess: () => {
+      // Conversations list inside the project is now empty.
+      qc.invalidateQueries({ queryKey: KEYS.conversations(projectId) });
+      // The top-level sidebar must refresh so the moved-out chats reappear.
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      // Project card counts need to update too.
+      qc.invalidateQueries({ queryKey: KEYS.detail(projectId) });
+    },
+  });
+}
