@@ -280,6 +280,26 @@ class ChatProjectFile(Base):
         nullable=False,
     )
 
+    # RAG indexing lifecycle — mirrors ``custom_model_files`` so the
+    # project Files tab can render the same "indexing… → ready / failed"
+    # chips. ``queued`` until the background ingester picks the file up;
+    # only text-extractable files (PDF / text) are ever indexed (images
+    # stay on the attachment/vision path and keep status ``queued``,
+    # which the retrieval layer simply ignores).
+    indexing_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+    )
+    indexing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
 
 class Message(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "messages"

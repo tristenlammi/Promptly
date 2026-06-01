@@ -3061,25 +3061,55 @@ async def _stream_generator(
                     else None
                 ) or None
 
-                pin_rows = await db.execute(
-                    select(UserFile)
-                    .join(
-                        ChatProjectFile,
-                        ChatProjectFile.file_id == UserFile.id,
-                    )
-                    .where(ChatProjectFile.project_id == project_row.id)
-                    .order_by(ChatProjectFile.pinned_at.asc())
+                # Phase P2 — hybrid retrieval. ``build_project_injection``
+                # decides full-dump (small projects: every pinned file
+                # folded into the turn, as before) vs. top-k retrieval
+                # (large projects: only the relevant chunks spliced into
+                # the system prompt; images + not-yet-indexed text still
+                # ride the attachment path). Local import mirrors the
+                # ``_has_project_access`` lazy import above — keeps the
+                # already-heavy router import graph narrow.
+                from app.chat.project_knowledge import build_project_injection
+
+                triggering_text = next(
+                    (
+                        m.content
+                        for m in history_rows
+                        if m.id == triggering_user_msg_id
+                    ),
+                    "",
                 )
-                pinned_files = list(pin_rows.scalars().all())
+                injection = await build_project_injection(
+                    db, project_id=project_row.id, query=triggering_text or ""
+                )
+                if injection.system_block:
+                    # Project instructions stay first; the retrieved
+                    # "Project knowledge" block sits under them.
+                    project_system_prompt = (
+                        merge_system_prompt(
+                            project_system_prompt, injection.system_block
+                        )
+                        if project_system_prompt
+                        else injection.system_block
+                    )
+
                 # ACL for pinned files in a (possibly shared) project:
                 # anyone with project access can *use* any file pinned
-                # there — the project itself is the access grant. The
-                # previous rule (only files the caller owns) broke
-                # cross-user pins once project sharing shipped. Admin
+                # there — the project itself is the access grant. Admin
                 # pool files (``user_id IS NULL``) are always allowed.
-                if not pinned_files:
-                    pinned_files = []
-                if pinned_files:
+                if injection.attach_file_ids:
+                    pin_rows = await db.execute(
+                        select(UserFile).where(
+                            UserFile.id.in_(injection.attach_file_ids)
+                        )
+                    )
+                    by_id = {f.id: f for f in pin_rows.scalars().all()}
+                    # Preserve pin order (``attach_file_ids`` is ordered).
+                    pinned_files = [
+                        by_id[fid]
+                        for fid in injection.attach_file_ids
+                        if fid in by_id
+                    ]
                     existing = per_message_attachments.get(
                         triggering_user_msg_id, []
                     )

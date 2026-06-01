@@ -15,6 +15,10 @@ export interface ChatProjectFilePin {
   mime_type: string;
   size_bytes: number;
   pinned_at: string;
+  /** RAG indexing lifecycle. ``queued`` also covers non-RAG files
+   *  (images / binaries) — they stay queued and retrieval ignores them. */
+  indexing_status: "queued" | "embedding" | "ready" | "failed";
+  indexing_error: string | null;
 }
 
 export interface ChatProjectParticipant {
@@ -53,6 +57,16 @@ export interface ChatProjectDetail extends ChatProjectSummary {
   owner: ChatProjectParticipant | null;
   /** Every user with an accepted project share, sorted by username. */
   collaborators: ChatProjectParticipant[];
+  /** Per-turn context budget (Phase P2). ``per_turn_tokens`` is what
+   *  every chat in the project actually pays: instructions + full pinned
+   *  text in full-dump mode, or instructions + a top-k retrieval slice
+   *  once ``retrieval_active`` is true. ``indexing_count`` is how many
+   *  pinned files are still being embedded. */
+  instruction_tokens: number;
+  pinned_file_tokens: number;
+  per_turn_tokens: number;
+  retrieval_active: boolean;
+  indexing_count: number;
 }
 
 /** One share row on the owner-facing management list. */

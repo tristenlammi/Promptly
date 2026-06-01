@@ -46,6 +46,11 @@ export function useChatProject(id: string | undefined) {
     queryKey: id ? KEYS.detail(id) : ["chat-projects", "detail", "_"],
     queryFn: () => chatProjectsApi.get(id as string),
     enabled: Boolean(id),
+    // Poll while files are mid-index so the Files tab flips from
+    // "indexing…" to "searchable" without a manual refresh. Stops as
+    // soon as nothing is in flight (the common steady state).
+    refetchInterval: (query) =>
+      (query.state.data?.indexing_count ?? 0) > 0 ? 2500 : false,
   });
 }
 

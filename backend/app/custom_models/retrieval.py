@@ -47,29 +47,13 @@ class RetrievedChunk:
     filename: str | None
 
 
-async def retrieve_context(
-    db: AsyncSession,
-    *,
-    custom_model: CustomModel,
-    query: str,
-    top_k: int | None = None,
-) -> list[RetrievedChunk]:
-    """Return the top-K chunks most similar to ``query`` for this assistant.
-
-    Falls back to ``[]`` (no error) when:
-
-    * the workspace has no embedding provider configured yet
-      (the setup wizard hasn't run / admin skipped it);
-    * the assistant has no indexed chunks yet (either no files are
-      attached or all files are still queued / failed);
-    * the embed call to the configured provider raises — better to
-      degrade gracefully into a personality-only chat than crash a
-      message send.
-    """
-    query = (query or "").strip()
-    if not query:
-        return []
-
+async def _resolve_query_vector(
+    db: AsyncSession, query: str
+) -> tuple[str, int] | None:
+    """Embed ``query`` against the workspace config, returning
+    ``(pgvector_literal, dim)`` — or ``None`` (never raises) when
+    embeddings aren't configured / the dim is unindexed / the provider
+    is gone / the embed call fails. Shared by every scope's retrieval."""
     settings: AppSettings | None = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
     if (
         settings is None
@@ -77,31 +61,25 @@ async def retrieve_context(
         or settings.embedding_model_id is None
         or settings.embedding_dim is None
     ):
-        logger.debug(
-            "retrieve_context: workspace has no embedding provider configured; "
-            "returning empty context"
-        )
-        return []
+        logger.debug("retrieval: no embedding provider configured")
+        return None
 
     dim = int(settings.embedding_dim)
     if dim not in SUPPORTED_DIMS:
         logger.warning(
-            "retrieve_context: configured embedding_dim=%d is not one of the "
-            "indexed columns %s; returning empty context",
+            "retrieval: configured embedding_dim=%d is not one of the indexed "
+            "columns %s",
             dim,
             sorted(SUPPORTED_DIMS),
         )
-        return []
+        return None
 
     provider: ModelProvider | None = await db.get(
         ModelProvider, settings.embedding_provider_id
     )
     if provider is None:
-        logger.warning(
-            "retrieve_context: configured embedding provider %s no longer exists",
-            settings.embedding_provider_id,
-        )
-        return []
+        logger.warning("retrieval: configured embedding provider gone")
+        return None
 
     try:
         vectors = await embed_texts(
@@ -110,18 +88,28 @@ async def retrieve_context(
             texts=[normalise_for_embedding(query)],
         )
     except Exception as exc:  # noqa: BLE001 - best-effort retrieval
-        logger.warning("retrieve_context: embed call failed: %s", exc)
-        return []
+        logger.warning("retrieval: embed call failed: %s", exc)
+        return None
     if not vectors:
-        return []
+        return None
+    return vector_literal(vectors[0]), dim
 
-    qvec_literal = vector_literal(vectors[0])
+
+async def _similarity_search(
+    db: AsyncSession,
+    *,
+    scope_col: str,
+    scope_id: uuid.UUID,
+    qvec_literal: str,
+    dim: int,
+    k: int,
+) -> list[RetrievedChunk]:
+    """Top-K cosine search within one owner scope. ``scope_col`` is the
+    knowledge_chunks owner column (``custom_model_id`` / ``project_id``)."""
     column = f"embedding_{dim}"
-    k = max(1, int(top_k or custom_model.top_k or 6))
-
     # ``<=>`` is pgvector's cosine distance operator (smaller = more
     # similar). We return ``1 - distance`` as the human "score" so the
-    # frontend can display percentages without having to know pgvector
+    # frontend can display percentages without knowing pgvector's
     # operator semantics.
     sql = text(
         f"""
@@ -134,21 +122,15 @@ async def retrieve_context(
             f.original_filename AS filename
         FROM knowledge_chunks AS kc
         LEFT JOIN files AS f ON f.id = kc.user_file_id
-        WHERE kc.custom_model_id = :model_id
+        WHERE kc.{scope_col} = :sid
           AND kc.{column} IS NOT NULL
         ORDER BY kc.{column} <=> CAST(:qvec AS vector({dim}))
         LIMIT :k
         """
     )
     result = await db.execute(
-        sql,
-        {
-            "qvec": qvec_literal,
-            "model_id": str(custom_model.id),
-            "k": k,
-        },
+        sql, {"qvec": qvec_literal, "sid": str(scope_id), "k": max(1, k)}
     )
-    rows = result.mappings().all()
     return [
         RetrievedChunk(
             chunk_id=row["id"],
@@ -158,8 +140,66 @@ async def retrieve_context(
             chunk_metadata=dict(row["chunk_metadata"] or {}),
             filename=row["filename"],
         )
-        for row in rows
+        for row in result.mappings().all()
     ]
+
+
+async def retrieve_context(
+    db: AsyncSession,
+    *,
+    custom_model: CustomModel,
+    query: str,
+    top_k: int | None = None,
+) -> list[RetrievedChunk]:
+    """Return the top-K chunks most similar to ``query`` for this assistant.
+
+    Falls back to ``[]`` (no error) when the workspace has no embedding
+    provider, the assistant has no indexed chunks, or the embed call
+    fails — better to degrade into a personality-only chat than crash a
+    message send.
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+    resolved = await _resolve_query_vector(db, query)
+    if resolved is None:
+        return []
+    qvec_literal, dim = resolved
+    return await _similarity_search(
+        db,
+        scope_col="custom_model_id",
+        scope_id=custom_model.id,
+        qvec_literal=qvec_literal,
+        dim=dim,
+        k=int(top_k or custom_model.top_k or 6),
+    )
+
+
+async def retrieve_project_context(
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    query: str,
+    top_k: int = 6,
+) -> list[RetrievedChunk]:
+    """Top-K chunks most similar to ``query`` among a project's pinned,
+    indexed files. Same graceful-degradation contract as
+    :func:`retrieve_context`."""
+    query = (query or "").strip()
+    if not query:
+        return []
+    resolved = await _resolve_query_vector(db, query)
+    if resolved is None:
+        return []
+    qvec_literal, dim = resolved
+    return await _similarity_search(
+        db,
+        scope_col="project_id",
+        scope_id=project_id,
+        qvec_literal=qvec_literal,
+        dim=dim,
+        k=top_k,
+    )
 
 
 def format_retrieved_block(chunks: list[RetrievedChunk]) -> str:

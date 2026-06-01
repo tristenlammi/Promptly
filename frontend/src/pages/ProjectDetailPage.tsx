@@ -6,7 +6,9 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   FileText,
+  Gauge,
   Lightbulb,
   Loader2,
   MessageSquare,
@@ -17,6 +19,7 @@ import {
   Trash2,
   Upload,
   Users,
+  Zap,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -517,6 +520,8 @@ function FilesTab({
         </Button>
       </div>
 
+      <ContextBudgetBar project={project} />
+
       {previewError && (
         <div
           role="alert"
@@ -558,8 +563,14 @@ function FilesTab({
                     <FileText className="h-4 w-4 shrink-0 text-[var(--text-muted)] transition group-hover:text-[var(--accent)]" />
                   )}
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-[var(--text)] group-hover:text-[var(--accent)]">
-                      {f.filename}
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium text-[var(--text)] group-hover:text-[var(--accent)]">
+                        {f.filename}
+                      </span>
+                      <IndexStatusChip
+                        status={f.indexing_status}
+                        error={f.indexing_error}
+                      />
                     </div>
                     <div className="text-xs text-[var(--text-muted)]">
                       {humanSize(f.size_bytes)} · {f.mime_type}
@@ -618,6 +629,89 @@ function FilesTab({
         />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Files tab — context budget + per-file indexing status
+// ---------------------------------------------------------------------
+
+/** Per-turn context cost readout. Makes the otherwise-invisible "every
+ *  chat pays for the pinned files on every message" tax legible, and
+ *  explains when retrieval has kicked in to cap it. */
+function ContextBudgetBar({
+  project,
+}: {
+  project: NonNullable<ReturnType<typeof useChatProject>["data"]>;
+}) {
+  const { per_turn_tokens, retrieval_active, indexing_count } = project;
+  // Mirror the instructions editor's green/amber/red tiers.
+  let tone = "text-emerald-500";
+  if (per_turn_tokens >= 8000) tone = "text-red-500";
+  else if (per_turn_tokens >= 3000) tone = "text-amber-500";
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+      <span className="inline-flex items-center gap-1.5">
+        <Gauge className="h-3.5 w-3.5" />
+        Per-turn context:{" "}
+        <span className={cn("font-medium", tone)}>
+          ~{formatTokens(per_turn_tokens)} tokens
+        </span>
+      </span>
+      {retrieval_active ? (
+        <span className="inline-flex items-center gap-1 text-[var(--accent)]">
+          <Zap className="h-3.5 w-3.5" />
+          Retrieval on — only the most relevant chunks are sent each turn
+        </span>
+      ) : (
+        <span>Pinned files are sent in full on every turn</span>
+      )}
+      {indexing_count > 0 && (
+        <span className="inline-flex items-center gap-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Indexing {indexing_count} file{indexing_count > 1 ? "s" : ""}…
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Small lifecycle chip on a pinned-file row. Hidden for the common
+ *  "queued" state on non-RAG files so an image doesn't look stuck. */
+function IndexStatusChip({
+  status,
+  error,
+}: {
+  status: "queued" | "embedding" | "ready" | "failed";
+  error: string | null;
+}) {
+  if (status === "queued") return null;
+  if (status === "embedding") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--border)]/40 px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
+        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+        indexing
+      </span>
+    );
+  }
+  if (status === "ready") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">
+        <Zap className="h-2.5 w-2.5" />
+        searchable
+      </span>
+    );
+  }
+  // failed
+  return (
+    <span
+      title={error ?? undefined}
+      className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-500"
+    >
+      <CircleAlert className="h-2.5 w-2.5" />
+      not indexed
+    </span>
   );
 }
 

@@ -243,6 +243,15 @@ def _extract_pdf(relative: str) -> str:
     return "\n".join(pieces).strip()
 
 
+def is_text_extractable(file: UserFile) -> bool:
+    """True when :func:`extract_text_for_embedding` could pull text out
+    of this file (PDF or text-ish). Lets callers (e.g. the project
+    pin endpoint) decide whether a file is a RAG candidate without
+    catching the ``ValueError`` the extractor raises for binaries /
+    images."""
+    return _looks_pdf(file) or _looks_textual(file)
+
+
 def extract_text_for_embedding(file: UserFile) -> str:
     """Best-effort UTF-8 text extraction for a knowledge-library file.
 

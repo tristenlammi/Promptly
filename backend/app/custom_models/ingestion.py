@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 # to amortise per-call overhead on cloud providers.
 EMBED_BATCH_SIZE = 16
 
+# ``knowledge_chunks`` is shared between two owners (Custom Models and
+# Chat Projects). Each chunk sets exactly one of these columns; the
+# other stays NULL (enforced by a CHECK constraint, migration 0070).
+_SCOPE_COLUMN = {"custom_model": "custom_model_id", "project": "project_id"}
+
 
 async def _set_status(
     db: AsyncSession,
@@ -78,34 +83,38 @@ async def _set_status(
     await db.commit()
 
 
-async def _delete_existing_chunks(
+async def delete_existing_chunks(
     db: AsyncSession,
     *,
-    custom_model_id: uuid.UUID,
+    scope_kind: str,
+    scope_id: uuid.UUID,
     user_file_id: uuid.UUID,
 ) -> None:
-    """Drop any prior chunks for this (model, file) pair before re-embedding.
+    """Drop any prior chunks for this (scope, file) pair before re-embedding.
 
-    Cheaper than a per-chunk MERGE — and the unique constraint on
-    ``(custom_model_id, user_file_id, chunk_index)`` would refuse a
-    plain re-insert anyway.
+    ``scope_kind`` is ``"custom_model"`` or ``"project"`` — it selects
+    which owner column to filter on. Cheaper than a per-chunk MERGE, and
+    the unique guards on ``(scope, user_file_id, chunk_index)`` would
+    refuse a plain re-insert anyway.
     """
+    col = _SCOPE_COLUMN[scope_kind]
     await db.execute(
         text(
-            """
+            f"""
             DELETE FROM knowledge_chunks
-            WHERE custom_model_id = :cm AND user_file_id = :uf
+            WHERE {col} = :sid AND user_file_id = :uf
             """
         ),
-        {"cm": str(custom_model_id), "uf": str(user_file_id)},
+        {"sid": str(scope_id), "uf": str(user_file_id)},
     )
     await db.commit()
 
 
-async def _insert_chunks(
+async def insert_chunks(
     db: AsyncSession,
     *,
-    custom_model_id: uuid.UUID,
+    scope_kind: str,
+    scope_id: uuid.UUID,
     user_file_id: uuid.UUID,
     chunks: list[Chunk],
     embeddings: list[list[float]],
@@ -118,7 +127,8 @@ async def _insert_chunks(
     pgvector text format; everything else goes through bind
     parameters. The dim discriminator picks which ``embedding_<N>``
     column to populate so the unused column stays NULL (the partial
-    HNSW index doesn't index NULLs).
+    HNSW index doesn't index NULLs). ``scope_kind`` selects which owner
+    column carries ``scope_id``; the other stays NULL.
     """
     if not chunks:
         return
@@ -128,6 +138,7 @@ async def _insert_chunks(
             f"vector columns {sorted(SUPPORTED_DIMS)}"
         )
     column = f"embedding_{embedding_dim}"
+    scope_col = _SCOPE_COLUMN[scope_kind]
 
     # One row per chunk. We intentionally use a single INSERT with
     # multiple VALUES tuples instead of executemany() so the vector
@@ -136,11 +147,11 @@ async def _insert_chunks(
     sql = text(
         f"""
         INSERT INTO knowledge_chunks
-            (id, custom_model_id, user_file_id, chunk_index,
+            (id, {scope_col}, user_file_id, chunk_index,
              text, tokens, embedding_model, embedding_dim,
              metadata, {column})
         VALUES
-            (gen_random_uuid(), :cm, :uf, :idx,
+            (gen_random_uuid(), :sid, :uf, :idx,
              :text, :tokens, :em_model, :em_dim,
              CAST(:meta AS jsonb), CAST(:vec AS vector({embedding_dim})))
         """
@@ -149,7 +160,7 @@ async def _insert_chunks(
         await db.execute(
             sql,
             {
-                "cm": str(custom_model_id),
+                "sid": str(scope_id),
                 "uf": str(user_file_id),
                 "idx": chunk.index,
                 "text": chunk.text,
@@ -161,6 +172,48 @@ async def _insert_chunks(
             },
         )
     await db.commit()
+
+
+async def embed_file_to_chunks(
+    file: UserFile,
+    *,
+    provider: ModelProvider,
+    model_id: str,
+    dim: int,
+) -> tuple[list[Chunk], list[list[float]]]:
+    """Pure extract → normalise → chunk → embed pipeline, scope-agnostic.
+
+    No DB writes and no status side effects — the caller owns lifecycle
+    bookkeeping (it differs per scope). Raises ``ValueError`` for
+    unsupported / empty files and ``RuntimeError`` when the provider
+    returns the wrong vector count or dimension.
+    """
+    raw_text = extract_text_for_embedding(file)  # raises ValueError
+    normalised = normalise_for_embedding(raw_text)
+    if not normalised:
+        raise ValueError("no extractable text content in this file")
+    chunks = chunk_text(normalised)
+    if not chunks:
+        raise ValueError("file produced no chunks (empty after normalisation)")
+
+    embeddings: list[list[float]] = []
+    for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+        batch = chunks[start : start + EMBED_BATCH_SIZE]
+        vecs = await embed_texts(
+            provider=provider, model_id=model_id, texts=[c.text for c in batch]
+        )
+        if len(vecs) != len(batch):
+            raise RuntimeError(
+                f"embedding provider returned {len(vecs)} vectors "
+                f"for {len(batch)} inputs"
+            )
+        if vecs and len(vecs[0]) != dim:
+            raise RuntimeError(
+                f"embedding provider returned dim={len(vecs[0])} "
+                f"but workspace is configured for dim={dim}"
+            )
+        embeddings.extend(vecs)
+    return chunks, embeddings
 
 
 def _json_dump(obj: dict[str, object]) -> str:
@@ -253,10 +306,11 @@ async def index_file_for_custom_model(
                 )
                 return
 
-            # 1. Pull text out of the file (raises ValueError on
-            #    unsupported / unparseable inputs).
+            # 1+2. Extract → normalise → chunk → embed (shared pipeline).
             try:
-                raw_text = extract_text_for_embedding(file)
+                chunks, embeddings = await embed_file_to_chunks(
+                    file, provider=provider, model_id=model_id, dim=dim
+                )
             except ValueError as exc:
                 await _set_status(
                     db,
@@ -266,65 +320,21 @@ async def index_file_for_custom_model(
                     error=str(exc),
                 )
                 return
-            normalised = normalise_for_embedding(raw_text)
-            if not normalised:
-                await _set_status(
-                    db,
-                    custom_model_id=custom_model_id,
-                    user_file_id=user_file_id,
-                    status="failed",
-                    error="no extractable text content in this file",
-                )
-                return
-
-            # 2. Chunk + embed in batches.
-            chunks = chunk_text(normalised)
-            if not chunks:
-                await _set_status(
-                    db,
-                    custom_model_id=custom_model_id,
-                    user_file_id=user_file_id,
-                    status="failed",
-                    error="file produced no chunks (empty after normalisation)",
-                )
-                return
-
-            embeddings: list[list[float]] = []
-            for start in range(0, len(chunks), EMBED_BATCH_SIZE):
-                batch = chunks[start : start + EMBED_BATCH_SIZE]
-                vecs = await embed_texts(
-                    provider=provider,
-                    model_id=model_id,
-                    texts=[c.text for c in batch],
-                )
-                if len(vecs) != len(batch):
-                    raise RuntimeError(
-                        f"embedding provider returned {len(vecs)} vectors "
-                        f"for {len(batch)} inputs"
-                    )
-                # Defensive: if a provider unexpectedly returned a
-                # different dimension than configured, fail loudly
-                # rather than write a row that will mismatch the
-                # vector column type.
-                if vecs and len(vecs[0]) != dim:
-                    raise RuntimeError(
-                        f"embedding provider returned dim={len(vecs[0])} "
-                        f"but workspace is configured for dim={dim}"
-                    )
-                embeddings.extend(vecs)
 
             # 3. Atomic-ish swap: drop old chunks, then insert new.
             #    A crash between the two leaves the file with an empty
             #    index (status=failed via the except path) — the admin
             #    can retry from the UI.
-            await _delete_existing_chunks(
+            await delete_existing_chunks(
                 db,
-                custom_model_id=custom_model_id,
+                scope_kind="custom_model",
+                scope_id=custom_model_id,
                 user_file_id=user_file_id,
             )
-            await _insert_chunks(
+            await insert_chunks(
                 db,
-                custom_model_id=custom_model_id,
+                scope_kind="custom_model",
+                scope_id=custom_model_id,
                 user_file_id=user_file_id,
                 chunks=chunks,
                 embeddings=embeddings,

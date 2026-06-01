@@ -34,7 +34,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +67,11 @@ from app.chat.project_shares import (
     load_project_participants,
 )
 from app.chat.schemas import ConversationSummary
+from app.chat.project_knowledge import (
+    delete_project_file_chunks,
+    index_file_for_project,
+    project_context_stats,
+)
 from app.chat.shares import list_accessible_project_ids
 from app.custom_models.resolver import is_custom_model_id
 from app.database import get_db
@@ -297,10 +309,15 @@ async def get_project(
             mime_type=uf.mime_type,
             size_bytes=uf.size_bytes,
             pinned_at=pin.pinned_at,
+            indexing_status=pin.indexing_status,
+            indexing_error=pin.indexing_error,
         )
         for pin, uf in files_q.all()
     ]
     summary = await _summary_with_rollups(proj, db, user)
+    stats = await project_context_stats(
+        db, project_id=proj.id, system_prompt=proj.system_prompt
+    )
     participants = await load_project_participants(proj, db)
     # ``ChatProjectDetail`` extends ``ChatProjectSummary`` — merge the
     # two payloads into one validated object so the HTTP shape stays
@@ -320,6 +337,11 @@ async def get_project(
             )
             for c in participants.collaborators
         ],
+        instruction_tokens=stats.instruction_tokens,
+        pinned_file_tokens=stats.pinned_file_tokens,
+        per_turn_tokens=stats.per_turn_tokens,
+        retrieval_active=stats.retrieval_active,
+        indexing_count=stats.indexing_count,
     )
 
 
@@ -474,6 +496,7 @@ async def list_project_conversations(
 async def pin_file(
     project_id: uuid.UUID,
     payload: ChatProjectPinFile,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ChatProjectFilePin:
@@ -512,6 +535,11 @@ async def pin_file(
         proj.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(pin)
+        # Kick off RAG indexing after the response is sent. The task
+        # owns its own session and no-ops for images / when embeddings
+        # aren't configured, so this is safe to fire unconditionally on
+        # a fresh pin.
+        background.add_task(index_file_for_project, proj.id, uf.id)
     else:
         pin = existing
 
@@ -521,6 +549,8 @@ async def pin_file(
         mime_type=uf.mime_type,
         size_bytes=uf.size_bytes,
         pinned_at=pin.pinned_at,
+        indexing_status=pin.indexing_status,
+        indexing_error=pin.indexing_error,
     )
 
 
@@ -531,6 +561,7 @@ async def pin_file(
 async def unpin_file(
     project_id: uuid.UUID,
     file_id: uuid.UUID,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
@@ -543,6 +574,9 @@ async def unpin_file(
     )
     proj.updated_at = datetime.now(timezone.utc)
     await db.commit()
+    # Drop the file's project-scoped chunks so they stop surfacing in
+    # retrieval. Best-effort, after the response.
+    background.add_task(delete_project_file_chunks, proj.id, file_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

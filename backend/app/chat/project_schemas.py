@@ -27,6 +27,11 @@ class ChatProjectFilePin(BaseModel):
     mime_type: str
     size_bytes: int
     pinned_at: datetime
+    # RAG indexing lifecycle for the Files tab chips. ``queued`` covers
+    # both "not picked up yet" and "not a RAG candidate" (images /
+    # binaries stay queued and are simply ignored by retrieval).
+    indexing_status: str = "queued"
+    indexing_error: str | None = None
 
 
 # ---------------------------------------------------------------------
@@ -101,6 +106,16 @@ class ChatProjectDetail(ChatProjectSummary):
     # list without a second round-trip.
     owner: ChatProjectParticipant | None = None
     collaborators: list[ChatProjectParticipant] = Field(default_factory=list)
+    # Per-turn context budget (Phase P2). ``per_turn_tokens`` is the
+    # honest cost every chat in the project pays: instructions plus the
+    # full pinned text in full-dump mode, or instructions plus a top-k
+    # retrieval slice once ``retrieval_active`` flips on. ``indexing_count``
+    # is how many pinned files are still being embedded.
+    instruction_tokens: int = 0
+    pinned_file_tokens: int = 0
+    per_turn_tokens: int = 0
+    retrieval_active: bool = False
+    indexing_count: int = 0
 
 
 # ---------------------------------------------------------------------
