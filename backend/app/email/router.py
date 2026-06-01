@@ -101,6 +101,18 @@ def _require_email_enabled(row: AppSettings) -> None:
         )
 
 
+def _oauth_redirect_uri(request: Request, row: AppSettings) -> str:
+    """Build the OAuth callback URI.
+
+    Prefers the admin-configured public_origins over request.base_url so
+    deployments behind a reverse proxy (where base_url resolves to the
+    internal host/port) send the correct URI to Google.
+    """
+    origins: list[str] = getattr(row, "public_origins", None) or []
+    base = origins[0].rstrip("/") if origins else str(request.base_url).rstrip("/")
+    return base + "/api/email/oauth/google/callback"
+
+
 def _require_google_oauth(row: AppSettings) -> tuple[str, str]:
     if not row.google_oauth_client_id or not row.google_oauth_client_secret_enc:
         raise HTTPException(
@@ -135,7 +147,7 @@ async def google_oauth_start(
         json.dumps({"user_id": str(user.id)}),
     )
 
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/email/oauth/google/callback"
+    redirect_uri = _oauth_redirect_uri(request, row)
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -171,7 +183,7 @@ async def google_oauth_callback(
     user_id = uuid.UUID(state_data["user_id"])
 
     client_id, client_secret = _require_google_oauth(row)
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/email/oauth/google/callback"
+    redirect_uri = _oauth_redirect_uri(request, row)
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
