@@ -10,6 +10,15 @@ import type {
   WebSearchMode,
 } from "./types";
 
+/** One of a project's pinned files, with whether the current chat has
+ *  excluded it from its context (per-chat opt-out). */
+export interface ConversationProjectFile {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  excluded: boolean;
+}
+
 /** Response from ``POST /chat/conversations/{id}/summarise-to-project``.
  *  Returned to the SummariseToProjectButton modal so it can show the
  *  resulting filename + offer an "Open project" deep-link. */
@@ -307,6 +316,28 @@ export const chatApi = {
       { params: { q, limit, ...(projectId ? { project_id: projectId } : {}) } }
     );
     return data;
+  },
+
+  /** The project's pinned files with this chat's per-file excluded flag
+   *  (empty when the chat isn't in a project). */
+  async listConversationProjectFiles(
+    conversationId: string
+  ): Promise<ConversationProjectFile[]> {
+    const { data } = await apiClient.get<ConversationProjectFile[]>(
+      `/chat/conversations/${conversationId}/project-files`
+    );
+    return data;
+  },
+
+  async toggleConversationProjectFile(
+    conversationId: string,
+    fileId: string,
+    excluded: boolean
+  ): Promise<void> {
+    await apiClient.put(
+      `/chat/conversations/${conversationId}/project-files/${fileId}`,
+      { excluded }
+    );
   },
 
   /** Fetch candidates for the ``@``-mention autocomplete. When a

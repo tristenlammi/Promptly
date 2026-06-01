@@ -59,16 +59,21 @@ async def is_owner_of_project(
     return proj
 
 
+ProjectAccessRole = Literal["owner", "editor", "viewer"]
+
+
 async def get_accessible_project(
     project_id: uuid.UUID,
     user: User,
     db: AsyncSession,
-) -> tuple[ChatProject, Literal["owner", "collaborator"]]:
+) -> tuple[ChatProject, ProjectAccessRole]:
     """Owner *or* accepted collaborator, else 404.
 
-    Used by the project detail / settings endpoints so a collaborator
-    can view the project page, edit settings, and pin files. Destructive
-    endpoints keep calling :func:`is_owner_of_project` directly.
+    Returns the caller's effective role: ``owner`` for the creator, or
+    the accepted share's ``role`` (``editor`` / ``viewer``) for a
+    collaborator. Read endpoints can ignore the role; write endpoints
+    pass it through :func:`require_project_write`. Destructive endpoints
+    keep calling :func:`is_owner_of_project` directly.
     """
     proj = await db.get(ChatProject, project_id)
     if proj is None:
@@ -88,11 +93,25 @@ async def get_accessible_project(
         )
     ).scalars().first()
     if share is not None:
-        return proj, "collaborator"
+        # ``role`` is non-null post-0071; default to editor for any
+        # pre-migration row that somehow lacks it.
+        role: ProjectAccessRole = (
+            "viewer" if share.role == "viewer" else "editor"
+        )
+        return proj, role
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Project not found",
     )
+
+
+def require_project_write(role: ProjectAccessRole) -> None:
+    """403 when the caller is a read-only viewer. Owner + editor pass."""
+    if role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You have view-only access to this project.",
+        )
 
 
 # ====================================================================
@@ -107,6 +126,7 @@ class ProjectShareRow(BaseModel):
     project_id: uuid.UUID
     invitee: ShareUserBrief
     status: ProjectShareStatus
+    role: Literal["editor", "viewer"]
     created_at: datetime
     accepted_at: datetime | None
 
@@ -132,6 +152,9 @@ class CreateProjectShareRequest(BaseModel):
 
     username: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=320)
+    # Permission level for the invite. Defaults to full editor access
+    # (back-compat with the pre-role share UI).
+    role: Literal["editor", "viewer"] = "editor"
 
 
 class ProjectParticipants(BaseModel):
@@ -202,6 +225,7 @@ async def list_project_shares(
             project_id=share.project_id,
             invitee=_brief(invitee),
             status=share.status,  # type: ignore[arg-type]
+            role="viewer" if share.role == "viewer" else "editor",
             created_at=share.created_at,
             accepted_at=share.accepted_at,
         )
@@ -255,11 +279,16 @@ async def create_project_share(
 
     now = datetime.now(timezone.utc)
     if existing is not None:
+        # Re-inviting updates the role (lets an owner promote/demote a
+        # collaborator by re-sending). A declined row flips back to
+        # pending; an accepted row keeps its status but adopts the new
+        # role immediately.
+        existing.role = payload.role
         if existing.status == "declined":
             existing.status = "pending"
-            existing.updated_at = now
-            await db.commit()
-            await db.refresh(existing)
+        existing.updated_at = now
+        await db.commit()
+        await db.refresh(existing)
         share = existing
     else:
         share = ProjectShare(
@@ -267,6 +296,7 @@ async def create_project_share(
             inviter_user_id=user.id,
             invitee_user_id=invitee.id,
             status="pending",
+            role=payload.role,
         )
         db.add(share)
         await db.commit()
@@ -277,6 +307,7 @@ async def create_project_share(
         project_id=share.project_id,
         invitee=_brief(invitee),
         status=share.status,  # type: ignore[arg-type]
+        role="viewer" if share.role == "viewer" else "editor",
         created_at=share.created_at,
         accepted_at=share.accepted_at,
     )

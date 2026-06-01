@@ -29,15 +29,18 @@ injection path returns "full-dump everything", exactly as before.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.models import ChatProject, ChatProjectFile
+from app.auth.models import User
+from app.chat.models import ChatProject, ChatProjectFile, Conversation
 from app.chat.semantic_search import get_embedding_config
+from app.models_config.models import ModelProvider
 from app.custom_models.embedding import (
     file_content_hash,
     is_text_extractable,
@@ -267,7 +270,11 @@ async def _indexed_token_total(db: AsyncSession, project_id: uuid.UUID) -> int:
 
 
 async def build_project_injection(
-    db: AsyncSession, *, project_id: uuid.UUID, query: str
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    query: str,
+    excluded_file_ids: set[uuid.UUID] | None = None,
 ) -> ProjectInjection:
     """Decide full-dump vs. retrieval for this turn and return the plan.
 
@@ -275,7 +282,12 @@ async def build_project_injection(
     AND the project's indexed text exceeds
     :data:`PROJECT_RETRIEVAL_TOKEN_BUDGET`. Otherwise we full-dump every
     pinned file, exactly as the pre-retrieval code did.
+
+    ``excluded_file_ids`` — files the current chat has opted out of
+    (per-chat toggle); they're dropped from both the attachment set and
+    the retrieved chunks so this conversation never sees them.
     """
+    excluded = excluded_file_ids or set()
     rows = (
         await db.execute(
             select(ChatProjectFile, UserFile)
@@ -284,6 +296,7 @@ async def build_project_injection(
             .order_by(ChatProjectFile.pinned_at.asc())
         )
     ).all()
+    rows = [(cpf, uf) for cpf, uf in rows if uf.id not in excluded]
     if not rows:
         return ProjectInjection()
 
@@ -311,8 +324,16 @@ async def build_project_injection(
         if not (is_text_extractable(uf) and cpf.indexing_status == "ready")
     ]
     chunks = await retrieve_project_context(
-        db, project_id=project_id, query=query, top_k=PROJECT_RETRIEVAL_TOP_K
+        db,
+        project_id=project_id,
+        query=query,
+        # Pull a few extra so post-filtering excluded files still leaves
+        # a useful slate.
+        top_k=PROJECT_RETRIEVAL_TOP_K + len(excluded),
     )
+    if excluded:
+        chunks = [c for c in chunks if c.user_file_id not in excluded]
+    chunks = chunks[:PROJECT_RETRIEVAL_TOP_K]
     block = format_retrieved_block(chunks) if chunks else None
     return ProjectInjection(
         system_block=block, attach_file_ids=attach_ids, retrieval_active=True
@@ -374,3 +395,121 @@ async def project_context_stats(
         retrieval_active=retrieval_active,
         indexing_count=indexing_count,
     )
+
+
+# ---------------------------------------------------------------------
+# Auto-memory (opt-in)
+# ---------------------------------------------------------------------
+
+# Source-kind marker for the single auto-maintained memory file per
+# project. Distinct from the manual "Save summary to project" files
+# (``chat_summary``) so we can find + replace exactly one of them.
+PROJECT_MEMORY_SOURCE_KIND = "project_memory"
+
+# Per-project cooldown so a burst of turns doesn't re-summarise on every
+# message. In-memory + best-effort — resets on restart, which is fine
+# (worst case is one extra summary after a deploy).
+_MEMORY_COOLDOWN_SECONDS = 180.0
+_last_memory_run: dict[str, float] = {}
+
+
+async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
+    """Refresh a project's rolling "Project Memory" file from the chat
+    that just produced a reply, when the project has opted in.
+
+    Owns its own session (spawned via ``asyncio.create_task`` from the
+    stream finalize). Entirely best-effort: every failure path is a
+    quiet return so it can never disturb the reply already on disk.
+    Debounced per project. No-op unless ``auto_memory_enabled``.
+    """
+    # Local imports avoid any import-time cycle with the summariser /
+    # files layer (both sit above this module in some graphs).
+    from app.chat.summariser import summarise_conversation_to_markdown
+    from app.files.generated import GeneratedFileError, persist_generated_file
+
+    async with SessionLocal() as db:
+        conv = await db.get(Conversation, conversation_id)
+        if conv is None or conv.project_id is None:
+            return
+        proj = await db.get(ChatProject, conv.project_id)
+        if proj is None or not proj.auto_memory_enabled:
+            return
+
+        key = str(proj.id)
+        now = time.monotonic()
+        last = _last_memory_run.get(key)
+        if last is not None and (now - last) < _MEMORY_COOLDOWN_SECONDS:
+            return
+        _last_memory_run[key] = now
+
+        if not conv.provider_id or not conv.model_id:
+            return
+        provider = await db.get(ModelProvider, conv.provider_id)
+        if provider is None or not provider.enabled:
+            return
+
+        try:
+            memo = await summarise_conversation_to_markdown(
+                conversation=conv,
+                llm_provider=provider,
+                llm_model_id=conv.model_id,
+                db=db,
+            )
+        except Exception:  # noqa: BLE001 - best-effort (incl. SummariseError)
+            logger.debug("auto-memory: summary skipped for project %s", proj.id)
+            return
+
+        owner = await db.get(User, proj.user_id)
+        if owner is None:
+            return
+
+        # Find the existing memory file (one per project) to replace.
+        existing = (
+            await db.execute(
+                select(UserFile)
+                .join(ChatProjectFile, ChatProjectFile.file_id == UserFile.id)
+                .where(
+                    ChatProjectFile.project_id == proj.id,
+                    UserFile.source_kind == PROJECT_MEMORY_SOURCE_KIND,
+                )
+            )
+        ).scalars().first()
+
+        body = (
+            f"# Project memory: {proj.title}\n\n"
+            "_Auto-maintained from the project's most recently active chat. "
+            "Turn this off in the project's Settings tab._\n\n"
+            f"{memo}\n"
+        )
+        try:
+            new_uf = await persist_generated_file(
+                db,
+                user=owner,
+                filename="Project Memory.md",
+                mime_type="text/markdown",
+                content=body.encode("utf-8"),
+                source_kind=PROJECT_MEMORY_SOURCE_KIND,
+            )
+        except GeneratedFileError:
+            return
+
+        db.add(
+            ChatProjectFile(
+                project_id=proj.id, file_id=new_uf.id, pinned_by=owner.id
+            )
+        )
+        if existing is not None:
+            await db.execute(
+                delete(ChatProjectFile).where(
+                    ChatProjectFile.project_id == proj.id,
+                    ChatProjectFile.file_id == existing.id,
+                )
+            )
+            await db.delete(existing)
+        proj.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        new_id = new_uf.id
+
+    # Index the fresh memory file so it participates in retrieval.
+    await index_file_for_project(proj.id, new_id, force=True)
+    logger.info("auto-memory refreshed for project %s", proj.id)

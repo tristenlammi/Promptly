@@ -249,6 +249,13 @@ class ChatProject(UUIDPKMixin, TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Opt-in rolling project memory (Phase 4). When true, a background
+    # job maintains a single pinned "Project Memory" file, refreshed
+    # from whichever chat in the project most recently produced a reply.
+    # Off by default — distinct from the manual "Save summary to project".
+    auto_memory_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     def __repr__(self) -> str:
         return f"<ChatProject id={self.id} title={self.title!r}>"
@@ -279,6 +286,12 @@ class ChatProjectFile(Base):
         server_default=func.now(),
         nullable=False,
     )
+    # Who pinned the file (Phase 4). Powers the unpin guard: the project
+    # owner can unpin anything, but a collaborator can only unpin files
+    # they pinned themselves. NULL on pre-0071 rows (owner-only unpin).
+    pinned_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     # RAG indexing lifecycle — mirrors ``custom_model_files`` so the
     # project Files tab can render the same "indexing… → ready / failed"
@@ -298,6 +311,26 @@ class ChatProjectFile(Base):
     )
     indexed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class ConversationExcludedProjectFile(Base):
+    """Per-chat opt-out of a project's pinned files (Phase 4).
+
+    Every chat in a project sees all pinned files by default. A row here
+    means "exclude ``file_id`` from *this* conversation's context" — the
+    send path filters it out of both the full-dump attachment set and
+    the retrieval candidate set. Composite PK; both FKs cascade so the
+    row vanishes when either the chat or the file goes away.
+    """
+
+    __tablename__ = "conversation_excluded_project_files"
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True
+    )
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), primary_key=True
     )
 
 
@@ -421,6 +454,14 @@ class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
     )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending", server_default="pending"
+    )
+    # Permission level once accepted (Phase 4). ``editor`` (default,
+    # back-compat with pre-0071 shares) grants full read+write — edit
+    # settings, pin/unpin files, add chats. ``viewer`` is read-only.
+    # Owner-only actions (delete / archive / manage shares) are never
+    # available to either; those gate on ``proj.user_id``.
+    role: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="editor", server_default="editor"
     )
     accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

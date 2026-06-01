@@ -116,6 +116,13 @@ class ChatProjectDetail(ChatProjectSummary):
     per_turn_tokens: int = 0
     retrieval_active: bool = False
     indexing_count: int = 0
+    # Caller's fine-grained permission (Phase 4): ``owner`` /
+    # ``editor`` / ``viewer``. The frontend hides edit affordances for
+    # ``viewer``. ``role`` (above) stays coarse (owner/collaborator) for
+    # the list cards.
+    access_role: str = "owner"
+    # Opt-in rolling project memory toggle (Phase 4).
+    auto_memory_enabled: bool = False
 
 
 # ---------------------------------------------------------------------
@@ -150,6 +157,7 @@ class ChatProjectUpdate(BaseModel):
     system_prompt: str | None = Field(default=None, max_length=20_000)
     default_model_id: str | None = Field(default=None, max_length=255)
     default_provider_id: uuid.UUID | None = None
+    auto_memory_enabled: bool | None = None
 
 
 class ChatProjectPinFile(BaseModel):
@@ -157,6 +165,25 @@ class ChatProjectPinFile(BaseModel):
     to the project so new conversations auto-attach it."""
 
     file_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------
+# Per-chat pinned-file opt-out (Phase 4)
+# ---------------------------------------------------------------------
+
+
+class ConversationProjectFile(BaseModel):
+    """One of the project's pinned files, with whether *this* chat has
+    excluded it from its context."""
+
+    file_id: uuid.UUID
+    filename: str
+    mime_type: str
+    excluded: bool
+
+
+class ToggleProjectFileRequest(BaseModel):
+    excluded: bool
 
 
 # ---------------------------------------------------------------------

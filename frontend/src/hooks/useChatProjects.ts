@@ -200,8 +200,11 @@ export function useProjectShares(projectId: string | null | undefined) {
 export function useCreateProjectShare(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { username?: string; email?: string }) =>
-      chatProjectsApi.createShare(projectId, payload),
+    mutationFn: (payload: {
+      username?: string;
+      email?: string;
+      role?: "editor" | "viewer";
+    }) => chatProjectsApi.createShare(projectId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.shares(projectId) });
       qc.invalidateQueries({ queryKey: KEYS.detail(projectId) });

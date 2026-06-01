@@ -16,6 +16,7 @@ import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ContextWarningBanner } from "@/components/chat/ContextWarningBanner";
 import { ContextWindowPill } from "@/components/chat/ContextWindowPill";
 import { SummariseToProjectButton } from "@/components/chat/SummariseToProjectButton";
+import { ProjectFilesToggle } from "@/components/chat/ProjectFilesToggle";
 import type { RegenerateOverride } from "@/components/chat/MessageBubble";
 import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
@@ -857,6 +858,12 @@ export function ChatPage() {
                   conversationId={id}
                   compact={isMobile}
                 />
+              )}
+            {id &&
+              isOwner &&
+              !effectiveTemporaryMode &&
+              conversation?.project_id && (
+                <ProjectFilesToggle conversationId={id} compact={isMobile} />
               )}
             {id && isOwner && (
               <ConversationInstructionsButton

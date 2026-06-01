@@ -88,6 +88,8 @@ export function ProjectDetailPage() {
 
   const isArchived = Boolean(project?.archived_at);
   const isOwner = (project?.role ?? "owner") === "owner";
+  // Fine-grained: viewers get a read-only project page.
+  const canEdit = (project?.access_role ?? "owner") !== "viewer";
   const collaboratorCount = project?.collaborators?.length ?? 0;
 
   return (
@@ -122,7 +124,7 @@ export function ProjectDetailPage() {
                   : "Share"}
               </Button>
             )}
-            {!isArchived && (
+            {!isArchived && canEdit && (
               <>
                 <Button
                   variant="ghost"
@@ -193,11 +195,23 @@ export function ProjectDetailPage() {
                 <div className="mb-4 flex items-center gap-2 rounded-card border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3 text-xs text-[var(--text)]">
                   <Users className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
                   <span>
-                    You have collaborator access to this project, shared by{" "}
-                    <span className="font-medium">
-                      {project.shared_by.username}
-                    </span>
-                    . You can see and edit every chat in it.
+                    {canEdit ? (
+                      <>
+                        You have collaborator access to this project, shared by{" "}
+                        <span className="font-medium">
+                          {project.shared_by.username}
+                        </span>
+                        . You can see and edit every chat in it.
+                      </>
+                    ) : (
+                      <>
+                        You have view-only access to this project, shared by{" "}
+                        <span className="font-medium">
+                          {project.shared_by.username}
+                        </span>
+                        . You can read its chats and files but not change them.
+                      </>
+                    )}
                   </span>
                 </div>
               )}
@@ -217,7 +231,9 @@ export function ProjectDetailPage() {
                     onOpen={(cid) => navigate(`/chat/${cid}`)}
                   />
                 )}
-                {tab === "files" && <FilesTab project={project} />}
+                {tab === "files" && (
+                  <FilesTab project={project} canEdit={canEdit} />
+                )}
                 {tab === "usage" && <UsageTab projectId={id} />}
                 {tab === "settings" && (
                   <SettingsTab
@@ -228,6 +244,7 @@ export function ProjectDetailPage() {
                     archivePending={archive.isPending}
                     unarchivePending={unarchive.isPending}
                     isOwner={isOwner}
+                    canEdit={canEdit}
                   />
                 )}
               </div>
@@ -747,12 +764,14 @@ function StatCard({ label, value }: { label: string; value: string }) {
 
 function FilesTab({
   project,
+  canEdit,
 }: {
   project: ReturnType<typeof useChatProject>["data"] extends
     | infer D
     | undefined
     ? Exclude<D, undefined>
     : never;
+  canEdit: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pin = usePinChatProjectFile(project.id);
@@ -824,13 +843,15 @@ function FilesTab({
         <p className="text-xs text-[var(--text-muted)]">
           Pinned files are auto-attached to every new chat in this project.
         </p>
-        <Button
-          variant="secondary"
-          leftIcon={<Plus className="h-3.5 w-3.5" />}
-          onClick={() => setPickerOpen(true)}
-        >
-          Add file
-        </Button>
+        {canEdit && (
+          <Button
+            variant="secondary"
+            leftIcon={<Plus className="h-3.5 w-3.5" />}
+            onClick={() => setPickerOpen(true)}
+          >
+            Add file
+          </Button>
+        )}
       </div>
 
       <ContextBudgetBar project={project} />
@@ -890,14 +911,16 @@ function FilesTab({
                     </div>
                   </div>
                 </button>
-                <button
-                  onClick={() => unpin.mutate(f.file_id)}
-                  title="Unpin"
-                  className="rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
-                  disabled={unpin.isPending}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => unpin.mutate(f.file_id)}
+                    title="Unpin"
+                    className="rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
+                    disabled={unpin.isPending}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </li>
             );
           })}
@@ -1040,6 +1063,7 @@ function SettingsTab({
   archivePending,
   unarchivePending,
   isOwner,
+  canEdit,
 }: {
   project: ReturnType<typeof useChatProject>["data"] extends
     | infer D
@@ -1052,6 +1076,7 @@ function SettingsTab({
   archivePending: boolean;
   unarchivePending: boolean;
   isOwner: boolean;
+  canEdit: boolean;
 }) {
   const [title, setTitle] = useState(project.title);
   const [description, setDescription] = useState(project.description ?? "");
@@ -1080,6 +1105,12 @@ function SettingsTab({
     });
   };
 
+  const toggleAutoMemory = async () => {
+    await update.mutateAsync({
+      auto_memory_enabled: !project.auto_memory_enabled,
+    });
+  };
+
   const isArchived = Boolean(project.archived_at);
 
   return (
@@ -1093,7 +1124,8 @@ function SettingsTab({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            disabled={!canEdit}
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
             maxLength={255}
           />
         </div>
@@ -1105,33 +1137,65 @@ function SettingsTab({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
-            className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            disabled={!canEdit}
+            className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
             maxLength={2000}
           />
         </div>
         <ProjectInstructionsEditor
           value={systemPrompt}
           onChange={setSystemPrompt}
+          disabled={!canEdit}
         />
-        <ProjectModelField
-          modelId={modelId}
-          providerId={providerId}
-          onChange={(m, p) => {
-            setModelId(m);
-            setProviderId(p);
-          }}
-        />
-        <div className="flex items-center justify-end">
-          <Button
-            variant="primary"
-            leftIcon={<Save className="h-3.5 w-3.5" />}
-            onClick={handleSave}
-            disabled={!dirty || !title.trim() || update.isPending}
-          >
-            {update.isPending ? "Saving..." : "Save changes"}
-          </Button>
-        </div>
+        {canEdit && (
+          <ProjectModelField
+            modelId={modelId}
+            providerId={providerId}
+            onChange={(m, p) => {
+              setModelId(m);
+              setProviderId(p);
+            }}
+          />
+        )}
+        {canEdit && (
+          <div className="flex items-center justify-end">
+            <Button
+              variant="primary"
+              leftIcon={<Save className="h-3.5 w-3.5" />}
+              onClick={handleSave}
+              disabled={!dirty || !title.trim() || update.isPending}
+            >
+              {update.isPending ? "Saving..." : "Save changes"}
+            </Button>
+          </div>
+        )}
       </section>
+
+      {canEdit && (
+        <section className="space-y-3 border-t border-[var(--border)] pt-6">
+          <h3 className="text-sm font-semibold">Project memory</h3>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={project.auto_memory_enabled}
+              onChange={toggleAutoMemory}
+              disabled={update.isPending}
+              className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+            />
+            <span>
+              <span className="font-medium text-[var(--text)]">
+                Keep a rolling project memory
+              </span>
+              <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+                When on, a pinned <strong>Project Memory.md</strong> file is
+                auto-maintained from the project's most recently active chat,
+                so other chats pick up the gist. Off by default — distinct
+                from the manual “Save summary to project”.
+              </span>
+            </span>
+          </label>
+        </section>
+      )}
 
       {isOwner && (
         <section className="space-y-3 border-t border-[var(--border)] pt-6">
@@ -1214,9 +1278,11 @@ const PROJECT_INSTRUCTIONS_TIPS: string[] = [
 function ProjectInstructionsEditor({
   value,
   onChange,
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   const [showTips, setShowTips] = useState(false);
   const tokens = useMemo(() => estimateTokens(value), [value]);
@@ -1247,8 +1313,9 @@ function ProjectInstructionsEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={10}
+        disabled={disabled}
         placeholder={PROJECT_INSTRUCTIONS_PLACEHOLDER}
-        className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
         maxLength={20000}
       />
       <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">

@@ -68,6 +68,7 @@ from app.chat.project_shares import (
     get_accessible_project,
     is_owner_of_project,
     load_project_participants,
+    require_project_write,
 )
 from app.chat.schemas import ConversationSummary
 from app.chat.project_knowledge import (
@@ -294,8 +295,9 @@ async def get_project(
     user: User = Depends(get_current_user),
 ) -> ChatProjectDetail:
     # Owner *or* accepted collaborator — project sharing grants
-    # full read access to the project detail page and its files.
-    proj, _role = await get_accessible_project(project_id, user, db)
+    # read access to the project detail page and its files; the role
+    # tells the frontend whether to expose edit affordances.
+    proj, access_role = await get_accessible_project(project_id, user, db)
     # Build the detail payload. Pinned files need a join against
     # ``user_files`` to pull the display metadata the frontend shows
     # on the Files tab.
@@ -345,6 +347,8 @@ async def get_project(
         per_turn_tokens=stats.per_turn_tokens,
         retrieval_active=stats.retrieval_active,
         indexing_count=stats.indexing_count,
+        access_role=access_role,
+        auto_memory_enabled=proj.auto_memory_enabled,
     )
 
 
@@ -355,10 +359,9 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ChatProjectSummary:
-    # Collaborators have full write access to project settings
-    # (system prompt, title, description, default model) — matching
-    # the "complete access" contract for shared projects.
-    proj, _role = await get_accessible_project(project_id, user, db)
+    # Editors + owner can edit project settings; viewers are read-only.
+    proj, access_role = await get_accessible_project(project_id, user, db)
+    require_project_write(access_role)
     # ``model_fields_set`` tells us which keys were actually sent by
     # the client — lets us differentiate "leave alone" (absent) from
     # "set to null" (explicit clear). Matches the PATCH semantics
@@ -393,6 +396,8 @@ async def update_project(
         await _validate_default_model(new_provider, new_model, user, db)
         proj.default_model_id = new_model
         proj.default_provider_id = new_provider
+    if "auto_memory_enabled" in sent and payload.auto_memory_enabled is not None:
+        proj.auto_memory_enabled = payload.auto_memory_enabled
     proj.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(proj)
@@ -596,7 +601,8 @@ async def pin_file(
     in the project's file list the same way they see the owner's
     originals.
     """
-    proj, _role = await get_accessible_project(project_id, user, db)
+    proj, access_role = await get_accessible_project(project_id, user, db)
+    require_project_write(access_role)
 
     uf = await db.get(UserFile, payload.file_id)
     if uf is None or uf.user_id != user.id:
@@ -614,7 +620,9 @@ async def pin_file(
     )
     existing = existing_q.scalar_one_or_none()
     if existing is None:
-        pin = ChatProjectFile(project_id=proj.id, file_id=uf.id)
+        pin = ChatProjectFile(
+            project_id=proj.id, file_id=uf.id, pinned_by=user.id
+        )
         db.add(pin)
         proj.updated_at = datetime.now(timezone.utc)
         await db.commit()
@@ -649,13 +657,23 @@ async def unpin_file(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    proj, _role = await get_accessible_project(project_id, user, db)
-    await db.execute(
-        delete(ChatProjectFile).where(
-            ChatProjectFile.project_id == proj.id,
-            ChatProjectFile.file_id == file_id,
+    proj, access_role = await get_accessible_project(project_id, user, db)
+    require_project_write(access_role)
+
+    pin = await db.get(ChatProjectFile, (proj.id, file_id))
+    if pin is None:
+        # Idempotent: already unpinned.
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # Unpin guard: the owner can remove any file; a collaborator can
+    # only remove files they pinned themselves (``pinned_by`` is NULL on
+    # pre-0071 rows → owner-only). Stops one editor yanking another's
+    # reference material out from under them.
+    if access_role != "owner" and pin.pinned_by != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the project owner or the person who pinned this file can remove it.",
         )
-    )
+    await db.delete(pin)
     proj.updated_at = datetime.now(timezone.utc)
     await db.commit()
     # Drop the file's project-scoped chunks so they stop surfacing in
@@ -686,7 +704,8 @@ async def move_conversation_into_project(
     project (owner or accepted collaborator). Temporary chats are
     rejected: tying a short-lived chat to a project complicates the
     cleanup sweep for negligible benefit."""
-    proj, _role = await get_accessible_project(project_id, user, db)
+    proj, access_role = await get_accessible_project(project_id, user, db)
+    require_project_write(access_role)
     conv = await db.get(Conversation, conversation_id)
     if conv is None or conv.user_id != user.id:
         raise HTTPException(

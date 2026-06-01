@@ -42,6 +42,7 @@ export function ShareProjectDialog({
   const remove = useDeleteProjectShare(projectId);
 
   const [picked, setPicked] = useState<UserPickerValue>(null);
+  const [role, setRole] = useState<"editor" | "viewer">("editor");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const excludeUserIds = useMemo(
@@ -52,14 +53,14 @@ export function ShareProjectDialog({
   const send = async () => {
     setErrorMsg(null);
     if (!picked) return;
-    const payload =
+    const base =
       picked.kind === "user"
         ? { username: picked.user.username }
         : picked.email.includes("@")
           ? { email: picked.email }
           : { username: picked.email };
     try {
-      await create.mutateAsync(payload);
+      await create.mutateAsync({ ...base, role });
       setPicked(null);
     } catch (err: unknown) {
       const detail =
@@ -94,6 +95,16 @@ export function ShareProjectDialog({
             disabled={create.isPending}
           />
         </div>
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as "editor" | "viewer")}
+          disabled={create.isPending}
+          title="Permission level"
+          className="rounded-input border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        >
+          <option value="editor">Editor</option>
+          <option value="viewer">Viewer</option>
+        </select>
         <button
           type="submit"
           disabled={!picked || create.isPending}
@@ -147,6 +158,9 @@ export function ShareProjectDialog({
                     {row.invitee.email}
                   </div>
                 </div>
+                <span className="shrink-0 rounded-full bg-[var(--border)]/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  {row.role === "viewer" ? "Viewer" : "Editor"}
+                </span>
                 <StatusPill status={row.status} />
                 <button
                   type="button"

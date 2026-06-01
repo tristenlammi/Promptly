@@ -67,7 +67,14 @@ export interface ChatProjectDetail extends ChatProjectSummary {
   per_turn_tokens: number;
   retrieval_active: boolean;
   indexing_count: number;
+  /** Caller's fine-grained permission. ``viewer`` is read-only;
+   *  ``editor``/``owner`` can edit. */
+  access_role: "owner" | "editor" | "viewer";
+  /** Opt-in rolling project memory. */
+  auto_memory_enabled: boolean;
 }
+
+export type ProjectShareRole = "editor" | "viewer";
 
 /** One share row on the owner-facing management list. */
 export interface ProjectShareRow {
@@ -75,6 +82,7 @@ export interface ProjectShareRow {
   project_id: string;
   invitee: ChatProjectParticipant;
   status: "pending" | "accepted" | "declined";
+  role: ProjectShareRole;
   created_at: string;
   accepted_at: string | null;
 }
@@ -120,6 +128,7 @@ export interface UpdateChatProjectPayload {
   system_prompt?: string | null;
   default_model_id?: string | null;
   default_provider_id?: string | null;
+  auto_memory_enabled?: boolean;
 }
 
 export const chatProjectsApi = {
@@ -235,7 +244,7 @@ export const chatProjectsApi = {
 
   async createShare(
     projectId: string,
-    payload: { username?: string; email?: string }
+    payload: { username?: string; email?: string; role?: ProjectShareRole }
   ): Promise<ProjectShareRow> {
     const { data } = await apiClient.post<ProjectShareRow>(
       `/chat/projects/${projectId}/shares`,

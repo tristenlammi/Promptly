@@ -42,7 +42,16 @@ from app.chat.models import (
     ChatProjectFile,
     CompareGroup,
     Conversation,
+    ConversationExcludedProjectFile,
     Message,
+)
+from app.chat.project_schemas import (
+    ConversationProjectFile,
+    ToggleProjectFileRequest,
+)
+from app.chat.project_shares import (
+    get_accessible_project,
+    require_project_write,
 )
 from app.chat.schemas import (
     BranchConversationRequest,
@@ -297,6 +306,95 @@ async def search_conversations(
             )
 
     return _fuse_search_hits(fts_rows, sem_rows, limit=limit)
+
+
+# ---------------------------------------------------------------------
+# Per-chat project-file opt-out (Phase 4)
+# ---------------------------------------------------------------------
+
+
+@router.get(
+    "/conversations/{conversation_id}/project-files",
+    response_model=list[ConversationProjectFile],
+)
+async def list_conversation_project_files(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ConversationProjectFile]:
+    """List the project's pinned files with each one's per-chat
+    excluded flag. Empty when the chat isn't in a project."""
+    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+    if conv.project_id is None:
+        return []
+    pins = (
+        await db.execute(
+            select(ChatProjectFile, UserFile)
+            .join(UserFile, UserFile.id == ChatProjectFile.file_id)
+            .where(ChatProjectFile.project_id == conv.project_id)
+            .order_by(ChatProjectFile.pinned_at.asc())
+        )
+    ).all()
+    excluded = set(
+        (
+            await db.execute(
+                select(ConversationExcludedProjectFile.file_id).where(
+                    ConversationExcludedProjectFile.conversation_id == conv.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        ConversationProjectFile(
+            file_id=uf.id,
+            filename=uf.filename,
+            mime_type=uf.mime_type,
+            excluded=uf.id in excluded,
+        )
+        for _pin, uf in pins
+    ]
+
+
+@router.put(
+    "/conversations/{conversation_id}/project-files/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def toggle_conversation_project_file(
+    conversation_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: ToggleProjectFileRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Include / exclude one of the project's pinned files for *this*
+    chat. Only the chat's owner can change its context."""
+    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+    if conv.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the chat's owner can change which files it sees.",
+        )
+    if conv.project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This chat isn't in a project.",
+        )
+    existing = await db.get(
+        ConversationExcludedProjectFile, (conv.id, file_id)
+    )
+    if payload.excluded and existing is None:
+        db.add(
+            ConversationExcludedProjectFile(
+                conversation_id=conv.id, file_id=file_id
+            )
+        )
+        await db.commit()
+    elif not payload.excluded and existing is not None:
+        await db.delete(existing)
+        await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # Reciprocal-rank-fusion constant. The standard k=60 from the RRF paper —
@@ -624,12 +722,11 @@ async def create_conversation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Temporary chats can't belong to a project.",
             )
-        project = await db.get(ChatProject, payload.project_id)
-        if project is None or project.user_id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown project",
-            )
+        # Owner or editor may start chats in the project; viewers can't.
+        project, _prole = await get_accessible_project(
+            payload.project_id, user, db
+        )
+        require_project_write(_prole)
         project_id = project.id
         # If the conversation didn't pick a model explicitly, inherit
         # the project's defaults — matches ChatGPT's behaviour where
@@ -879,12 +976,11 @@ async def update_conversation(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Temporary chats can't belong to a project.",
                 )
-            project = await db.get(ChatProject, payload.project_id)
-            if project is None or project.user_id != user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Unknown project",
-                )
+            # Owner or editor may move a chat into the project.
+            project, _prole = await get_accessible_project(
+                payload.project_id, user, db
+            )
+            require_project_write(_prole)
             conv.project_id = project.id
 
     await db.commit()
@@ -3099,8 +3195,27 @@ async def _stream_generator(
                     ),
                     "",
                 )
+                # Per-chat opt-outs: files this conversation has excluded
+                # from the project's shared set.
+                excluded_ids = set(
+                    (
+                        await db.execute(
+                            select(
+                                ConversationExcludedProjectFile.file_id
+                            ).where(
+                                ConversationExcludedProjectFile.conversation_id
+                                == conv.id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 injection = await build_project_injection(
-                    db, project_id=project_row.id, query=triggering_text or ""
+                    db,
+                    project_id=project_row.id,
+                    query=triggering_text or "",
+                    excluded_file_ids=excluded_ids,
                 )
                 if injection.system_block:
                     # Project instructions stay first; the retrieved
@@ -4358,6 +4473,15 @@ async def _stream_generator(
             logger.exception(
                 "Post-stream budget check failed for user=%s", user.id
             )
+
+        # Phase P4 — opt-in rolling project memory. Fire-and-forget: the
+        # task owns its own session, no-ops unless the project has
+        # auto-memory enabled, and is debounced per project. Gated on
+        # ``project_id`` so non-project chats spawn nothing.
+        if conv.project_id is not None:
+            from app.chat.project_knowledge import maybe_refresh_project_memory
+
+            asyncio.create_task(maybe_refresh_project_memory(conv.id))
 
         # Phase 6 — cross-chat memory capture. Cheap regex pre-filter so
         # ordinary turns cost nothing; when the user states something
