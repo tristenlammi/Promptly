@@ -51,6 +51,11 @@ Category = Literal[
     "import_done",
     "shared_message",
     "task_complete",
+    # Phase 12 — email integration notifications.
+    # ``email_brief``  — daily AI digest of what needs attention.
+    # ``email_action`` — instant alert for high-priority / VIP / deadline mail.
+    "email_brief",
+    "email_action",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -63,6 +68,8 @@ CATEGORIES: tuple[str, ...] = (
     "import_done",
     "shared_message",
     "task_complete",
+    "email_brief",
+    "email_action",
     "test",
 )
 

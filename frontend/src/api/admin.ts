@@ -117,6 +117,26 @@ export interface AppSettingsPatch {
    */
   default_chat_provider_id?: string | null;
   default_chat_model_id?: string | null;
+  /**
+   * Phase 11 — Deep Research model. Same paired semantics as above.
+   * When set, every Deep Research run uses this model regardless of the
+   * user's current chat model selection.
+   */
+  research_provider_id?: string | null;
+  research_model_id?: string | null;
+  /**
+   * Phase 12 — Email integration. Kill switch + OAuth credentials + triage model.
+   *
+   * ``google_oauth_client_secret`` semantics:
+   *   undefined → unchanged; "" → clear; non-empty → encrypt + store.
+   * Triage model: same paired semantics as vision relay.
+   */
+  email_integration_enabled?: boolean;
+  google_oauth_client_id?: string | null;
+  google_oauth_client_secret?: string;
+  email_triage_provider_id?: string | null;
+  email_triage_model_id?: string | null;
+  email_triage_daily_token_cap?: number | null;
 }
 
 export interface OriginPreview {

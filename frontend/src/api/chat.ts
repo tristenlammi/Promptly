@@ -61,6 +61,8 @@ export interface UpdateConversationPayload {
   /** Phase 1 — per-conversation custom instructions. Pass a string to
    *  set (empty string clears it); omit to leave unchanged. */
   system_prompt?: string;
+  /** Phase 9 — pause / resume auto-memory capture for this conversation. */
+  memory_capture_paused?: boolean;
 }
 
 export interface SendMessagePayload {

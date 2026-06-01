@@ -406,8 +406,11 @@ _RECONCILE_SYSTEM_PROMPT: Final[str] = (
     "Decide how the exchange should change memory and output ONLY a JSON "
     "array of operation objects.\n\n"
     "Operations:\n"
-    '  {"op": "add", "text": "<new durable fact>", "category": "<cat>"} — '
-    "a genuinely new fact not already covered by the existing list.\n"
+    '  {"op": "add", "text": "<new durable fact>", "category": "<cat>", "confidence": "high"|"low"} — '
+    "a genuinely new fact not already covered by the existing list. Set "
+    "confidence to \"high\" ONLY when you are certain this fact is durable "
+    "and will still be relevant weeks from now. Use \"low\" for anything "
+    "borderline — low-confidence adds are automatically discarded.\n"
     '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>", "category": "<cat>"} '
     "— when the exchange refines or CONTRADICTS an existing fact (e.g. the "
     "user switched their main language); rewrite that fact in place.\n"
@@ -422,10 +425,11 @@ _RECONCILE_SYSTEM_PROMPT: Final[str] = (
     "call them, role/profession, tools/languages/frameworks, stable "
     "preferences (tone, format, units), ongoing projects, and explicit "
     "'remember this' requests.\n"
-    "Do NOT capture: one-off task details, the answer to their question, "
-    "transient state, time-bound statements ('I'm tired today'), sensitive "
-    "data they didn't ask you to remember (passwords, full card/ID "
-    "numbers), or facts already present AND unchanged.\n\n"
+    "Do NOT capture (always use confidence 'low' or omit): one-off task "
+    "details, the answer to their question, transient state, time-bound "
+    "statements ('I'm tired today', 'I'm in a meeting'), emotional states, "
+    "sensitive data they didn't ask you to remember (passwords, full "
+    "card/ID numbers), or facts already present AND unchanged.\n\n"
     "Write each fact as a single concise third-person statement starting "
     "with 'User ' (e.g. 'User is a Rust developer'). Only use ids that "
     "appear in the existing list. If nothing should change, output []."
@@ -461,7 +465,10 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
         category = raw_cat if raw_cat in _VALID_CATEGORIES else None
         if op == "add":
             txt = (item.get("text") or "").strip()
-            if txt:
+            confidence = (item.get("confidence") or "low").strip().lower()
+            # Only save facts the model explicitly marks as high-confidence.
+            # Anything borderline (low confidence or field absent) is dropped.
+            if txt and confidence == "high":
                 ops.append({"op": "add", "text": txt[:MAX_CONTENT_CHARS], "category": category})
         elif op == "update":
             mid = str(item.get("id") or "")

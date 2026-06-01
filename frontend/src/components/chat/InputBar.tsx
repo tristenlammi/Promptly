@@ -13,6 +13,9 @@ import {
   Eye,
   File as FileIcon,
   FileText,
+  FlaskConical,
+  Globe,
+  GlobeLock,
   Image as ImageIcon,
   Loader2,
   Mic,
@@ -21,6 +24,7 @@ import {
   Sparkles,
   Square,
   Upload,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -50,8 +54,6 @@ import {
   EFFORT_META,
   EFFORT_ORDER,
 } from "./ReasoningEffortToggle";
-import { ToolsToggle } from "./ToolsToggle";
-import { WebSearchToggle } from "./WebSearchToggle";
 
 interface InputBarProps {
   disabled?: boolean;
@@ -77,6 +79,9 @@ interface InputBarProps {
    * session view where attachments don't apply yet).
    */
   allowAttachments?: boolean;
+  /** Phase 11 — open the deep-research confirmation dialog. Only provided
+   *  on the main chat surface; study/task views omit it. */
+  onResearch?: () => void;
   /**
    * Focus the textarea on mount. Use on surfaces where the student's
    * primary intent is to type — chat / study pages — so the user can
@@ -120,6 +125,7 @@ export function InputBar({
   autoFocus = false,
   currentConversationId = null,
   projectId = null,
+  onResearch,
 }: InputBarProps) {
   // Persist the draft (text + attachments) in a module-level store so a
   // mobile rotation that flips the AppLayout tree (crossing the 768px
@@ -903,20 +909,33 @@ export function InputBar({
                   {!isMobile && <span className="font-medium">Attach</span>}
                 </button>
               )}
-              {onWebSearchModeChange && (
-                <WebSearchToggle
-                  mode={webSearchMode}
-                  onChange={onWebSearchModeChange}
-                  disabled={disabled || streaming}
-                />
-              )}
-              {onToolsChange && (
-                <ToolsToggle
-                  enabled={toolsEnabled}
-                  onToggle={onToolsChange}
-                  disabled={disabled || streaming}
-                />
-              )}
+              {/* Phase 10 — Enhance always visible in the main bar. */}
+              <button
+                type="button"
+                onClick={() => void handleEnhance()}
+                disabled={
+                  disabled ||
+                  streaming ||
+                  value.trim().length === 0 ||
+                  enhanceStatus === "loading"
+                }
+                title="Enhance prompt — rewrite for a sharper answer"
+                className={cn(
+                  "inline-flex items-center rounded-full border transition",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                  isMobile ? "h-9 w-9 justify-center" : "h-8 gap-1.5 px-2.5 text-xs",
+                  enhanceStatus === "loading"
+                    ? "border-[var(--accent)]/60 text-[var(--accent)]"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
+                )}
+              >
+                {enhanceStatus === "loading" ? (
+                  <Loader2 className={cn(isMobile ? "h-4 w-4" : "h-3.5 w-3.5", "animate-spin")} />
+                ) : (
+                  <Sparkles className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+                )}
+                {!isMobile && <span className="font-medium">Enhance</span>}
+              </button>
               {speech.supported && (
                 <button
                   type="button"
@@ -958,14 +977,12 @@ export function InputBar({
               <ComposerMoreMenu
                 reasoningEffort={reasoningEffort}
                 onReasoningEffortChange={onReasoningEffortChange}
-                onEnhance={() => void handleEnhance()}
-                enhanceLoading={enhanceStatus === "loading"}
-                enhanceDisabled={
-                  disabled ||
-                  streaming ||
-                  value.trim().length === 0 ||
-                  enhanceStatus === "loading"
-                }
+                webSearchMode={webSearchMode}
+                onWebSearchModeChange={onWebSearchModeChange}
+                toolsEnabled={toolsEnabled}
+                onToolsChange={onToolsChange}
+                onResearch={onResearch}
+                researchDisabled={disabled || streaming || value.trim().length === 0}
                 disabled={disabled || streaming}
               />
             </div>
@@ -1062,19 +1079,34 @@ export function InputBar({
 // popover (which would clip), reusing its shared EFFORT_META/ORDER.
 // Opens upward like the other composer popovers.
 // ----------------------------------------------------------------
+const WEB_LABELS: Record<WebSearchMode, string> = {
+  off: "Off",
+  auto: "Auto",
+  always: "Always",
+};
+const WEB_ORDER: WebSearchMode[] = ["off", "auto", "always"];
+
+// Phase 10 — Web + Tools moved inside More; Enhance moves to the main bar.
+// Phase 11 — Deep Research action added at the bottom.
 function ComposerMoreMenu({
   reasoningEffort,
   onReasoningEffortChange,
-  onEnhance,
-  enhanceLoading,
-  enhanceDisabled,
+  webSearchMode,
+  onWebSearchModeChange,
+  toolsEnabled,
+  onToolsChange,
+  onResearch,
+  researchDisabled,
   disabled,
 }: {
   reasoningEffort: ReasoningEffort | null;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
-  onEnhance: () => void;
-  enhanceLoading: boolean;
-  enhanceDisabled: boolean;
+  webSearchMode: WebSearchMode;
+  onWebSearchModeChange?: (mode: WebSearchMode) => void;
+  toolsEnabled: boolean;
+  onToolsChange?: (enabled: boolean) => void;
+  onResearch?: () => void;
+  researchDisabled?: boolean;
   disabled?: boolean;
 }) {
   const isMobile = useIsMobile();
@@ -1101,15 +1133,19 @@ function ComposerMoreMenu({
     };
   }, [open]);
 
-  // `null` means "provider default"; show DeepSeek's own default
-  // (medium) as the checked row rather than an empty selection.
   const displayEffort: ReasoningEffort = reasoningEffort ?? "medium";
-  // Light the trigger up when a non-default reasoning level is engaged,
-  // so the curated bar still signals that a power option is active.
   const reasoningActive =
     !!onReasoningEffortChange &&
     reasoningEffort !== null &&
     reasoningEffort !== "off";
+
+  const hasWebSection = !!onWebSearchModeChange;
+  const hasToolsSection = !!onToolsChange;
+  const hasReasoningSection = !!onReasoningEffortChange;
+  const hasResearchSection = !!onResearch;
+  const hasAnySection = hasWebSection || hasToolsSection || hasReasoningSection || hasResearchSection;
+
+  if (!hasAnySection) return null;
 
   return (
     <div ref={containerRef} className="relative">
@@ -1120,7 +1156,7 @@ function ComposerMoreMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="More options"
-        title="More — reasoning effort, enhance prompt"
+        title="More — web search, tools, reasoning effort"
         className={cn(
           "inline-flex items-center rounded-full border transition",
           "disabled:cursor-not-allowed disabled:opacity-40",
@@ -1143,8 +1179,133 @@ function ComposerMoreMenu({
             "p-1 text-sm"
           )}
         >
-          {onReasoningEffortChange && (
+          {/* Web search section */}
+          {hasWebSection && (
             <>
+              <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                {webSearchMode === "off" ? (
+                  <GlobeLock className="h-3 w-3" />
+                ) : (
+                  <Globe className="h-3 w-3" />
+                )}
+                Web search
+              </div>
+              {WEB_ORDER.map((value) => {
+                const selected = value === webSearchMode;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    onClick={() => onWebSearchModeChange!(value)}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition",
+                      "hover:bg-[var(--accent)]/[0.08]",
+                      selected && "bg-[var(--accent)]/[0.06]"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex h-4 w-4 shrink-0 items-center justify-center",
+                        selected ? "text-[var(--accent)]" : "text-transparent"
+                      )}
+                      aria-hidden
+                    >
+                      <Check className="h-4 w-4" />
+                    </span>
+                    <span
+                      className={cn(
+                        "text-sm font-medium",
+                        selected ? "text-[var(--accent)]" : "text-[var(--text)]"
+                      )}
+                    >
+                      {WEB_LABELS[value]}
+                    </span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+
+          {/* Tools toggle */}
+          {hasToolsSection && (
+            <>
+              {hasWebSection && <div className="my-1 border-t border-[var(--border)]" />}
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={toolsEnabled}
+                onClick={() => onToolsChange!(!toolsEnabled)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition",
+                  "hover:bg-[var(--accent)]/[0.08]",
+                  toolsEnabled && "bg-[var(--accent)]/[0.06]"
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-flex h-4 w-4 shrink-0 items-center justify-center",
+                    toolsEnabled ? "text-[var(--accent)]" : "text-transparent"
+                  )}
+                  aria-hidden
+                >
+                  <Check className="h-4 w-4" />
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Wrench className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                  <span
+                    className={cn(
+                      "text-sm font-medium",
+                      toolsEnabled ? "text-[var(--accent)]" : "text-[var(--text)]"
+                    )}
+                  >
+                    AI tools
+                  </span>
+                </span>
+              </button>
+            </>
+          )}
+
+          {/* Deep Research action */}
+          {hasResearchSection && (
+            <>
+              {(hasWebSection || hasToolsSection || hasReasoningSection) && (
+                <div className="my-1 border-t border-[var(--border)]" />
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  onResearch!();
+                }}
+                disabled={researchDisabled}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition",
+                  "hover:bg-[var(--accent)]/[0.08]",
+                  "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                )}
+              >
+                <FlaskConical className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-[var(--text)]">
+                    Deep Research
+                  </span>
+                  <span className="block text-xs leading-snug text-[var(--text-muted)]">
+                    Multi-source investigation with cited report.
+                  </span>
+                </span>
+              </button>
+            </>
+          )}
+
+          {/* Reasoning effort (DeepSeek only) */}
+          {hasReasoningSection && (
+            <>
+              {(hasWebSection || hasToolsSection) && (
+                <div className="my-1 border-t border-[var(--border)]" />
+              )}
               <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                 <Brain className="h-3 w-3" />
                 Reasoning effort
@@ -1158,7 +1319,7 @@ function ComposerMoreMenu({
                     type="button"
                     role="menuitemradio"
                     aria-checked={selected}
-                    onClick={() => onReasoningEffortChange(value)}
+                    onClick={() => onReasoningEffortChange!(value)}
                     title={m.description}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition",
@@ -1186,38 +1347,8 @@ function ComposerMoreMenu({
                   </button>
                 );
               })}
-              <div className="my-1 border-t border-[var(--border)]" />
             </>
           )}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onEnhance();
-            }}
-            disabled={enhanceDisabled}
-            title="Enhance prompt — rewrite it for a better answer"
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition",
-              "hover:bg-[var(--accent)]/[0.08]",
-              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-            )}
-          >
-            {enhanceLoading ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
-            ) : (
-              <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" />
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-[var(--text)]">
-                Enhance prompt
-              </span>
-              <span className="block text-xs leading-snug text-[var(--text-muted)]">
-                Rewrite your draft for a sharper answer.
-              </span>
-            </span>
-          </button>
         </div>
       )}
     </div>

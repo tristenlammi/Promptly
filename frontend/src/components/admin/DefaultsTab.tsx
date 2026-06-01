@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, CheckCircle2, Eye } from "lucide-react";
+import { Bot, CheckCircle2, Eye, FlaskConical } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -74,6 +74,11 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <VisionRelayDefaultCard
+        settings={data}
+        onSubmit={submit}
+        busy={update.isPending}
+      />
+      <ResearchModelCard
         settings={data}
         onSubmit={submit}
         busy={update.isPending}
@@ -480,6 +485,159 @@ function VisionRelayDefaultCard({ settings, onSubmit, busy }: CardProps) {
             No vision-capable models in the catalog yet. Add a provider
             with a vision model (Gemini, GPT-4o, llava, …) to enable the
             relay.
+          </span>
+        )}
+      </label>
+    </SettingsCard>
+  );
+}
+
+// --------------------------------------------------------------------
+// Research model — same shape as the other pickers. Any capable model
+// is valid; the admin can choose any model in the catalog.
+// --------------------------------------------------------------------
+
+function ResearchModelCard({ settings, onSubmit, busy }: CardProps) {
+  const OFF = "";
+
+  const initialKey =
+    settings.research_configured &&
+    settings.research_provider_id &&
+    settings.research_model_id
+      ? `${settings.research_provider_id}::${settings.research_model_id}`
+      : OFF;
+
+  const [value, setValue] = useState(initialKey);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const { data: models, isLoading: modelsLoading } = useAvailableModels();
+
+  useEffect(() => {
+    setValue(initialKey);
+  }, [initialKey]);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const eligible: AvailableModel[] = models ?? [];
+
+  const grouped = useMemo(() => {
+    const byProvider = new Map<string, AvailableModel[]>();
+    for (const m of eligible) {
+      const existing = byProvider.get(m.provider_name) ?? [];
+      existing.push(m);
+      byProvider.set(m.provider_name, existing);
+    }
+    return Array.from(byProvider.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0])
+    );
+  }, [eligible]);
+
+  const dirty = value !== initialKey;
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      if (value === OFF) {
+        await onSubmit({ research_provider_id: null, research_model_id: null });
+      } else {
+        const [provider_id, ...rest] = value.split("::");
+        const model_id = rest.join("::");
+        if (!provider_id || !model_id) {
+          setError("Pick a model from the list, or choose Off.");
+          return;
+        }
+        await onSubmit({ research_provider_id: provider_id, research_model_id: model_id });
+      }
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Deep Research model"
+      icon={<FlaskConical className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">
+              {error}
+            </span>
+          )}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setValue(initialKey); setError(null); }}
+              disabled={busy}
+            >
+              Discard
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={busy || !dirty}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <label className="flex flex-col gap-2">
+        <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+          When set, every Deep Research run uses this model regardless of
+          the user&apos;s current chat model — ideal for pointing research at a
+          capable pro model (e.g. Claude Opus) while users chat with a
+          faster model. Users continue chatting with their selected model
+          after research completes.{" "}
+          <span className="font-medium">Off</span> = fall back to each
+          user&apos;s current chat model.
+        </p>
+        <select
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+            setSavedAt(null);
+          }}
+          disabled={busy || modelsLoading}
+          className={cn(
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40",
+            "disabled:cursor-not-allowed disabled:opacity-60"
+          )}
+        >
+          <option value={OFF}>Off — use each user&apos;s current chat model</option>
+          {grouped.map(([providerName, entries]) => (
+            <optgroup key={providerName} label={providerName}>
+              {entries.map((m) => (
+                <option
+                  key={`${m.provider_id}::${m.model_id}`}
+                  value={`${m.provider_id}::${m.model_id}`}
+                >
+                  {m.display_name || m.model_id}
+                  {m.is_custom ? " (custom)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        {modelsLoading && (
+          <span className="text-xs text-[var(--text-muted)]">
+            Loading models…
           </span>
         )}
       </label>

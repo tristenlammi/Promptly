@@ -843,6 +843,8 @@ async def update_conversation(
     if "system_prompt" in payload.model_fields_set:
         cleaned = (payload.system_prompt or "").strip()
         conv.system_prompt = cleaned or None
+    if "memory_capture_paused" in payload.model_fields_set and payload.memory_capture_paused is not None:
+        conv.memory_capture_paused = payload.memory_capture_paused
     # Phase P1 — project reassignment. Only honour the field when the
     # client explicitly sent it (``model_fields_set`` check) so this
     # PATCH stays idempotent for the common "just toggle pinned"
@@ -4321,6 +4323,9 @@ async def _stream_generator(
             # Auto-capture only in "auto" mode; "manual" injects saved
             # facts but never volunteers new ones.
             memory_mode == "auto"
+            # Phase 9 — per-conversation pause skips capture while still
+            # injecting previously-saved memories.
+            and not conv.memory_capture_paused
             and trig_row is not None
             and (trig_row.content or "").strip()
             and should_attempt_capture(trig_row.content)

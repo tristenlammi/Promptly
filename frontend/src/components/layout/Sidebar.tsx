@@ -90,10 +90,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     () => new Set(hiddenNav ?? []),
     [hiddenNav]
   );
+  const emailMode = useAuthStore((s) => s.user?.settings?.email_mode);
+  const emailEnabled = emailMode === "triage" || emailMode === "triage_rag";
   const visibleNavItems: NavItemConfig[] = NAV_ITEMS.filter((it) => {
     if (it.desktopOnly && isMobile) return false;
     if (it.adminOnly && !isAdmin) return false;
     if (it.optionalKey && hiddenSet.has(it.optionalKey)) return false;
+    if (it.emailGated && !emailEnabled) return false;
     return true;
   });
 

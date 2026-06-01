@@ -172,6 +172,8 @@ class ConversationSummary(BaseModel):
     # chat header's "Instructions" editor so the owner can see / tweak
     # the per-chat steer. NULL / blank when unset.
     system_prompt: str | None = None
+    # Phase 9 — per-conversation memory capture pause.
+    memory_capture_paused: bool = False
 
 
 class ConversationParticipantBrief(BaseModel):
@@ -238,6 +240,8 @@ class ConversationUpdate(BaseModel):
     # any other value sets it (the router trims it). Capped so a runaway
     # paste can't blow up the system prompt.
     system_prompt: str | None = Field(default=None, max_length=8000)
+    # Phase 9 — pause/resume auto-capture for this conversation.
+    memory_capture_paused: bool | None = None
 
 
 class SendMessageRequest(BaseModel):

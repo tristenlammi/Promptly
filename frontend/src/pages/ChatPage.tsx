@@ -23,6 +23,9 @@ import { StreamingAnnouncer } from "@/components/chat/StreamingAnnouncer";
 import { InputBar } from "@/components/chat/InputBar";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ConversationInstructionsButton } from "@/components/chat/ConversationInstructionsButton";
+import { MemoryConversationButton } from "@/components/chat/MemoryConversationButton";
+import { ResearchDialog } from "@/components/chat/ResearchDialog";
+import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
 import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
 import {
@@ -33,7 +36,10 @@ import type { AttachedFile } from "@/components/chat/AttachmentPickerModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useChatProject } from "@/hooks/useChatProjects";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
+import { useResearch } from "@/hooks/useResearch";
+import { useResearchStore, isResearchActive } from "@/store/researchStore";
 import { useAuthStore } from "@/store/authStore";
+import { useComposerStore } from "@/store/composerStore";
 import { useChatStore } from "@/store/chatStore";
 import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import type {
@@ -105,6 +111,21 @@ export function ChatPage() {
   );
   const [toolsEnabled, setToolsEnabled] = useState(
     () => userSettings?.default_tools_enabled ?? DEFAULT_TOOLS_ENABLED
+  );
+  // Phase 9 — per-conversation memory capture pause.
+  const [memoryCapturePaused, setMemoryCapturePaused] = useState(false);
+
+  // Phase 11 — Deep Research.
+  const [researchDialogOpen, setResearchDialogOpen] = useState(false);
+  const { startResearch, cancelResearch } = useResearch();
+  const researchStep = useResearchStore((s) => s.step);
+  const researchConvId = useResearchStore((s) => s.conversationId);
+  const researchRunning = id
+    ? isResearchActive({ conversationId: researchConvId, step: researchStep }, id)
+    : false;
+  // Read current composer draft so the research dialog can pre-fill the topic.
+  const composerDraft = useComposerStore(
+    (s) => s.getDraft(id ?? "__new__")?.text ?? ""
   );
   // DeepSeek-only reasoning state. ``null`` means "no override on this
   // turn, use whatever the conversation has stored" — for non-DeepSeek
@@ -218,11 +239,25 @@ export function ChatPage() {
     setReasoningEffort(convReasoningEffort);
   }, [id, convReasoningEffort]);
 
+  // Phase 9 — seed memory capture paused from the loaded conversation.
+  useEffect(() => {
+    setMemoryCapturePaused(conversation?.memory_capture_paused ?? false);
+  }, [id, conversation?.memory_capture_paused]);
+
   // Show the reasoning chip only when the active model lives on a
   // DeepSeek provider — for every other provider the request fields
   // would be silently dropped (or worse, 400 the call). Falls back to
   // hidden when no model is selected yet.
   const reasoningSupported = selectedModel?.provider_type === "deepseek";
+
+  // Phase 9 — show the memory header control when memory isn't globally off.
+  // Resolves the memory_mode / legacy memory_enabled setting consistently.
+  const memoryEnabled = (() => {
+    const m = userSettings?.memory_mode;
+    if (m === "off") return false;
+    if (m === "auto" || m === "manual") return true;
+    return userSettings?.memory_enabled !== false;
+  })();
 
   // Persist a preference flip to the server. Optimistic: update local
   // state + cached user immediately, fire the PATCH, roll back on
@@ -837,6 +872,17 @@ export function ChatPage() {
                 }}
               />
             )}
+            {/* Phase 9 — memory header control: active-facts popover + per-
+                conversation capture pause. Hidden when memory is globally off
+                or this is an unsaved conversation (no id to PATCH). */}
+            {id && isOwner && memoryEnabled && (
+              <MemoryConversationButton
+                conversationId={id}
+                capturePaused={memoryCapturePaused}
+                onCapturePausedChange={setMemoryCapturePaused}
+                compact={isMobile}
+              />
+            )}
             {!isMobile && (
               <ContextWindowPill
                 conversationId={id ?? null}
@@ -907,6 +953,16 @@ export function ChatPage() {
               />
             </div>
           )}
+          {/* Phase 11 — live research progress. Shown between the message
+              list and composer while a research job is running for this
+              conversation. Disappears automatically when done. */}
+          {researchRunning && id && (
+            <ResearchProgressCard
+              conversationId={id}
+              onCancel={cancelResearch}
+            />
+          )}
+
           <InputBar
             streaming={isStreaming}
             disabled={!selectedModel}
@@ -923,6 +979,7 @@ export function ChatPage() {
             }
             toolsEnabled={toolsEnabled}
             onToolsChange={handleToolsChange}
+            onResearch={() => setResearchDialogOpen(true)}
             footer={footerText}
             autoFocus
             currentConversationId={id ?? null}
@@ -944,6 +1001,40 @@ export function ChatPage() {
           Renders into the same DOM tree but its fixed positioning takes
           it out of normal flow; null when no file is selected. */}
       <PdfEditorPanel />
+
+      {/* Phase 11 — Deep Research confirmation dialog. */}
+      <ResearchDialog
+        open={researchDialogOpen}
+        initialQuery={composerDraft}
+        onClose={() => setResearchDialogOpen(false)}
+        onStart={async (query) => {
+          if (!selectedModel) return;
+
+          // For new (unsaved) chats, create a conversation first so
+          // research has a persistent home and the URL updates.
+          let convId = id;
+          if (!convId) {
+            try {
+              const newConv = await chatApi.create({
+                provider_id: selectedModel.provider_id,
+                model_id: selectedModel.model_id,
+              });
+              convId = String(newConv.id);
+              setActive(convId);
+              upsertConversation(newConv);
+              navigate(`/chat/${convId}`, { replace: true });
+            } catch {
+              return;
+            }
+          }
+
+          void startResearch(convId, {
+            query,
+            provider_id: selectedModel.provider_id,
+            model_id: selectedModel.model_id,
+          });
+        }}
+      />
     </>
   );
 }

@@ -52,9 +52,11 @@ def build_tools_system_prompt(categories: set[str]) -> str:
     guidelines: list[str] = []
     if "artefact" in categories:
         guidelines.append(
-            "- If the user asks for a PDF, report, document, brief, or "
-            "printable file, call `generate_pdf` with the full Markdown "
-            "body. Don't ask permission first — just produce the file."
+            "- Only call `generate_pdf` when the user explicitly requests "
+            "a PDF, printed report, or downloadable document — e.g. 'give "
+            "me a PDF', 'export this as a report'. Do NOT proactively "
+            "offer, suggest, or auto-generate PDFs for ordinary answers, "
+            "summaries, or code. Return those inline. Wait for a clear request."
         )
         guidelines.append(
             "- If the user asks for an image, illustration, picture, "

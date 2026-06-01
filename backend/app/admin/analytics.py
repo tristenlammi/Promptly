@@ -11,10 +11,10 @@ USD here so the frontend never has to think about the conversion.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import (
@@ -25,28 +25,13 @@ from app.admin.schemas import (
 )
 from app.auth.deps import require_admin
 from app.auth.models import User
+from app.billing import aggregates
+from app.billing.aggregates import micros_to_usd as _micros_to_usd
+from app.billing.aggregates import window_start as _window_start
 from app.billing.models import UsageDaily
-from app.chat.models import Conversation, Message
 from app.database import get_db
 
 router = APIRouter()
-
-
-def _window_start(days: int) -> datetime:
-    """First instant we want included in the window.
-
-    ``usage_daily.day`` is a date (not a timestamp), so anchoring to
-    UTC midnight ``days-1`` ago gives an inclusive range — pass
-    ``days=1`` for "today only", ``days=30`` for the last month.
-    """
-    today = datetime.now(timezone.utc).date()
-    return datetime.combine(today - timedelta(days=max(days - 1, 0)), datetime.min.time())
-
-
-def _micros_to_usd(micros: int | None) -> float:
-    if not micros:
-        return 0.0
-    return round(int(micros) / 1_000_000, 6)
 
 
 @router.get("/analytics/summary", response_model=AnalyticsSummary)
@@ -113,32 +98,7 @@ async def analytics_timeseries(
     frontend fills the gaps so the X axis stays continuous), which
     keeps the payload tiny on a quiet instance.
     """
-    start = _window_start(days)
-    rows = (
-        await db.execute(
-            select(
-                UsageDaily.day,
-                func.coalesce(func.sum(UsageDaily.messages_sent), 0),
-                func.coalesce(func.sum(UsageDaily.prompt_tokens), 0),
-                func.coalesce(func.sum(UsageDaily.completion_tokens), 0),
-                func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
-            )
-            .where(UsageDaily.day >= start.date())
-            .group_by(UsageDaily.day)
-            .order_by(UsageDaily.day.asc())
-        )
-    ).all()
-
-    return [
-        AnalyticsTimeseriesPoint(
-            day=datetime.combine(r[0], datetime.min.time(), tzinfo=timezone.utc),
-            messages=int(r[1] or 0),
-            prompt_tokens=int(r[2] or 0),
-            completion_tokens=int(r[3] or 0),
-            cost_usd=_micros_to_usd(r[4]),
-        )
-        for r in rows
-    ]
+    return await aggregates.timeseries(db, start=_window_start(days))
 
 
 @router.get(
@@ -230,34 +190,7 @@ async def analytics_by_model(
     to ``conversations``. Bounded to the requested window via
     ``messages.created_at`` and grouped by ``conversations.model_id``.
     """
-    start = _window_start(days)
-
-    is_assistant = case((Message.role == "assistant", 1), else_=0)
-    stmt = (
-        select(
-            func.coalesce(Conversation.model_id, "unknown"),
-            func.coalesce(func.sum(is_assistant), 0),
-            func.coalesce(func.sum(Message.prompt_tokens), 0),
-            func.coalesce(func.sum(Message.completion_tokens), 0),
-            func.coalesce(func.sum(Message.cost_usd_micros), 0),
-        )
-        .join(Conversation, Conversation.id == Message.conversation_id)
-        .where(Message.created_at >= start)
-        .group_by(Conversation.model_id)
-        .order_by(func.coalesce(func.sum(Message.cost_usd_micros), 0).desc())
-    )
-    rows = (await db.execute(stmt)).all()
-
-    return [
-        AnalyticsModelRow(
-            model_id=str(r[0]),
-            messages_window=int(r[1] or 0),
-            prompt_tokens_window=int(r[2] or 0),
-            completion_tokens_window=int(r[3] or 0),
-            cost_usd_window=_micros_to_usd(r[4]),
-        )
-        for r in rows
-    ]
+    return await aggregates.by_model(db, start=_window_start(days))
 
 
 # --------------------------------------------------------------------
@@ -278,33 +211,9 @@ async def analytics_user_timeseries(
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    start = _window_start(days)
-    rows = (
-        await db.execute(
-            select(
-                UsageDaily.day,
-                UsageDaily.messages_sent,
-                UsageDaily.prompt_tokens,
-                UsageDaily.completion_tokens,
-                UsageDaily.cost_usd_micros,
-            )
-            .where(
-                (UsageDaily.user_id == user_id) & (UsageDaily.day >= start.date())
-            )
-            .order_by(UsageDaily.day.asc())
-        )
-    ).all()
-
-    return [
-        AnalyticsTimeseriesPoint(
-            day=datetime.combine(r[0], datetime.min.time(), tzinfo=timezone.utc),
-            messages=int(r[1] or 0),
-            prompt_tokens=int(r[2] or 0),
-            completion_tokens=int(r[3] or 0),
-            cost_usd=_micros_to_usd(r[4]),
-        )
-        for r in rows
-    ]
+    return await aggregates.timeseries(
+        db, start=_window_start(days), user_id=user_id
+    )
 
 
 __all__ = ["router"]

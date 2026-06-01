@@ -69,6 +69,13 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
     # layers). NULL / blank = no per-chat steer.
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Phase 9 — per-conversation memory capture pause. When True, the
+    # auto-capture pass is skipped for this chat. Existing memories are
+    # still injected normally; this only stops new facts being extracted.
+    memory_capture_paused: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # When True the user has renamed the conversation themselves and the
     # server must not auto-regenerate the title after subsequent turns. Set
     # by the title-PATCH endpoint; cleared only if we reset the conversation.

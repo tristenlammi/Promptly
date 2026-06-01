@@ -1,9 +1,9 @@
 # Promptly — Roadmap v2
 
 > Forward-looking plan created 2026-05-29 after a fresh capability audit.
+> Updated 2026-06-01 after Phases 1–8 shipped — new phases reflect current priorities.
 > v1 (Phases 1–3 of the original roadmap) is fully shipped — see the
-> **Appendix: Shipped to date** at the bottom. Nothing in the numbered
-> phases below is implemented yet.
+> **Appendix: Shipped to date** at the bottom.
 
 ## Guiding principles
 
@@ -307,53 +307,324 @@ renderer.
 
 ---
 
-## Phase 8 — End-user usage & cost dashboard
+## Phase 8 — End-user usage & cost dashboard — ✅ SHIPPED
 
-- **What:** A personal page showing spend, token usage, and activity over
-  time (by model / day / conversation). Admin sees the fleet; users
-  currently can't see their own.
-- **How (clean UI):** New panel in account settings; aggregate the
-  per-message cost we already record.
+
+
+- **What:** A personal panel in account settings showing each user their
+  own spend, token usage, and activity over time — by model and by day.
+  Admin sees the fleet; this gives every user their own view.
+- **Shipped:**
+  - `billing/aggregates.py` — shared read-side aggregations (timeseries,
+    by-model, window totals, today totals) used by both admin fleet view
+    and self-scoped user view, preventing drift between the numbers.
+  - `billing/router.py` — three self-scoped endpoints (`GET /usage/me/summary`,
+    `/me/timeseries`, `/me/by-model`) keyed off `get_current_user` only —
+    no `user_id` path param, so zero IDOR surface.
+  - `billing/schemas.py` — `MyUsageSummary` Pydantic schema with budget
+    verdict, quota caps, and window/today aggregates.
+  - `components/usage/shared.tsx` — shared chart primitives (`RangePicker`,
+    `MetricToggle`, `StatCard` with sparkline, `UsageTrendChart`,
+    `ChartSummaryRow`, `EmptyState`, `ErrorBanner`) used by both admin
+    `AnalyticsPanel` and user `UsagePanel`.
+  - `components/account/UsagePanel.tsx` — full end-user dashboard:
+    verdict banner (amber/red when near/over cap), quota meters, 3 stat
+    cards with sparklines, daily trend chart, and by-model table.
+  - Wired into `AccountSecurityPage.tsx` between "Interface" and
+    "Saved prompts" sections.
 - **impact: med · effort: med** · Scaffolding: `billing/usage.py`,
   `MessageStats`, per-message cost fields.
 
 ---
 
-## Phase 9 — Chat folders
+## Phase 9 — Memory overhaul (v2) — ✅ SHIPPED
 
-- **What:** Lightweight folders for **loose** chats (separate from
-  Projects), with drag-drop organisation in the sidebar.
-- **How (clean UI):** Extend the sidebar grouping + the existing
-  move/context-menu plumbing (`ConversationRowContextMenu.tsx`,
-  `MoveToProjectMenu.tsx`).
-- **impact: low-med · effort: med** · Scaffolding: sidebar, conversation
-  context menu.
+- **What:** The memory system works but has friction and noise. This phase
+  polishes the capture quality, the in-chat transparency, and the
+  management UX into something that feels intentional rather than bolted-on.
+
+### Pain points to fix
+- **"N memories in context" chip is confusing** — users don't know what it
+  means. Remove it or replace with a subtle, opt-in indicator (e.g. a
+  small brain icon in the chat header that expands to show which memories
+  are active this conversation, on hover only).
+- **Capture accuracy** — the regex pre-filter is intentionally conservative
+  but still occasionally captures transient facts ("I'm tired today") or
+  misses durable ones. Improve the extraction prompt and add a
+  **confidence threshold** so borderline facts are silently dropped rather
+  than saved incorrectly.
+- **No update path for stale memories** — if you told Promptly you're a
+  junior dev and now you're a senior, the old memory just sits there.
+  The capture pass should detect **contradictions** with existing memories
+  and prompt an update/replace rather than accumulating duplicates.
+- **Memory panel is a flat list** — hard to scan at 50+ entries. Add
+  **search within memories** and optional tagging/grouping (work, personal,
+  preferences).
+- **"Remember this" is hidden** — the manual capture affordance should be
+  discoverable: a right-click / long-press option on any assistant message
+  to save a highlighted fact directly.
+- **Per-conversation opt-out** — some conversations are sensitive
+  (medical, legal). A toggle in the conversation settings header to
+  pause auto-capture for that chat only.
+
+### Sub-sequencing
+- **M.1** — Remove "N memories in context" chip; replace with subtle
+  hover-only indicator in chat header. Fix extraction prompt + confidence
+  threshold. Contradiction detection + auto-update.
+- **M.2** — Memory panel search + tag/group. "Remember this" on message
+  right-click. Per-conversation capture pause toggle.
+
+**impact: med · effort: med** · Scaffolding: `capture_memories`,
+`MemoryPanel.tsx`, `memory_saved` SSE event, per-conversation settings.
 
 ---
 
-## Phase 10 — Real-time voice conversation mode
+## Phase 10 — InputBar UX polish + PDF restraint — ✅ SHIPPED
 
+These are small but high-friction items that affect every chat session.
+Ship them together as one focused sprint.
+
+### 10.1 — Enhance button always visible
+
+Currently the **Enhance** wand lives inside the "more" (`⋯`) menu.
+Move it to the persistent `InputBar` action row (alongside the attachment
+clip and send button) so it's one click, not two.
+- Desktop: icon + tooltip.
+- Mobile: icon-only, same row as attachment.
+- No new real estate needed — the attachment clip + send are the only
+  persistent icons today; Enhance slots in between.
+
+### 10.2 — Web and Tools toggles move inside "more"
+
+Conversely, **Web search** and **Tools** toggles currently take permanent
+space. Move them into the `⋯` more menu. They're session-persistent
+(not per-message) so the user sets them once and forgets.
+
+**New defaults for first-time users:**
+- Tools → **on**
+- Web search → **on (auto)** — the model decides when to search, not the user
+
+Existing users keep their saved prefs; only the fallback for `null`
+(never-set) changes.
+
+### 10.3 — PDF tool restraint
+
+The model currently reaches for `generate_pdf` too eagerly — offering
+to create a PDF for things like a short answer or a code snippet.
+PDF generation should be **invitation-only**:
+- Explicitly blocked in the base system prompt for normal chat.
+- Allowed (and encouraged) in **Research mode** (Phase 11) and
+  **Task runs** (Phase 1), where a durable document is the right output.
+- Allowed when the user explicitly asks ("give me a PDF of this").
+
+Implementation: add a system-prompt instruction that names `generate_pdf`
+and states the permitted contexts. The tool stays registered and callable
+— just not proactively offered.
+
+**impact: med · effort: low** · Scaffolding: `InputBar.tsx`, `more` menu,
+system prompt config.
+
+---
+
+## Phase 11 — Deep Research — ✅ SHIPPED
+
+- **What:** A first-class **Research mode** that produces a structured,
+  cited, multi-section report rather than a conversational reply — the
+  difference between asking a question and commissioning a research paper.
+
+### How it works (engine)
+Unlike regular chat (one prompt → one reply), deep research is a
+**multi-step agentic loop** that mimics how a human researcher works:
+
+1. **Decompose** — a fast pre-pass breaks the question into 4–8
+   focused sub-questions (e.g. "history of X", "current state of X",
+   "criticism of X", "alternatives to X").
+2. **Search** — parallel `web_search` calls for each sub-question.
+3. **Read** — `fetch_url` on the top 2–3 results per sub-question,
+   extracting the most relevant passages.
+4. **Gap check** — a brief pass over collected evidence asks "what's
+   still missing?", issuing follow-up searches for any significant gaps.
+5. **Synthesise** — a final opus-class model call writes the full report
+   from the evidence, in structured markdown: executive summary, sections
+   per theme, inline citations `[1]`, and a sources table.
+6. **Output** — rendered as a `TaskRun`-style document in a dedicated
+   Research panel that opens alongside the chat (like the artifact panel),
+   with a one-click **Export to PDF** (this is one of the two permitted
+   `generate_pdf` contexts).
+
+The loop runs headless using the existing `ModelRouter` + tool call
+infrastructure. Total token budget is capped (admin-configurable) and
+the cost is shown prominently before the user confirms start, and again
+on the finished report.
+
+### UI entry point
+- **"Research" option in the `⋯` more menu** (alongside the other
+  session-level modes). Selecting it opens a small confirmation sheet:
+  topic pre-filled from the current composer draft, estimated depth
+  (standard = ~5 min / ~50k tokens; deep = ~15 min / ~150k tokens),
+  estimated cost in AUD, **Start research** button.
+- Research runs **inline in the current conversation** — the chat thread
+  shows a single collapsible "Research in progress…" block with live
+  sub-step indicators (Decomposing → Searching → Reading → Synthesising).
+  The final report opens in the **right panel** (same slot as the artifact
+  viewer).
+- **"Follow up in chat"** — after reading the report, the user can ask a
+  follow-up question; the report is summarised into context and a normal
+  chat reply continues. Research output is never used as a streaming
+  block mid-conversation; it's always a finished document first.
+
+### Proactive suggestion (with strict guardrails)
+When the user sends a message **without** selecting Research mode, a
+fast/cheap classifier (a single-turn headless call on a haiku-class model,
+~$0.0001) checks whether the query is a genuinely research-worthy topic.
+The bar is **deliberately high**: it fires only when *all* of:
+- The query is phrased as an open investigation ("explain the landscape
+  of…", "what are all the factors behind…", "compare X across the
+  literature…") — not a simple factual question, coding help, or opinion.
+- The query has no obvious short answer.
+- The conversation is new (first user turn, or explicitly "start fresh").
+- The user has not dismissed the suggestion in the last 5 turns.
+
+When triggered, a **single, dismissible chip** appears above the reply
+(not a modal, not blocking): *"This looks like a research topic — want a
+Deep Research report instead? [Research it] [No thanks]"* Dismissing
+suppresses the suggestion for the rest of the conversation.
+
+**impact: very high · effort: high** · Scaffolding: `ModelRouter` headless
+calls, tool registry (`web_search`, `fetch_url`), artifact panel right-
+panel slot, TaskRun rendering, `generate_pdf`, `enhance.py` classifier
+pattern.
+
+---
+
+## Phase 12 — Email & Calendar integration  *(new pillar)*
+
+- **What:** A smart inbox inside Promptly that replaces your email client
+  for the conversations that actually matter — powered by AI triage,
+  draft replies, and reminders — paired with a calendar view for scheduling
+  context.
+
+### Why not just use Gmail
+Standard email clients dump everything into Inbox/Spam/Promotions and
+make you do the triage. Promptly's inbox **doesn't expose those folders
+at all** — it ingests everything and presents its own opinionated
+categorisation: Action Required, FYI, Newsletters, Promotional, Social,
+and Spam. The AI decides, not a server-side filter.
+
+### Data model & OAuth
+- **`email_accounts`** table: `id`, `user_id`, `provider`
+  (`google`/`microsoft`), `email_address`, `oauth_tokens` (encrypted),
+  `last_synced_at`, `enabled`.
+- **`email_messages`** table: `id`, `account_id`, `provider_message_id`,
+  `thread_id`, `subject`, `from_address`, `to_addresses`, `date`,
+  `body_text`, `body_html`, `snippet`, `ai_category`
+  (`action_required`/`fyi`/`newsletter`/`promotional`/`social`/`spam`),
+  `ai_priority` (0–10), `ai_summary` (1–2 sentences), `needs_reply`
+  (bool), `suggested_reply_draft` (text, nullable), `read`, `archived`,
+  `labels` (original provider labels, for reference only), `synced_at`.
+- **`calendar_events`** table: `id`, `account_id`, `provider_event_id`,
+  `title`, `start_at`, `end_at`, `location`, `description`,
+  `attendees` (JSON), `synced_at`.
+- OAuth flows for Google (Gmail + Calendar scopes) and Microsoft
+  (Outlook + Calendar). Tokens stored encrypted at rest. Sync runs
+  via a background task (incremental, using provider push/delta APIs
+  where available, polling fallback).
+
+### AI triage pipeline
+- On each sync batch, new messages are run through a lightweight
+  categorisation + summary pass (haiku-class, batched, async —
+  never blocking the sync). Produces: `ai_category`, `ai_priority`,
+  `ai_summary`, `needs_reply`.
+- `needs_reply = true` triggers a **reminder notification** in-app
+  (and optionally email/push) if the message is still unread after
+  a configurable delay (default 24h for action items).
+- **Draft replies** are generated on-demand (not pre-emptively) —
+  when the user opens a message and clicks "Draft reply", a headless
+  model call writes a contextual reply (full thread context + personal
+  context + user memories injected). The draft appears in an editable
+  composer. **Promptly never sends without explicit user confirmation**
+  — the Send button always requires a deliberate click and shows the
+  recipient clearly.
+
+### UI
+- **Emails** nav entry (toggleable like Tasks via Phase 2 visibility).
+- **Inbox view**: three-column layout — category rail (left), message
+  list (centre), reading pane (right). On mobile: full-screen list →
+  swipe-right to thread. The category rail shows counts: "Action
+  Required (3)", "FYI (12)", etc. Spam is collapsed by default.
+- **Message reading pane**: AI summary card at top (expandable to full
+  body), sender/date/thread info, inline "Draft reply" button, archive/
+  delete actions. Full HTML body rendered in a sandboxed iframe.
+- **Calendar strip**: a compact weekly strip at the top of the email
+  view (or a dedicated Calendar tab) showing upcoming events. Events
+  are read-only by default; users can create events from the calendar
+  tab with a simple form. Event details expand on click with attendees
+  and join-link extraction.
+- **"Remind me" on any message** — snooze to a time/date; creates a
+  notification via the existing notifications module.
+- **AI assistant in email context** — a chat input at the bottom of the
+  reading pane: "summarise this thread", "what action is needed?",
+  "draft a decline". Uses the full thread as context. Produces a reply
+  in the composer, not a chat message.
+
+### Guardrails (send safety)
+- **No auto-send, ever.** The draft composer is the only path to sending.
+  The send button shows: "Send to [name] <address> — confirm?".
+- OAuth scopes requested are the minimum needed: read + send for Gmail,
+  no delete scope.
+- Admin can disable email integration org-wide (off by default until
+  the admin explicitly enables it).
+
+### Sub-sequencing
+- ✅ **E.1** — OAuth flow (Google), sync engine, `email_messages` table,
+  AI triage pipeline, `search_emails` RAG tool, Email Attachments system
+  folder, admin kill switch + OAuth credentials + triage model panel.
+  No inbox UI — headless-verified in chat via the `search_emails` tool.
+- ✅ **E.2** — Inbox UI (category rail + list + reading pane). Read/archive
+  actions (with two-way writeback flags). Account Email settings panel
+  (connect Gmail, email mode picker). Email nav item (gated on email_mode).
+  Sandboxed HTML body renderer. Backend message list/detail/counts endpoints.
+  Public feature-status endpoint. TypeScript clean. Backend image rebuilt.
+- ✅ **E.3** — Draft reply composer (AI-generated, user-editable, explicit send confirmation). AI assistant chat input in reading pane. CalendarStrip (weekly events, meet links, attendees). Calendar sync via Google Calendar API with nextSyncToken incremental cursor. Migration 0068 (calendar_events + calendar_sync_token).
+- ✅ **E.4** — Calendar event creation (POST /calendar/events → Google Calendar API + local mirror). New event form in CalendarStrip (title, date, time, all-day, location). "Add to calendar" quick action in reading pane pre-fills from email due_at. Microsoft/Outlook OAuth deferred.
+
+**impact: very high · effort: very high** · Scaffolding: notifications
+module, headless ModelRouter, Phase 1 background task engine, personal
+context + memories injection, `generate_pdf`, existing OAuth patterns.
+
+---
+
+## Backlog (no current timeline)
+
+### Chat folders
+- **What:** Lightweight folders for **loose** chats (separate from
+  Projects), with drag-drop organisation in the sidebar.
+- **How:** Extend the sidebar grouping + the existing move/context-menu
+  plumbing (`ConversationRowContextMenu.tsx`, `MoveToProjectMenu.tsx`).
+- **impact: low-med · effort: med**
+
+### Real-time voice conversation mode
 - **What:** Full-duplex voice mode (speak ↔ hear, with barge-in), beyond
   today's separate dictation (in) + TTS (out).
-- **How (clean UI):** A dedicated voice session surface; reuse
-  `useSpeechRecognition` for input and the TTS path for output, with a
-  streaming turn loop.
-- **impact: med · effort: high** · Scaffolding: `useSpeechRecognition.ts`,
-  TTS in `MessageBubble.tsx`, streaming chat. *(Heaviest; intentionally
-  last.)*
+- **How:** A dedicated voice session surface; reuse `useSpeechRecognition`
+  for input and the TTS path for output, with a streaming turn loop.
+- **impact: med · effort: high** · *(Heaviest; intentionally deferred.)*
 
 ---
 
 ## Suggested sequencing
 
-1. **Tasks (Phase 1)** — the new pillar; build the engine + reports inbox.
-2. **Feature visibility (Phase 2)** — ships right after Tasks so the new
-   nav item is curatable.
-3. **Quick wins (Phase 3)** — Continue generating + Enhance prompt.
-4. **Code interpreter (Phase 4)** — biggest capability jump after Tasks.
-5. **Artifacts (5) → Memory (6) → Semantic search (7)** as dedicated efforts.
-6. **Usage dashboard (8) → Folders (9)** opportunistically.
-7. **Voice mode (10)** when there's appetite for the heaviest item.
+1. ✅ **Tasks (1)** — the new pillar; build the engine + reports inbox.
+2. ✅ **Feature visibility (2)** — ships right after Tasks so the new nav item is curatable.
+3. ✅ **Quick wins (3)** — Continue generating + Enhance prompt.
+4. ✅ **Code interpreter (4)** — biggest capability jump after Tasks.
+5. ✅ **Artifacts (5) → Memory (6) → Semantic search (7)** as dedicated efforts.
+6. ✅ **Usage dashboard (8)** — personal spend panel in account settings.
+7. **Memory overhaul (9)** — fix friction, improve capture quality, declutter the in-chat indicator.
+8. **InputBar UX + PDF restraint (10)** — fast win, affects every session.
+9. **Deep Research (11)** — the next headline capability.
+10. **Email & Calendar (12)** — the new pillar for v3.
+11. **Folders / Voice (backlog)** — when there's appetite.
 
 > **Explicitly out of scope for v2** (decided 2026-05-29): MCP /
 > connectors, read-only public share links, conversation tree view,

@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BarChart3, ScrollText, Settings, Settings2, Terminal, Users } from "lucide-react";
+import { BarChart3, Mail, ScrollText, Settings, Settings2, Terminal, Users } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
+import { EmailSettingsPanel } from "@/components/admin/EmailSettingsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
@@ -17,7 +18,8 @@ type TabId =
   | "console"
   | "audit"
   | "settings"
-  | "models";
+  | "models"
+  | "email";
 
 interface TabDef {
   id: TabId;
@@ -64,6 +66,12 @@ const TABS: TabDef[] = [
     icon: <Settings className="h-3.5 w-3.5" />,
     subtitle: "MFA enforcement and SMTP server configuration.",
   },
+  {
+    id: "email",
+    label: "Email",
+    icon: <Mail className="h-3.5 w-3.5" />,
+    subtitle: "Configure Google OAuth and AI email triage for the Email integration.",
+  },
 ];
 
 const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
@@ -106,6 +114,7 @@ export function AdminPage() {
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}
             {tab === "settings" && <AppSettingsPanel />}
+            {tab === "email" && <EmailSettingsPanel />}
           </div>
         </div>
       </div>

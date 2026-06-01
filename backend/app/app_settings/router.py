@@ -115,6 +115,16 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         default_chat_provider_id=row.default_chat_provider_id,
         default_chat_model_id=row.default_chat_model_id,
         default_chat_configured=row.default_chat_configured,
+        research_provider_id=row.research_provider_id,
+        research_model_id=row.research_model_id,
+        research_configured=row.research_configured,
+        email_integration_enabled=row.email_integration_enabled,
+        google_oauth_client_id=row.google_oauth_client_id,
+        google_oauth_configured=row.google_oauth_configured,
+        email_triage_provider_id=row.email_triage_provider_id,
+        email_triage_model_id=row.email_triage_model_id,
+        email_triage_configured=row.email_triage_configured,
+        email_triage_daily_token_cap=row.email_triage_daily_token_cap,
         updated_at=row.updated_at,
     )
 
@@ -316,6 +326,83 @@ async def update_app_settings(
             diff["default_chat_model_id"] = new_mid
         row.default_chat_provider_id = new_pid
         row.default_chat_model_id = new_mid
+
+    # ----- Deep Research model -----
+    rpid_set = "research_provider_id" in fields
+    rmid_set = "research_model_id" in fields
+    if rpid_set != rmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "research_provider_id and research_model_id must be sent "
+                "together — pass both to set a research model, or both as "
+                "null to clear."
+            ),
+        )
+    if rpid_set and rmid_set:
+        new_pid = payload.research_provider_id
+        new_mid = payload.research_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "research_provider_id and research_model_id must both "
+                    "be set or both be null."
+                ),
+            )
+        if row.research_provider_id != new_pid:
+            diff["research_provider_id"] = str(new_pid) if new_pid else None
+        if row.research_model_id != new_mid:
+            diff["research_model_id"] = new_mid
+        row.research_provider_id = new_pid
+        row.research_model_id = new_mid
+
+    # ----- Email integration (Phase 12) -----
+    if "email_integration_enabled" in fields and payload.email_integration_enabled is not None:
+        if row.email_integration_enabled != payload.email_integration_enabled:
+            diff["email_integration_enabled"] = payload.email_integration_enabled
+        row.email_integration_enabled = payload.email_integration_enabled
+
+    if "google_oauth_client_id" in fields:
+        if row.google_oauth_client_id != payload.google_oauth_client_id:
+            diff["google_oauth_client_id"] = payload.google_oauth_client_id
+        row.google_oauth_client_id = payload.google_oauth_client_id
+
+    if "google_oauth_client_secret" in fields:
+        if payload.google_oauth_client_secret is None or payload.google_oauth_client_secret == "":
+            if row.google_oauth_client_secret_enc is not None:
+                diff["google_oauth_client_secret"] = "<cleared>"
+            row.google_oauth_client_secret_enc = None
+        else:
+            row.google_oauth_client_secret_enc = encrypt_secret(payload.google_oauth_client_secret)
+            diff["google_oauth_client_secret"] = "<set>"
+
+    etpid_set = "email_triage_provider_id" in fields
+    etmid_set = "email_triage_model_id" in fields
+    if etpid_set != etmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="email_triage_provider_id and email_triage_model_id must be sent together.",
+        )
+    if etpid_set and etmid_set:
+        new_pid = payload.email_triage_provider_id
+        new_mid = payload.email_triage_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="email_triage_provider_id and email_triage_model_id must both be set or both be null.",
+            )
+        if row.email_triage_provider_id != new_pid:
+            diff["email_triage_provider_id"] = str(new_pid) if new_pid else None
+        if row.email_triage_model_id != new_mid:
+            diff["email_triage_model_id"] = new_mid
+        row.email_triage_provider_id = new_pid
+        row.email_triage_model_id = new_mid
+
+    if "email_triage_daily_token_cap" in fields:
+        if row.email_triage_daily_token_cap != payload.email_triage_daily_token_cap:
+            diff["email_triage_daily_token_cap"] = payload.email_triage_daily_token_cap
+        row.email_triage_daily_token_cap = payload.email_triage_daily_token_cap
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

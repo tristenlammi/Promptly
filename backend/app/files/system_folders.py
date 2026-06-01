@@ -48,6 +48,9 @@ class SystemKind(str, Enum):
     GENERATED_ROOT = "generated_root"
     GENERATED_FILES = "generated_files"
     GENERATED_MEDIA = "generated_media"
+    # Phase 12 — lazy-seeded when a user connects their first email account.
+    # Hidden from the Files page when email_mode == "off".
+    EMAIL_ATTACHMENTS = "email_attachments"
 
 
 DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
@@ -55,6 +58,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.GENERATED_ROOT: "Generated Files",
     SystemKind.GENERATED_FILES: "Files",
     SystemKind.GENERATED_MEDIA: "Media",
+    SystemKind.EMAIL_ATTACHMENTS: "Email Attachments",
 }
 
 # A "media" mime is anything that's primarily a moving / sounding /
@@ -145,6 +149,15 @@ async def ensure_generated_media(db: AsyncSession, user: User) -> FileFolder:
     return await _ensure(
         db, user.id, SystemKind.GENERATED_MEDIA, parent_id=root.id
     )
+
+
+async def ensure_email_attachments(db: AsyncSession, user: User) -> FileFolder:
+    """Folder where email attachment files are saved.
+
+    Lazy — only called when a user connects an email account, not at
+    registration. This keeps the folder out of non-email users' drives.
+    """
+    return await _ensure(db, user.id, SystemKind.EMAIL_ATTACHMENTS)
 
 
 async def seed_system_folders(db: AsyncSession, user: User) -> None:

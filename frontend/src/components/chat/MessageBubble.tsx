@@ -595,6 +595,26 @@ function stripInlineCitations(markdown: string): string {
     .replace(/\s+([.,;:!?])/g, "$1");
 }
 
+/** Strip the ``<!--RESEARCH:{...}-->`` metadata comment and the model-
+ *  generated ``## Sources`` section from research report content before
+ *  rendering in chat.
+ *
+ *  The metadata comment is an internal marker not meant to be visible.
+ *  The ``## Sources`` section is redundant because ``SourcesFooter``
+ *  already renders sources cleanly from ``message.sources``; removing
+ *  the model-generated duplicate keeps the chat display tidy. The PDF
+ *  attachment (generated separately) contains the full report. */
+function stripResearchArtifacts(md: string): string {
+  if (!md.startsWith("<!--RESEARCH:")) return md;
+  const commentEnd = md.indexOf("-->");
+  let result = commentEnd !== -1 ? md.slice(commentEnd + 3).trimStart() : md;
+  const sourcesMatch = result.search(/\n## Sources\b/);
+  if (sourcesMatch !== -1) {
+    result = result.slice(0, sourcesMatch).trimEnd();
+  }
+  return result;
+}
+
 /** Flatten Markdown into something pleasant for ``speechSynthesis`` to
  *  read aloud (Phase 2.4). Drops code blocks, link/image syntax,
  *  heading/emphasis markers and table pipes so the narration doesn't
@@ -758,7 +778,9 @@ function MessageBubbleImpl({
   const processedMarkdown = useMemo(
     () =>
       protectCurrencyDollars(
-        rewriteMentionsForMarkdown(stripInlineCitations(content || "")),
+        rewriteMentionsForMarkdown(
+          stripInlineCitations(stripResearchArtifacts(content || "")),
+        ),
       ),
     [content],
   );
