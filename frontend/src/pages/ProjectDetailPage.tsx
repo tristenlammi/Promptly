@@ -24,6 +24,7 @@ import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareProjectDialog } from "@/components/chat/ShareProjectDialog";
+import { ProjectModelField } from "@/components/projects/ProjectModelField";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { TopNav } from "@/components/layout/TopNav";
@@ -122,7 +123,9 @@ export function ProjectDetailPage() {
                 <Button
                   variant="primary"
                   leftIcon={<Plus className="h-4 w-4" />}
-                  onClick={() => handleNewChat(id, navigate)}
+                  onClick={() =>
+                    project && handleNewChat(project, navigate)
+                  }
                 >
                   New chat
                 </Button>
@@ -268,21 +271,27 @@ export function ProjectDetailPage() {
 // ---------------------------------------------------------------------
 
 async function handleNewChat(
-  projectId: string,
+  project: { id: string; default_model_id: string | null; default_provider_id: string | null },
   navigate: (path: string) => void
 ) {
   // Creates an empty conversation under the project and navigates to
-  // it. The backend inherits the project's default model + system
-  // prompt + pinned files on the first send automatically.
-  const { selectedModelId, selectedProviderId } =
-    useModelStore.getState();
+  // it. The project's default model wins when set — sending it
+  // explicitly keeps the chat header correct on first paint (rather
+  // than relying solely on the backend's send-time fallback). When the
+  // project has no default we fall back to the user's current global
+  // selection, matching the pre-default behaviour. System prompt +
+  // pinned files are still applied by the backend on the first send.
+  const { selectedModelId, selectedProviderId } = useModelStore.getState();
+  const modelId = project.default_model_id ?? selectedModelId ?? undefined;
+  const providerId =
+    project.default_provider_id ?? selectedProviderId ?? undefined;
   try {
     const conv = await chatApi.create({
       title: null,
-      model_id: selectedModelId ?? undefined,
-      provider_id: selectedProviderId ?? undefined,
+      model_id: modelId,
+      provider_id: providerId,
       web_search_mode: "off",
-      project_id: projectId,
+      project_id: project.id,
     });
     navigate(`/chat/${conv.id}`);
   } catch {
@@ -642,12 +651,16 @@ function SettingsTab({
   const [systemPrompt, setSystemPrompt] = useState(
     project.system_prompt ?? ""
   );
+  const [modelId, setModelId] = useState(project.default_model_id);
+  const [providerId, setProviderId] = useState(project.default_provider_id);
   const update = useUpdateChatProject(project.id);
 
   const dirty =
     title.trim() !== project.title ||
     (description || "") !== (project.description || "") ||
-    (systemPrompt || "") !== (project.system_prompt || "");
+    (systemPrompt || "") !== (project.system_prompt || "") ||
+    (modelId || null) !== (project.default_model_id || null) ||
+    (providerId || null) !== (project.default_provider_id || null);
 
   const handleSave = async () => {
     if (!dirty || !title.trim()) return;
@@ -655,6 +668,8 @@ function SettingsTab({
       title: title.trim(),
       description: description.trim() || null,
       system_prompt: systemPrompt.trim() || null,
+      default_model_id: modelId,
+      default_provider_id: providerId,
     });
   };
 
@@ -690,6 +705,14 @@ function SettingsTab({
         <ProjectInstructionsEditor
           value={systemPrompt}
           onChange={setSystemPrompt}
+        />
+        <ProjectModelField
+          modelId={modelId}
+          providerId={providerId}
+          onChange={(m, p) => {
+            setModelId(m);
+            setProviderId(p);
+          }}
         />
         <div className="flex items-center justify-end">
           <Button

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
+import { ProjectModelField } from "@/components/projects/ProjectModelField";
 import { useCreateChatProject } from "@/hooks/useChatProjects";
 
 interface NewChatProjectModalProps {
@@ -10,11 +11,11 @@ interface NewChatProjectModalProps {
   onCreated?: (projectId: string) => void;
 }
 
-/** New-project wizard. Deliberately thin: title + optional
- * description are the only up-front requirements. The system prompt,
- * pinned files, and default model all live on the detail page's
- * Settings tab — keeping the create flow minimal lets users get a
- * project shell in place before they've worked out what goes in it. */
+/** New-project wizard. Title is the only requirement; description,
+ * instructions, and a default model are optional up front so a project
+ * can be useful the moment it's created — but everything is also
+ * editable later on the detail page's Settings tab. Pinned files still
+ * live on the detail page (they need an upload/picker flow). */
 export function NewChatProjectModal({
   open,
   onClose,
@@ -22,11 +23,17 @@ export function NewChatProjectModal({
 }: NewChatProjectModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [modelId, setModelId] = useState<string | null>(null);
+  const [providerId, setProviderId] = useState<string | null>(null);
   const create = useCreateChatProject();
 
   const reset = () => {
     setTitle("");
     setDescription("");
+    setSystemPrompt("");
+    setModelId(null);
+    setProviderId(null);
   };
 
   const handleClose = () => {
@@ -42,6 +49,9 @@ export function NewChatProjectModal({
     const proj = await create.mutateAsync({
       title: trimmed,
       description: description.trim() || null,
+      system_prompt: systemPrompt.trim() || null,
+      default_model_id: modelId,
+      default_provider_id: providerId,
     });
     reset();
     onCreated?.(proj.id);
@@ -94,12 +104,36 @@ export function NewChatProjectModal({
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={3}
+            rows={2}
             placeholder="What kind of work happens in this project?"
             className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             maxLength={2000}
           />
         </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
+            Instructions{" "}
+            <span className="text-[var(--text-muted)]/70">(optional)</span>
+          </label>
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={3}
+            placeholder="Durable facts + preferences shared across every chat in this project. You can refine this later."
+            className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            maxLength={20000}
+          />
+        </div>
+
+        <ProjectModelField
+          modelId={modelId}
+          providerId={providerId}
+          onChange={(m, p) => {
+            setModelId(m);
+            setProviderId(p);
+          }}
+        />
 
         {create.isError && (
           <div className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">

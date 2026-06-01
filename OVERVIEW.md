@@ -169,7 +169,8 @@ Promptly/
 - A project bundles **a shared system prompt + a shared set of pinned files + a group of conversations** under one owner.
 - Dedicated `/projects` and `/projects/:id` pages modelled on the Study topic UI, with an Archive tab.
 - Move an existing conversation into or out of a project from the chat menu. Temporary chats are ineligible.
-- **What's shared across chats in a project**: the project's system prompt (prepended to each chat's system message) and the project's pinned files (folded into the first user turn of every chat alongside that turn's own attachments). Projects also set the default model/provider for new chats inside them.
+- **Default model**: a project can pin a default model/provider (set in the New-project modal or the detail page's Settings tab via `ProjectModelField`). New chats opened from inside the project start on that model — `handleNewChat` sends the project default explicitly (falling back to the user's current global model when unset), and the backend's create-conversation fallback honours it for API callers too. The chosen model is validated server-side (`_validate_default_model`) against the provider's `enabled_models` so a project can't pin a model the caller can't actually use (custom `custom:<uuid>` models skip the membership check, provider ACL still applies).
+- **What's shared across chats in a project**: the project's system prompt (prepended to each chat's system message) and the project's pinned files (folded into the first user turn of every chat alongside that turn's own attachments).
 - **What's not shared**: conversation history. Each chat loads its own messages (`WHERE conversation_id = X`) and never sees sibling chats' history. Cross-chat continuity is deliberately out of scope — if the user wants it, they pin a summary file to the project or paste an exported Markdown transcript into a new chat.
 
 ### 5.5 Study mode (desktop/tablet only)

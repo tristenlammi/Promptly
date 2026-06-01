@@ -61,6 +61,7 @@ from app.chat.project_shares import (
 )
 from app.chat.schemas import ConversationSummary
 from app.chat.shares import list_accessible_project_ids
+from app.custom_models.resolver import is_custom_model_id
 from app.database import get_db
 from app.files.models import UserFile
 from app.models_config.models import ModelProvider
@@ -88,16 +89,18 @@ async def _get_owned_project(
 
 async def _validate_provider(
     provider_id: uuid.UUID | None, user: User, db: AsyncSession
-) -> None:
+) -> ModelProvider | None:
     """Reject ``default_provider_id`` pointing at a provider the user
     isn't allowed to use. Mirrors the ACL rules the send-message
     endpoint enforces, so a project can't be wired up with a
     provider the caller couldn't actually hit anyway.
 
     ``None`` is always fine (means "fall back to global selection")
-    and returns without a DB hit."""
+    and returns without a DB hit. Returns the resolved provider row
+    (or ``None`` when ``provider_id`` was ``None``) so callers that
+    also need to inspect ``enabled_models`` don't re-fetch it."""
     if provider_id is None:
-        return
+        return None
     provider = await db.get(ModelProvider, provider_id)
     if provider is None:
         raise HTTPException(
@@ -107,6 +110,46 @@ async def _validate_provider(
     if not owner_ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+        )
+    return provider
+
+
+async def _validate_default_model(
+    provider_id: uuid.UUID | None,
+    model_id: str | None,
+    user: User,
+    db: AsyncSession,
+) -> None:
+    """Reject a default model the caller couldn't actually use.
+
+    Rules mirror the create-conversation fallback in
+    :mod:`app.chat.router`:
+
+    * ``provider_id`` and ``model_id`` are set together or cleared
+      together — a half-set default silently falls back at send time,
+      which is confusing to debug.
+    * The provider must exist and be usable by the caller
+      (delegated to :func:`_validate_provider`).
+    * For a real (non-custom) model the id must be one of the
+      provider's ``enabled_models``. Custom models carry a synthetic
+      ``custom:<uuid>`` id the chat resolver expands at send time, so
+      the membership check is skipped for them (the provider check
+      still applies)."""
+    if model_id is None and provider_id is None:
+        return
+    if (model_id is None) != (provider_id is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set a default model and provider together, or clear both.",
+        )
+    provider = await _validate_provider(provider_id, user, db)
+    if is_custom_model_id(model_id):
+        return
+    enabled = (provider.enabled_models if provider else None) or []
+    if model_id not in enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That model isn't enabled for the selected provider.",
         )
 
 
@@ -207,7 +250,9 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ChatProjectSummary:
-    await _validate_provider(payload.default_provider_id, user, db)
+    await _validate_default_model(
+        payload.default_provider_id, payload.default_model_id, user, db
+    )
     proj = ChatProject(
         user_id=user.id,
         title=payload.title.strip(),
@@ -305,11 +350,24 @@ async def update_project(
         proj.description = payload.description
     if "system_prompt" in sent:
         proj.system_prompt = payload.system_prompt
-    if "default_model_id" in sent:
-        proj.default_model_id = payload.default_model_id
-    if "default_provider_id" in sent:
-        await _validate_provider(payload.default_provider_id, user, db)
-        proj.default_provider_id = payload.default_provider_id
+    # Default model + provider are validated as a *pair* against the
+    # resulting state — sending one without the other (or a model the
+    # provider doesn't enable) is rejected so the chat header and the
+    # send-time fallback can't disagree.
+    if "default_model_id" in sent or "default_provider_id" in sent:
+        new_model = (
+            payload.default_model_id
+            if "default_model_id" in sent
+            else proj.default_model_id
+        )
+        new_provider = (
+            payload.default_provider_id
+            if "default_provider_id" in sent
+            else proj.default_provider_id
+        )
+        await _validate_default_model(new_provider, new_model, user, db)
+        proj.default_model_id = new_model
+        proj.default_provider_id = new_provider
     proj.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(proj)
