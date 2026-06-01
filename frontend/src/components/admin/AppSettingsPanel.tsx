@@ -62,6 +62,11 @@ export function AppSettingsPanel() {
 
   return (
     <div className="space-y-6">
+      <PublicUrlCard
+        settings={data}
+        onSubmit={(patch) => update.mutateAsync(patch)}
+        busy={update.isPending}
+      />
       <AuthCard
         settings={data}
         onSubmit={(patch) => update.mutateAsync(patch)}
@@ -83,6 +88,87 @@ export function AppSettingsPanel() {
         busy={update.isPending}
       />
     </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// Public URL card — used to build OAuth redirect URIs behind a proxy
+// --------------------------------------------------------------------
+
+function PublicUrlCard({ settings, onSubmit, busy }: CardSubmit) {
+  const initial = (settings.public_origins ?? [])[0] ?? "";
+  const [value, setValue] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => { setValue(initial); }, [initial]);
+
+  const dirty = value.trim() !== initial;
+
+  const handleSave = async () => {
+    setError(null);
+    const trimmed = value.trim();
+    if (trimmed && !/^https?:\/\/.+/.test(trimmed)) {
+      setError("Must be a full URL starting with https:// (or http:// for local dev).");
+      return;
+    }
+    try {
+      await onSubmit({ public_origins: trimmed ? [trimmed] : [] });
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  return (
+    <SettingsCard
+      title="Public URL"
+      icon={<Globe className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">{error}</span>
+          )}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button variant="ghost" size="sm" onClick={() => { setValue(initial); setError(null); }} disabled={busy}>
+              Discard
+            </Button>
+          )}
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={!dirty || busy} loading={busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
+        The externally reachable URL for this Promptly instance (e.g.{" "}
+        <code className="rounded bg-black/[0.05] px-1 py-0.5 text-[11px] dark:bg-white/[0.06]">
+          https://ai.example.com
+        </code>
+        ). Used to build OAuth redirect URIs for Gmail and other integrations
+        when Promptly is behind a reverse proxy. Leave empty if running on
+        localhost only.
+      </p>
+      <Field
+        label="Public URL"
+        value={value}
+        onChange={(v) => { setValue(v); setError(null); setSavedAt(null); }}
+        placeholder="https://ai.example.com"
+        disabled={busy}
+      />
+    </SettingsCard>
   );
 }
 
