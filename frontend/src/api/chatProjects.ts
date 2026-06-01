@@ -200,6 +200,10 @@ export const chatProjectsApi = {
     return data;
   },
 
+  async reindex(id: string): Promise<void> {
+    await apiClient.post(`/chat/projects/${id}/reindex`);
+  },
+
   async pinFile(id: string, fileId: string): Promise<ChatProjectFilePin> {
     const { data } = await apiClient.post<ChatProjectFilePin>(
       `/chat/projects/${id}/files`,

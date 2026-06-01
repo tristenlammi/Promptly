@@ -13,6 +13,7 @@ import {
   FolderMinus,
   Gauge,
   Lightbulb,
+  RefreshCw,
   Loader2,
   MessageSquare,
   Pencil,
@@ -47,6 +48,7 @@ import {
   useChatProjectUsage,
   useDeleteChatProject,
   usePinChatProjectFile,
+  useReindexProject,
   useUnarchiveChatProject,
   useUnpinChatProjectFile,
   useUpdateChatProject,
@@ -776,6 +778,7 @@ function FilesTab({
   const [pickerOpen, setPickerOpen] = useState(false);
   const pin = usePinChatProjectFile(project.id);
   const unpin = useUnpinChatProjectFile(project.id);
+  const reindex = useReindexProject(project.id);
 
   // Preview state. ``previewFile`` is the full ``FileItem`` returned
   // by ``filesApi.getFile`` — we lazy-fetch it on click so we have
@@ -844,13 +847,39 @@ function FilesTab({
           Pinned files are auto-attached to every new chat in this project.
         </p>
         {canEdit && (
-          <Button
-            variant="secondary"
-            leftIcon={<Plus className="h-3.5 w-3.5" />}
-            onClick={() => setPickerOpen(true)}
-          >
-            Add file
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Reindex: owner-only, shown when files need indexing */}
+            {project.role === "owner" &&
+              project.files.some(
+                (f) =>
+                  f.indexing_status === "queued" ||
+                  f.indexing_status === "failed"
+              ) && (
+                <Button
+                  variant="ghost"
+                  leftIcon={
+                    <RefreshCw
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        reindex.isPending && "animate-spin"
+                      )}
+                    />
+                  }
+                  onClick={() => reindex.mutate()}
+                  disabled={reindex.isPending || project.indexing_count > 0}
+                  title="Re-index all queued or failed files for semantic search"
+                >
+                  {reindex.isPending ? "Indexing…" : "Reindex"}
+                </Button>
+              )}
+            <Button
+              variant="secondary"
+              leftIcon={<Plus className="h-3.5 w-3.5" />}
+              onClick={() => setPickerOpen(true)}
+            >
+              Add file
+            </Button>
+          </div>
         )}
       </div>
 

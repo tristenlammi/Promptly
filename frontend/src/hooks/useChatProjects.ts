@@ -265,3 +265,14 @@ export function useDeclineProjectInvite() {
     },
   });
 }
+
+export function useReindexProject(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => chatProjectsApi.reindex(projectId),
+    onSuccess: () => {
+      // Refresh the detail so the Files tab starts polling for indexing progress.
+      qc.invalidateQueries({ queryKey: KEYS.detail(projectId) });
+    },
+  });
+}

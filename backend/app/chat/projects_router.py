@@ -75,6 +75,7 @@ from app.chat.project_knowledge import (
     delete_project_file_chunks,
     index_file_for_project,
     project_context_stats,
+    reindex_project,
 )
 from app.chat.shares import list_accessible_project_ids
 from app.custom_models.resolver import is_custom_model_id
@@ -570,6 +571,34 @@ async def project_usage(
         cost_usd=round(cost_micros / 1_000_000, 6),
         by_model=by_model,
     )
+
+
+# ---------------------------------------------------------------------
+# Reindex pinned files (backfill)
+# ---------------------------------------------------------------------
+
+
+@router.post(
+    "/{project_id}/reindex",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=dict,
+)
+async def reindex_project_files(
+    project_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Queue a background re-index of every pinned file in the project.
+
+    Useful after enabling an embedding provider for the first time, or
+    to backfill files pinned before Phase-2 that are still ``queued``.
+    Owner-only: collaborators don't manage the project's embedding state.
+    Returns immediately; the Files tab's polling will show progress.
+    """
+    proj = await _get_owned_project(project_id, user, db)
+    background.add_task(reindex_project, proj.id)
+    return {"queued": True}
 
 
 # ---------------------------------------------------------------------

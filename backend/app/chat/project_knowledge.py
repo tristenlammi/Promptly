@@ -38,7 +38,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.chat.models import ChatProject, ChatProjectFile, Conversation
+from app.chat.models import ChatProject, ChatProjectFile, Conversation, Message
 from app.chat.semantic_search import get_embedding_config
 from app.models_config.models import ModelProvider
 from app.custom_models.embedding import (
@@ -412,20 +412,72 @@ PROJECT_MEMORY_SOURCE_KIND = "project_memory"
 _MEMORY_COOLDOWN_SECONDS = 180.0
 _last_memory_run: dict[str, float] = {}
 
+# How many recently-active conversations to pull for cross-chat merging.
+# Enough to capture meaningful divergence without blowing the summary
+# model's context. The most recent conversation is always included
+# (it triggered this refresh) and the others contribute their own
+# last-N messages as background material.
+_MEMORY_SOURCE_CONV_COUNT = 5
+# Max messages pulled from each background conversation. Keeps the
+# merged input bounded even for long conversations.
+_MEMORY_BG_MSG_LIMIT = 20
+
+
+def _format_transcript_excerpt(
+    messages: list, title: str | None, max_msgs: int = _MEMORY_BG_MSG_LIMIT
+) -> str:
+    """Render a bounded excerpt of messages for the merged-memory prompt."""
+    label = title or "Untitled"
+    lines = [f"=== Chat: {label} ==="]
+    textual = [m for m in messages if (m.content or "").strip()][-max_msgs:]
+    for m in textual:
+        role = (m.role or "user").upper()
+        content = (m.content or "").strip()
+        if not content or m.role == "system":
+            continue
+        lines.append(f"{role}: {content[:800]}")  # cap per-message to keep prompt bounded
+    return "\n\n".join(lines)
+
+
+_MERGE_SYSTEM_PROMPT = (
+    "You are maintaining a rolling 'Project Memory' document that "
+    "accumulates knowledge across all chats in a project.\n\n"
+    "You will receive excerpts from several recent chats. Your job is "
+    "to synthesise them into a single up-to-date memory document.\n\n"
+    "Output format (Markdown only, no preamble):\n"
+    "- `## Project overview` — one or two sentences: what is this project about?\n"
+    "- `## Durable facts` — bulleted list of things that are always true: "
+    "tech stack, constraints, preferences, names, versions.\n"
+    "- `## Recent decisions` — bulleted: concrete choices made across "
+    "recent chats. Include which chat if relevant.\n"
+    "- `## Open questions` — bulleted: unresolved threads across any of "
+    "the recent chats. Omit if none.\n"
+    "- `## Next steps` — bulleted: actions mentioned as upcoming. Omit if none.\n\n"
+    "Rules:\n"
+    "- Merge and deduplicate — don't repeat the same fact twice.\n"
+    "- Prefer the most recent information when chats conflict.\n"
+    "- Write in third person: 'The user ...', 'The assistant ...'.\n"
+    "- Hard ceiling: under 700 words. Aim for 350-500.\n"
+    "- No commentary about this being a summary."
+)
+
 
 async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
-    """Refresh a project's rolling "Project Memory" file from the chat
-    that just produced a reply, when the project has opted in.
+    """Refresh a project's rolling 'Project Memory' by merging the last
+    few conversations, when the project has ``auto_memory_enabled``.
+
+    This is a multi-chat upgrade from the original single-chat approach:
+    instead of summarising only the triggering chat, it pulls recent
+    transcripts from up to :data:`_MEMORY_SOURCE_CONV_COUNT` conversations
+    and asks the model to produce a coherent merged document. Knowledge
+    accumulates across conversations rather than overwriting.
 
     Owns its own session (spawned via ``asyncio.create_task`` from the
-    stream finalize). Entirely best-effort: every failure path is a
-    quiet return so it can never disturb the reply already on disk.
-    Debounced per project. No-op unless ``auto_memory_enabled``.
+    stream finalize). Entirely best-effort; every failure path is a
+    quiet return. Debounced per project.
     """
-    # Local imports avoid any import-time cycle with the summariser /
-    # files layer (both sit above this module in some graphs).
-    from app.chat.summariser import summarise_conversation_to_markdown
     from app.files.generated import GeneratedFileError, persist_generated_file
+    from app.models_config.provider import ChatMessage, ProviderError, model_router
 
     async with SessionLocal() as db:
         conv = await db.get(Conversation, conversation_id)
@@ -437,33 +489,95 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
 
         key = str(proj.id)
         now = time.monotonic()
-        last = _last_memory_run.get(key)
-        if last is not None and (now - last) < _MEMORY_COOLDOWN_SECONDS:
+        if (now - _last_memory_run.get(key, 0.0)) < _MEMORY_COOLDOWN_SECONDS:
             return
         _last_memory_run[key] = now
 
+        # Resolve provider from the triggering conversation.
         if not conv.provider_id or not conv.model_id:
             return
         provider = await db.get(ModelProvider, conv.provider_id)
         if provider is None or not provider.enabled:
             return
 
-        try:
-            memo = await summarise_conversation_to_markdown(
-                conversation=conv,
-                llm_provider=provider,
-                llm_model_id=conv.model_id,
-                db=db,
+        # Pull the last N recently-active conversations in this project
+        # (triggering conv always leads the list).
+        recent_convs = list(
+            (
+                await db.execute(
+                    select(Conversation)
+                    .where(
+                        Conversation.project_id == proj.id,
+                        Conversation.temporary_mode.is_(None),
+                    )
+                    .order_by(Conversation.updated_at.desc())
+                    .limit(_MEMORY_SOURCE_CONV_COUNT)
+                )
             )
-        except Exception:  # noqa: BLE001 - best-effort (incl. SummariseError)
-            logger.debug("auto-memory: summary skipped for project %s", proj.id)
+            .scalars()
+            .all()
+        )
+        if not recent_convs:
+            return
+
+        # Build per-conversation transcripts. Triggering conv is always
+        # pulled in full (up to _MEMORY_BG_MSG_LIMIT); older ones also
+        # up to the same limit so the merged prompt stays bounded.
+        excerpts: list[str] = []
+        for c in recent_convs:
+            msgs = list(
+                (
+                    await db.execute(
+                        select(Message)
+                        .where(Message.conversation_id == c.id)
+                        .order_by(Message.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            textual = [m for m in msgs if (m.content or "").strip() and m.role != "system"]
+            if len(textual) < 2:
+                continue
+            excerpts.append(_format_transcript_excerpt(textual, c.title))
+
+        if not excerpts:
+            return
+
+        merged_input = "\n\n".join(excerpts)
+
+        try:
+            chunks: list[str] = []
+            async for token in model_router.stream_chat(
+                provider=provider,
+                model_id=conv.model_id,
+                messages=[ChatMessage(role="user", content=merged_input)],
+                system=_MERGE_SYSTEM_PROMPT,
+                temperature=0.2,
+                max_tokens=1500,
+            ):
+                chunks.append(token)
+            memo = "".join(chunks).strip()
+        except Exception:  # noqa: BLE001 - ProviderError or any other failure
+            logger.debug("auto-memory: merge call failed for project %s", proj.id)
+            return
+
+        if not memo:
             return
 
         owner = await db.get(User, proj.user_id)
         if owner is None:
             return
 
-        # Find the existing memory file (one per project) to replace.
+        conv_count = len(recent_convs)
+        body = (
+            f"# Project Memory: {proj.title}\n\n"
+            f"_Auto-maintained from the last {conv_count} active chat"
+            f"{'s' if conv_count > 1 else ''} in this project. "
+            "Turn this off in Settings._\n\n"
+            f"{memo}\n"
+        )
+
         existing = (
             await db.execute(
                 select(UserFile)
@@ -475,12 +589,6 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
             )
         ).scalars().first()
 
-        body = (
-            f"# Project memory: {proj.title}\n\n"
-            "_Auto-maintained from the project's most recently active chat. "
-            "Turn this off in the project's Settings tab._\n\n"
-            f"{memo}\n"
-        )
         try:
             new_uf = await persist_generated_file(
                 db,
@@ -493,11 +601,7 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
         except GeneratedFileError:
             return
 
-        db.add(
-            ChatProjectFile(
-                project_id=proj.id, file_id=new_uf.id, pinned_by=owner.id
-            )
-        )
+        db.add(ChatProjectFile(project_id=proj.id, file_id=new_uf.id, pinned_by=owner.id))
         if existing is not None:
             await db.execute(
                 delete(ChatProjectFile).where(
@@ -512,4 +616,8 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
 
     # Index the fresh memory file so it participates in retrieval.
     await index_file_for_project(proj.id, new_id, force=True)
-    logger.info("auto-memory refreshed for project %s", proj.id)
+    logger.info(
+        "auto-memory refreshed for project %s (merged %d chats)",
+        proj.id,
+        len(recent_convs),
+    )
