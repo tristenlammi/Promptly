@@ -297,10 +297,14 @@ export const chatApi = {
     );
     return data.stream_id;
   },
-  async search(q: string, limit = 20): Promise<ConversationSearchHit[]> {
+  async search(
+    q: string,
+    limit = 20,
+    projectId?: string
+  ): Promise<ConversationSearchHit[]> {
     const { data } = await apiClient.get<ConversationSearchHit[]>(
       "/chat/conversations/search",
-      { params: { q, limit } }
+      { params: { q, limit, ...(projectId ? { project_id: projectId } : {}) } }
     );
     return data;
   },

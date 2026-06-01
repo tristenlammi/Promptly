@@ -1,21 +1,27 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  BarChart3,
   ChevronDown,
   ChevronRight,
   CircleAlert,
   FileText,
+  FolderMinus,
   Gauge,
   Lightbulb,
   Loader2,
   MessageSquare,
+  Pencil,
   Plus,
   Save,
+  Search,
   Settings2,
   Share2,
+  Star,
   Trash2,
   Upload,
   Users,
@@ -32,11 +38,13 @@ import { DocumentEditorModal } from "@/components/files/documents/DocumentEditor
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { chatApi } from "@/api/chat";
+import type { ConversationSummary } from "@/api/types";
 import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
 import {
   useArchiveChatProject,
   useChatProject,
   useChatProjectConversations,
+  useChatProjectUsage,
   useDeleteChatProject,
   usePinChatProjectFile,
   useUnarchiveChatProject,
@@ -56,7 +64,7 @@ function humanSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type Tab = "conversations" | "files" | "settings";
+type Tab = "conversations" | "files" | "usage" | "settings";
 
 /** Project detail page — three tabs (Conversations, Files, Settings).
  * Laid out to match Study's unit-list page at a glance: left-aligned
@@ -204,11 +212,13 @@ export function ProjectDetailPage() {
               <div className="mt-6">
                 {tab === "conversations" && (
                   <ConversationsTab
+                    projectId={id}
                     conversations={conversations ?? []}
                     onOpen={(cid) => navigate(`/chat/${cid}`)}
                   />
                 )}
                 {tab === "files" && <FilesTab project={project} />}
+                {tab === "usage" && <UsageTab projectId={id} />}
                 {tab === "settings" && (
                   <SettingsTab
                     project={project}
@@ -333,6 +343,12 @@ function Tabs({
         count={fileCount}
       />
       <TabButton
+        active={tab === "usage"}
+        onClick={() => onChange("usage")}
+        icon={<BarChart3 className="h-3.5 w-3.5" />}
+        label="Usage"
+      />
+      <TabButton
         active={tab === "settings"}
         onClick={() => onChange("settings")}
         icon={<Settings2 className="h-3.5 w-3.5" />}
@@ -388,43 +404,340 @@ function TabButton({
 // ---------------------------------------------------------------------
 
 function ConversationsTab({
+  projectId,
   conversations,
   onOpen,
 }: {
-  conversations: Array<{
-    id: string;
-    title: string | null;
-    updated_at: string;
-  }>;
+  projectId: string;
+  conversations: ConversationSummary[];
   onOpen: (id: string) => void;
 }) {
-  if (conversations.length === 0) {
+  const [rawQuery, setRawQuery] = useState("");
+  const [query, setQuery] = useState("");
+
+  // Debounce the FTS/semantic call so we don't hit the endpoint on
+  // every keystroke (200ms matches the command-palette feel).
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(rawQuery.trim()), 200);
+    return () => clearTimeout(t);
+  }, [rawQuery]);
+
+  const { data: hits, isFetching } = useQuery({
+    queryKey: ["chat-project-search", projectId, query],
+    queryFn: () => chatApi.search(query, 20, projectId),
+    enabled: query.length > 0,
+  });
+
+  return (
+    <div>
+      <div className="relative mb-4">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+        <input
+          value={rawQuery}
+          onChange={(e) => setRawQuery(e.target.value)}
+          placeholder="Search this project's chats…"
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] py-2 pl-9 pr-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+
+      {query.length > 0 ? (
+        <SearchResults
+          hits={hits ?? []}
+          loading={isFetching}
+          onOpen={onOpen}
+        />
+      ) : conversations.length === 0 ? (
+        <div className="rounded-card border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--text-muted)]">
+          No conversations yet. Start a new chat — it will inherit this
+          project's instructions and pinned files.
+        </div>
+      ) : (
+        <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
+          {conversations.map((c) => (
+            <ConversationRow
+              key={c.id}
+              conv={c}
+              projectId={projectId}
+              onOpen={onOpen}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SearchResults({
+  hits,
+  loading,
+  onOpen,
+}: {
+  hits: Array<{
+    conversation_id: string;
+    message_id: string;
+    conversation_title: string | null;
+    snippet: string;
+    created_at: string;
+  }>;
+  loading: boolean;
+  onOpen: (id: string) => void;
+}) {
+  if (!hits.length) {
     return (
-      <div className="rounded-card border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--text-muted)]">
-        No conversations yet. Start a new chat — it will inherit this
-        project's instructions and pinned files.
+      <div className="rounded-card border border-dashed border-[var(--border)] p-8 text-center text-sm text-[var(--text-muted)]">
+        {loading ? "Searching…" : "No matches in this project."}
       </div>
     );
   }
-
+  // Snippets carry [[HL]]…[[/HL]] markers from ts_headline; render the
+  // highlighted spans inline without trusting raw HTML.
+  const renderSnippet = (s: string) =>
+    s.split(/\[\[HL\]\]|\[\[\/HL\]\]/).map((part, i) =>
+      i % 2 === 1 ? (
+        <mark
+          key={i}
+          className="rounded bg-[var(--accent)]/20 px-0.5 text-[var(--text)]"
+        >
+          {part}
+        </mark>
+      ) : (
+        <span key={i}>{part}</span>
+      )
+    );
   return (
     <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
-      {conversations.map((c) => (
-        <li key={c.id}>
+      {hits.map((h) => (
+        <li key={h.message_id}>
           <button
-            onClick={() => onOpen(c.id)}
-            className="flex w-full items-center justify-between px-4 py-3 text-left text-sm transition hover:bg-[var(--accent)]/5"
+            onClick={() => onOpen(h.conversation_id)}
+            className="block w-full px-4 py-3 text-left transition hover:bg-[var(--accent)]/5"
           >
-            <span className="truncate font-medium text-[var(--text)]">
-              {c.title ?? "Untitled chat"}
-            </span>
-            <span className="text-xs text-[var(--text-muted)]">
-              {new Date(c.updated_at).toLocaleDateString()}
-            </span>
+            <div className="truncate text-sm font-medium text-[var(--text)]">
+              {h.conversation_title ?? "Untitled chat"}
+            </div>
+            <div className="mt-0.5 line-clamp-2 text-xs text-[var(--text-muted)]">
+              {renderSnippet(h.snippet)}
+            </div>
           </button>
         </li>
       ))}
     </ul>
+  );
+}
+
+function ConversationRow({
+  conv,
+  projectId,
+  onOpen,
+}: {
+  conv: ConversationSummary;
+  projectId: string;
+  onOpen: (id: string) => void;
+}) {
+  const qc = useQueryClient();
+  const available = useModelStore((s) => s.available);
+  const [renaming, setRenaming] = useState(false);
+  const [title, setTitle] = useState(conv.title ?? "");
+  const [busy, setBusy] = useState(false);
+
+  const modelLabel = useMemo(() => {
+    if (!conv.model_id) return null;
+    return (
+      available.find((m) => m.model_id === conv.model_id)?.display_name ??
+      conv.model_id
+    );
+  }, [available, conv.model_id]);
+
+  const refresh = () =>
+    qc.invalidateQueries({
+      queryKey: ["chat-projects", "conversations", projectId],
+    });
+
+  const mutate = async (patch: {
+    title?: string;
+    starred?: boolean;
+    project_id?: string | null;
+  }) => {
+    setBusy(true);
+    try {
+      await chatApi.update(conv.id, patch);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveTitle = async () => {
+    const t = title.trim();
+    setRenaming(false);
+    if (t && t !== conv.title) await mutate({ title: t });
+    else setTitle(conv.title ?? "");
+  };
+
+  return (
+    <li className="group flex items-center gap-2 px-4 py-3 text-sm">
+      <div className="min-w-0 flex-1">
+        {renaming ? (
+          <input
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveTitle();
+              if (e.key === "Escape") {
+                setRenaming(false);
+                setTitle(conv.title ?? "");
+              }
+            }}
+            className="w-full rounded border border-[var(--accent)] bg-[var(--surface)] px-2 py-1 text-sm outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => onOpen(conv.id)}
+            className="block w-full text-left"
+          >
+            <span className="truncate font-medium text-[var(--text)] hover:text-[var(--accent)]">
+              {conv.title ?? "Untitled chat"}
+            </span>
+            <span className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+              {modelLabel && (
+                <span className="truncate rounded bg-[var(--border)]/40 px-1.5 py-0.5">
+                  {modelLabel}
+                </span>
+              )}
+              {new Date(conv.updated_at).toLocaleDateString()}
+            </span>
+          </button>
+        )}
+      </div>
+
+      {!renaming && (
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+          <RowAction
+            label={conv.starred ? "Unstar" : "Star"}
+            onClick={() => mutate({ starred: !conv.starred })}
+            disabled={busy}
+          >
+            <Star
+              className={cn(
+                "h-3.5 w-3.5",
+                conv.starred && "fill-[var(--accent)] text-[var(--accent)]"
+              )}
+            />
+          </RowAction>
+          <RowAction
+            label="Rename"
+            onClick={() => {
+              setTitle(conv.title ?? "");
+              setRenaming(true);
+            }}
+            disabled={busy}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </RowAction>
+          <RowAction
+            label="Remove from project"
+            onClick={() => mutate({ project_id: null })}
+            disabled={busy}
+          >
+            <FolderMinus className="h-3.5 w-3.5" />
+          </RowAction>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function RowAction({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)] disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Tab: Usage
+// ---------------------------------------------------------------------
+
+function UsageTab({ projectId }: { projectId: string }) {
+  const { data: usage, isLoading } = useChatProjectUsage(projectId);
+
+  if (isLoading || !usage) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading usage…
+      </div>
+    );
+  }
+
+  const fmtCost = (c: number) =>
+    c >= 0.01 ? `$${c.toFixed(2)}` : c > 0 ? `$${c.toFixed(4)}` : "$0.00";
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Conversations" value={usage.conversation_count.toLocaleString()} />
+        <StatCard label="Messages" value={usage.message_count.toLocaleString()} />
+        <StatCard label="Total tokens" value={formatTokens(usage.total_tokens)} />
+        <StatCard label="Est. cost" value={fmtCost(usage.cost_usd)} />
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold">By model</h3>
+        {usage.by_model.length === 0 ? (
+          <div className="rounded-card border border-dashed border-[var(--border)] p-8 text-center text-sm text-[var(--text-muted)]">
+            No usage recorded yet. Token + cost stats appear once chats in
+            this project have replies.
+          </div>
+        ) : (
+          <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
+            {usage.by_model.map((m) => (
+              <li
+                key={m.model_id ?? "unknown"}
+                className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
+              >
+                <span className="truncate font-medium text-[var(--text)]">
+                  {m.model_id ?? "Unknown model"}
+                </span>
+                <span className="flex shrink-0 items-center gap-3 text-xs text-[var(--text-muted)]">
+                  <span>{formatTokens(m.prompt_tokens + m.completion_tokens)} tok</span>
+                  <span>{fmtCost(m.cost_usd)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-3">
+      <div className="text-xs text-[var(--text-muted)]">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-[var(--text)]">{value}</div>
+    </div>
   );
 }
 

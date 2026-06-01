@@ -51,6 +51,7 @@ from app.chat.models import (
     ChatProject,
     ChatProjectFile,
     Conversation,
+    Message,
 )
 from app.chat.project_schemas import (
     ChatProjectCreate,
@@ -60,6 +61,8 @@ from app.chat.project_schemas import (
     ChatProjectPinFile,
     ChatProjectSummary,
     ChatProjectUpdate,
+    ChatProjectUsage,
+    ChatProjectUsageModel,
 )
 from app.chat.project_shares import (
     get_accessible_project,
@@ -481,6 +484,87 @@ async def list_project_conversations(
     return [
         ConversationSummary.model_validate(c) for c in res.scalars().all()
     ]
+
+
+# ---------------------------------------------------------------------
+# Usage rollup
+# ---------------------------------------------------------------------
+
+
+@router.get("/{project_id}/usage", response_model=ChatProjectUsage)
+async def project_usage(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatProjectUsage:
+    """Token + cost usage aggregated over every conversation in the
+    project. Built from message-level stats because ``usage_daily`` is
+    keyed by ``(user_id, day)`` and can't be sliced by project.
+
+    Scoped to the project's conversations (all collaborators' chats),
+    gated by :func:`get_accessible_project`."""
+    proj, _role = await get_accessible_project(project_id, user, db)
+
+    conv_count = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.project_id == proj.id)
+        )
+        or 0
+    )
+
+    # One grouped pass over the project's messages, attributed to each
+    # conversation's model (``messages`` rows don't carry a model — the
+    # model lives on the conversation). This attributes a chat's whole
+    # spend to its *current* model, which is the only model key we
+    # retain; good enough for a per-project rollup. ``model_id`` is NULL
+    # for conversations that never had one persisted.
+    rows = (
+        await db.execute(
+            select(
+                Conversation.model_id.label("model_id"),
+                func.count(Message.id).label("messages"),
+                func.coalesce(func.sum(Message.prompt_tokens), 0).label("pt"),
+                func.coalesce(func.sum(Message.completion_tokens), 0).label("ct"),
+                func.coalesce(func.sum(Message.cost_usd_micros), 0).label("cost"),
+            )
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(Conversation.project_id == proj.id)
+            .group_by(Conversation.model_id)
+        )
+    ).all()
+
+    message_count = sum(int(r.messages) for r in rows)
+    prompt_tokens = sum(int(r.pt) for r in rows)
+    completion_tokens = sum(int(r.ct) for r in rows)
+    cost_micros = sum(int(r.cost) for r in rows)
+
+    by_model = [
+        ChatProjectUsageModel(
+            model_id=r.model_id,
+            messages=int(r.messages),
+            prompt_tokens=int(r.pt),
+            completion_tokens=int(r.ct),
+            cost_usd=round(int(r.cost) / 1_000_000, 6),
+        )
+        for r in rows
+        if r.model_id is not None
+        and (int(r.pt) or int(r.ct) or int(r.cost))
+    ]
+    by_model.sort(
+        key=lambda m: m.prompt_tokens + m.completion_tokens, reverse=True
+    )
+
+    return ChatProjectUsage(
+        conversation_count=conv_count,
+        message_count=message_count,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        cost_usd=round(cost_micros / 1_000_000, 6),
+        by_model=by_model,
+    )
 
 
 # ---------------------------------------------------------------------

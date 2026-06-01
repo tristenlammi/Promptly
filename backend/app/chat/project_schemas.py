@@ -157,3 +157,34 @@ class ChatProjectPinFile(BaseModel):
     to the project so new conversations auto-attach it."""
 
     file_id: uuid.UUID
+
+
+# ---------------------------------------------------------------------
+# Usage rollup (Phase P3)
+# ---------------------------------------------------------------------
+
+
+class ChatProjectUsageModel(BaseModel):
+    """Per-model slice of a project's spend."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_id: str | None
+    messages: int
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+
+
+class ChatProjectUsage(BaseModel):
+    """Aggregated token + cost usage across every conversation in a
+    project. Sourced from message-level stats (``usage_daily`` is only
+    keyed by user/day and can't be sliced by project)."""
+
+    conversation_count: int
+    message_count: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost_usd: float
+    by_model: list[ChatProjectUsageModel] = Field(default_factory=list)

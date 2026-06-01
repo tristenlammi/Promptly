@@ -29,6 +29,7 @@ const KEYS = {
   detail: (id: string) => ["chat-projects", "detail", id] as const,
   conversations: (id: string) =>
     ["chat-projects", "conversations", id] as const,
+  usage: (id: string) => ["chat-projects", "usage", id] as const,
   shares: (id: string) => ["chat-projects", "shares", id] as const,
   invites: ["chat-project-invites"] as const,
 };
@@ -58,6 +59,14 @@ export function useChatProjectConversations(id: string | undefined) {
   return useQuery({
     queryKey: id ? KEYS.conversations(id) : ["chat-projects", "conversations", "_"],
     queryFn: () => chatProjectsApi.listConversations(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+export function useChatProjectUsage(id: string | undefined) {
+  return useQuery({
+    queryKey: id ? KEYS.usage(id) : ["chat-projects", "usage", "_"],
+    queryFn: () => chatProjectsApi.usage(id as string),
     enabled: Boolean(id),
   });
 }

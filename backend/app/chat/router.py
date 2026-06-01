@@ -189,6 +189,7 @@ def _to_websearch_query(raw: str) -> str:
 async def search_conversations(
     q: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
+    project_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ConversationSearchHit]:
@@ -202,7 +203,10 @@ async def search_conversations(
     renderer's allowlist).
 
     Searches the caller's own conversations plus any chat inside a
-    project shared with them.
+    project shared with them. When ``project_id`` is given, results are
+    scoped to chats inside that project (intersected with the caller's
+    accessible set, so it never widens access — an inaccessible project
+    just yields no results).
     """
     cleaned = _to_websearch_query(q)
     if not cleaned:
@@ -214,6 +218,22 @@ async def search_conversations(
     accessible_ids = await list_accessible_conversation_ids(user, db)
     if not accessible_ids:
         return []
+
+    if project_id is not None:
+        proj_conv_ids = set(
+            (
+                await db.execute(
+                    select(Conversation.id).where(
+                        Conversation.project_id == project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        accessible_ids = [cid for cid in accessible_ids if cid in proj_conv_ids]
+        if not accessible_ids:
+            return []
 
     # Pull a wider slate from each retriever than the caller asked for so
     # the fusion below has material to re-rank before we trim to ``limit``.

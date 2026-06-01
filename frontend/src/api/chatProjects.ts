@@ -88,6 +88,24 @@ export interface ProjectInviteRow {
   created_at: string;
 }
 
+export interface ChatProjectUsageModel {
+  model_id: string | null;
+  messages: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+}
+
+export interface ChatProjectUsage {
+  conversation_count: number;
+  message_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  by_model: ChatProjectUsageModel[];
+}
+
 export interface CreateChatProjectPayload {
   title: string;
   description?: string | null;
@@ -162,6 +180,13 @@ export const chatProjectsApi = {
   async listConversations(id: string): Promise<ConversationSummary[]> {
     const { data } = await apiClient.get<ConversationSummary[]>(
       `/chat/projects/${id}/conversations`
+    );
+    return data;
+  },
+
+  async usage(id: string): Promise<ChatProjectUsage> {
+    const { data } = await apiClient.get<ChatProjectUsage>(
+      `/chat/projects/${id}/usage`
     );
     return data;
   },
