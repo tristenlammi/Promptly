@@ -163,15 +163,6 @@ class AppSettingsResponse(BaseModel):
     research_model_id: str | None = None
     research_configured: bool
 
-    # ----- Email integration (Phase 12) -----
-    email_integration_enabled: bool
-    google_oauth_client_id: str | None = None
-    google_oauth_configured: bool
-    email_triage_provider_id: uuid.UUID | None = None
-    email_triage_model_id: str | None = None
-    email_triage_configured: bool
-    email_triage_daily_token_cap: int | None = None
-
     updated_at: datetime
 
 
@@ -246,17 +237,6 @@ class AppSettingsUpdate(BaseModel):
     # both to leave unchanged.
     research_provider_id: uuid.UUID | None = None
     research_model_id: str | None = Field(default=None, max_length=255)
-
-    # ----- Email integration (Phase 12) -----
-    email_integration_enabled: bool | None = None
-    google_oauth_client_id: str | None = Field(default=None, max_length=256)
-    # Pass plaintext secret; router encrypts before storing. Empty string = clear.
-    google_oauth_client_secret: str | None = Field(default=None, max_length=512)
-    # Triage model — same paired semantics as vision relay.
-    email_triage_provider_id: uuid.UUID | None = None
-    email_triage_model_id: str | None = Field(default=None, max_length=255)
-    # ge=0 so admin can zero-out the cap to effectively disable triage.
-    email_triage_daily_token_cap: int | None = Field(default=None, ge=0)
 
 
 class AdminUserCreate(BaseModel):

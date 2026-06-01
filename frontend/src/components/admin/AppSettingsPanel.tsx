@@ -4,7 +4,6 @@ import {
   Gauge,
   Globe,
   Loader2,
-  Mail,
   ShieldAlert,
   ShieldCheck,
   TriangleAlert,

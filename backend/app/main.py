@@ -27,8 +27,6 @@ from app.observability.capture import (
 )
 from app.chat.temporary_sweeper import start_sweeper
 from app.chat.semantic_index import start_semantic_indexer
-from app.email.scheduler import start_email_scheduler
-from app.email.indexer import start_email_indexer
 from app.tasks.scheduler import start_scheduler
 from app.redis_client import close_redis, redis
 
@@ -80,20 +78,11 @@ async def lifespan(_: FastAPI):
     # can blend keyword + meaning-based recall. No-op when embeddings
     # aren't configured.
     indexer_task = start_semantic_indexer()
-    # Phase 12 (v3) — email sync scheduler (polls due email_accounts every
-    # minute; actual syncs fire every ~5 min via next_sync_at). No-op when
-    # email_integration_enabled is False in app_settings.
-    email_scheduler_task = start_email_scheduler()
-    # Phase 12 (v3) — email RAG indexer. Continuously embeds email messages
-    # into email_chunks for semantic search. No-op when embeddings aren't
-    # configured or email is disabled.
-    email_indexer_task = start_email_indexer()
     try:
         yield
     finally:
         logger.info("Promptly backend shutting down")
-        for bg in (sweeper_task, scheduler_task, indexer_task,
-                   email_scheduler_task, email_indexer_task):
+        for bg in (sweeper_task, scheduler_task, indexer_task):
             bg.cancel()
             try:
                 await bg
@@ -288,7 +277,6 @@ from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
 from app.memory.router import router as memory_router  # noqa: E402
 from app.tasks.router import router as tasks_router  # noqa: E402
-from app.email.router import router as email_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
@@ -352,7 +340,6 @@ app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
 app.include_router(billing_router, prefix="/api/usage", tags=["usage"])
-app.include_router(email_router, prefix="/api/email", tags=["email"])
 app.include_router(research_router, prefix="/api", tags=["research"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
 app.include_router(files_router, prefix="/api/files", tags=["files"])

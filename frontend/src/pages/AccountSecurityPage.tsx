@@ -5,14 +5,12 @@ import {
   Bookmark,
   Brain,
   LayoutGrid,
-  Mail,
   ShieldCheck,
   SlidersHorizontal,
   UserRound,
 } from "lucide-react";
 
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
-import { EmailPanel } from "@/components/account/EmailPanel";
 import { FeatureVisibilityPanel } from "@/components/account/FeatureVisibilityPanel";
 import { MemoryPanel } from "@/components/account/MemoryPanel";
 import { NotificationsPanel } from "@/components/account/NotificationsPanel";
@@ -53,7 +51,6 @@ export function AccountSecurityPage() {
     { id: "chat", label: "Chat defaults", icon: SlidersHorizontal, node: <ChatPreferencesPanel /> },
     { id: "memory", label: "Memory", icon: Brain, node: <MemoryPanel /> },
     { id: "interface", label: "Interface", icon: LayoutGrid, node: <FeatureVisibilityPanel /> },
-    { id: "email", label: "Email", icon: Mail, node: <EmailPanel /> },
     { id: "usage", label: "Usage & cost", icon: BarChart3, node: <UsagePanel /> },
     { id: "prompts", label: "Saved prompts", icon: Bookmark, node: <SavedPromptsPanel /> },
     { id: "notifications", label: "Notifications", icon: Bell, node: <NotificationsPanel /> },

@@ -24,7 +24,6 @@ import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
 import { StudyPage } from "@/pages/StudyPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
 import { StudyTopicPage } from "@/pages/StudyTopicPage";
-import { EmailPage } from "@/pages/EmailPage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
@@ -218,7 +217,6 @@ export default function App() {
         <Route path="/chat/:id" element={<ChatPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
-        <Route path="/email" element={<EmailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route

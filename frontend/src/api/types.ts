@@ -62,21 +62,6 @@ export interface UserSettings {
   memory_mode?: "off" | "auto" | "manual";
   /** Conversation ids the user has hidden from their own sidebar. */
   hidden_conversations?: string[];
-  /**
-   * Phase 12 — Email integration mode.
-   * ``"off"``       — disabled (default; nav item hidden).
-   * ``"triage"``    — sync + AI triage; no RAG / chat tool.
-   * ``"triage_rag"`` — triage + email_chunks RAG + search_emails tool.
-   * Overridden to "off" when admin kills the feature org-wide.
-   */
-  email_mode?: "off" | "triage" | "triage_rag";
-  /**
-   * Phase 12 — Email notification posture.
-   * ``"brief"``   — daily AI digest (default).
-   * ``"instant"`` — push on high-priority / VIP / deadline mail.
-   * ``"off"``     — no email notifications.
-   */
-  email_notify?: "brief" | "instant" | "off";
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -103,10 +88,6 @@ export interface UserPreferencesUpdate {
   memory_mode?: "off" | "auto" | "manual";
   /** Replace the full set of conversation ids hidden from the sidebar. */
   hidden_conversations?: string[];
-  /** Phase 12 — Email integration mode. */
-  email_mode?: "off" | "triage" | "triage_rag";
-  /** Phase 12 — Email notification posture. */
-  email_notify?: "brief" | "instant" | "off";
 }
 
 export interface User {
@@ -262,17 +243,6 @@ export interface AppSettings {
   research_provider_id: string | null;
   research_model_id: string | null;
   research_configured: boolean;
-  /**
-   * Phase 12 — Email integration. Kill switch + OAuth credentials +
-   * triage model. Off by default; admin opts in.
-   */
-  email_integration_enabled: boolean;
-  google_oauth_client_id: string | null;
-  google_oauth_configured: boolean;
-  email_triage_provider_id: string | null;
-  email_triage_model_id: string | null;
-  email_triage_configured: boolean;
-  email_triage_daily_token_cap: number | null;
   updated_at: string;
 }
 

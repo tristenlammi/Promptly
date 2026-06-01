@@ -3,7 +3,6 @@ import {
   CalendarClock,
   FolderKanban,
   FolderOpen,
-  Mail,
   MessagesSquare,
   Star,
   Trash2,
@@ -64,12 +63,6 @@ export interface NavItem {
   /** When set, this item is *optional*: the user can hide it from their
    *  sidebar via Account → Features. Matches an ``OptionalNavKey``. */
   optionalKey?: OptionalNavKey;
-  /**
-   * When true, the item is only shown when the user's email_mode is
-   * not "off" (i.e. they have connected Gmail and not disabled email).
-   * Gated in Sidebar.tsx using useAuthStore email_mode.
-   */
-  emailGated?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -101,13 +94,6 @@ export const NAV_ITEMS: NavItem[] = [
     section: "study",
     desktopOnly: true,
     optionalKey: "study",
-  },
-  {
-    to: "/email",
-    icon: Mail,
-    label: "Email",
-    section: "chat",
-    emailGated: true,
   },
   {
     to: "/files",

@@ -17,7 +17,6 @@ from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
-from app.chat.tools.search_emails import SearchEmailsTool
 from app.chat.tools.web_search import WebSearchTool
 
 # NOTE: ``AttachDemoFileTool`` used to sit between ``EchoTool`` and
@@ -38,8 +37,6 @@ REGISTRY: list[Tool] = [
     CodeInterpreterTool(),
     WebSearchTool(),
     FetchUrlTool(),
-    # Phase 12 — only exposed when the user is in email context (category "email")
-    SearchEmailsTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

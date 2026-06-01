@@ -177,17 +177,6 @@ class UserPreferencesUpdate(BaseModel):
     # (e.g. a chat that reached them before per-chat sharing was retired,
     # which they don't own and so can't delete). Stored as id strings.
     hidden_conversations: list[str] | None = None
-    # Email integration (Phase 12).
-    #   "off"      — email integration disabled for this user (default).
-    #   "triage"   — sync + AI triage; no RAG / chat tool.
-    #   "triage_rag" — sync + triage + email_chunks RAG + search_emails tool.
-    # Overridden to "off" when app_settings.email_integration_enabled is False.
-    email_mode: Literal["off", "triage", "triage_rag"] | None = None
-    # Notification posture for AI-detected important emails.
-    #   "brief"   — daily AI digest (default).
-    #   "instant" — push on high-priority / VIP / deadline mail.
-    #   "off"     — no email notifications.
-    email_notify: Literal["brief", "instant", "off"] | None = None
 
     @field_validator("hidden_nav")
     @classmethod
