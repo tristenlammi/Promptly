@@ -52,29 +52,30 @@ class GeneratePdfTool(Tool):
     name = "generate_pdf"
     description = (
         "Render a PDF file from Markdown and attach it to your reply. "
-        "Call this whenever the user asks for a PDF, report, write-up, "
-        "brief, document, memo, summary doc, printable, export, or "
-        "anything they want to download / save / print as a file. "
-        "Examples that should trigger this tool: 'make me a PDF of...', "
-        "'write a report on...', 'turn this into a document', 'export "
-        "this conversation as a PDF', 'generate a brief about...', "
-        "'save this as a file'. The Markdown source is also saved "
-        "alongside (in 'Generated Files / Files') so the user can edit "
-        "it later in the side-panel editor and re-render. Supports "
-        "headings, bold/italic/strikethrough, ordered + bulleted lists, "
-        "GFM tables, fenced code blocks with syntax labels, blockquotes, "
-        "and links. Do NOT call this for a chat-style answer the user "
-        "just wants to read on screen — only when an actual downloadable "
-        "file is the goal."
+        "ONLY call this when the user explicitly asks for an actual "
+        "downloadable / printable file — e.g. 'make me a PDF of...', "
+        "'export this as a PDF', 'save this as a PDF', 'give me a "
+        "printable version', 'turn this into a downloadable document'. "
+        "The request must clearly be for a FILE, not just for written "
+        "content. Do NOT call this for ordinary chat answers, even when "
+        "the user says 'report', 'summary', 'write-up', 'brief', 'memo', "
+        "or 'document' — those words almost always describe text they "
+        "want to read inline, not a file. When in doubt, answer inline "
+        "and let the user ask for a PDF if they actually want one. "
+        "The Markdown source is saved alongside (in 'Generated Files / "
+        "Files') so the user can edit it later in the side-panel editor "
+        "and re-render. Supports headings, bold/italic/strikethrough, "
+        "ordered + bulleted lists, GFM tables, fenced code blocks with "
+        "syntax labels, blockquotes, and links."
     )
     # Conversational version for the tool-aware system prompt. Kept
     # short because it appears in a bullet list with the other tools.
     prompt_hint = (
         "Render a downloadable PDF (with editable Markdown source) and "
-        "attach it to your reply. Use whenever the user wants a file, "
-        "report, document, brief, write-up, or anything printable / "
-        "downloadable — never refuse this on the grounds that you "
-        "'can't generate files'."
+        "attach it to your reply. Use ONLY when the user explicitly asks "
+        "for a PDF or other downloadable file — never for ordinary "
+        "answers, summaries, reports, or write-ups they just want to "
+        "read inline. Don't proactively offer or auto-generate PDFs."
     )
     parameters: dict[str, Any] = {
         "type": "object",
