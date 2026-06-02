@@ -2491,7 +2491,12 @@ async def get_session_arc(
     user: User = Depends(get_current_user),
 ) -> SessionArcResponse:
     """Phase plan + per-objective mastery for the arc rail component."""
-    session, unit = await _get_owned_session(session_id, user, db)
+    session, _ = await _get_owned_session(session_id, user, db)
+    unit: StudyUnit | None = (
+        await db.get(StudyUnit, session.unit_id)
+        if session.unit_id is not None
+        else None
+    )
 
     objectives: list[SessionArcObjective] = []
     if unit is not None:
