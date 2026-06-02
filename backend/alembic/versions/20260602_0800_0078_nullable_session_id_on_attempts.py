@@ -9,7 +9,7 @@ Revises: 0077_session_goal
 
 from alembic import op
 
-revision = "0078_nullable_session_id_attempts"
+revision = "0078_attempt_session_nullable"
 down_revision = "0077_session_goal"
 branch_labels = None
 depends_on = None

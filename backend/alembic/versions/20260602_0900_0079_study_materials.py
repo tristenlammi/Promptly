@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0079_study_materials"
-down_revision = "0078_nullable_session_id_attempts"
+down_revision = "0078_attempt_session_nullable"
 branch_labels = None
 depends_on = None
 
