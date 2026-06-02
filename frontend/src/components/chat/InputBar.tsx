@@ -100,6 +100,9 @@ interface InputBarProps {
    *  button is the only submission path. Used by the study session
    *  page where students write multi-line answers. */
   newlineOnEnter?: boolean;
+  /** Hide the Enhance prompt button. Study sessions omit it so student
+   *  answers stay authentic and unassisted. */
+  showEnhance?: boolean;
 }
 
 /** Pending in-flight upload tracked alongside finished attachments. */
@@ -131,6 +134,7 @@ export function InputBar({
   projectId = null,
   onResearch,
   newlineOnEnter = false,
+  showEnhance = true,
 }: InputBarProps) {
   // Persist the draft (text + attachments) in a module-level store so a
   // mobile rotation that flips the AppLayout tree (crossing the 768px
@@ -911,8 +915,8 @@ export function InputBar({
                   {!isMobile && <span className="font-medium">Attach</span>}
                 </button>
               )}
-              {/* Phase 10 — Enhance always visible in the main bar. */}
-              <button
+              {/* Phase 10 — Enhance visible in the main bar (hidden in study sessions). */}
+              {showEnhance && <button
                 type="button"
                 onClick={() => void handleEnhance()}
                 disabled={
@@ -937,7 +941,7 @@ export function InputBar({
                   <Sparkles className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
                 )}
                 {!isMobile && <span className="font-medium">Enhance</span>}
-              </button>
+              </button>}
               {speech.supported && (
                 <button
                   type="button"

@@ -503,6 +503,7 @@ export function StudySessionPage() {
                   onCancel={cancel}
                   allowAttachments={false}
                   newlineOnEnter
+                  showEnhance={false}
                   autoFocus
                   placeholder={
                     kind === "exam"
