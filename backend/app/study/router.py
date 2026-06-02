@@ -1804,7 +1804,7 @@ async def send_message(
         "session_id": str(session.id),
         "project_id": str(project.id),
         "user_message_id": str(user_msg.id),
-        "provider_id": str(provider_id),
+        "provider_id": str(provider.id),
         "model_id": model_id,
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
