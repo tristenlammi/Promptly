@@ -30,7 +30,7 @@ def upgrade() -> None:
             "phase_history",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="'[]'::jsonb",
+            server_default=sa.text("'[]'::jsonb"),
         ),
     )
 
