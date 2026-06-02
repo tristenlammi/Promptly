@@ -210,12 +210,16 @@ emit ``mark_complete`` alongside any other action.
     "preferred_examples_from": ["..."], "free_form": {{...}} }} }}``
 
 - ``update_objective_mastery`` — record that you just assessed a
-  specific objective. Called after a teach-back, a practice
-  question, or a whiteboard submission that clearly targets one
-  objective. Also reschedules the spaced-repetition cadence.
+  specific objective. Called after a whiteboard submission or
+  teach-back that clearly targets one objective. Also reschedules
+  the spaced-repetition cadence.
   ``{{"type": "update_objective_mastery", "objective_index": 0,
     "score": 0-100, "evidence": "1-2 sentence note on what they
-    demonstrated."}}``
+    demonstrated.", "phase": "independent"}}``
+  **Phase gate (server-enforced):** The server silently rejects this
+  action during ``hook``, ``activate``, ``present``, and ``guided``
+  phases. Only emit it after a whiteboard submission in the
+  ``independent`` (or later) phase — never after a discussion alone.
 
 - ``log_misconception`` — when you spot a recurring wrong model
   the student has (not a one-off slip). Unit-scoped by default.
@@ -3023,13 +3027,28 @@ async def handle_board_op(
     if not isinstance(block_payload, dict):
         return None
 
-    # Determine next order_index for this session.
-    from sqlalchemy import func as sa_func
-    count_stmt = select(sa_func.count()).select_from(StudyBoardBlock).where(
-        StudyBoardBlock.session_id == session.id
+    # Dedup: for term blocks, skip if the same term name is already pinned.
+    # For other kinds, a simple kind+payload check avoids identical duplicates
+    # (e.g. the model re-pinning the same note on a retry).
+    existing_stmt = select(StudyBoardBlock).where(
+        StudyBoardBlock.session_id == session.id,
+        StudyBoardBlock.kind == kind,
     )
-    count_result = await db.execute(count_stmt)
-    next_index = (count_result.scalar() or 0)
+    existing_blocks = (await db.execute(existing_stmt)).scalars().all()
+    if kind == "term":
+        new_term = str(block_payload.get("term", "")).strip().lower()
+        if new_term and any(
+            str(b.payload_json.get("term", "")).strip().lower() == new_term
+            for b in existing_blocks
+        ):
+            return None
+    else:
+        # Exact payload dedup for other block kinds.
+        if any(b.payload_json == block_payload for b in existing_blocks):
+            return None
+
+    # Determine next order_index for this session.
+    next_index = len(existing_blocks)
 
     block = StudyBoardBlock(
         session_id=session.id,
@@ -3201,6 +3220,20 @@ async def _apply_single_capture(
                 result["learner_profile_updated"] = True
             return
         if action_type == "update_objective_mastery":
+            # Phase gate: reject mastery scoring before the student has
+            # actually practised.  The present and guided phases are for
+            # introduction and faded examples; independent (and later
+            # phases) are the only moments evidence of retrieval exists.
+            # Silently drop the action so the orchestrator can't be
+            # short-circuited by a rushed tutor.
+            _early_phases = {"hook", "activate", "present", "guided"}
+            if session is not None and session.phase in _early_phases:
+                logger.warning(
+                    "study: rejected update_objective_mastery in phase=%s "
+                    "(wait for independent/interleave phases)",
+                    session.phase,
+                )
+                return
             attempt = await handle_update_objective_mastery(
                 db=db,
                 project=project,

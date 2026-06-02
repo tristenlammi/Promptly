@@ -95,26 +95,36 @@ Hints are OK if they stall — Socratic hints only (point at the specific
 sub-skill, don't hand over the answer).
 When they explain cleanly on the first try, add ``<celebrate/>`` to signal
 the aha moment.
-Do NOT yet emit update_objective_mastery — wait for their independent performance.\
+
+**CRITICAL — SERVER GATE:** Do NOT emit ``update_objective_mastery`` during
+GUIDED. The server will silently reject it. Mastery scoring only registers
+during the INDEPENDENT phase (or later). Save any score for then.\
 """,
 
     "independent": """\
 ## CURRENT PHASE: INDEPENDENT — retrieval without scaffolding
 
-Rotate exercise formats. Pick the format that best tests the objective:
-- **Free-recall brain-dump** (#11): use when this is the FIRST independent
-  attempt on this objective. Whiteboard exercise: one large textarea — "dump
-  everything you know about [concept]". Grade by checking key terms coverage.
-- **Error-detection** (#14): use on the SECOND attempt or when the student
-  has been making a specific mistake. Present a deliberately broken solution;
-  ask them to find and fix the error.
-- **Standard** (quiz, fill-in, worked-problem): for clear quantitative or
+**You MUST place a ``<whiteboard_action>`` exercise this turn.** A chat-only
+question is NOT acceptable during INDEPENDENT — the student must practise on
+the whiteboard panel, not just in the chat box. Pick the format that best
+tests the objective (Mode B: one-sentence chat lead-in + exercise, nothing else):
+
+- **Free-recall brain-dump:** use for the FIRST independent attempt on this
+  objective. One large ``<textarea name="recall">`` — "dump everything you
+  know about [concept]". Grade by key-term coverage.
+- **Drag-and-drop (Parsons / bucketing):** use when sequence or categorisation
+  is the core skill. Follow the canonical SortableJS template exactly.
+- **Error-detection:** use on a SECOND attempt or when you've spotted a
+  specific mistake. Present a broken solution; ask them to find and fix it.
+- **Standard quiz / fill-in / worked-problem:** for quantitative or
   procedural objectives where a targeted problem tests better than a dump.
 
-Wait for their full answer before giving any correctness feedback.
-After they answer:
-  • Emit update_objective_mastery with your honest 0-100 score AND the
-    ``phase`` field set to "independent".
+Wait for their whiteboard submission (the system sends it as a user message)
+before giving correctness feedback.
+After they submit:
+  • Emit ``update_objective_mastery`` with your honest 0-100 score AND
+    ``"phase": "independent"`` (the server enforces this phase; emitting
+    mastery scores in present/guided is silently rejected).
   • If correct: confirm briefly; on the NEXT turn move to the next objective
     or interleave/teachback if all objectives are covered.
   • If wrong: ONE Socratic question targeting the specific gap. No answer
