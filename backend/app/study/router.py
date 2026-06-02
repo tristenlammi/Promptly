@@ -2008,7 +2008,7 @@ async def _stream_generator(
                 session_goal=getattr(session, "session_goal", None),
                 material_context=retrieved_material or None,
             )
-            allowed_tags = ["whiteboard_action", "unit_action"]
+            allowed_tags = ["whiteboard_action", "unit_action", "board_op"]
         elif session_kind == "exam" and exam is not None:
             system_prompt = build_exam_system_prompt(
                 project=project,

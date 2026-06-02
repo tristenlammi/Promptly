@@ -29,6 +29,9 @@ const CONFIDENCE_MARKER_RE = /<\s*request_confidence\s*\/?\s*>/gi;
 const TEACHBACK_MARKER_RE = /<\s*request_teachback\s*\/?\s*>/gi;
 const PREDICT_MARKER_RE = /<\s*request_predict\s*\/?\s*>/gi;
 const CELEBRATE_MARKER_RE = /<\s*celebrate\s*\/?\s*>/gi;
+// Strip board_op tags so they never appear in the chat transcript even
+// if the backend parser fails to intercept them during streaming.
+const BOARD_OP_RE = /<\s*board_op\b[^>]*\/?>[\s\S]*?<\/board_op>|<\s*board_op\b[^>]*\/>/gi;
 
 export interface StudyMarkers {
   stripped: string;
@@ -48,7 +51,10 @@ export function extractStudyMarkers(content: string): StudyMarkers {
   PREDICT_MARKER_RE.lastIndex = 0;
   CELEBRATE_MARKER_RE.lastIndex = 0;
 
-  if (!requestConfidence && !requestTeachback && !requestPredict && !celebrate) {
+  const hasBoardOp = BOARD_OP_RE.test(content);
+  BOARD_OP_RE.lastIndex = 0;
+
+  if (!requestConfidence && !requestTeachback && !requestPredict && !celebrate && !hasBoardOp) {
     return {
       stripped: content,
       requestConfidence: false,
@@ -59,6 +65,7 @@ export function extractStudyMarkers(content: string): StudyMarkers {
   }
 
   const stripped = content
+    .replace(BOARD_OP_RE, "")
     .replace(CONFIDENCE_MARKER_RE, "")
     .replace(TEACHBACK_MARKER_RE, "")
     .replace(PREDICT_MARKER_RE, "")
