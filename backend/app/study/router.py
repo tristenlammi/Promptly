@@ -1985,7 +1985,10 @@ async def _stream_generator(
             # query so the returned chunks are scoped to this turn.
             # Falls back to "" when no embedding provider is configured
             # or no materials are indexed — graceful degradation.
-            last_user_text = payload.content or ""
+            last_user_text = next(
+                (m.content for m in reversed(history_rows) if m.role == "user"),
+                "",
+            ) or ""
             retrieved_material = await retrieve_for_study_session(
                 db,
                 study_project_id=project.id,
