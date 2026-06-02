@@ -96,6 +96,10 @@ interface InputBarProps {
    *  but the "exclude self" step is a no-op. */
   currentConversationId?: string | null;
   projectId?: string | null;
+  /** When true, Enter inserts a newline instead of sending. The send
+   *  button is the only submission path. Used by the study session
+   *  page where students write multi-line answers. */
+  newlineOnEnter?: boolean;
 }
 
 /** Pending in-flight upload tracked alongside finished attachments. */
@@ -126,6 +130,7 @@ export function InputBar({
   currentConversationId = null,
   projectId = null,
   onResearch,
+  newlineOnEnter = false,
 }: InputBarProps) {
   // Persist the draft (text + attachments) in a module-level store so a
   // mobile rotation that flips the AppLayout tree (crossing the 768px
@@ -583,12 +588,9 @@ export function InputBar({
         return;
       }
     }
-    // On mobile, Enter should insert a newline so users have a
-    // dedicated tap target (the send button) for submission. The
-    // on-screen keyboard's Enter key on phones is almost universally
-    // expected to be "new line" in chat UIs (iMessage, WhatsApp,
-    // Messenger all behave this way).
-    if (isMobile) return;
+    // On mobile, or when newlineOnEnter is set (e.g. study sessions),
+    // Enter inserts a newline. Submit only via the send button.
+    if (isMobile || newlineOnEnter) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();
@@ -1010,6 +1012,8 @@ export function InputBar({
                 title={
                   uploadingCount > 0
                     ? "Waiting for uploads to finish..."
+                    : newlineOnEnter
+                    ? "Send"
                     : "Send (Enter)"
                 }
               >
@@ -1041,7 +1045,7 @@ export function InputBar({
             )}
           </span>
           <span className="shrink-0">
-            Enter to send · Shift+Enter for newline
+            {newlineOnEnter ? "Click send to submit" : "Enter to send · Shift+Enter for newline"}
           </span>
         </div>
       </div>
