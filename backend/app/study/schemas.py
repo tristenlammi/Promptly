@@ -172,8 +172,10 @@ class StudyProjectCreate(BaseModel):
     # planner front-loads prerequisite units for beginners and keeps
     # the plan tight for refreshers.
     current_level: CurrentLevel | None = None
-    model_id: str = Field(min_length=1, max_length=255)
-    provider_id: uuid.UUID
+    # Ignored when admin app_settings has a study/teaching model configured.
+    # Kept optional for back-compat with older clients that still send them.
+    model_id: str | None = Field(default=None, max_length=255)
+    provider_id: uuid.UUID | None = None
     # Optional list of already-uploaded file IDs to attach as learning
     # materials. Files are indexed asynchronously after the project is
     # created; extracted text is used synchronously to ground the plan.
