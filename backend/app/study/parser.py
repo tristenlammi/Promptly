@@ -59,12 +59,25 @@ class TaggedActionParser:
         ]
         self._opens: list[tuple[str, str]] = [(f"<{t}>", t) for t in self._tags]
         self._closes: dict[str, str] = {t: f"</{t}>" for t in self._tags}
+
+        # board_op can also appear as a self-closing XML-attribute tag:
+        #   <board_op op="add" kind="term" payload={...} />
+        # Add "<board_op " (with trailing space) as an alternate open that
+        # closes on "/>" — captured under the internal name "board_op_attr"
+        # and normalised back to "board_op" before being yielded.
+        if "board_op" in self._tags:
+            self._opens.append(("<board_op ", "board_op_attr"))
+            self._closes["board_op_attr"] = "/>"
+
         # Longest possible tag-token so we know how much to retain as
         # "could still become a tag prefix" at buffer tail.
         self._max_tag_len = max(
             max(len(o) for o, _ in self._opens),
             max(len(c) for c in self._closes.values()),
         )
+
+        # Internal aliases: map parser-internal names → public tag names.
+        self._tag_aliases: dict[str, str] = {"board_op_attr": "board_op"}
 
         self._buf: str = ""
         self._in_tag: str | None = None  # Name of the tag currently open, or None.
@@ -113,8 +126,9 @@ class TaggedActionParser:
                 close_tag = self._closes[self._in_tag]
                 close_idx = self._buf.find(close_tag)
                 if close_idx != -1:
+                    public_tag = self._tag_aliases.get(self._in_tag, self._in_tag)
                     captures.append(
-                        Capture(tag=self._in_tag, body=self._buf[:close_idx])
+                        Capture(tag=public_tag, body=self._buf[:close_idx])
                     )
                     self._buf = self._buf[close_idx + len(close_tag):]
                     self._in_tag = None

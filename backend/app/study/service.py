@@ -306,23 +306,27 @@ default to whiteboard for everything.
   durable artefacts the student should be able to glance at for the
   rest of the lesson. Kinds and when to use each:
 
+  **Format — always wrap the JSON in ``<board_op>`` tags, like this:**
+  ``<board_op>{{"op":"add","kind":"term","payload":{{"term":"OSI Model","def":"A 7-layer reference framework."}}}}</board_op>``
+
+  Kinds and payloads:
     · ``"term"`` — pin a new vocabulary word as soon as you define it.
-      ``{{"op":"add","kind":"term","payload":{{"term":"...","def":"..."}}}}``
+      ``<board_op>{{"op":"add","kind":"term","payload":{{"term":"...","def":"..."}}}}</board_op>``
     · ``"note"`` — pin a key rule or insight (1-2 sentences max).
-      ``{{"op":"add","kind":"note","payload":{{"text":"..."}}}}``
+      ``<board_op>{{"op":"add","kind":"note","payload":{{"text":"..."}}}}</board_op>``
     · ``"worked_example"`` — pin a step-by-step solution during the
       PRESENT and GUIDED phases so the student can reference it while
       practising.
-      ``{{"op":"add","kind":"worked_example","payload":{{"title":"...","steps":["...","..."]}}}}``
+      ``<board_op>{{"op":"add","kind":"worked_example","payload":{{"title":"...","steps":["...","..."]}}}}</board_op>``
     · ``"callout"`` — highlight a critical warning or surprising fact.
-      ``{{"op":"add","kind":"callout","payload":{{"text":"...","label":"Warning"|"Key idea"|"Surprise"}}}}``
+      ``<board_op>{{"op":"add","kind":"callout","payload":{{"text":"...","label":"Warning"}}}}</board_op>``
     · ``"concept_node"`` — anchor a concept bubble (good for hook
       puzzles and transfer anchors).
-      ``{{"op":"add","kind":"concept_node","payload":{{"label":"...","note":"..."}}}}``
+      ``<board_op>{{"op":"add","kind":"concept_node","payload":{{"label":"...","note":"..."}}}}</board_op>``
     · ``"concept_map"`` — a labelled node-and-edge graph showing how
       the unit's concepts connect. Build this once in the ``transfer``
       or ``close`` phase after all objectives are covered.
-      ``{{"op":"add","kind":"concept_map","payload":{{"title":"...","nodes":[{{"id":"a","label":"...","note":"..."}}],"edges":[{{"from":"a","to":"b","label":"..."}}]}}}}``
+      ``<board_op>{{"op":"add","kind":"concept_map","payload":{{"title":"...","nodes":[{{"id":"a","label":"...","note":""}}],"edges":[{{"from":"a","to":"b","label":"..."}}]}}}}</board_op>``
       Keep it to 4-7 nodes; more than that loses clarity.
 
   **When to pin:** every time you introduce a term, post a worked
@@ -1816,6 +1820,32 @@ def parse_action_payload(raw: str) -> dict[str, Any] | None:
     return obj
 
 
+_BOARD_OP_ATTR_RE = re.compile(
+    r"""op=["']?(\w+)["']?\s+kind=["']?(\w+)["']?\s+payload=(\{.*\})""",
+    re.DOTALL,
+)
+
+
+def parse_board_op_attr_body(raw: str) -> dict[str, Any] | None:
+    """Fallback: parse board_op body captured from XML-attribute style.
+
+    The model sometimes generates ``<board_op op="add" kind="term" payload={...} />``
+    instead of ``<board_op>{"op":...}</board_op>``.  The attribute-style open
+    is now captured by the parser with the trailing attribute string as the body.
+    """
+    m = _BOARD_OP_ATTR_RE.search(raw.strip().rstrip("/>").strip())
+    if not m:
+        return None
+    op, kind, payload_str = m.group(1), m.group(2), m.group(3)
+    try:
+        payload = json.loads(payload_str)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {"op": op, "kind": kind, "payload": payload}
+
+
 def _strip_code_fences(body: str) -> str:
     """Strip markdown code fences the model sometimes wraps JSON in.
 
@@ -3069,6 +3099,9 @@ async def apply_captures(
     for cap in captures:
         try:
             payload = parse_action_payload(cap.body)
+            if payload is None and cap.tag == "board_op":
+                # Fallback: model used XML-attribute style instead of JSON body.
+                payload = parse_board_op_attr_body(cap.body)
             if payload is None:
                 continue
             await _apply_single_capture(
