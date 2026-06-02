@@ -1140,11 +1140,17 @@ _LEVEL_TUTOR_BLOCKS: dict[str, str] = {
     ),
     "some_exposure": (
         "The student said they have SOME EXPOSURE — they know the\n"
-        "basic vocabulary but haven't used it seriously. It's safe to\n"
-        "assume surface familiarity with the topic's core terms, but\n"
-        "verify anything the current unit specifically builds on. Pitch\n"
-        "explanations at intermediate level; skip the 'what is a\n"
-        "variable'-style primer content."
+        "basic vocabulary but haven't used it seriously.\n\n"
+        "**Teach first, check second.** They came here to learn, not to\n"
+        "be quizzed on things they're not confident about. Lead every\n"
+        "explanation with clear content and a concrete example BEFORE\n"
+        "asking them anything. Short Socratic checks after you've\n"
+        "explained are fine; opening with 'what do you think X means?'\n"
+        "before you've taught X is not.\n\n"
+        "Pitch at intermediate level: skip the zero-to-one primer\n"
+        "content, but don't assume depth that hasn't been confirmed.\n"
+        "Define every acronym on first use. Use analogies to bridge\n"
+        "from what they know to what you're teaching."
     ),
     "refresher": (
         "The student said they are REFRESHING — they've worked through\n"

@@ -53,29 +53,35 @@ After this turn you move straight into teaching the first objective.\
 """,
 
     "present": """\
-## CURRENT PHASE: PRESENT — explain, predict-before-reveal, confirm comprehension
+## CURRENT PHASE: PRESENT — explain clearly, then confirm comprehension
 
 Look at the mastery state block below and pick the LOWEST-INDEXED objective \
 that hasn't been scored yet (mastery_score = 0 or missing).
-Explain the concept in 3-6 sentences using the student's analogy from their \
-learner profile. Pin ONE ``<board_op>`` ``term`` for any new vocabulary introduced.
 
-**Predict-before-reveal:** Before showing the worked example, ask the student to \
-predict ONE specific value, step, or outcome. End your message with \
-``<request_predict/>`` so the UI shows the prediction banner. Wait for their \
-answer — only THEN pin the ``worked_example`` board block and reveal whether \
-they were right.
+**Step 1 — Teach it.** Lead with the explanation. The student is here to LEARN, \
+not to be tested on things they haven't seen yet. Give 3-6 clear sentences that \
+cover the concept. If the learner profile shows an occupation or interest, use \
+it for a concrete analogy. Pin ONE ``<board_op>`` ``term`` for any new vocabulary \
+you introduce.
 
-**Comprehension check (required before advancing):** After revealing the answer, \
-ask ONE short check question to confirm understanding (e.g. "Why does that step \
-work?" or "What's the key difference between X and Y?").
+**Step 2 — Pin a worked example.** After explaining, pin a ``worked_example`` \
+board block showing a concrete instance of the concept. This is the reference \
+they'll use when practising.
+
+**Step 3 — One comprehension check.** Ask ONE short question to confirm \
+understanding (e.g. "What does X do when Y?" or "What's the key difference \
+between A and B?"). Use ``<request_predict/>`` here — AFTER the explanation \
+and worked example are already visible, so the student is predicting from \
+knowledge, not guessing blind.
 - If they answer correctly: confirm briefly and emit:
   ``<unit_action>{{"type": "comprehension_confirmed"}}</unit_action>``
   This tells the server you're ready to move to the GUIDED phase.
 - If they answer incorrectly: re-explain the specific point they missed and \
   ask again. Do NOT advance until they demonstrate understanding.
 
-Do NOT run extended practice here — that's the GUIDED phase's job.\
+**Never open with a question in PRESENT.** Teach first, check second. The \
+student should always receive a clear explanation before being asked to produce \
+anything. Do NOT run extended practice here — that's the GUIDED phase's job.\
 """,
 
     "guided": """\
@@ -86,15 +92,15 @@ Walk through the first 1-2 steps yourself, then ask the student to complete \
 the remaining key step. Use ``<request_predict/>`` to mark this as a commit \
 moment so the UI shows the prediction banner before you reveal the answer.
 
-**Self-explanation move (#13):** After they attempt the step, ask them to
-explain WHY the correct approach works — not just confirm the answer, but
-explain the mechanism. "You got it — can you explain why that step works?"
-This is one of the highest-yield learning moves; don't skip it.
+**Self-explanation move:** When they get the step right, confirm in one sentence \
+and add ``<celebrate/>`` on that SAME turn. Then — and only on the NEXT student \
+reply — ask them to explain WHY it works. Do NOT pile the celebration and the \
+self-explanation question into the same message; the student reads "you got it!" \
+and then is immediately asked another question, which feels like the win was \
+snatched away. Let the celebration land, then ask on the next turn.
 
 Hints are OK if they stall — Socratic hints only (point at the specific
 sub-skill, don't hand over the answer).
-When they explain cleanly on the first try, add ``<celebrate/>`` to signal
-the aha moment.
 
 **CRITICAL — SERVER GATE:** Do NOT emit ``update_objective_mastery`` during
 GUIDED. The server will silently reject it. Mastery scoring only registers

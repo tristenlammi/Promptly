@@ -54,6 +54,7 @@ export function StudySessionPage() {
   const kickoffAttachedRef = useRef(false);
 
   const setActiveSession = useStudyStore((s) => s.setActiveSession);
+  const messages = useStudyStore((s) => s.messages);
   const setMessages = useStudyStore((s) => s.setMessages);
   const resetStream = useStudyStore((s) => s.resetStream);
   const isStreaming = useStudyStore((s) => s.isStreaming);
@@ -508,7 +509,18 @@ export function StudySessionPage() {
                   placeholder={
                     kind === "exam"
                       ? "Answer the examiner..."
-                      : "Ask your tutor..."
+                      : (() => {
+                          const last = [...messages].reverse().find(
+                            (m) => m.role === "assistant"
+                          );
+                          const lastText = (last?.content ?? "").replace(
+                            /<[^>]+>/g,
+                            ""
+                          );
+                          return lastText.trimEnd().endsWith("?")
+                            ? "Type your reply..."
+                            : "Ask your tutor...";
+                        })()
                   }
                 />
               </div>
