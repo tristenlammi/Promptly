@@ -50,6 +50,8 @@ class StudySessionSummary(BaseModel):
     student_turn_count: int = 0
     hint_count: int = 0
     current_review_focus_objective_id: uuid.UUID | None = None
+    # Phase 2 orchestrator — null for legacy sessions.
+    phase: str | None = None
 
 
 class StudySessionDetail(StudySessionSummary):
@@ -172,6 +174,10 @@ class StudyProjectCreate(BaseModel):
     current_level: CurrentLevel | None = None
     model_id: str = Field(min_length=1, max_length=255)
     provider_id: uuid.UUID
+    # Optional list of already-uploaded file IDs to attach as learning
+    # materials. Files are indexed asynchronously after the project is
+    # created; extracted text is used synchronously to ground the plan.
+    material_file_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class StudyProjectUpdate(BaseModel):
@@ -458,6 +464,136 @@ class CompletionReadinessResponse(BaseModel):
     student_turn_count: int
     min_turns_required: int | None = None
     has_reflection: bool
+
+
+# ---- Lesson board (Phase 3) ----
+class StudyBoardBlockResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    order_index: int
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class SessionArcObjective(BaseModel):
+    index: int
+    text: str
+    mastery_score: int | None = None
+    mastered: bool = False
+
+
+class SessionArcResponse(BaseModel):
+    phase: str | None = None
+    phase_history: list[dict[str, Any]] = Field(default_factory=list)
+    objectives: list[SessionArcObjective] = Field(default_factory=list)
+    total_objectives: int = 0
+    current_objective_index: int | None = None
+
+
+class SessionGoalUpdate(BaseModel):
+    session_goal: str | None = None
+
+
+class AssessorStatusResponse(BaseModel):
+    configured: bool
+    total_attempts_24h: int = 0
+    assessor_attempts_24h: int = 0
+
+
+class SessionTimelineEntry(BaseModel):
+    session_id: uuid.UUID
+    unit_id: uuid.UUID | None = None
+    unit_title: str
+    started_at: datetime
+    updated_at: datetime
+    student_turn_count: int
+    teachback_passed: bool
+    phase_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ---- Calibration history (Phase 4 #18) ----
+class CalibrationDataPoint(BaseModel):
+    """One retrieval attempt with confidence + correctness.
+
+    Used by the Calibration Chart to plot confidence (self-reported,
+    1-5) vs correctness (0/1) over time, exposing Dunning-Kruger
+    patterns to the student.
+    """
+    attempt_id: uuid.UUID
+    unit_title: str
+    objective_index: int
+    phase: str
+    confidence: int | None = None
+    correct: bool | None = None
+    created_at: datetime
+
+
+class CalibrationHistoryResponse(BaseModel):
+    project_id: uuid.UUID
+    data_points: list[CalibrationDataPoint] = Field(default_factory=list)
+
+
+# ---- Quick review (Phase 5 #1 daily review loop) ----
+
+class QuickReviewRequest(BaseModel):
+    """Request body for POST /projects/{id}/quick-review."""
+
+    objective_id: uuid.UUID
+    """UUID of the ``StudyObjectiveMastery`` row to review."""
+
+    answer: str = ""
+    """The student's free-recall answer text."""
+
+    confidence: int | None = None
+    """1-5 self-reported confidence *before* seeing feedback. Optional."""
+
+    self_correct: bool | None = None
+    """Student's own verdict — used as fallback when the assessor model
+    is not configured. If both assessor and self_correct are unavailable,
+    the SM-2 schedule is not updated (no-grade round-trip)."""
+
+
+class QuickReviewResponse(BaseModel):
+    correct: bool | None = None
+    """AI verdict. ``None`` when no assessor is available and the student
+    did not self-grade."""
+
+    feedback: str = ""
+    """One-sentence AI feedback, or empty when unavailable."""
+
+    new_mastery_score: float
+    """Updated mastery 0.0–1.0 for the objective."""
+
+    items_remaining: int
+    """How many items are still due after this submission."""
+
+    assessor_unavailable: bool = False
+    """True when the assessor model is not configured — UI should offer
+    a self-grade fallback."""
+
+
+# ---- Study materials ----
+
+class StudyMaterialResponse(BaseModel):
+    id: uuid.UUID
+    study_project_id: uuid.UUID
+    user_file_id: uuid.UUID
+    filename: str
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    indexing_status: str
+    indexing_error: str | None = None
+    indexed_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyMaterialAttach(BaseModel):
+    file_id: uuid.UUID
 
 
 # ---- Unit entry response ----

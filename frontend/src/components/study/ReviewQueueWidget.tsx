@@ -1,4 +1,5 @@
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Zap } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/shared/Button";
 import { useReviewQueueQuery } from "@/hooks/useStudy";
@@ -22,6 +23,7 @@ export function ReviewQueueWidget({
   projectId,
   onStartReview,
 }: ReviewQueueWidgetProps) {
+  const navigate = useNavigate();
   const { data, isLoading } = useReviewQueueQuery(projectId);
   const items = data?.items ?? [];
 
@@ -31,15 +33,25 @@ export function ReviewQueueWidget({
 
   return (
     <section className="rounded-card border border-amber-500/30 bg-amber-500/5 p-4">
-      <header className="flex items-center gap-2">
-        <RotateCcw className="h-4 w-4 text-amber-700 dark:text-amber-300" />
-        <h3 className="text-sm font-semibold text-[var(--text)]">
-          {items.length} {items.length === 1 ? "item" : "items"} due for review
-        </h3>
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <RotateCcw className="h-4 w-4 text-amber-700 dark:text-amber-300" />
+          <h3 className="text-sm font-semibold text-[var(--text)]">
+            {items.length} {items.length === 1 ? "item" : "items"} due for review
+          </h3>
+        </div>
+        <Button
+          size="sm"
+          variant="primary"
+          leftIcon={<Zap className="h-3.5 w-3.5" />}
+          onClick={() => navigate(`/study/topics/${projectId}/review`)}
+        >
+          Quick review
+        </Button>
       </header>
       <p className="mt-1 text-xs text-[var(--text-muted)]">
-        Spaced repetition keeps material sticky. Start any of these and the
-        tutor will weave a quick check of that concept into the session.
+        Spaced repetition keeps material sticky. Do a quick review session or
+        open a unit to weave a check into the full tutor flow.
       </p>
       <ul className="mt-3 space-y-2">
         {items.map((item) => (

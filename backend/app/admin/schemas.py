@@ -163,6 +163,14 @@ class AppSettingsResponse(BaseModel):
     research_model_id: str | None = None
     research_configured: bool
 
+    # ----- Study / Teaching model -----
+    study_provider_id: uuid.UUID | None = None
+    study_model_id: str | None = None
+    study_configured: bool
+    study_assessor_provider_id: uuid.UUID | None = None
+    study_assessor_model_id: str | None = None
+    study_assessor_configured: bool
+
     updated_at: datetime
 
 
@@ -237,6 +245,14 @@ class AppSettingsUpdate(BaseModel):
     # both to leave unchanged.
     research_provider_id: uuid.UUID | None = None
     research_model_id: str | None = Field(default=None, max_length=255)
+
+    # ----- Study / Teaching model -----
+    # Same paired semantics as the other model pairs. Favor a frontier
+    # reasoning model for the teacher; a fast/cheap model for the assessor.
+    study_provider_id: uuid.UUID | None = None
+    study_model_id: str | None = Field(default=None, max_length=255)
+    study_assessor_provider_id: uuid.UUID | None = None
+    study_assessor_model_id: str | None = Field(default=None, max_length=255)
 
 
 class AdminUserCreate(BaseModel):

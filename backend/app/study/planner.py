@@ -158,6 +158,7 @@ async def generate_plan(
     goal: str | None,
     topics: list[str],
     current_level: str | None = None,
+    material_context: str | None = None,
 ) -> GeneratedPlan:
     """Ask the model for a unit plan and parse the JSON response.
 
@@ -170,6 +171,7 @@ async def generate_plan(
         goal=goal,
         topics=topics,
         current_level=current_level,
+        material_context=material_context,
     )
 
     buf: list[str] = []
@@ -222,6 +224,7 @@ def _build_user_prompt(
     goal: str | None,
     topics: list[str],
     current_level: str | None,
+    material_context: str | None = None,
 ) -> str:
     topics_line = ", ".join(topics) if topics else "(none specified)"
     goal_line = (goal or "").strip() or "(none specified)"
@@ -229,12 +232,18 @@ def _build_user_prompt(
         (current_level or "").strip(),
         "(not provided — pitch at intermediate with light foundation coverage)",
     )
+    material_block = (
+        f"\n\n## Uploaded course material (use this to ground your unit plan)\n{material_context.strip()}"
+        if material_context and material_context.strip()
+        else ""
+    )
     return (
         f"## Topic title\n{title.strip()}\n\n"
         f"## What they want to learn\n{learning_request.strip()}\n\n"
         f"## Their end goal\n{goal_line}\n\n"
         f"## Specific focus areas\n{topics_line}\n\n"
-        f"## Student's current level\n{level_line}\n\n"
+        f"## Student's current level\n{level_line}"
+        f"{material_block}\n\n"
         "Design the unit plan."
     )
 
@@ -386,6 +395,7 @@ async def generate_and_apply_plan(
     project: StudyProject,
     provider: ModelProvider,
     model_id: str,
+    material_context: str | None = None,
 ) -> list[StudyUnit]:
     """Convenience wrapper — generate + persist in one step.
 
@@ -401,6 +411,7 @@ async def generate_and_apply_plan(
             goal=project.goal,
             topics=list(project.topics or []),
             current_level=project.current_level,
+            material_context=material_context,
         )
     except PlanGenerationError as exc:
         project.status = "planning"

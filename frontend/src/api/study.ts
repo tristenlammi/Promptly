@@ -1,5 +1,6 @@
 import { apiClient } from "./client";
 import type {
+  CalibrationHistory,
   ConfidenceCaptureResponse,
   LearnerProfileResponse,
   LearnerProfileUpdate,
@@ -7,13 +8,20 @@ import type {
   MisconceptionListResponse,
   NotesState,
   ObjectiveMasteryListResponse,
+  QuickReviewRequest,
+  QuickReviewResponse,
   ReviewQueueResponse,
+  SessionArc,
   StartExamResponse,
+  StudyBoardBlock,
+  AssessorStatus,
+  SessionTimelineEntry,
   StudyExamSummary,
   StudyProjectDetail,
   StudyProjectSummary,
   StudySendMessageResponse,
   StudySessionDetail,
+  StudyMaterial,
   StudyUnitSummary,
   UnitEnterResponse,
   WhiteboardExerciseDetail,
@@ -30,8 +38,15 @@ export interface CreateStudyProjectPayload {
    *  the planner front-loads foundation units and the default register
    *  the unit tutor pitches at. */
   current_level?: "beginner" | "some_exposure" | "refresher" | null;
-  model_id: string;
-  provider_id: string;
+  /** Deprecated — the backend now reads the teaching model from
+   *  admin app_settings. These fields are accepted for back-compat
+   *  but ignored when a study model is configured. */
+  model_id?: string;
+  provider_id?: string;
+  /** Optional list of already-uploaded file IDs to attach as course
+   *  material. Extracted text grounds the unit plan; full RAG indexing
+   *  happens asynchronously after the project is created. */
+  material_file_ids?: string[];
 }
 
 export interface UpdateStudyProjectPayload {
@@ -322,5 +337,86 @@ export const studyApi = {
       payload
     );
     return data;
+  },
+
+  // ---- Lesson board (Phase 3) ------------------------------------
+  async getBoardBlocks(sessionId: string): Promise<StudyBoardBlock[]> {
+    const { data } = await apiClient.get<StudyBoardBlock[]>(
+      `/study/sessions/${sessionId}/board`
+    );
+    return data;
+  },
+  async getSessionArc(sessionId: string): Promise<SessionArc> {
+    const { data } = await apiClient.get<SessionArc>(
+      `/study/sessions/${sessionId}/arc`
+    );
+    return data;
+  },
+  async setSessionGoal(
+    sessionId: string,
+    goal: string | null
+  ): Promise<{ session_goal: string | null }> {
+    const { data } = await apiClient.patch<{ session_goal: string | null }>(
+      `/study/sessions/${sessionId}/goal`,
+      { session_goal: goal }
+    );
+    return data;
+  },
+  async getAssessorStatus(): Promise<AssessorStatus> {
+    const { data } = await apiClient.get<AssessorStatus>(
+      `/study/assessor-status`
+    );
+    return data;
+  },
+  async getSessionTimeline(projectId: string): Promise<SessionTimelineEntry[]> {
+    const { data } = await apiClient.get<SessionTimelineEntry[]>(
+      `/study/projects/${projectId}/session-timeline`
+    );
+    return data;
+  },
+
+  async getCalibrationHistory(projectId: string): Promise<CalibrationHistory> {
+    const { data } = await apiClient.get<CalibrationHistory>(
+      `/study/projects/${projectId}/calibration-history`
+    );
+    return data;
+  },
+
+  async quickReview(
+    projectId: string,
+    payload: QuickReviewRequest
+  ): Promise<QuickReviewResponse> {
+    const { data } = await apiClient.post<QuickReviewResponse>(
+      `/study/projects/${projectId}/quick-review`,
+      payload
+    );
+    return data;
+  },
+
+  async listMaterials(projectId: string): Promise<StudyMaterial[]> {
+    const { data } = await apiClient.get<StudyMaterial[]>(
+      `/study/projects/${projectId}/materials`
+    );
+    return data;
+  },
+
+  async attachMaterial(
+    projectId: string,
+    fileId: string
+  ): Promise<StudyMaterial> {
+    const { data } = await apiClient.post<StudyMaterial>(
+      `/study/projects/${projectId}/materials`,
+      { file_id: fileId }
+    );
+    return data;
+  },
+
+  async deleteMaterial(
+    projectId: string,
+    materialId: string
+  ): Promise<void> {
+    await apiClient.delete(
+      `/study/projects/${projectId}/materials/${materialId}`
+    );
   },
 };

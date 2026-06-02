@@ -8,13 +8,13 @@ interface StudyDesktopOnlyProps {
 }
 
 /**
- * Gates the Study routes so that on phone-sized viewports (<768px, i.e.
- * below Tailwind's ``md`` breakpoint) the user sees a friendly
- * "use a tablet or desktop" screen instead of the cramped study UI.
+ * Gates individual Study routes (currently just the live session page)
+ * that require the split chat + whiteboard layout. On phone-sized
+ * viewports (<768px / below Tailwind ``md``) those pages are unusable —
+ * the user sees a friendly redirect screen instead.
  *
- * Tablets in portrait (iPad at 768px) and everything wider still get
- * the full experience — the split chat / whiteboard panel and the
- * interactive exercises need the horizontal room.
+ * Study home, topic detail, and the daily review loop are NOT wrapped
+ * in this component — they are fully mobile-friendly.
  */
 export function StudyDesktopOnly({ children }: StudyDesktopOnlyProps) {
   const isMobile = useIsMobile();
@@ -28,22 +28,31 @@ export function StudyDesktopOnly({ children }: StudyDesktopOnlyProps) {
         </div>
         <div className="space-y-2">
           <h1 className="text-lg font-semibold text-[var(--text)]">
-            Study works best on a larger screen
+            Live classroom needs more room
           </h1>
           <p className="text-sm leading-relaxed text-[var(--text-muted)]">
-            The Study section uses a split chat and whiteboard layout with
-            interactive exercises, so it's only available on tablets and
-            larger. Flip your device to landscape, grab a tablet, or jump
-            back onto your laptop to keep learning.
+            The live session uses a side-by-side chat and lesson board with
+            interactive exercises — it needs a tablet or larger screen to work
+            well. Your daily review and topic overview are still accessible on
+            this device.
           </p>
         </div>
-        <Link
-          to="/chat"
-          className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
-        >
-          <MessagesSquare className="h-4 w-4" />
-          Back to Chat
-        </Link>
+        <div className="flex flex-col items-center gap-2">
+          <Link
+            to="/study"
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
+          >
+            <BookOpen className="h-4 w-4" />
+            Go to Study home
+          </Link>
+          <Link
+            to="/chat"
+            className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            <MessagesSquare className="h-4 w-4" />
+            Back to Chat
+          </Link>
+        </div>
       </div>
     </div>
   );

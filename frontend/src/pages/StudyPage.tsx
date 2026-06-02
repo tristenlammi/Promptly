@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Archive, BookOpen, Plus } from "lucide-react";
 
+import { useIsMobile } from "@/hooks/useIsMobile";
+
 import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { NewStudyWizard } from "@/components/study/NewStudyWizard";
@@ -20,6 +22,7 @@ type Tab = "active" | "archived";
 
 export function StudyPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("active");
 
@@ -70,12 +73,12 @@ export function StudyPage() {
             leftIcon={<Plus className="h-4 w-4" />}
             onClick={() => setWizardOpen(true)}
           >
-            New topic
+            {isMobile ? null : "New topic"}
           </Button>
         }
       />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-6xl px-6 py-6">
+        <div className="mx-auto w-full max-w-6xl px-4 py-4 sm:px-6 sm:py-6">
           <Tabs
             tab={tab}
             onChange={setTab}

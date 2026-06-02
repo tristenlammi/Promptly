@@ -22,6 +22,7 @@ import { ShareLinkLandingPage } from "@/pages/ShareLinkLandingPage";
 import { StarredFilesPage } from "@/pages/StarredFilesPage";
 import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
 import { StudyPage } from "@/pages/StudyPage";
+import { ReviewPage } from "@/pages/ReviewPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
 import { StudyTopicPage } from "@/pages/StudyTopicPage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
@@ -219,22 +220,11 @@ export default function App() {
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
-        <Route
-          path="/study"
-          element={
-            <StudyDesktopOnly>
-              <StudyPage />
-            </StudyDesktopOnly>
-          }
-        />
-        <Route
-          path="/study/topics/:id"
-          element={
-            <StudyDesktopOnly>
-              <StudyTopicPage />
-            </StudyDesktopOnly>
-          }
-        />
+        {/* Study home + topic detail are fully mobile-friendly. */}
+        <Route path="/study" element={<StudyPage />} />
+        <Route path="/study/topics/:id" element={<StudyTopicPage />} />
+        {/* Review page: mobile-first by design (daily habit use case). */}
+        <Route path="/study/topics/:id/review" element={<ReviewPage />} />
         <Route
           path="/study/sessions/:id"
           element={

@@ -5,9 +5,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Sparkles } from "lucide-react";
 
 import { studyApi } from "@/api/study";
+import type { StudyBoardBlock } from "@/api/types";
+import { useStudyStore } from "@/store/studyStore";
 import { cn } from "@/utils/cn";
 
 interface UnitNotesProps {
@@ -33,9 +35,30 @@ const AUTO_SAVE_MS = 1_500;
  * The AI tutor is the thing doing structured pedagogy; this is just
  * somewhere for the student to jot down their own thoughts.
  */
+function boardBlockToText(block: StudyBoardBlock): string | null {
+  const p = block.payload;
+  switch (block.kind) {
+    case "term":
+      return `- **${p.term ?? ""}**: ${p.def ?? ""}`;
+    case "note":
+      return `- ${p.text ?? ""}`;
+    case "callout":
+      return `- ${p.label ? `[${p.label}] ` : ""}${p.text ?? ""}`;
+    case "concept_node":
+      return `- ${p.label ?? ""}${p.note ? ` — ${p.note}` : ""}`;
+    case "worked_example":
+      return `- Example: ${p.title ?? ""}`;
+    case "concept_map":
+      return p.title ? `- Concept map: ${p.title}` : null;
+    default:
+      return null;
+  }
+}
+
 export function UnitNotes({ sessionId, initialNotes, visible }: UnitNotesProps) {
   const [value, setValue] = useState<string>(initialNotes ?? "");
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const boardBlocks = useStudyStore((s) => s.boardBlocks);
 
   const saveTimerRef = useRef<number | null>(null);
   const latestValueRef = useRef<string>(initialNotes ?? "");
@@ -106,6 +129,22 @@ export function UnitNotes({ sessionId, initialNotes, visible }: UnitNotesProps) 
     [scheduleSave]
   );
 
+  const handleSeedFromBoard = useCallback(() => {
+    if (boardBlocks.length === 0) return;
+    const lines = boardBlocks
+      .map(boardBlockToText)
+      .filter((l): l is string => l !== null);
+    if (lines.length === 0) return;
+    const seeded = `## Board summary\n\n${lines.join("\n")}`;
+    const next = value.trim()
+      ? `${value.trimEnd()}\n\n${seeded}`
+      : seeded;
+    setValue(next);
+    latestValueRef.current = next;
+    isDirtyRef.current = next !== savedValueRef.current;
+    scheduleSave();
+  }, [boardBlocks, value, scheduleSave]);
+
   const helperText = useMemo(() => {
     if (value.trim().length === 0) {
       return "Jot down key ideas, questions for the tutor, or your own summary — it's just for you.";
@@ -123,7 +162,20 @@ export function UnitNotes({ sessionId, initialNotes, visible }: UnitNotesProps) 
     >
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-1.5 text-xs text-[var(--text-muted)]">
         <span className="opacity-70">Your notes for this unit</span>
-        <StatusBadge status={status} />
+        <div className="flex items-center gap-3">
+          {boardBlocks.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSeedFromBoard}
+              className="inline-flex items-center gap-1 text-[var(--text-muted)] hover:text-[var(--text)]"
+              title="Add board blocks as bullet notes"
+            >
+              <Sparkles className="h-3 w-3" />
+              Seed from board
+            </button>
+          )}
+          <StatusBadge status={status} />
+        </div>
       </div>
       <div className="relative min-h-0 flex-1">
         <textarea

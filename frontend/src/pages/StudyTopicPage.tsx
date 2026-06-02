@@ -4,6 +4,8 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  BarChart2,
+  BookOpen,
   RotateCcw,
   Target,
   Trash2,
@@ -13,10 +15,10 @@ import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ExamBreakdown } from "@/components/study/ExamBreakdown";
 import { FinalExamCard } from "@/components/study/FinalExamCard";
-import { LearnerProfilePanel } from "@/components/study/LearnerProfilePanel";
-import { MisconceptionsPanel } from "@/components/study/MisconceptionsPanel";
+import { InsightDashboard } from "@/components/study/InsightDashboard";
 import { PrereqBatchBanner } from "@/components/study/PrereqBatchBanner";
 import { ReviewQueueWidget } from "@/components/study/ReviewQueueWidget";
+import { StudyMaterialsPanel } from "@/components/study/StudyMaterialsPanel";
 import { TopNav } from "@/components/layout/TopNav";
 import { UnitCard } from "@/components/study/UnitCard";
 import {
@@ -30,12 +32,14 @@ import {
   useUnarchiveStudyProject,
 } from "@/hooks/useStudy";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 export function StudyTopicPage() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
   const { data: project, isLoading, error, refetch } = useStudyProjectQuery(
     projectId ?? null
@@ -66,6 +70,7 @@ export function StudyTopicPage() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"units" | "insights">("units");
 
   // Build the session-page URL with optional one-shot query params.
   // ``kickoff`` carries the fresh-session stream id so the page can
@@ -227,7 +232,7 @@ export function StudyTopicPage() {
       />
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl px-6 py-6">
+        <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6 sm:py-6">
           {/* Overview */}
           <section className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-5">
             <div className="flex items-start justify-between gap-3">
@@ -313,22 +318,7 @@ export function StudyTopicPage() {
             <PrereqBatchBanner projectId={project.id} units={project.units} />
           )}
 
-          {/* Learner state widgets — hidden during the planning failure
-              state since there's no coherent project to show them for. */}
-          {!isPlanning && (
-            <div className="mt-6 space-y-4">
-              <ReviewQueueWidget
-                projectId={project.id}
-                onStartReview={handleStartReview}
-              />
-              <div className="grid gap-4 md:grid-cols-2">
-                <LearnerProfilePanel projectId={project.id} />
-                <MisconceptionsPanel projectId={project.id} />
-              </div>
-            </div>
-          )}
-
-          {/* Planning / error state */}
+          {/* Planning / error state — no tabs, just the error */}
           {isPlanning && (
             <div className="mt-6 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
               <h3 className="text-sm font-semibold">
@@ -351,63 +341,112 @@ export function StudyTopicPage() {
             </div>
           )}
 
-          {/* Final exam card — show above units when unlocked or completed
-              so it's visible without scrolling. */}
-          {(project.final_exam_unlocked ||
-            project.exams.length > 0 ||
-            project.status === "completed") && (
-            <section className="mt-6">
-              <FinalExamCard
-                project={project}
-                startPending={startExam.isPending}
-                onStart={handleStartExam}
-                onResume={(examId) => {
-                  const exam = project.exams.find((e) => e.id === examId);
-                  if (exam?.session_id) {
-                    navigate(`/study/sessions/${exam.session_id}`);
-                  } else {
-                    void handleStartExam();
-                  }
-                }}
-                onRetry={handleStartExam}
-              />
-            </section>
-          )}
-
-          {project.exams.length > 0 && (
-            <ExamBreakdown exams={project.exams} units={project.units} />
-          )}
-
-          {/* Units grid */}
-          {project.units.length > 0 && (
-            <section className="mt-6">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Units</h2>
-                {!isArchived && project.status !== "completed" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
-                    onClick={() => setRegenerateOpen(true)}
-                    loading={regenerate.isPending}
-                    title="Replace the current plan with a fresh one"
+          {/* Tab bar + content — hidden while planning */}
+          {!isPlanning && (
+            <div className="mt-6">
+              {/* Tabs */}
+              <div className="flex gap-1 border-b border-[var(--border)]">
+                {(
+                  [
+                    { id: "units", label: "Units", icon: <BookOpen className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> },
+                    { id: "insights", label: "Insights", icon: <BarChart2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> },
+                  ] as { id: "units" | "insights"; label: string; icon: React.ReactNode }[]
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                      "flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors",
+                      activeTab === tab.id
+                        ? "border-[var(--accent)] text-[var(--accent)]"
+                        : "border-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
+                    )}
                   >
-                    Regenerate plan
-                  </Button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {project.units.map((u) => (
-                  <UnitCard
-                    key={u.id}
-                    unit={u}
-                    onOpen={() => handleOpenUnit(u.id)}
-                    disabled={isArchived || enterUnit.isPending}
-                    masteryEntries={masteryByUnit.get(u.id)}
-                  />
+                    {tab.icon}
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </button>
                 ))}
               </div>
-            </section>
+
+              {/* Units tab */}
+              {activeTab === "units" && (
+                <div className="mt-4 space-y-4">
+                  <ReviewQueueWidget
+                    projectId={project.id}
+                    onStartReview={handleStartReview}
+                  />
+
+                  <StudyMaterialsPanel projectId={project.id} />
+
+                  {/* Final exam card */}
+                  {(project.final_exam_unlocked ||
+                    project.exams.length > 0 ||
+                    project.status === "completed") && (
+                    <FinalExamCard
+                      project={project}
+                      startPending={startExam.isPending}
+                      onStart={handleStartExam}
+                      onResume={(examId) => {
+                        const exam = project.exams.find((e) => e.id === examId);
+                        if (exam?.session_id) {
+                          navigate(`/study/sessions/${exam.session_id}`);
+                        } else {
+                          void handleStartExam();
+                        }
+                      }}
+                      onRetry={handleStartExam}
+                    />
+                  )}
+
+                  {project.exams.length > 0 && (
+                    <ExamBreakdown exams={project.exams} units={project.units} />
+                  )}
+
+                  {/* Units grid */}
+                  {project.units.length > 0 && (
+                    <section>
+                      <div className="mb-3 flex items-center justify-between">
+                        <h2 className="text-sm font-semibold">Units</h2>
+                        {!isArchived && project.status !== "completed" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
+                            onClick={() => setRegenerateOpen(true)}
+                            loading={regenerate.isPending}
+                            title="Replace the current plan with a fresh one"
+                          >
+                            Regenerate plan
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {project.units.map((u) => (
+                          <UnitCard
+                            key={u.id}
+                            unit={u}
+                            onOpen={() => handleOpenUnit(u.id)}
+                            disabled={isArchived || enterUnit.isPending}
+                            masteryEntries={masteryByUnit.get(u.id)}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
+
+              {/* Insights tab */}
+              {activeTab === "insights" && (
+                <div className="mt-4">
+                  <InsightDashboard
+                    projectId={project.id}
+                    units={project.units}
+                    isAdmin={isAdmin}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

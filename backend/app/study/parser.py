@@ -55,6 +55,7 @@ class TaggedActionParser:
             "whiteboard_action",
             "unit_action",
             "exam_action",
+            "board_op",
         ]
         self._opens: list[tuple[str, str]] = [(f"<{t}>", t) for t in self._tags]
         self._closes: dict[str, str] = {t: f"</{t}>" for t in self._tags}

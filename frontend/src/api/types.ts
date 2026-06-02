@@ -243,6 +243,23 @@ export interface AppSettings {
   research_provider_id: string | null;
   research_model_id: string | null;
   research_configured: boolean;
+  /**
+   * Admin-designated teaching model for Study sessions. When set,
+   * every unit session and exam uses this model regardless of the
+   * user's chat selection. Favor the frontier reasoning tier.
+   * Both fields NULL = fall back to the workspace default chat model.
+   */
+  study_provider_id: string | null;
+  study_model_id: string | null;
+  study_configured: boolean;
+  /**
+   * Optional cheaper model for the Study assessor pass (Phase 1).
+   * Grades practice reps without being the teacher. Both fields NULL
+   * = use the study model for grading too.
+   */
+  study_assessor_provider_id: string | null;
+  study_assessor_model_id: string | null;
+  study_assessor_configured: boolean;
   updated_at: string;
 }
 
@@ -772,6 +789,9 @@ export interface StudySessionSummary {
   student_turn_count: number;
   hint_count: number;
   current_review_focus_objective_id: string | null;
+  /** Phase 2 orchestrator — null for legacy sessions. */
+  phase: string | null;
+  session_goal: string | null;
 }
 
 export interface StudySessionDetail extends StudySessionSummary {
@@ -952,6 +972,76 @@ export interface WhiteboardSubmitResponse {
   exercise: WhiteboardExerciseSummary;
 }
 
+// ---- Lesson board (Phase 3) ----
+
+export type BoardBlockKind =
+  | "term"
+  | "note"
+  | "worked_example"
+  | "concept_map"
+  | "callout"
+  | "concept_node"
+  | "exercise_ref"
+  | "diagram_svg";
+
+export interface StudyBoardBlock {
+  id: string;
+  session_id: string;
+  order_index: number;
+  kind: BoardBlockKind;
+  /** Shape varies by kind — see BoardBlockKind docs in service.py. */
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface SessionArcObjective {
+  index: number;
+  text: string;
+  mastery_score: number | null;
+  mastered: boolean;
+}
+
+export interface SessionArc {
+  phase: string | null;
+  phase_history: Array<{ phase: string; turn: number }>;
+  objectives: SessionArcObjective[];
+  total_objectives: number;
+  current_objective_index: number | null;
+}
+
+export interface AssessorStatus {
+  configured: boolean;
+  total_attempts_24h: number;
+  assessor_attempts_24h: number;
+}
+
+export interface SessionTimelineEntry {
+  session_id: string;
+  unit_id: string | null;
+  unit_title: string;
+  started_at: string;
+  updated_at: string;
+  student_turn_count: number;
+  teachback_passed: boolean;
+  phase_history: Array<{ phase: string; turn: number }>;
+}
+
+// ---- Calibration history (Phase 4 #18) ----
+export interface CalibrationDataPoint {
+  attempt_id: string;
+  unit_title: string;
+  objective_index: number;
+  phase: string;
+  confidence: number | null;
+  correct: boolean | null;
+  created_at: string;
+}
+
+export interface CalibrationHistory {
+  project_id: string;
+  data_points: CalibrationDataPoint[];
+}
+
 // ---- Learner state (Study 10/10) ----
 
 /**
@@ -1039,6 +1129,36 @@ export interface ConfidenceCaptureResponse {
   session_id: string;
   captured_at: string;
   level: number;
+}
+
+// ---- Quick review (Phase 5 #1) ----
+export interface QuickReviewRequest {
+  objective_id: string;
+  answer: string;
+  confidence?: number | null;
+  self_correct?: boolean | null;
+}
+
+export interface QuickReviewResponse {
+  correct: boolean | null;
+  feedback: string;
+  new_mastery_score: number;
+  items_remaining: number;
+  assessor_unavailable: boolean;
+}
+
+export interface StudyMaterial {
+  id: string;
+  study_project_id: string;
+  user_file_id: string;
+  filename: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  /** pending | indexing | ready | failed */
+  indexing_status: string;
+  indexing_error: string | null;
+  indexed_at: string | null;
+  created_at: string;
 }
 
 // ---- MFA ----

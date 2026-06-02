@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef } from "react";
 import { studyApi } from "@/api/study";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingBubble } from "@/components/chat/ThinkingBubble";
+import { AhaMoment } from "@/components/study/AhaMoment";
 import { ConfidenceWidget } from "@/components/study/ConfidenceWidget";
+import { PredictBanner } from "@/components/study/PredictBanner";
 import { TeachbackBanner } from "@/components/study/TeachbackBanner";
 import { useStudyStore } from "@/store/studyStore";
 import { cn } from "@/utils/cn";
@@ -111,13 +113,14 @@ export function StudyChat({
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== "assistant") continue;
-      const { requestConfidence, requestTeachback } = extractStudyMarkers(
-        m.content
-      );
+      const { requestConfidence, requestTeachback, requestPredict, celebrate } =
+        extractStudyMarkers(m.content);
       return {
         messageId: m.id,
         requestConfidence,
         requestTeachback,
+        requestPredict,
+        celebrate,
       };
     }
     return null;
@@ -164,6 +167,19 @@ export function StudyChat({
                 }
                 exerciseReviewed={exerciseReviewed}
               />
+              {isMarkerAnchor &&
+                lastAssistantMarkers?.celebrate && (
+                  <div className="mx-3 sm:mx-4">
+                    <AhaMoment />
+                  </div>
+                )}
+              {isMarkerAnchor &&
+                !exerciseInProgress &&
+                lastAssistantMarkers?.requestPredict && (
+                  <div className="mx-3 mb-3 sm:mx-4">
+                    <PredictBanner />
+                  </div>
+                )}
               {isMarkerAnchor &&
                 !exerciseInProgress &&
                 lastAssistantMarkers?.requestTeachback && (

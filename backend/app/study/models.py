@@ -311,6 +311,36 @@ class StudySession(UUIDPKMixin, TimestampMixin, Base):
         nullable=True,
     )
 
+    # Phase 4: student's one-sentence learning goal set in the hook
+    # phase via the ``set_session_goal`` unit_action. The close phase
+    # references it to verify the session delivered what was promised.
+    session_goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Phase 7 polish: stamp set when the tutor emits
+    # ``comprehension_confirmed`` during the PRESENT phase.  Signals the
+    # orchestrator to advance to GUIDED immediately rather than waiting
+    # for the turn-count ceiling.  Reset to null each time the session
+    # transitions OUT of present so the next objective gets a fresh gate.
+    comprehension_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # ---- Phase 2 orchestration (0074) --------------------------------
+    # The current lesson phase name, e.g. ``hook``, ``present``,
+    # ``independent``, ``close``. Null for sessions created before the
+    # orchestrator launched (they start on the first call to
+    # ``advance_phase``).  One of the ``PHASES`` list in
+    # ``app.study.orchestrator``.
+    phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Ordered log of phase transitions: each entry is
+    # ``{"phase": "<name>", "turn": <student_turn_count_at_entry>}``.
+    # Newest entries are appended; oldest are at index 0.  Used by
+    # the orchestrator to compute ``turns_in_current_phase``.
+    phase_history: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
+    )
+
     def __repr__(self) -> str:
         return f"<StudySession id={self.id} kind={self.kind} project_id={self.project_id}>"
 
@@ -497,6 +527,114 @@ class StudyMisconception(UUIDPKMixin, Base):
         return f"<StudyMisconception id={self.id} project={self.project_id}>"
 
 
+class StudyRetrievalAttempt(UUIDPKMixin, CreatedAtMixin, Base):
+    """One retrieval attempt recorded when the tutor scores an objective.
+
+    Written by :func:`app.study.service.handle_update_objective_mastery`
+    every time the tutor emits ``update_objective_mastery``. An async
+    assessor pass may later update ``correct`` and set
+    ``source_kind="assessor"`` to replace the tutor's subjective reading
+    with an independent grade.
+
+    Mastery is *derived* from the recency-weighted accuracy of recent
+    attempts (see :func:`app.study.review.derive_mastery_from_attempts`)
+    rather than taken directly from the tutor's 0-100 score, so a
+    consistently encouraging tutor can't inflate progress indefinitely.
+    """
+
+    __tablename__ = "study_retrieval_attempts"
+
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("study_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    unit_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_units.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    objective_index: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Learning phase at the time of the attempt:
+    # 'initial' | 'practice' | 'independent' | 'interleave' | 'review'
+    # The tutor may pass this in the update_objective_mastery action;
+    # defaults to 'practice' if omitted.
+    phase: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="practice", server_default="practice"
+    )
+
+    # Whether the attempt was correct. Null when created (tutor signal
+    # pending), then set by either the tutor handler (source_kind='tutor')
+    # or the assessor pass (source_kind='assessor').
+    correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    # Raw 0-100 score the tutor reported.  Kept for posterity / analytics
+    # even after the assessor overwrites ``correct``.
+    tutor_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Number of hints the tutor offered before the student answered.
+    hint_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+    # Student's self-reported confidence (1-5) captured on this turn,
+    # if available.  Null when the student didn't rate.
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Time (milliseconds) the student spent composing the answer.
+    # Optional — populated only when the client sends a latency hint.
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # 'tutor'     — correctness derived from the tutor's score
+    # 'assessor'  — updated by an independent model pass
+    source_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="tutor", server_default="tutor"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StudyRetrievalAttempt session={self.session_id} "
+            f"obj={self.objective_index} correct={self.correct} "
+            f"source={self.source_kind}>"
+        )
+
+
+class StudyBoardBlock(UUIDPKMixin, CreatedAtMixin, Base):
+    """One persistent block on the lesson board for a unit session.
+
+    Blocks are created by the tutor's ``<board_op>`` side-channel action
+    and accumulate as the lesson progresses — terms pinned when introduced,
+    worked examples kept visible during practice, concept nodes forming a
+    map.  At the end of the unit the board is the lesson artefact.
+
+    ``kind`` is a discriminator:
+      term         — vocabulary card (term + def)
+      note         — freeform note
+      worked_example — step-by-step solution
+      callout      — highlighted emphasis block
+      concept_node — labelled concept bubble
+      exercise_ref — pointer to a WhiteboardExercise
+      diagram_svg  — SVG diagram string
+    """
+
+    __tablename__ = "study_board_blocks"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="'{}'::jsonb"
+    )
+
+    def __repr__(self) -> str:
+        return f"<StudyBoardBlock session={self.session_id} kind={self.kind} order={self.order_index}>"
+
+
 class StudyUnitReflection(UUIDPKMixin, CreatedAtMixin, Base):
     """A bridging summary written at the end of a unit attempt.
 
@@ -531,6 +669,52 @@ class StudyUnitReflection(UUIDPKMixin, CreatedAtMixin, Base):
     concepts_anchored: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
     )
+    # Phase 3 co-created notes: snapshot of board blocks and student
+    # notes captured when summarise_unit fires at unit close. These
+    # become the persistent "lesson artifact" the student built.
+    board_snapshot: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
+    )
+    notes_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<StudyUnitReflection unit={self.unit_id} id={self.id}>"
+
+
+class StudyMaterial(UUIDPKMixin, Base):
+    """A file attached to a study project as learning material.
+
+    Mirrors :class:`app.chat.models.ChatProjectFile` but scoped to study
+    projects. Indexing status tracks the async RAG pipeline:
+    ``pending`` → ``indexing`` → ``ready`` | ``failed``.
+    """
+
+    __tablename__ = "study_materials"
+
+    study_project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # pending → indexing → ready | failed
+    indexing_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    indexing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.utcnow(),
+        server_default="now()",
+    )
+
+    def __repr__(self) -> str:
+        return f"<StudyMaterial project={self.study_project_id} file={self.user_file_id} status={self.indexing_status}>"

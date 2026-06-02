@@ -16,10 +16,13 @@ function invalidateStudy(qc: QueryClient, sessionId: string): void {
   qc.invalidateQueries({ queryKey: ["study", "project"] });
   qc.invalidateQueries({ queryKey: ["study", "unit"] });
   qc.invalidateQueries({ queryKey: ["study", "exam"] });
+  // Phase 3: invalidate the arc rail so phase + mastery stay current.
+  qc.invalidateQueries({ queryKey: ["study", "arc", sessionId] });
 }
 import { authHeader } from "@/api/client";
 import { useStudyStore } from "@/store/studyStore";
 import type {
+  BoardBlockKind,
   StudyMessage,
   WhiteboardExerciseDetail,
   WhiteboardExerciseSummary,
@@ -100,6 +103,15 @@ interface ExamGradedPayload {
   ended_at: string | null;
 }
 
+interface BoardBlockPayload {
+  id: string;
+  session_id: string;
+  order_index: number;
+  kind: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
 interface SSEPayload {
   event?: string;
   delta?: string;
@@ -126,6 +138,8 @@ interface SSEPayload {
    *  subtle hint strip so they understand why the unit isn't closing. */
   unmet?: string[];
   session_id?: string;
+  /** Board block added this turn (Phase 3 board_op). */
+  block?: BoardBlockPayload;
 }
 
 interface SendMessageOptions {
@@ -305,6 +319,18 @@ export function useStudyStream(): UseStudyStreamResult {
           // the session query so any surfaced counters (turn count,
           // teachback flag) update for the student.
           qc.invalidateQueries({ queryKey: ["study", "session"] });
+          continue;
+        }
+
+        if (data.event === "board_updated" && data.block) {
+          store.appendBoardBlock({
+            id: data.block.id,
+            session_id: data.block.session_id,
+            order_index: data.block.order_index,
+            kind: data.block.kind as BoardBlockKind,
+            payload: data.block.payload,
+            created_at: data.block.created_at,
+          });
           continue;
         }
 

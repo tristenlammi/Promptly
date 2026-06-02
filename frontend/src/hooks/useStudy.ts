@@ -264,3 +264,58 @@ export function useCaptureConfidence() {
     },
   });
 }
+
+// ---- Study materials -------------------------------------------------------
+
+export function useStudyMaterialsQuery(projectId: string | null) {
+  return useQuery({
+    queryKey: ["study", "materials", projectId],
+    queryFn: () => studyApi.listMaterials(projectId as string),
+    enabled: Boolean(projectId),
+    staleTime: 10_000,
+  });
+}
+
+export function useAttachStudyMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, fileId }: { projectId: string; fileId: string }) =>
+      studyApi.attachMaterial(projectId, fileId),
+    onSuccess: (_data, { projectId }) => {
+      qc.invalidateQueries({ queryKey: ["study", "materials", projectId] });
+    },
+  });
+}
+
+export function useAssessorStatusQuery() {
+  return useQuery({
+    queryKey: ["study", "assessor-status"],
+    queryFn: () => studyApi.getAssessorStatus(),
+    staleTime: 60_000,
+  });
+}
+
+export function useSessionTimelineQuery(projectId: string | null) {
+  return useQuery({
+    queryKey: ["study", "session-timeline", projectId],
+    queryFn: () => studyApi.getSessionTimeline(projectId!),
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+export function useDeleteStudyMaterial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      materialId,
+    }: {
+      projectId: string;
+      materialId: string;
+    }) => studyApi.deleteMaterial(projectId, materialId),
+    onSuccess: (_data, { projectId }) => {
+      qc.invalidateQueries({ queryKey: ["study", "materials", projectId] });
+    },
+  });
+}

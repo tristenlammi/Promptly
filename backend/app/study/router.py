@@ -24,27 +24,32 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import get_current_user
+from app.app_settings.models import AppSettings, SINGLETON_APP_SETTINGS_ID
+from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
 from app.database import SessionLocal, get_db
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, ProviderError, model_router
+from app.study import config as study_config
 from app.study import review as study_review
 from app.study.config import min_turns_required as study_min_turns_required
+from app.files.models import UserFile
 from app.study.models import (
     StudyExam,
+    StudyMaterial,
     StudyMessage,
     StudyMisconception,
     StudyObjectiveMastery,
     StudyProject,
+    StudyRetrievalAttempt,
     StudySession,
     StudyUnit,
     StudyUnitReflection,
@@ -60,7 +65,14 @@ from app.study.planner import (
     PlanGenerationError,
     generate_and_apply_plan,
 )
+from app.study.materials import (
+    extract_material_text_for_planning,
+    index_material_for_study_project,
+    retrieve_for_study_session,
+)
 from app.study.schemas import (
+    CalibrationDataPoint,
+    CalibrationHistoryResponse,
     CompletionReadinessObjective,
     CompletionReadinessResponse,
     ConfidenceCaptureRequest,
@@ -72,6 +84,8 @@ from app.study.schemas import (
     MisconceptionListResponse,
     ObjectiveMasteryEntry,
     ObjectiveMasteryListResponse,
+    QuickReviewRequest,
+    QuickReviewResponse,
     ReviewQueueItem,
     ReviewQueueResponse,
     StudyExamStartRequest,
@@ -91,11 +105,21 @@ from app.study.schemas import (
     UnitEnterResponse,
     NotesState,
     NotesUpdate,
+    AssessorStatusResponse,
+    SessionArcObjective,
+    SessionArcResponse,
+    SessionGoalUpdate,
+    SessionTimelineEntry,
+    StudyBoardBlockResponse,
     WhiteboardExerciseDetail,
     WhiteboardExerciseSummary,
     WhiteboardSubmitRequest,
     WhiteboardSubmitResponse,
+    StudyMaterialAttach,
+    StudyMaterialResponse,
 )
+from app.study.assessor import dispatch_assessor_if_configured, grade_for_review
+from app.study.orchestrator import advance_phase
 from app.study.service import (
     StudyStreamContext,
     apply_captures,
@@ -276,6 +300,56 @@ async def _pick_provider_for_model(
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"No enabled provider serves model {model_id!r}",
+    )
+
+
+async def _load_study_provider(
+    db: AsyncSession,
+    user: User,
+    project: StudyProject | None = None,
+) -> tuple[ModelProvider, str]:
+    """Resolve the admin-designated teaching model for Study.
+
+    Precedence:
+      1. ``app_settings.study_provider_id`` + ``study_model_id`` — admin's explicit choice.
+      2. ``app_settings.default_chat_provider_id`` + ``default_chat_model_id`` — workspace default.
+      3. ``project.model_id`` via ``_pick_provider_for_model`` — legacy compat for existing projects.
+
+    Models from the admin settings bypass the per-user ``allowed_models``
+    check — the admin chose them for everyone, not the student.
+
+    Raises ``HTTP 503`` with a human-readable admin-action message if
+    nothing is configured.
+    """
+    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+
+    # 1. Admin-designated study model.
+    if settings and settings.study_configured:
+        provider = await db.get(ModelProvider, settings.study_provider_id)
+        if provider and provider.enabled:
+            return provider, settings.study_model_id  # type: ignore[return-value]
+
+    # 2. Workspace default chat model.
+    if settings and settings.default_chat_configured:
+        provider = await db.get(ModelProvider, settings.default_chat_provider_id)
+        if provider and provider.enabled:
+            return provider, settings.default_chat_model_id  # type: ignore[return-value]
+
+    # 3. Legacy: project's stored model_id (for sessions created before Phase 0).
+    if project and project.model_id:
+        try:
+            provider = await _pick_provider_for_model(project.model_id, user, db)
+            return provider, project.model_id
+        except HTTPException:
+            pass
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=(
+            "No teaching model is configured for Study. "
+            "An admin needs to set one under Admin → Models → Defaults → "
+            "Study / Teaching model."
+        ),
     )
 
 
@@ -553,6 +627,7 @@ async def list_projects(
 )
 async def create_project(
     payload: StudyProjectCreate,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StudyProjectDetail:
@@ -570,9 +645,7 @@ async def create_project(
     via ``POST /projects/{id}/regenerate-plan`` instead of losing
     their brief.
     """
-    provider = await db.get(ModelProvider, payload.provider_id)
-    await _resolve_provider(provider, user, db, model_id=payload.model_id)
-    assert provider is not None  # Appeases the type-checker; _resolve_provider raises otherwise.
+    provider, teaching_model_id = await _load_study_provider(db, user)
 
     project = StudyProject(
         user_id=user.id,
@@ -581,19 +654,39 @@ async def create_project(
         goal=(payload.goal or "").strip() or None,
         learning_request=payload.learning_request.strip(),
         current_level=payload.current_level,
-        model_id=payload.model_id,
+        model_id=teaching_model_id,
         planning_provider_id=provider.id,
         status="planning",
     )
     db.add(project)
     await db.flush()
 
+    # Attach any uploaded material files before planning so the
+    # planner can ground the unit plan in the actual content.
+    for file_id in payload.material_file_ids:
+        uf = await db.get(UserFile, file_id)
+        if uf is None or uf.user_id != user.id:
+            continue
+        mat = StudyMaterial(
+            study_project_id=project.id,
+            user_file_id=file_id,
+            indexing_status="pending",
+        )
+        db.add(mat)
+    if payload.material_file_ids:
+        await db.flush()
+
+    # Extract text from materials to ground the plan (synchronous —
+    # full indexing for session retrieval happens async after commit).
+    material_context = await extract_material_text_for_planning(db, project.id)
+
     try:
         await generate_and_apply_plan(
             db=db,
             project=project,
             provider=provider,
-            model_id=payload.model_id,
+            model_id=teaching_model_id,
+            material_context=material_context or None,
         )
     except PlanGenerationError as exc:
         # The planner already recorded the error on the project and
@@ -630,6 +723,12 @@ async def create_project(
 
     await db.commit()
     await db.refresh(project)
+
+    # Kick off async indexing for each attached material now that the
+    # project is committed and the file rows are durable.
+    for file_id in payload.material_file_ids:
+        background.add_task(index_material_for_study_project, project.id, file_id)
+
     return await _project_detail(project, db)
 
 
@@ -641,6 +740,148 @@ async def get_project(
 ) -> StudyProjectDetail:
     project = await _get_owned_project(project_id, user, db)
     return await _project_detail(project, db)
+
+
+# ---- Study materials -------------------------------------------------------
+
+@router.get(
+    "/projects/{project_id}/materials",
+    response_model=list[StudyMaterialResponse],
+)
+async def list_materials(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[StudyMaterialResponse]:
+    """List all learning materials attached to a study project."""
+    project = await _get_owned_project(project_id, user, db)
+    res = await db.execute(
+        select(StudyMaterial, UserFile)
+        .join(UserFile, UserFile.id == StudyMaterial.user_file_id)
+        .where(StudyMaterial.study_project_id == project.id)
+        .order_by(StudyMaterial.created_at)
+    )
+    rows = res.all()
+    return [
+        StudyMaterialResponse(
+            id=mat.id,
+            study_project_id=mat.study_project_id,
+            user_file_id=mat.user_file_id,
+            filename=uf.original_filename or uf.filename,
+            mime_type=uf.mime_type,
+            size_bytes=uf.size_bytes,
+            indexing_status=mat.indexing_status,
+            indexing_error=mat.indexing_error,
+            indexed_at=mat.indexed_at,
+            created_at=mat.created_at,
+        )
+        for mat, uf in rows
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/materials",
+    response_model=StudyMaterialResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def attach_material(
+    project_id: uuid.UUID,
+    payload: StudyMaterialAttach,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyMaterialResponse:
+    """Attach an already-uploaded file to a study project as learning material.
+
+    Triggers async RAG indexing after the response is sent. Idempotent —
+    re-attaching the same file returns the existing record.
+    """
+    project = await _get_owned_project(project_id, user, db)
+    uf = await db.get(UserFile, payload.file_id)
+    if uf is None or uf.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    existing_res = await db.execute(
+        select(StudyMaterial).where(
+            StudyMaterial.study_project_id == project.id,
+            StudyMaterial.user_file_id == uf.id,
+        )
+    )
+    existing = existing_res.scalar_one_or_none()
+    if existing is not None:
+        return StudyMaterialResponse(
+            id=existing.id,
+            study_project_id=existing.study_project_id,
+            user_file_id=existing.user_file_id,
+            filename=uf.original_filename or uf.filename,
+            mime_type=uf.mime_type,
+            size_bytes=uf.size_bytes,
+            indexing_status=existing.indexing_status,
+            indexing_error=existing.indexing_error,
+            indexed_at=existing.indexed_at,
+            created_at=existing.created_at,
+        )
+
+    mat = StudyMaterial(
+        study_project_id=project.id,
+        user_file_id=uf.id,
+        indexing_status="pending",
+    )
+    db.add(mat)
+    await db.commit()
+    await db.refresh(mat)
+
+    background.add_task(index_material_for_study_project, project.id, uf.id)
+
+    return StudyMaterialResponse(
+        id=mat.id,
+        study_project_id=mat.study_project_id,
+        user_file_id=mat.user_file_id,
+        filename=uf.original_filename or uf.filename,
+        mime_type=uf.mime_type,
+        size_bytes=uf.size_bytes,
+        indexing_status=mat.indexing_status,
+        indexing_error=mat.indexing_error,
+        indexed_at=mat.indexed_at,
+        created_at=mat.created_at,
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/materials/{material_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_material(
+    project_id: uuid.UUID,
+    material_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Remove a learning material and its indexed chunks from a study project."""
+    from sqlalchemy import delete as sql_delete
+    from app.custom_models.models import KnowledgeChunk
+
+    project = await _get_owned_project(project_id, user, db)
+    mat_res = await db.execute(
+        select(StudyMaterial).where(
+            StudyMaterial.id == material_id,
+            StudyMaterial.study_project_id == project.id,
+        )
+    )
+    mat = mat_res.scalar_one_or_none()
+    if mat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
+
+    # Delete indexed chunks first, then the material row.
+    await db.execute(
+        sql_delete(KnowledgeChunk).where(
+            KnowledgeChunk.study_project_id == project.id,
+            KnowledgeChunk.user_file_id == mat.user_file_id,
+        )
+    )
+    await db.delete(mat)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/projects/{project_id}", response_model=StudyProjectSummary)
@@ -781,16 +1022,7 @@ async def regenerate_plan(
             detail="This topic has already been passed — regenerating would wipe progress.",
         )
 
-    model_id = payload.model_id or project.model_id
-    provider_id = payload.provider_id or project.planning_provider_id
-    if not model_id or not provider_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Provider and model must be set before regenerating a plan.",
-        )
-    provider = await db.get(ModelProvider, provider_id)
-    await _resolve_provider(provider, user, db, model_id=model_id)
-    assert provider is not None
+    provider, model_id = await _load_study_provider(db, user, project)
 
     project.model_id = model_id
     project.planning_provider_id = provider.id
@@ -1188,16 +1420,16 @@ async def enter_unit(
     unit.updated_at = now
     project.updated_at = now
 
-    # Resolve a model + provider ONLY if we're actually going to
-    # kickoff — avoids failing the enter call when the project
-    # doesn't have a model set yet and the student just wants to
-    # browse the existing transcript.
+    # Resolve the admin-designated teaching model for the kickoff stream.
+    # Silently skip the stream (not an error) when no model is reachable —
+    # the student lands on the existing transcript instead.
     kickoff_stream_id: uuid.UUID | None = None
-    if should_kickoff and project.model_id:
+    if should_kickoff:
         try:
-            provider = await _pick_provider_for_model(project.model_id, user, db)
+            provider, teaching_model_id = await _load_study_provider(db, user, project)
         except HTTPException:
             provider = None
+            teaching_model_id = None
         if provider is not None:
             # Mirror the final-exam kickoff pattern: a short
             # student-authored "let's start" seed so the tutor's
@@ -1221,7 +1453,7 @@ async def enter_unit(
                 "project_id": str(project.id),
                 "user_message_id": str(kickoff.id),
                 "provider_id": str(provider.id),
-                "model_id": project.model_id,
+                "model_id": teaching_model_id,
                 "temperature": 0.6,
                 "max_tokens": 2000,
                 "reviewing_exercise_id": None,
@@ -1339,19 +1571,7 @@ async def start_final_exam(
             detail="This topic has already been passed — archive it instead.",
         )
 
-    model_id = payload.model_id or project.model_id
-    if not model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No model configured for this topic — set one and retry.",
-        )
-    provider_id = payload.provider_id or project.planning_provider_id
-    if provider_id is None:
-        provider = await _pick_provider_for_model(model_id, user, db)
-    else:
-        provider = await db.get(ModelProvider, provider_id)
-        await _resolve_provider(provider, user, db, model_id=model_id)
-        assert provider is not None
+    provider, model_id = await _load_study_provider(db, user, project)
 
     # Determine the next attempt number.
     prior_res = await db.execute(
@@ -1527,19 +1747,7 @@ async def send_message(
             detail="This topic is archived — unarchive it to keep studying.",
         )
 
-    provider_id = payload.provider_id
-    model_id = payload.model_id or project.model_id
-    if provider_id is None or not model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No model configured for this study session. "
-                "Send provider_id + model_id in the request."
-            ),
-        )
-    provider = await db.get(ModelProvider, provider_id)
-    await _resolve_provider(provider, user, db, model_id=model_id)
-    assert provider is not None
+    provider, model_id = await _load_study_provider(db, user, project)
 
     user_msg = StudyMessage(
         session_id=session.id,
@@ -1757,9 +1965,33 @@ async def _stream_generator(
             focus_id = getattr(session, "current_review_focus_objective_id", None)
             if focus_id is not None:
                 review_focus = await db.get(StudyObjectiveMastery, focus_id)
+            # Advance the lesson phase (Phase 2 orchestrator).
+            # This mutates session.phase / session.phase_history in
+            # place; the changes are committed with the assistant
+            # message at the end of the stream.
+            current_phase = advance_phase(
+                session=session,
+                unit=unit,
+                mastery_rows=mastery_rows,
+                has_due_reviews=bool(review_queue),
+            )
+
             # Commit the seeding changes so the transaction stays
             # tidy even if the LLM call downstream fails.
             await db.commit()
+
+            # Retrieve relevant passages from study materials (if any
+            # are indexed). Uses the student's last message as the
+            # query so the returned chunks are scoped to this turn.
+            # Falls back to "" when no embedding provider is configured
+            # or no materials are indexed — graceful degradation.
+            last_user_text = payload.content or ""
+            retrieved_material = await retrieve_for_study_session(
+                db,
+                study_project_id=project.id,
+                query=last_user_text,
+            )
+
             system_prompt = build_unit_system_prompt(
                 project=project,
                 unit=unit,
@@ -1769,6 +2001,9 @@ async def _stream_generator(
                 open_misconceptions=open_misconceptions,
                 review_queue=review_queue,
                 review_focus=review_focus,
+                current_phase=current_phase,
+                session_goal=getattr(session, "session_goal", None),
+                material_context=retrieved_material or None,
             )
             allowed_tags = ["whiteboard_action", "unit_action"]
         elif session_kind == "exam" and exam is not None:
@@ -1965,6 +2200,27 @@ async def _stream_generator(
         if exam is not None:
             await db.refresh(exam)
 
+        # Fire async assessor passes for every scored objective.
+        # These run after commit so the student answers are visible
+        # to the new session the assessor task opens. Fire-and-forget.
+        for att in capture_result.get("mastery_attempts") or []:
+            dispatch_assessor_if_configured(
+                attempt_id=att["attempt_id"],
+                session_id=att["session_id"],
+                unit_id=att["unit_id"],
+                objective_index=att["objective_index"],
+                objective_text=att["objective_text"],
+            )
+
+        # Emit board_updated for every block the tutor just pinned.
+        for block_info in capture_result.get("board_blocks_added") or []:
+            yield _sse(
+                {
+                    "event": "board_updated",
+                    "block": block_info,
+                }
+            )
+
         for ex in emitted_exercises:
             yield _sse(
                 {
@@ -2058,6 +2314,8 @@ async def _stream_generator(
             state_changed.append("misconceptions")
         if capture_result.get("reflection_written"):
             state_changed.append("reflections")
+        if capture_result.get("session_goal_set"):
+            state_changed.append("session_goal")
         if state_changed:
             yield _sse(
                 {
@@ -2119,6 +2377,9 @@ async def _stream_generator(
                 "done": True,
                 "message_id": str(assistant.id),
                 "created_at": assistant.created_at.isoformat(),
+                # Phase 2: expose current phase so the frontend can
+                # render the arc rail and highlight the active beat.
+                "phase": session.phase,
             }
         )
 
@@ -2179,6 +2440,369 @@ async def update_notes(
     return NotesState(
         notes=session.notes_md,
         updated_at=session.updated_at,
+    )
+
+
+# ====================================================================
+# Lesson board (Phase 3 — evolving canvas)
+# ====================================================================
+@router.get(
+    "/sessions/{session_id}/board",
+    response_model=list[StudyBoardBlockResponse],
+)
+async def get_board_blocks(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[StudyBoardBlockResponse]:
+    """Return all board blocks for a session, ordered oldest-first."""
+    from app.study.models import StudyBoardBlock
+
+    session, _ = await _get_owned_session(session_id, user, db)
+    stmt = (
+        select(StudyBoardBlock)
+        .where(StudyBoardBlock.session_id == session.id)
+        .order_by(StudyBoardBlock.order_index.asc())
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    return [
+        StudyBoardBlockResponse(
+            id=b.id,
+            session_id=b.session_id,
+            order_index=b.order_index,
+            kind=b.kind,
+            payload=b.payload_json,
+            created_at=b.created_at,
+        )
+        for b in rows
+    ]
+
+
+# ====================================================================
+# Session arc (Phase 3 — phase rail + objective promises)
+# ====================================================================
+@router.get(
+    "/sessions/{session_id}/arc",
+    response_model=SessionArcResponse,
+)
+async def get_session_arc(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SessionArcResponse:
+    """Phase plan + per-objective mastery for the arc rail component."""
+    session, unit = await _get_owned_session(session_id, user, db)
+
+    objectives: list[SessionArcObjective] = []
+    if unit is not None:
+        mastery_rows: list[StudyObjectiveMastery] = list(
+            (
+                await db.execute(
+                    select(StudyObjectiveMastery)
+                    .where(StudyObjectiveMastery.unit_id == unit.id)
+                    .order_by(StudyObjectiveMastery.objective_index.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        mastery_by_index = {m.objective_index: m for m in mastery_rows}
+        for idx, text in enumerate(unit.learning_objectives or []):
+            row = mastery_by_index.get(idx)
+            score = row.mastery_score if row is not None else None
+            mastered = score is not None and score >= study_config.MASTERY_FLOOR
+            objectives.append(
+                SessionArcObjective(
+                    index=idx,
+                    text=text,
+                    mastery_score=score,
+                    mastered=mastered,
+                )
+            )
+
+    total_objectives = len(objectives)
+    current_objective_index: int | None = None
+    for obj in objectives:
+        if not obj.mastered:
+            current_objective_index = obj.index
+            break
+
+    return SessionArcResponse(
+        phase=session.phase,
+        phase_history=list(session.phase_history or []),
+        objectives=objectives,
+        total_objectives=total_objectives,
+        current_objective_index=current_objective_index,
+    )
+
+
+# ====================================================================
+# Session goal (P1-A)
+# ====================================================================
+@router.patch(
+    "/sessions/{session_id}/goal",
+    response_model=SessionGoalUpdate,
+)
+async def set_session_goal(
+    session_id: uuid.UUID,
+    body: SessionGoalUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SessionGoalUpdate:
+    """Set (or clear) the student's personal goal for a session."""
+    session, _ = await _get_owned_session(session_id, user, db)
+    goal = body.session_goal.strip() if body.session_goal else None
+    session.session_goal = goal
+    session.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return SessionGoalUpdate(session_goal=session.session_goal)
+
+
+# ====================================================================
+# Assessor health (P1-C — admin only)
+# ====================================================================
+@router.get(
+    "/assessor-status",
+    response_model=AssessorStatusResponse,
+)
+async def get_assessor_status(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> AssessorStatusResponse:
+    """Coverage stats for the independent assessor model (admin only)."""
+    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+    configured = bool(settings and settings.study_assessor_configured)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    total_result = await db.execute(
+        select(func.count()).where(StudyRetrievalAttempt.created_at >= cutoff)
+    )
+    total_24h: int = total_result.scalar_one() or 0
+
+    assessor_result = await db.execute(
+        select(func.count()).where(
+            StudyRetrievalAttempt.created_at >= cutoff,
+            StudyRetrievalAttempt.source_kind == "assessor",
+        )
+    )
+    assessor_24h: int = assessor_result.scalar_one() or 0
+
+    return AssessorStatusResponse(
+        configured=configured,
+        total_attempts_24h=total_24h,
+        assessor_attempts_24h=assessor_24h,
+    )
+
+
+# ====================================================================
+# Session timeline (P2-C — phase history per session)
+# ====================================================================
+@router.get(
+    "/projects/{project_id}/session-timeline",
+    response_model=list[SessionTimelineEntry],
+)
+async def get_session_timeline(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[SessionTimelineEntry]:
+    """Phase progression for recent unit sessions — drives the timeline in InsightDashboard."""
+    project = await _get_owned_project(project_id, user, db)
+
+    sessions: list[StudySession] = list(
+        (
+            await db.execute(
+                select(StudySession)
+                .where(
+                    StudySession.project_id == project.id,
+                    StudySession.kind == "unit",
+                    StudySession.unit_id.isnot(None),
+                )
+                .order_by(StudySession.updated_at.desc())
+                .limit(10)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Fetch unit titles in one query.
+    unit_ids = list({s.unit_id for s in sessions if s.unit_id})
+    unit_title_map: dict[uuid.UUID, str] = {}
+    if unit_ids:
+        rows = (
+            await db.execute(
+                select(StudyUnit.id, StudyUnit.title).where(StudyUnit.id.in_(unit_ids))
+            )
+        ).all()
+        unit_title_map = {r.id: r.title for r in rows}
+
+    return [
+        SessionTimelineEntry(
+            session_id=s.id,
+            unit_id=s.unit_id,
+            unit_title=unit_title_map.get(s.unit_id, "Unknown unit") if s.unit_id else "Unknown unit",
+            started_at=s.created_at,
+            updated_at=s.updated_at,
+            student_turn_count=s.student_turn_count or 0,
+            teachback_passed=s.teachback_passed_at is not None,
+            phase_history=list(s.phase_history or []),
+        )
+        for s in sessions
+    ]
+
+
+# ====================================================================
+# Calibration history (Phase 4 #18 — confidence vs. correctness)
+# ====================================================================
+@router.get(
+    "/projects/{project_id}/calibration-history",
+    response_model=CalibrationHistoryResponse,
+)
+async def get_calibration_history(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CalibrationHistoryResponse:
+    """Return all retrieval attempts with confidence + correctness data.
+
+    Powers the Calibration Chart in the LessonBoard Insights tab —
+    plots self-reported confidence (1-5) against measured correctness
+    so the student can see Dunning-Kruger patterns in their own data.
+    Returns at most 200 data points (newest first for recency) to
+    keep the chart readable.
+    """
+    from app.study.models import StudyRetrievalAttempt
+
+    project = await _get_owned_project(project_id, user, db)
+
+    # Load units for this project to resolve titles.
+    units_stmt = select(StudyUnit).where(StudyUnit.project_id == project.id)
+    units = list((await db.execute(units_stmt)).scalars().all())
+    unit_title_map = {u.id: u.title for u in units}
+
+    stmt = (
+        select(StudyRetrievalAttempt)
+        .where(
+            StudyRetrievalAttempt.unit_id.in_([u.id for u in units]),
+        )
+        .order_by(StudyRetrievalAttempt.created_at.desc())
+        .limit(200)
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+
+    data_points = [
+        CalibrationDataPoint(
+            attempt_id=r.id,
+            unit_title=unit_title_map.get(r.unit_id, "Unknown unit"),
+            objective_index=r.objective_index,
+            phase=r.phase,
+            confidence=r.confidence,
+            correct=r.correct,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+    return CalibrationHistoryResponse(
+        project_id=project.id,
+        data_points=data_points,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/quick-review",
+    response_model=QuickReviewResponse,
+)
+async def quick_review(
+    project_id: uuid.UUID,
+    body: QuickReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> QuickReviewResponse:
+    """Grade a standalone review attempt and update SM-2 scheduling.
+
+    Used by the daily review loop — no session required. The assessor
+    model grades the answer if configured; otherwise the caller may pass
+    ``self_correct`` for a student-graded round-trip. If neither is
+    available, SM-2 is not updated and ``correct`` is null.
+    """
+    project = await _get_owned_project(project_id, user, db)
+
+    # Verify the objective belongs to this project.
+    mastery_row = await db.get(StudyObjectiveMastery, body.objective_id)
+    if mastery_row is None:
+        raise HTTPException(status_code=404, detail="Objective not found.")
+
+    unit = await db.get(StudyUnit, mastery_row.unit_id)
+    if unit is None or unit.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Objective not found.")
+
+    # Grade the answer.
+    grade_result = await grade_for_review(
+        db, mastery_row.objective_text, body.answer
+    ) if body.answer.strip() else None
+
+    assessor_unavailable = grade_result is None and not body.answer.strip() is False
+    if grade_result is not None:
+        correct: bool | None = grade_result[0]
+        feedback: str = grade_result[1]
+        assessor_unavailable = False
+    elif body.self_correct is not None:
+        correct = body.self_correct
+        feedback = ""
+        assessor_unavailable = True
+    else:
+        correct = None
+        feedback = ""
+        assessor_unavailable = True
+
+    # Record the attempt (session_id is nullable since migration 0078).
+    attempt = StudyRetrievalAttempt(
+        session_id=None,
+        unit_id=mastery_row.unit_id,
+        objective_index=mastery_row.objective_index,
+        phase="review",
+        correct=correct,
+        confidence=body.confidence,
+        source_kind="review" if grade_result is not None else "self",
+    )
+    db.add(attempt)
+
+    # Update SM-2 only when we have a definitive grade.
+    if correct is not None:
+        recent = await study_review.recent_attempts_for_objective(
+            db, mastery_row.unit_id, mastery_row.objective_index
+        )
+        derived_score, derived_success = study_review.derive_mastery_from_attempts(
+            [attempt] + recent, fallback_score=mastery_row.mastery_score
+        )
+        study_review.schedule_next_review(
+            mastery_row, success=derived_success, score=derived_score
+        )
+
+        # Re-average unit-level mastery.
+        if unit.status != "completed":
+            all_rows_stmt = select(StudyObjectiveMastery).where(
+                StudyObjectiveMastery.unit_id == unit.id
+            )
+            all_rows = list((await db.execute(all_rows_stmt)).scalars().all())
+            if all_rows:
+                unit.mastery_score = int(
+                    round(sum(r.mastery_score for r in all_rows) / len(all_rows))
+                )
+
+    await db.commit()
+
+    # Count remaining due items.
+    remaining_rows = await study_review.compute_due(db, project.id)
+    items_remaining = len(remaining_rows)
+
+    return QuickReviewResponse(
+        correct=correct,
+        feedback=feedback,
+        new_mastery_score=mastery_row.mastery_score / 100,
+        items_remaining=items_remaining,
+        assessor_unavailable=assessor_unavailable,
     )
 
 
@@ -2334,16 +2958,7 @@ async def submit_exercise(
             status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found"
         )
 
-    model_id = project.model_id
-    if not model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No model is associated with this study project yet — "
-                "send a chat message first."
-            ),
-        )
-    provider = await _pick_provider_for_model(model_id, user, db)
+    provider, model_id = await _load_study_provider(db, user, project)
 
     now = datetime.now(timezone.utc)
     exercise.status = "submitted"

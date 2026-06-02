@@ -3,7 +3,6 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
 import { InputBar } from "@/components/chat/InputBar";
-import { ModelSelector } from "@/components/chat/ModelSelector";
 import { TopNav } from "@/components/layout/TopNav";
 import { ExamContextPanel } from "@/components/study/ExamContextPanel";
 import { ExamResultsModal } from "@/components/study/ExamResultsModal";
@@ -13,8 +12,9 @@ import { DiagnosticBanner } from "@/components/study/DiagnosticBanner";
 import { CalibrationWarningToast } from "@/components/study/CalibrationWarningToast";
 import { UnitCompletedToast } from "@/components/study/UnitCompletedToast";
 import { UnitsInsertedToast } from "@/components/study/UnitsInsertedToast";
-import { UnitContextPanel } from "@/components/study/UnitContextPanel";
 import { ConfidenceWidget } from "@/components/study/ConfidenceWidget";
+import { LessonArcRail } from "@/components/study/LessonArcRail";
+import { LessonBoard } from "@/components/study/LessonBoard";
 import { WhiteboardPanel } from "@/components/study/Whiteboard/WhiteboardPanel";
 import { studyApi } from "@/api/study";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -29,7 +29,6 @@ import {
 } from "@/hooks/useStudy";
 import { useStudyStream } from "@/hooks/useStudyStream";
 import { useStudyStore } from "@/store/studyStore";
-import { useSelectedModel } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 import type { StudyMessage } from "@/api/types";
 
@@ -60,6 +59,7 @@ export function StudySessionPage() {
   const isStreaming = useStudyStore((s) => s.isStreaming);
   const setActiveExercise = useStudyStore((s) => s.setActiveExercise);
   const setExerciseHistory = useStudyStore((s) => s.setExerciseHistory);
+  const setBoardBlocks = useStudyStore((s) => s.setBoardBlocks);
   const lastUnitCompleted = useStudyStore((s) => s.lastUnitCompleted);
   const lastUnitsInserted = useStudyStore((s) => s.lastUnitsInserted);
   const lastCalibrationWarning = useStudyStore((s) => s.lastCalibrationWarning);
@@ -75,7 +75,6 @@ export function StudySessionPage() {
   const setSubmissionStatus = useStudyStore((s) => s.setSubmissionStatus);
   const setSubmissionError = useStudyStore((s) => s.setSubmissionError);
   const appendStudyMessage = useStudyStore((s) => s.appendMessage);
-  const selectedModel = useSelectedModel();
   const isMobile = useIsMobile();
   const archiveMutation = useArchiveStudyProject();
   const calibrateMutation = useCalibrateStudyProject();
@@ -95,6 +94,7 @@ export function StudySessionPage() {
 
   const [examResultsOpen, setExamResultsOpen] = useState(false);
   const [timeoutPending, setTimeoutPending] = useState(false);
+  const [sessionGoalSet, setSessionGoalSet] = useState(false);
   const [unitToastDismissed, setUnitToastDismissed] = useState<string | null>(
     null
   );
@@ -140,6 +140,7 @@ export function StudySessionPage() {
       setMessages([]);
       setActiveExercise(null);
       setExerciseHistory([]);
+      setBoardBlocks([]);
       setSubmissionStatus("idle");
       setSubmissionError(null);
       setLastUnitCompleted(null);
@@ -154,6 +155,7 @@ export function StudySessionPage() {
     setMessages,
     setActiveExercise,
     setExerciseHistory,
+    setBoardBlocks,
     setSubmissionStatus,
     setSubmissionError,
     setLastUnitCompleted,
@@ -254,7 +256,7 @@ export function StudySessionPage() {
 
   const handleSend = useCallback(
     async (text: string) => {
-      if (!sessionId || !selectedModel) return;
+      if (!sessionId) return;
 
       const store = useStudyStore.getState();
       const optimisticId = `optimistic-${Date.now()}-${Math.random()
@@ -287,14 +289,12 @@ export function StudySessionPage() {
         sessionId,
         {
           content: text,
-          provider_id: selectedModel.provider_id,
-          model_id: selectedModel.model_id,
           review_focus_objective_id: reviewFocus,
         },
         { optimisticUserId: optimisticId }
       );
     },
-    [sessionId, selectedModel, sendMessage, searchParams, setSearchParams]
+    [sessionId, sendMessage, searchParams, setSearchParams]
   );
 
   const handleExerciseSubmit = useCallback(
@@ -372,9 +372,7 @@ export function StudySessionPage() {
     : exam
     ? `Final exam · attempt ${exam.attempt_number}`
     : project?.title || "Study session";
-  const subtitle = selectedModel
-    ? `${selectedModel.display_name} · ${selectedModel.provider_name}`
-    : "No model selected";
+  const subtitle = unit?.title ?? (exam ? `Final exam · attempt ${exam.attempt_number}` : undefined);
 
   return (
     <>
@@ -399,7 +397,6 @@ export function StudySessionPage() {
               <ArrowLeft className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
               {!isMobile && "Back"}
             </button>
-            <ModelSelector compact={isMobile} />
           </div>
         }
       />
@@ -489,44 +486,51 @@ export function StudySessionPage() {
                 !showWhiteboard && (
                   <FallbackConfidenceStrip sessionId={session.id} />
                 )}
+              {kind === "unit" &&
+                session &&
+                !session.session_goal &&
+                !sessionGoalSet &&
+                session.student_turn_count === 0 && (
+                  <SessionGoalPrompt
+                    sessionId={session.id}
+                    onSet={() => setSessionGoalSet(true)}
+                  />
+                )}
               <div className="px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
                 <InputBar
                   streaming={isStreaming}
-                  disabled={!selectedModel}
                   onSend={handleSend}
                   onCancel={cancel}
                   allowAttachments={false}
                   autoFocus
                   placeholder={
-                    selectedModel
-                      ? kind === "exam"
-                        ? "Answer the examiner..."
-                        : "Ask your tutor..."
-                      : "Select a model above to start chatting"
-                  }
-                  footer={
-                    selectedModel
-                      ? `Tutor model: ${selectedModel.display_name}`
-                      : "No model selected"
+                    kind === "exam"
+                      ? "Answer the examiner..."
+                      : "Ask your tutor..."
                   }
                 />
               </div>
             </div>
           }
           right={
-            <div className="h-full min-h-0">
-              {showWhiteboard && session ? (
+            <div className="flex h-full min-h-0 flex-col">
+              {kind === "unit" && session ? (
+                <>
+                  <LessonArcRail sessionId={session.id} />
+                  <div className="min-h-0 flex-1">
+                    <LessonBoard
+                      sessionId={session.id}
+                      projectId={session.project_id}
+                      initialNotes={session.notes_md}
+                      onSubmit={handleExerciseSubmit}
+                    />
+                  </div>
+                </>
+              ) : showWhiteboard && session ? (
                 <WhiteboardPanel
                   sessionId={session.id}
                   initialNotes={session.notes_md}
                   onSubmit={handleExerciseSubmit}
-                />
-              ) : kind === "unit" && unit && project ? (
-                <UnitContextPanel
-                  unit={unit}
-                  projectId={project.id}
-                  projectTitle={project.title}
-                  totalUnits={project.total_units}
                 />
               ) : kind === "exam" && exam && project ? (
                 <ExamContextPanel
@@ -560,6 +564,89 @@ export function StudySessionPage() {
         archivePending={archiveMutation.isPending}
       />
     </>
+  );
+}
+
+/** One-shot goal-setting prompt shown before the student's first message. */
+function SessionGoalPrompt({
+  sessionId,
+  onSet,
+}: {
+  sessionId: string;
+  onSet: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setOpen(false);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await studyApi.setSessionGoal(sessionId, trimmed);
+      onSet();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div className="px-3 pb-1 pt-0 sm:px-4">
+        <button
+          type="button"
+          className="text-[11px] text-[var(--text-muted)] underline-offset-2 hover:text-[var(--text)] hover:underline"
+          onClick={() => setOpen(true)}
+        >
+          + Set a session goal (optional)
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 px-3 pb-2 pt-0.5 sm:px-4">
+      <input
+        autoFocus
+        className={cn(
+          "min-w-0 flex-1 rounded-input border border-[var(--border)] bg-[var(--surface)]",
+          "px-2.5 py-1.5 text-xs text-[var(--text)]",
+          "focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]",
+          "placeholder:text-[var(--text-muted)]/60"
+        )}
+        placeholder="e.g. understand how recursion works…"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void handleSubmit();
+          if (e.key === "Escape") setOpen(false);
+        }}
+        maxLength={200}
+      />
+      <button
+        type="button"
+        disabled={submitting || !value.trim()}
+        onClick={() => void handleSubmit()}
+        className={cn(
+          "shrink-0 rounded-input border border-[var(--accent)] bg-[var(--accent)]",
+          "px-2.5 py-1.5 text-xs font-medium text-white",
+          "disabled:cursor-not-allowed disabled:opacity-40"
+        )}
+      >
+        Set
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="shrink-0 rounded-input px-2 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+      >
+        Skip
+      </button>
+    </div>
   );
 }
 

@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Sparkles, X } from "lucide-react";
+import { FileText, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 import type { StudyCurrentLevel } from "@/api/types";
+import { apiClient } from "@/api/client";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useCreateStudyProject } from "@/hooks/useStudy";
-import { useAvailableModels } from "@/hooks/useProviders";
-import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
 type LevelOption = {
@@ -45,13 +44,15 @@ interface NewStudyWizardProps {
 
 type WizardStep = "form" | "planning";
 
+interface PendingFile {
+  name: string;
+  fileId: string;
+}
+
 export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
   const navigate = useNavigate();
   const create = useCreateStudyProject();
-  const { isLoading: modelsLoading } = useAvailableModels();
-  const available = useModelStore((s) => s.available);
-  const currentSelection = useSelectedModel();
-  const setSelection = useModelStore((s) => s.setSelection);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<WizardStep>("form");
   const [title, setTitle] = useState("");
@@ -62,12 +63,9 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
   );
   const [topicDraft, setTopicDraft] = useState("");
   const [topics, setTopics] = useState<string[]>([]);
-  const [modelKey, setModelKey] = useState<string>(() =>
-    currentSelection
-      ? `${currentSelection.provider_id}:${currentSelection.model_id}`
-      : ""
-  );
   const [error, setError] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -76,17 +74,6 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
     setStep("form");
     setError(null);
   }, [open]);
-
-  const modelOptions = useMemo(
-    () =>
-      available.map((m) => ({
-        key: `${m.provider_id}:${m.model_id}`,
-        label: `${m.display_name} — ${m.provider_name}`,
-        providerId: m.provider_id,
-        modelId: m.model_id,
-      })),
-    [available]
-  );
 
   const reset = () => {
     setTitle("");
@@ -97,7 +84,29 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
     setTopics([]);
     setError(null);
     setStep("form");
+    setPendingFiles([]);
+    setUploadingFile(false);
   };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setUploadingFile(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { data } = await apiClient.post<{ id: string }>("/files/", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setPendingFiles((prev) => [...prev, { name: file.name, fileId: data.id }]);
+    } catch {
+      setError("File upload failed. Please try again.");
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
 
   const handleClose = () => {
     if (create.isPending) return;
@@ -139,11 +148,6 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
       );
       return;
     }
-    const opt = modelOptions.find((m) => m.key === modelKey);
-    if (!opt) {
-      setError("Pick a model so the AI can design your study plan.");
-      return;
-    }
 
     setStep("planning");
     try {
@@ -153,10 +157,8 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
         goal: goal.trim() || null,
         learning_request: request,
         current_level: currentLevel,
-        model_id: opt.modelId,
-        provider_id: opt.providerId,
+        material_file_ids: pendingFiles.map((f) => f.fileId),
       });
-      setSelection(opt.providerId, opt.modelId);
       reset();
       onClose();
       navigate(`/study/topics/${detail.id}`);
@@ -319,30 +321,62 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
             />
           </Field>
 
-          <Field label="Study model">
-            {modelsLoading ? (
-              <div className="text-xs text-[var(--text-muted)]">
-                Loading models...
-              </div>
-            ) : modelOptions.length === 0 ? (
-              <div className="rounded-card border border-dashed border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)]">
-                No models configured yet. Add a provider in the Models tab and
-                come back.
-              </div>
-            ) : (
-              <select
-                value={modelKey}
-                onChange={(e) => setModelKey(e.target.value)}
-                className={inputCls}
+          <Field
+            label="Upload course material"
+            hint="Optional — PDF, notes, or a syllabus. The AI will use it to build a plan that matches your actual course."
+          >
+            <div className="space-y-2">
+              {pendingFiles.length > 0 && (
+                <div className="space-y-1.5">
+                  {pendingFiles.map((f) => (
+                    <div
+                      key={f.fileId}
+                      className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5"
+                    >
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                      <span className="min-w-0 flex-1 truncate text-xs">
+                        {f.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPendingFiles((prev) =>
+                            prev.filter((x) => x.fileId !== f.fileId)
+                          )
+                        }
+                        className="shrink-0 text-[var(--text-muted)] hover:text-red-500"
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                leftIcon={
+                  uploadingFile ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" />
+                  )
+                }
+                disabled={uploadingFile}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <option value="">Pick a model...</option>
-                {modelOptions.map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            )}
+                {uploadingFile ? "Uploading…" : "Add file"}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.txt,.md,.py,.js,.ts,.json,.csv,.docx"
+                onChange={handleFileUpload}
+              />
+            </div>
           </Field>
 
           {error && (
@@ -355,20 +389,27 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
           )}
         </div>
       ) : (
-        <PlanningScreen />
+        <PlanningScreen hasMaterials={pendingFiles.length > 0} />
       )}
     </Modal>
   );
 }
 
-function PlanningScreen() {
+function PlanningScreen({ hasMaterials }: { hasMaterials: boolean }) {
   const [stage, setStage] = useState(0);
-  const stages = [
-    "Parsing your learning goals...",
-    "Mapping prerequisites and skill order...",
-    "Drafting focused units with clear objectives...",
-    "Finalising your study plan...",
-  ];
+  const stages = hasMaterials
+    ? [
+        "Reading your uploaded material...",
+        "Mapping prerequisites and skill order...",
+        "Grounding units in your course content...",
+        "Finalising your study plan...",
+      ]
+    : [
+        "Parsing your learning goals...",
+        "Mapping prerequisites and skill order...",
+        "Drafting focused units with clear objectives...",
+        "Finalising your study plan...",
+      ];
   useEffect(() => {
     const t = setInterval(() => {
       setStage((s) => Math.min(s + 1, stages.length - 1));

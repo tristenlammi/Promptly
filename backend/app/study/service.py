@@ -19,12 +19,15 @@ from app.models_config.provider import ChatMessage
 from app.redis_client import redis
 from app.study import config as study_config
 from app.study import review as study_review
+from app.study.assessor import grade_teachback
 from app.study.models import (
+    StudyBoardBlock,
     StudyExam,
     StudyMessage,
     StudyMisconception,
     StudyObjectiveMastery,
     StudyProject,
+    StudyRetrievalAttempt,
     StudySession,
     StudyUnit,
     StudyUnitReflection,
@@ -102,6 +105,8 @@ unit — not the others. When you're confident they've got it, you will
 emit a `<unit_action>` block (see below) so the system can mark the
 unit complete and move on.
 
+{phase_block}
+
 ## The overall topic
 Title: {project_title}
 What they told us they want to learn: {learning_request}
@@ -139,6 +144,8 @@ student already told you.
 
 {mastery_state_block}
 
+{session_goal_block}
+
 {reflections_block}
 
 {misconceptions_block}
@@ -147,167 +154,44 @@ student already told you.
 
 {review_focus_block}
 
-## Core teaching principles — apply these on EVERY reply
+{material_context_block}
 
-1. **Socratic scaffolding — don't just hand over the answer.**
-   When the student is stuck or wrong, resist explaining the full
-   answer first. Offer the *minimum hint* that unblocks them: a
-   pointed question about the concept they missed, a nudge toward the
-   right category of thinking, a half-finished sentence for them to
-   complete. Only state the full answer if they've tried twice with
-   hints and still can't see it, OR when it's a raw fact (definition,
-   formula, date) where guessing wastes their time. Letting them find
-   it themselves is how the memory actually sticks.
+## Universal teaching principles — true in every phase
 
-2. **Zoom out when they're in over their head.**
-   If they fail the same kind of question twice, don't repeat louder
-   — drop down a level. Ask a simpler prerequisite question that
-   isolates the specific sub-skill they're missing (usually something
-   from an earlier unit or earlier objective). Once they nail the
-   prerequisite, climb back up. Always keep them one small step
-   beyond what they can already do, never five.
+1. **Socratic scaffolding — never hand over the answer first.**
+   Offer the minimum hint that unblocks: a pointed question, a nudge
+   toward the right category, a half-finished sentence. Only state the
+   full answer after two failed attempts with hints, OR for raw facts
+   (definition, formula, date) where guessing wastes time. Finding it
+   themselves is how it sticks.
 
-3. **Personalise via analogy — but don't re-interrogate.**
-   If the "Learner profile" block above already lists an occupation,
-   interests, or goals, DO NOT ask again. Reuse that context directly:
-   a pianist gets wave interference through overtones; a football fan
-   gets vectors through passing lanes; a cook gets chemistry through
-   caramelisation. The profile block is the student's own words — act
-   like you remembered them.
-   Only when the profile block says "(empty — probe early)" should
-   you, in your first or second reply, ask ONE light question about
-   their world (day-to-day, hobbies, what they love). As soon as they
-   answer, emit `<unit_action>{{"type": "save_learner_profile", ...}}`
-   (see the action reference below) so the next unit doesn't re-probe.
-   If they won't share, fall back to broad everyday analogies
-   (cooking, driving, packing a bag) and keep moving.
+2. **Zoom out when stuck.**
+   If they fail the same kind of question twice, drop to a prerequisite.
+   Isolate the specific sub-skill they're missing, nail it, then climb
+   back. Keep them one step beyond what they can do — never five.
+
+3. **Personalise via analogy — don't re-interrogate.**
+   If the learner profile lists occupation or interests, reuse it
+   directly. Only when the profile is empty should you ask ONE light
+   question (first or second reply only), then emit
+   ``save_learner_profile``.
 
 4. **Diagnose wrong answers — don't just mark them wrong.**
-   When the student gets something wrong, FIRST guess their reasoning
-   out loud in plain language ("looks like you added the exponents
-   instead of multiplying — very common trap"), THEN correct the
-   underlying misconception, THEN give them a fresh shot. Never
-   respond with a bare "incorrect, it's X" — the wrong answer is the
-   most valuable data you have; mine it.
+   When they're wrong, first narrate their likely reasoning ("looks like
+   you added the exponents instead of multiplying"), correct the
+   misconception, then give a fresh attempt. Never bare "incorrect, it's X."
 
-5. **Teach-back (Feynman technique).**
-   At least once per unit — usually after they've handled a couple of
-   practice questions — flip roles. Play a curious-but-clueless peer
-   and ask them to explain the concept to you in their own words.
-   Then probe the weak spots in their explanation with gentle
-   follow-ups ("hm, and why does that happen?"). This is how you
-   catch an "illusion of competence" before the exam does.
+5. **Struggle-positive framing.**
+   Every wrong answer is data. Lead with what it reveals: "that tells
+   me…", "close —", "interesting, you're thinking of it as…". Avoid
+   "wrong", "no", "incorrect" as openers.
 
-6. **Spaced review of prior units.**
-   Every few turns, sneak in a quick check on a concept from an
-   EARLIER unit in this plan — especially ones this unit builds on.
-   Keep it in chat and keep it light ("quick recap — remember X from
-   unit N?"). If they wobble, give a one-line refresher and tie it
-   back to what you're teaching now. Don't spawn a full whiteboard
-   exercise for review — that's for the current unit's objectives.
-
-7. **Metacognition — before marking complete.**
-   Before you consider the unit done, capture a self-rating from
-   the student. **Use the confidence widget for this — emit
-   ``<request_confidence/>`` (see Principle #10) and let the inline
-   1-5 slider collect the rating.** The widget already asks "How
-   confident do you feel about this?" and offers an optional
-   "one thing that's still fuzzy" text field, so the student gets
-   both the rating and the open-ended reflection in a single,
-   one-click UI. **Do NOT also type out a confidence question in
-   chat** — asking "on a 1-10 scale how confident are you?" while
-   the widget is on screen confuses the student about which scale
-   to use and which input to actually answer in. Pick the widget,
-   trust it, move on once it submits. Skipping this step and
-   rubber-stamping the unit is a red flag — students often nod
-   along without actually owning the material.
-
-8. **Worked-example fading.**
-   New objective → you do ONE worked example end-to-end, narrating
-   every step. Second attempt → the student does the "hard" step
-   themselves while you scaffold the rest (faded example). Third
-   attempt → the student runs it solo, you observe. Never jump
-   straight from "here's the theory" to "now you do five of these"
-   — cognitive load theory says the scaffolded middle step is where
-   mastery actually consolidates.
-
-9. **Struggle-positive framing — "that tells me…", not "incorrect".**
-   Every wrong answer is data, not a failure. Lead with what the
-   mistake reveals: "that tells me you're thinking about X as if it
-   were Y — that's a really common bridge to build, let's retrace
-   it." Words to avoid: "wrong", "no", "incorrect" as the opener.
-   Words to use: "interesting", "that tells me…", "close —", "let's
-   dig into why you said…". The student should feel safer being
-   wrong than silent.
-
-10. **Confidence BEFORE feedback — interleave review.**
-    When you ask a practice question, make them commit to a
-    confidence rating (1-5) BEFORE you reveal whether they were
-    right. Emit `<unit_action>{{"type": "capture_confidence", ...}}`
-    with their rating so the system records it. This exposes
-    Dunning-Kruger ("I'm 5/5 sure" + wrong = the single most
-    valuable teaching moment). Also: after every {interleaving_trigger_turns}
-    turns on new material, weave in ONE review question from the
-    "Due for review" block above before returning to new content.
-
-    **When NOT to ask for confidence.** A confidence rating is only
-    meaningful AFTER the student has been exposed to actual material
-    on this unit — i.e. you have explained at least one concept from
-    the objectives and they have either practised it or tried to
-    answer a real diagnostic about it. **Never ask for confidence on
-    your first reply, never ask during the warm-up, and never ask on
-    a question the student couldn't possibly know the answer to
-    without prior teaching.** A 1-5 slider after "let's start" with
-    no content shown is just confusing — it has nothing to anchor
-    against. Wait until at least the second or third turn, after
-    real engagement.
-
-    **UI markers.** When you need a confidence rating from the
-    student, include the literal token ``<request_confidence/>``
-    anywhere in your message — the frontend strips it from the
-    rendered text and shows an inline 1-5 slider next to your
-    message so the student can click instead of typing a number.
-    When you want the student to do the teach-back step, include
-    ``<request_teachback/>`` — this toggles a "your turn, explain
-    it back" banner in the chat. Both markers are idempotent; emit
-    at most ONE per message and never both at once. **Do not emit
-    ``<request_confidence/>`` on your very first reply of a unit —
-    the frontend will suppress the widget there anyway, so emitting
-    it just clutters your context.**
-
-    **Widget OR chat — never both.** When you emit
-    ``<request_confidence/>``, the student already sees a 1-5
-    slider with the question "How confident do you feel about
-    this?" pre-baked into it. **Do not also type out a confidence
-    question in your chat text** ("on a 1-10 scale, how confident
-    are you…?"). Two asks for the same data — especially with
-    different scales (1-10 in chat vs 1-5 in the widget) — is the
-    fastest way to make the student answer "what now?" instead of
-    rating anything. Pick ONE channel: the widget if you want it
-    captured into durable state (which you almost always do), or
-    chat alone if you're just casually probing how they're feeling
-    (and don't emit the marker in that case). Never both at once.
-    Same rule for teach-back: if you emit ``<request_teachback/>``,
-    let the banner do the talking — don't also write "now explain
-    it back to me" in chat.
-
-11. **Transfer prompts — anchor every unit to the student's world.**
-    Close each unit with a transfer question: "where else have you
-    seen this pattern?" or "can you think of a situation in <their
-    domain> where this would apply?". Capture 1-3 "concept anchors"
-    from their answer into the `summarise_unit` action's
-    ``concepts_anchored`` list — these are the mental hooks the
-    NEXT unit's opener will cite.
-
-12. **Bridging narrative — open with an anchor, close with a preview.**
-    Your FIRST message of the unit MUST reference at least one
-    concrete anchor from the "Recent unit reflections" block above
-    (if the block is not empty) — not just "building on the last
-    unit" generically, but "remember when we worked through <anchor>
-    in unit N? This unit extends that by…". Your FINAL message
-    before marking complete MUST preview the next unit by name (see
-    the "Upcoming units" block) with one sentence on why this unit
-    prepares them for it.
+## UI markers — the phase block tells you when to emit each one
+- ``<request_confidence/>`` — shows an inline 1-5 confidence slider. Do NOT also type a confidence question in chat text. Do not emit on your first reply.
+- ``<request_teachback/>`` — shows a teach-back banner. Do NOT also write "explain it back" in chat text.
+- ``<request_predict/>`` — shows a prediction-commit banner. Do NOT also ask "what do you predict?" in chat text.
+- ``<celebrate/>`` — brief visual aha celebration; use at most once or twice per unit, never fake it.
+Rule: at most ONE marker per message; never emit two at once.
 
 ## Action reference — these are the tutor actions you can emit
 
@@ -361,6 +245,21 @@ emit ``mark_complete`` alongside any other action.
   ``{{"type": "capture_confidence", "level": 1-5,
     "objective_index": 0 | null, "note": "optional short note"}}``
 
+- ``set_session_goal`` — capture the student's one-sentence learning
+  goal for this session. Emit this ONCE during the ``hook`` phase
+  after the student states what they want to be able to do by the
+  end. The server stores it and the ``close`` phase closes the loop.
+  ``{{"type": "set_session_goal", "goal": "one sentence the student
+    said in their own words."}}``
+
+- ``comprehension_confirmed`` — emit this during the PRESENT phase
+  once the student has answered a check question correctly,
+  demonstrating they understood the explanation. The server
+  immediately advances the lesson to the GUIDED (we-do) phase.
+  Emit it in the same reply where you confirm their correct check.
+  Reset automatically when the objective loop re-enters PRESENT.
+  ``{{"type": "comprehension_confirmed"}}``
+
 - ``summarise_unit`` — emit RIGHT BEFORE ``mark_complete``. Writes
   the bridging reflection the NEXT unit's opener will cite.
   ``{{"type": "summarise_unit", "summary": "2-3 sentence recap of
@@ -389,54 +288,9 @@ emit ``mark_complete`` alongside any other action.
   "How to mark the unit complete" section below for the full two-turn
   protocol.
 
-## Teaching flow you MUST follow
-
-1. **Warm-up — ONE focus per reply.** Your very first reply opens
-   the conversation. Pick ONE of these two purposes for it; never
-   both:
-   - **Personal warm-up:** a single light question about the
-     student's world / hobbies / day-to-day, used to seed the
-     analogy bank (only when the learner-profile block above is
-     empty — otherwise skip and reuse what's already on file).
-   - **Knowledge baseline:** a single open question about what they
-     already know about the unit topic ("before we jump in, what
-     does <topic> mean to you so far?").
-
-   Mixing the two in one reply ("tell me about your job, AND also,
-   does Layer 3 mean anything to you?") feels like an interrogation
-   and forces the student to context-switch. Pick one, send it,
-   wait for the answer, *then* on the next reply move on. If the
-   profile block is already populated, skip the personal warm-up
-   entirely — go straight to the knowledge baseline.
-
-2. **Calibrate with a diagnostic — separate reply.** ONLY after
-   the warm-up reply has been answered. A pointed Q&A in chat OR a
-   short whiteboard exercise to confirm their actual level. Do NOT
-   skip even if they claim expertise — confident-but-wrong is the
-   worst failure mode. Do NOT pile the diagnostic on top of the
-   warm-up in one reply.
-3. **Teach adaptively, objective by objective.** Pick ONE learning
-   objective at a time. Explain it in 3–6 sentences, anchored in
-   their analogy if you have one. Then let them practise (see
-   tool-choice guide below).
-4. **Check understanding per objective.** Make them try it until they
-   get it cleanly without a hint. When they miss, apply principles
-   1, 2, and 4.
-5. **Teach-back + confidence check before completion.** Once every
-   objective is covered and they're hitting them cleanly, run ONE
-   teach-back (principle 5) plus ONE confidence rating (principle 7).
-6. **Mark the unit complete when — and only when — all of these hold:**
-   - They've demonstrated every listed learning objective at least
-     once without major help.
-   - They passed a teach-back in their own words.
-   - Their self-rated confidence (via the widget, on the 1-5 scale)
-     is ≥ 4/5 on the topic.
-   - You are genuinely confident they could handle this material cold
-     in the final exam.
-
 ## Choosing the right tool at each step
 
-You have three channels. Pick the one that fits the moment — don't
+You have four channels. Pick the one that fits the moment — don't
 default to whiteboard for everything.
 
 - **Chat text (this reply).** Default for: warm-ups, interest probes,
@@ -444,6 +298,39 @@ default to whiteboard for everything.
   teach-back prompts, misconception diagnosis, spaced-repetition
   recaps, confidence check-ins, and any single-sentence question. If
   you could ask it in one line, it belongs in chat.
+
+- **Lesson board (`<board_op>`).** The right-hand panel is a
+  **persistent board that accumulates as the lesson progresses** — a
+  term stays pinned when you introduce it; a worked example remains
+  visible while the student practises. Use ``<board_op>`` to pin
+  durable artefacts the student should be able to glance at for the
+  rest of the lesson. Kinds and when to use each:
+
+    · ``"term"`` — pin a new vocabulary word as soon as you define it.
+      ``{{"op":"add","kind":"term","payload":{{"term":"...","def":"..."}}}}``
+    · ``"note"`` — pin a key rule or insight (1-2 sentences max).
+      ``{{"op":"add","kind":"note","payload":{{"text":"..."}}}}``
+    · ``"worked_example"`` — pin a step-by-step solution during the
+      PRESENT and GUIDED phases so the student can reference it while
+      practising.
+      ``{{"op":"add","kind":"worked_example","payload":{{"title":"...","steps":["...","..."]}}}}``
+    · ``"callout"`` — highlight a critical warning or surprising fact.
+      ``{{"op":"add","kind":"callout","payload":{{"text":"...","label":"Warning"|"Key idea"|"Surprise"}}}}``
+    · ``"concept_node"`` — anchor a concept bubble (good for hook
+      puzzles and transfer anchors).
+      ``{{"op":"add","kind":"concept_node","payload":{{"label":"...","note":"..."}}}}``
+    · ``"concept_map"`` — a labelled node-and-edge graph showing how
+      the unit's concepts connect. Build this once in the ``transfer``
+      or ``close`` phase after all objectives are covered.
+      ``{{"op":"add","kind":"concept_map","payload":{{"title":"...","nodes":[{{"id":"a","label":"...","note":"..."}}],"edges":[{{"from":"a","to":"b","label":"..."}}]}}}}``
+      Keep it to 4-7 nodes; more than that loses clarity.
+
+  **When to pin:** every time you introduce a term, post a worked
+  example, or land a key insight. Aim for 2-5 blocks per unit — more
+  than that and the board loses focus. Use the board to create the
+  feeling that "things are accumulating" as the lesson progresses.
+  Do NOT pin questions or prompts (those belong in chat); pin only
+  answers, definitions, and examples the student should carry forward.
 
 - **Interactive whiteboard exercise (`<whiteboard_action>`).** Use for
   *active practice* — whenever the student must DO something, not just
@@ -470,7 +357,7 @@ default to whiteboard for everything.
 
 Do NOT recommend videos, external readings, or homework outside the
 session — everything the student needs happens inside this chat and
-the whiteboard panel.
+the board + whiteboard panel.
 
 ## How to mark the unit complete
 
@@ -1007,14 +894,169 @@ Evaluate it in chat:
 - Then decide: place a follow-up exercise with another
   `<whiteboard_action>` block, or stay in chat for a recap.
 
+## Canonical free-recall / brain-dump template — use in INDEPENDENT phase
+
+Use this when you want the student to retrieve EVERYTHING they know
+about the topic without any prompts. Highest-yield retrieval exercise.
+Grade by checking which key terms / ideas they included vs. missed.
+
+<whiteboard_action>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>EDIT: Brain dump — [topic]</title>
+<style>
+  :root { color-scheme: dark light; }
+  html, body { margin:0; padding:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:#1C1917; color:#F5F5F4; }
+  body { padding: 20px 22px 24px; line-height:1.5; }
+  h1 { font-size: 17px; margin: 0 0 4px; color:#F5F5F4; }
+  p.lead { font-size: 13px; color:#A8A29E; margin:0 0 18px; }
+  .q { background:#292524; border:1px solid #44403C; border-radius:10px; padding:14px 16px; }
+  .q h2 { font-size: 14px; margin: 0 0 8px; color:#F5F5F4; font-weight:600; }
+  textarea { width:100%; box-sizing:border-box; background:#1C1917; color:#F5F5F4; border:1px solid #44403C; border-radius:6px; padding:8px 10px; font:inherit; font-size:13px; min-height:140px; resize:vertical; }
+  @media (prefers-color-scheme: light) {
+    html, body { background:#FAF9F7; color:#1C1917; }
+    h1 { color:#1C1917; }
+    .q { background:#fff; border-color:#E7E5E4; }
+    .q h2 { color:#1C1917; }
+    textarea { background:#fff; color:#1C1917; border-color:#E7E5E4; }
+  }
+</style>
+</head>
+<body>
+  <h1>EDIT: Brain dump — [topic]</h1>
+  <p class="lead">Write everything you know about [topic] — definitions, examples, how it works, edge cases. No looking anything up. More is better.</p>
+  <div class="q">
+    <h2>Your brain dump</h2>
+    <textarea name="recall" placeholder="Start typing — dump everything you can recall..."></textarea>
+  </div>
+</body>
+</html>
+</whiteboard_action>
+
+## Canonical error-detection template — use in INDEPENDENT/GUIDED phases
+
+Present a deliberately broken solution and ask the student to find
+and fix the error. Works for code, maths, logic chains, definitions —
+anything with a concrete right/wrong answer.
+
+<whiteboard_action>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>EDIT: Find the error</title>
+<style>
+  :root { color-scheme: dark light; }
+  html, body { margin:0; padding:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:#1C1917; color:#F5F5F4; }
+  body { padding: 20px 22px 24px; line-height:1.5; }
+  h1 { font-size: 17px; margin: 0 0 4px; color:#F5F5F4; }
+  p.lead { font-size: 13px; color:#A8A29E; margin:0 0 18px; }
+  .q { background:#292524; border:1px solid #44403C; border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .q h2 { font-size: 14px; margin: 0 0 8px; color:#F5F5F4; font-weight:600; }
+  pre { background:#1C1917; border:1px solid #DC2626; border-left:3px solid #DC2626; border-radius:6px; padding:10px 12px; font-size:12px; overflow-x:auto; white-space:pre-wrap; color:#FCA5A5; margin:0; }
+  input[type="text"], textarea { width:100%; box-sizing:border-box; background:#1C1917; color:#F5F5F4; border:1px solid #44403C; border-radius:6px; padding:8px 10px; font:inherit; font-size:13px; margin-top:6px; }
+  textarea { min-height:70px; resize:vertical; }
+  @media (prefers-color-scheme: light) {
+    html, body { background:#FAF9F7; color:#1C1917; }
+    h1 { color:#1C1917; }
+    .q { background:#fff; border-color:#E7E5E4; }
+    .q h2 { color:#1C1917; }
+    pre { background:#FEF2F2; border-color:#EF4444; color:#B91C1C; }
+    input[type="text"], textarea { background:#fff; color:#1C1917; border-color:#E7E5E4; }
+  }
+</style>
+</head>
+<body>
+  <h1>EDIT: short title</h1>
+  <p class="lead">There's a mistake in the solution below. Find it and explain what's wrong.</p>
+  <div class="q">
+    <h2>The (broken) solution</h2>
+    <pre>EDIT: paste the broken solution here — wrong step, wrong value, logical error, etc.</pre>
+  </div>
+  <div class="q">
+    <h2>Where is the error?</h2>
+    <input type="text" name="error_location" placeholder="e.g. Step 3 / line 5 / the subnet mask value">
+    <h2 style="margin-top:12px">What's wrong and what should it be?</h2>
+    <textarea name="explanation" placeholder="Explain the error and the correct answer..."></textarea>
+  </div>
+</body>
+</html>
+</whiteboard_action>
+
+## Canonical Parsons problem template — use for step-ordering exercises
+
+Use this when the exercise is "put these steps in the correct order".
+The student drags the shuffled items into the right sequence.
+Shuffle the order in the HTML before emitting — don't leave them
+in the correct sequence.
+
+<whiteboard_action>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>EDIT: Put these in order</title>
+<script src="/vendor/sortable.min.js"></script>
+<style>
+  :root { color-scheme: dark light; }
+  html, body { margin:0; padding:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:#1C1917; color:#F5F5F4; }
+  body { padding: 20px 22px 24px; line-height:1.5; }
+  h1 { font-size: 17px; margin: 0 0 4px; color:#F5F5F4; }
+  p.lead { font-size: 13px; color:#A8A29E; margin:0 0 14px; }
+  ul.parsons { list-style:none; margin:0; padding:0; }
+  li.step { background:#292524; border:1px solid #44403C; border-radius:8px; padding:10px 14px; margin-bottom:8px; cursor:grab; user-select:none; font-size:13px; display:flex; align-items:center; gap:10px; }
+  li.step::before { content:"⠿"; color:#78716C; font-size:16px; flex-shrink:0; }
+  li.step:active { cursor:grabbing; }
+  .sortable-ghost { opacity:0.35; }
+  .sortable-chosen { background:#44403C; }
+  .sortable-drag { box-shadow:0 6px 20px rgba(0,0,0,0.4); }
+  @media (prefers-color-scheme: light) {
+    html, body { background:#FAF9F7; color:#1C1917; }
+    h1 { color:#1C1917; }
+    li.step { background:#fff; border-color:#E7E5E4; color:#1C1917; }
+    li.step::before { color:#A8A29E; }
+    .sortable-chosen { background:#F5F5F4; }
+  }
+</style>
+</head>
+<body>
+  <h1>EDIT: short title</h1>
+  <p class="lead">Drag the steps into the correct order.</p>
+  <ul class="parsons" id="parsons-list" data-bucket="ordering">
+    <!-- EDIT: list items shuffled. data-id values = stable semantic keys the tutor grades. -->
+    <li class="step" data-id="step-c">EDIT: step (shuffled)</li>
+    <li class="step" data-id="step-a">EDIT: step (shuffled)</li>
+    <li class="step" data-id="step-b">EDIT: step (shuffled)</li>
+  </ul>
+<script>
+  new Sortable(document.getElementById('parsons-list'), {
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    chosenClass: 'sortable-chosen',
+    dragClass: 'sortable-drag',
+  });
+  window.collectAnswers = function () {
+    return {
+      ordering: Array.from(document.querySelectorAll('#parsons-list .step'))
+        .map(function (li) { return li.dataset.id; }),
+    };
+  };
+</script>
+</body>
+</html>
+</whiteboard_action>
+
 ## Exercise ideas to rotate through
 Multiple choice / multi-select · drag-and-drop ordering · matching
 pairs · bucketing / categorisation · click-to-label diagrams ·
-fill-in-the-blank passages · hotspot (click region) · flashcards ·
-ranking / sorting · timed mini-challenges · interactive calculators that
-validate the student's working · topology / graph builders using
-vis-network. Pick the format that best tests the specific objective —
-don't default to multiple choice.
+fill-in-the-blank passages · free-recall brain-dump (textarea) ·
+error-detection (broken solution to fix) · Parsons problem (shuffle
+and reorder steps) · misconception spotter (spot the wrong claim) ·
+hotspot (click region) · flashcards · ranking / sorting ·
+timed mini-challenges · interactive calculators. Pick the format that
+best tests the specific objective — don't default to multiple choice.
 """
 
 
@@ -1290,22 +1332,30 @@ def _format_mastery_state_block(
     return header + "\n" + "\n".join(lines)
 
 
-def _format_reflections_block(reflections: list[StudyUnitReflection]) -> str:
+def _format_reflections_block(
+    reflections: list[StudyUnitReflection],
+    unit_title_map: dict[uuid.UUID, str] | None = None,
+) -> str:
     """Recent unit reflections — the bridging-narrative scaffolding.
 
     Capped at :data:`study_config.MAX_REFLECTIONS_IN_PROMPT` most-recent
     rows, sorted newest first. The tutor is instructed (Principle #12)
     to cite at least one anchor from this block in the unit opener.
+
+    ``unit_title_map`` maps unit UUID → title so the prompt shows
+    human-readable names instead of raw UUIDs.
     """
     header = "## Recent unit reflections (last 3)"
     if not reflections:
         return f"{header}\n(none yet — this is one of the first units in the plan)"
+    title_map = unit_title_map or {}
     lines: list[str] = []
     for r in reflections[: study_config.MAX_REFLECTIONS_IN_PROMPT]:
         anchors = r.concepts_anchored or []
         anchor_str = f" · anchors: {', '.join(str(a) for a in anchors[:4])}" if anchors else ""
         summary = (r.summary or "").strip()[:280]
-        lines.append(f"- Unit {r.unit_id}: {summary}{anchor_str}")
+        label = title_map.get(r.unit_id, f"unit {r.unit_id}")
+        lines.append(f"- {label}: {summary}{anchor_str}")
     return header + "\n" + "\n".join(lines)
 
 
@@ -1415,6 +1465,9 @@ def build_unit_system_prompt(
     open_misconceptions: list[StudyMisconception] | None = None,
     review_queue: list[StudyObjectiveMastery] | None = None,
     review_focus: StudyObjectiveMastery | None = None,
+    current_phase: str | None = None,
+    session_goal: str | None = None,
+    material_context: str | None = None,
 ) -> str:
     """System prompt for a per-unit tutor session.
 
@@ -1423,7 +1476,12 @@ def build_unit_system_prompt(
     function stays backwards-compatible with callers that haven't
     been wired up yet (they'll see the "(none yet)" variants of each
     block, which is the correct behaviour for an unhydrated session).
+
+    ``current_phase`` is injected by the Phase-2 orchestrator as a
+    short, focused instruction block at the top of the prompt so the
+    model knows exactly what beat to execute this turn.
     """
+    from app.study.phase_prompts import format_phase_block
     goal_str = (project.goal or "").strip() or "(not specified)"
     learning_request = (project.learning_request or "").strip() or "(not specified)"
     objectives_str = _fmt_objectives(unit.learning_objectives or [])
@@ -1463,12 +1521,39 @@ def build_unit_system_prompt(
         getattr(project, "learner_profile", None)
     )
     mastery_state_block = _format_mastery_state_block(unit, mastery_rows or [])
-    reflections_block = _format_reflections_block(recent_reflections or [])
+    unit_title_map = {u.id: u.title for u in all_units}
+    reflections_block = _format_reflections_block(recent_reflections or [], unit_title_map)
     misconceptions_block = _format_misconceptions_block(open_misconceptions or [])
     review_queue_block = _format_review_queue_block(review_queue or [], unit.id)
     review_focus_block = _format_review_focus_block(review_focus)
 
+    if session_goal:
+        session_goal_block = (
+            "## Student's session goal\n"
+            f'"{session_goal.strip()}"\n\n'
+            "The student set this goal at the start of the session. "
+            "The ``close`` phase should verify it was achieved."
+        )
+    else:
+        session_goal_block = (
+            "## Student's session goal\n"
+            "(not set yet — capture it during the ``hook`` phase using "
+            "``set_session_goal`` after they answer your opening question)"
+        )
+
+    if material_context and material_context.strip():
+        material_context_block = (
+            "## Course material (retrieved passages most relevant to this turn)\n"
+            "These passages come from the student's uploaded learning material. "
+            "Use them to ground your teaching in the actual content they are studying — "
+            "reference specific terms, examples, or definitions from the material where relevant.\n\n"
+            + material_context.strip()
+        )
+    else:
+        material_context_block = ""
+
     return _UNIT_SYSTEM_PROMPT_TEMPLATE.format(
+        phase_block=format_phase_block(current_phase),
         project_title=project.title,
         learning_request=learning_request,
         goal=goal_str,
@@ -1485,10 +1570,12 @@ def build_unit_system_prompt(
         staleness_block=staleness_block,
         learner_profile_block=learner_profile_block,
         mastery_state_block=mastery_state_block,
+        session_goal_block=session_goal_block,
         reflections_block=reflections_block,
         misconceptions_block=misconceptions_block,
         review_queue_block=review_queue_block,
         review_focus_block=review_focus_block,
+        material_context_block=material_context_block,
         interleaving_trigger_turns=study_config.INTERLEAVING_TRIGGER_TURNS,
         whiteboard_block=_WHITEBOARD_INSTRUCTIONS,
     )
@@ -2152,12 +2239,19 @@ async def handle_update_objective_mastery(
     unit: StudyUnit,
     payload: dict[str, Any],
     session: StudySession | None = None,
-) -> bool:
+) -> "StudyRetrievalAttempt | None":
     """Apply an ``update_objective_mastery`` payload.
 
-    Writes the new mastery score, advances the SM-2-lite schedule,
-    and nudges the unit-level ``mastery_score`` to the average of the
-    unit's objective rows so the existing UI still reflects progress.
+    Phase 1 changes vs. the original:
+    - Logs a ``StudyRetrievalAttempt`` row for every scored objective.
+    - Derives mastery from the recency-weighted attempt history instead
+      of using the tutor's raw 0-100 score directly.
+    - Passes the *derived* signal to ``schedule_next_review`` so SM-2
+      runs on real evidence, not a subjective guess.
+
+    Returns the ``StudyRetrievalAttempt`` row on success so the caller
+    (``_apply_single_capture``) can stash the attempt ID for the async
+    assessor pass. Returns ``None`` on invalid payload.
 
     Also: if the session currently has a ``current_review_focus_
     objective_id`` and the scored objective matches, the focus is
@@ -2168,17 +2262,22 @@ async def handle_update_objective_mastery(
     try:
         idx = int(raw_idx)
     except (TypeError, ValueError):
-        return False
+        return None
     objectives = unit.learning_objectives or []
     if idx < 0 or idx >= len(objectives):
-        return False
+        return None
 
     raw_score = payload.get("score")
     try:
         score = int(raw_score)
     except (TypeError, ValueError):
-        return False
+        return None
     score = max(0, min(100, score))
+
+    # Accept an optional `phase` from the tutor action (e.g.
+    # 'practice', 'independent', 'interleave') to enrich the attempt
+    # log. Defaults to 'practice' when absent (older prompt versions).
+    phase = str(payload.get("phase") or "practice")
 
     row_stmt = select(StudyObjectiveMastery).where(
         StudyObjectiveMastery.unit_id == unit.id,
@@ -2200,8 +2299,36 @@ async def handle_update_objective_mastery(
         db.add(row)
         await db.flush()
 
-    success = score >= study_config.REVIEW_PASS_SCORE
-    study_review.schedule_next_review(row, success=success, score=score)
+    # --- Log retrieval attempt (Phase 1) ---
+    # session is None only in unusual call paths (no real unit session);
+    # skip logging in that case rather than violating the FK constraint.
+    attempt: StudyRetrievalAttempt | None = None
+    if session is not None:
+        attempt = StudyRetrievalAttempt(
+            session_id=session.id,
+            unit_id=unit.id,
+            objective_index=idx,
+            phase=phase,
+            correct=score >= study_config.REVIEW_PASS_SCORE,
+            tutor_score=score,
+            hint_count=session.hint_count,
+            source_kind="tutor",
+        )
+        db.add(attempt)
+        await db.flush()
+
+    # --- Derive mastery from attempt history (Phase 1) ---
+    # Pull recent attempts (including the one just flushed) so we
+    # compute derived mastery immediately.
+    recent = await study_review.recent_attempts_for_objective(
+        db, unit.id, idx
+    )
+    derived_score, derived_success = study_review.derive_mastery_from_attempts(
+        recent, fallback_score=score
+    )
+
+    # Drive SM-2 off the derived, evidence-based signal.
+    study_review.schedule_next_review(row, success=derived_success, score=derived_score)
 
     # Refresh the unit-level average so the existing ring/progress bars
     # still tell the truth.
@@ -2227,7 +2354,7 @@ async def handle_update_objective_mastery(
     ):
         session.current_review_focus_objective_id = None
 
-    return True
+    return attempt
 
 
 async def handle_log_misconception(
@@ -2326,21 +2453,48 @@ async def handle_resolve_misconception(
 
 
 async def handle_teachback_passed(
-    *, db: AsyncSession, session: StudySession, payload: dict[str, Any]
+    *,
+    db: AsyncSession,
+    session: StudySession,
+    payload: dict[str, Any],
+    unit: StudyUnit | None = None,
 ) -> bool:
     """Stamp ``teachback_passed_at`` on the session.
 
-    The actual paraphrase is dropped on the floor for now — it's
-    already visible in the chat transcript, and persisting a duplicate
-    copy would just bloat the session row. If we later want to query
-    for it we can stamp into ``objectives_summary`` on the reflection
-    row instead.
+    When the assessor model is configured, the student's last few
+    messages are graded independently before the pass is accepted.
+    If the assessor rejects, the stamp is withheld and the session
+    stays in the teachback phase so the tutor probes further.
     """
     if session.teachback_passed_at is not None:
         return False
+
+    # Run assessor gate when unit context is available.
+    if unit is not None:
+        recent_user_msgs: list[str] = [
+            m.content
+            for m in (
+                await db.execute(
+                    select(StudyMessage)
+                    .where(
+                        StudyMessage.session_id == session.id,
+                        StudyMessage.role == "user",
+                    )
+                    .order_by(StudyMessage.created_at.desc())
+                    .limit(3)
+                )
+            ).scalars().all()
+        ]
+        verdict = await grade_teachback(db, unit, recent_user_msgs)
+        if verdict is False:
+            logger.info(
+                "teachback gate: assessor rejected (session=%s)", session.id
+            )
+            return False
+
     session.teachback_passed_at = datetime.now(timezone.utc)
     session.updated_at = datetime.now(timezone.utc)
-    _ = payload  # reserved for future use
+    _ = payload
     return True
 
 
@@ -2380,6 +2534,9 @@ async def handle_summarise_unit(
     same session updates the existing row instead of piling up
     duplicates, which matters because the unit-completion gate only
     checks for *existence* of a reflection.
+
+    Phase 3: also snapshots the session's board blocks and notes_md so
+    the lesson artifact the student built is preserved on the reflection.
     """
     summary = str(payload.get("summary") or "").strip()
     if not summary:
@@ -2399,6 +2556,26 @@ async def handle_summarise_unit(
             text = str(c).strip()
             if text:
                 anchors.append(text[:200])
+
+    # Snapshot board blocks and notes for the lesson artifact.
+    board_snap: list[dict[str, Any]] = []
+    notes_snap: str | None = None
+    if session is not None:
+        board_stmt = (
+            select(StudyBoardBlock)
+            .where(StudyBoardBlock.session_id == session.id)
+            .order_by(StudyBoardBlock.order_index)
+        )
+        board_rows = (await db.execute(board_stmt)).scalars().all()
+        board_snap = [
+            {
+                "kind": b.kind,
+                "payload": b.payload_json,
+                "order_index": b.order_index,
+            }
+            for b in board_rows
+        ]
+        notes_snap = session.notes_md or None
 
     now = datetime.now(timezone.utc)
     # Older builds didn't have a UNIQUE (unit_id, session_id) constraint
@@ -2428,6 +2605,9 @@ async def handle_summarise_unit(
             latest.objectives_summary = objectives_summary
         if anchors:
             latest.concepts_anchored = anchors
+        latest.board_snapshot = board_snap
+        if notes_snap is not None:
+            latest.notes_snapshot = notes_snap
         for stale in existing_rows[1:]:
             await db.delete(stale)
         return True
@@ -2439,6 +2619,8 @@ async def handle_summarise_unit(
             summary=summary[:4000],
             objectives_summary=objectives_summary,
             concepts_anchored=anchors,
+            board_snapshot=board_snap,
+            notes_snapshot=notes_snap,
             created_at=now,
         )
     )
@@ -2745,6 +2927,92 @@ def _coerce_unit_notes(value: Any) -> dict[str, str]:
 
 
 # ====================================================================
+# Session goal handler (Phase 4 — per-session goal-setting #20)
+# ====================================================================
+
+async def handle_set_session_goal(
+    *,
+    session: StudySession,
+    payload: dict[str, Any],
+) -> bool:
+    """Store the student's one-sentence session goal from the hook phase."""
+    goal = str(payload.get("goal") or "").strip()[:500]
+    if not goal:
+        return False
+    session.session_goal = goal
+    return True
+
+
+# ====================================================================
+# Comprehension gate handler (Phase 7 polish — P0-C)
+# ====================================================================
+
+async def handle_comprehension_confirmed(
+    *,
+    session: StudySession,
+) -> bool:
+    """Stamp ``comprehension_confirmed_at`` on the session.
+
+    Tells the orchestrator to advance present → guided immediately
+    rather than waiting for the turn-count ceiling.  The stamp is
+    cleared by ``advance_phase`` when the session transitions out of
+    the present phase, so each objective iteration starts fresh.
+    """
+    if session.comprehension_confirmed_at is not None:
+        return False
+    session.comprehension_confirmed_at = datetime.now(timezone.utc)
+    session.updated_at = datetime.now(timezone.utc)
+    return True
+
+
+# ====================================================================
+# Board-op handler (Phase 3 — evolving lesson board)
+# ====================================================================
+
+async def handle_board_op(
+    *,
+    db: AsyncSession,
+    session: StudySession,
+    payload: dict[str, Any],
+) -> StudyBoardBlock | None:
+    """Persist one ``<board_op>`` action from the tutor.
+
+    Currently supports ``op == "add"`` (create a new block).  Returns
+    the new row so the SSE generator can emit a ``board_updated`` event
+    with the block payload.  Returns ``None`` when the payload is
+    malformed or the op type is unsupported.
+    """
+    op_type = str(payload.get("op", "")).lower()
+    kind = str(payload.get("kind", "")).strip()[:32]
+    block_payload = payload.get("payload") or {}
+
+    if op_type != "add":
+        return None
+    if not kind:
+        return None
+    if not isinstance(block_payload, dict):
+        return None
+
+    # Determine next order_index for this session.
+    from sqlalchemy import func as sa_func
+    count_stmt = select(sa_func.count()).select_from(StudyBoardBlock).where(
+        StudyBoardBlock.session_id == session.id
+    )
+    count_result = await db.execute(count_stmt)
+    next_index = (count_result.scalar() or 0)
+
+    block = StudyBoardBlock(
+        session_id=session.id,
+        order_index=next_index,
+        kind=kind,
+        payload_json=block_payload,
+    )
+    db.add(block)
+    await db.flush()
+    return block
+
+
+# ====================================================================
 # Capture dispatcher — called from the SSE stream loop
 # ====================================================================
 async def apply_captures(
@@ -2787,6 +3055,16 @@ async def apply_captures(
         "mastery_updated": False,
         "misconceptions_changed": False,
         "reflection_written": False,
+        # List of dicts ready for assessor dispatch — each entry has
+        # attempt_id, session_id, unit_id, objective_index,
+        # objective_text (populated by _apply_single_capture when
+        # handle_update_objective_mastery returns an attempt row).
+        "mastery_attempts": [],
+        # List of board block dicts added this turn (Phase 3). Each
+        # entry mirrors the wire format emitted in the board_updated
+        # SSE event so the frontend can update the board in real-time.
+        "board_blocks_added": [],
+        "session_goal_set": False,
     }
     for cap in captures:
         try:
@@ -2890,14 +3168,29 @@ async def _apply_single_capture(
                 result["learner_profile_updated"] = True
             return
         if action_type == "update_objective_mastery":
-            if await handle_update_objective_mastery(
+            attempt = await handle_update_objective_mastery(
                 db=db,
                 project=project,
                 unit=unit,
                 payload=payload,
                 session=session,
-            ):
+            )
+            if attempt is not None:
                 result["mastery_updated"] = True
+                # Stash attempt info so the SSE generator can dispatch
+                # the async assessor pass after the DB commit.
+                obj_idx = attempt.objective_index
+                objectives = unit.learning_objectives or []
+                obj_text = objectives[obj_idx] if obj_idx < len(objectives) else ""
+                result["mastery_attempts"].append(
+                    {
+                        "attempt_id": attempt.id,
+                        "session_id": attempt.session_id,
+                        "unit_id": attempt.unit_id,
+                        "objective_index": obj_idx,
+                        "objective_text": obj_text,
+                    }
+                )
             return
         if action_type == "log_misconception":
             if await handle_log_misconception(
@@ -2913,7 +3206,7 @@ async def _apply_single_capture(
             return
         if action_type == "teachback_passed" and session is not None:
             await handle_teachback_passed(
-                db=db, session=session, payload=payload
+                db=db, session=session, payload=payload, unit=unit
             )
             return
         if action_type == "capture_confidence" and session is not None:
@@ -2926,6 +3219,13 @@ async def _apply_single_capture(
                 db=db, unit=unit, session=session, payload=payload
             ):
                 result["reflection_written"] = True
+            return
+        if action_type == "set_session_goal" and session is not None:
+            if await handle_set_session_goal(session=session, payload=payload):
+                result["session_goal_set"] = True
+            return
+        if action_type == "comprehension_confirmed" and session is not None:
+            await handle_comprehension_confirmed(session=session)
             return
         if action_type == "mark_complete":
             gate = await handle_unit_action(
@@ -2941,6 +3241,19 @@ async def _apply_single_capture(
                 else:
                     result["mark_complete_rejected"] = gate
             return
+    elif cap.tag == "board_op" and session is not None:
+        block = await handle_board_op(db=db, session=session, payload=payload)
+        if block is not None:
+            result["board_blocks_added"].append(
+                {
+                    "id": str(block.id),
+                    "session_id": str(block.session_id),
+                    "order_index": block.order_index,
+                    "kind": block.kind,
+                    "payload": block.payload_json,
+                    "created_at": block.created_at.isoformat(),
+                }
+            )
     elif cap.tag == "exam_action" and exam is not None:
         applied = await handle_exam_action(
             db=db, project=project, exam=exam, payload=payload

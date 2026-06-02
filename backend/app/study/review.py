@@ -33,6 +33,57 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import config, models
 
 
+# ---- Derived mastery from attempt history ----------------------------
+def derive_mastery_from_attempts(
+    attempts: "list[models.StudyRetrievalAttempt]",
+    *,
+    fallback_score: int = 0,
+) -> "tuple[int, bool]":
+    """Recency-weighted accuracy over recent retrieval attempts.
+
+    Returns ``(mastery_score 0-100, correct_bool)``.  When no attempts
+    have a resolved ``correct`` value yet, falls back to
+    ``(fallback_score, fallback_score >= REVIEW_PASS_SCORE)``.
+
+    Weight scheme: most recent attempt = weight 1.0, each prior
+    attempt halved (1.0, 0.5, 0.25, …) capped at the last 5 reps.
+    Null ``correct`` rows (assessor still pending) are excluded from
+    the weighted sum — they don't count for or against.
+    """
+    resolved = [a for a in attempts if a.correct is not None]
+    if not resolved:
+        return fallback_score, fallback_score >= config.REVIEW_PASS_SCORE
+
+    # Newest first — created_at is the canonical sort key.
+    sorted_attempts = sorted(resolved, key=lambda a: a.created_at, reverse=True)[:5]
+    weights = [0.5 ** i for i in range(len(sorted_attempts))]
+    weighted_sum = sum(
+        w * (100 if a.correct else 0) for a, w in zip(sorted_attempts, weights)
+    )
+    weight_total = sum(weights)
+    score = int(round(weighted_sum / weight_total))
+    return score, score >= config.REVIEW_PASS_SCORE
+
+
+# ---- Recent attempts for an objective --------------------------------
+async def recent_attempts_for_objective(
+    db: "AsyncSession",
+    unit_id: uuid.UUID,
+    objective_index: int,
+    *,
+    limit: int = 5,
+) -> "list[models.StudyRetrievalAttempt]":
+    """Return the most recent attempts for a specific objective, newest first."""
+    stmt = (
+        select(models.StudyRetrievalAttempt)
+        .where(models.StudyRetrievalAttempt.unit_id == unit_id)
+        .where(models.StudyRetrievalAttempt.objective_index == objective_index)
+        .order_by(models.StudyRetrievalAttempt.created_at.desc())
+        .limit(limit)
+    )
+    return list((await db.execute(stmt)).scalars().all())
+
+
 # ---- Scheduling ------------------------------------------------------
 def schedule_next_review(
     row: "models.StudyObjectiveMastery", *, success: bool, score: int

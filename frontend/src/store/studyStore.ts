@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type {
+  StudyBoardBlock,
   StudyExamSummary,
   StudyMessage,
   StudyUnitSummary,
@@ -78,6 +79,9 @@ interface StudyState {
    *  session page reads this and pops a ``CalibrationWarningToast``. */
   lastCalibrationWarning: CalibrationWarningEvent | null;
 
+  /** Lesson board blocks for the active unit session (Phase 3). */
+  boardBlocks: StudyBoardBlock[];
+
   /** Live exam snapshot for the Exam page. */
   activeExam: StudyExamSummary | null;
   lastExamGraded: ExamGradedEvent | null;
@@ -103,6 +107,9 @@ interface StudyState {
   setLastUnitsInserted: (event: UnitsInsertedEvent | null) => void;
   setLastCalibrationWarning: (event: CalibrationWarningEvent | null) => void;
 
+  setBoardBlocks: (blocks: StudyBoardBlock[]) => void;
+  appendBoardBlock: (block: StudyBoardBlock) => void;
+
   setActiveExam: (exam: StudyExamSummary | null) => void;
   setLastExamGraded: (event: ExamGradedEvent | null) => void;
 }
@@ -123,6 +130,8 @@ export const useStudyStore = create<StudyState>((set) => ({
   lastUnitCompleted: null,
   lastUnitsInserted: null,
   lastCalibrationWarning: null,
+
+  boardBlocks: [],
 
   activeExam: null,
   lastExamGraded: null,
@@ -172,6 +181,12 @@ export const useStudyStore = create<StudyState>((set) => ({
   setLastUnitsInserted: (lastUnitsInserted) => set({ lastUnitsInserted }),
   setLastCalibrationWarning: (lastCalibrationWarning) =>
     set({ lastCalibrationWarning }),
+
+  setBoardBlocks: (boardBlocks) => set({ boardBlocks }),
+  appendBoardBlock: (block) =>
+    set((state) => ({
+      boardBlocks: [...state.boardBlocks, block],
+    })),
 
   setActiveExam: (activeExam) => set({ activeExam }),
   setLastExamGraded: (lastExamGraded) => set({ lastExamGraded }),

@@ -52,10 +52,14 @@ logger = logging.getLogger(__name__)
 # to amortise per-call overhead on cloud providers.
 EMBED_BATCH_SIZE = 16
 
-# ``knowledge_chunks`` is shared between two owners (Custom Models and
-# Chat Projects). Each chunk sets exactly one of these columns; the
-# other stays NULL (enforced by a CHECK constraint, migration 0070).
-_SCOPE_COLUMN = {"custom_model": "custom_model_id", "project": "project_id"}
+# ``knowledge_chunks`` is shared across three owners (Custom Models,
+# Chat Projects, and Study Projects). Each chunk sets exactly one of
+# these columns; the others stay NULL (CHECK constraint, migration 0080).
+_SCOPE_COLUMN = {
+    "custom_model": "custom_model_id",
+    "project": "project_id",
+    "study_project": "study_project_id",
+}
 
 
 async def _set_status(

@@ -124,6 +124,19 @@ export interface AppSettingsPatch {
    */
   research_provider_id?: string | null;
   research_model_id?: string | null;
+  /**
+   * Study / Teaching model. When set, every Study unit session and final
+   * exam uses this model regardless of the user's chat model. Favor the
+   * frontier reasoning tier. Send both halves together; null+null to clear.
+   */
+  study_provider_id?: string | null;
+  study_model_id?: string | null;
+  /**
+   * Study / Assessor model (Phase 1 prep). Optional cheaper grader model.
+   * Send both halves together; null+null to clear.
+   */
+  study_assessor_provider_id?: string | null;
+  study_assessor_model_id?: string | null;
 }
 
 export interface OriginPreview {
