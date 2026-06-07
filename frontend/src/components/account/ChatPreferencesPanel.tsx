@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Check, Cpu, Globe, Loader2, Wrench } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Cpu, Globe, Loader2, MessageSquareText, Wrench } from "lucide-react";
 
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/shared/Button";
@@ -31,8 +31,20 @@ export function ChatPreferencesPanel() {
   const [webMode, setWebMode] = useState<WebSearchMode>(
     user?.settings?.default_web_search_mode ?? "auto"
   );
-  const [busy, setBusy] = useState<"tools" | "web" | "model" | null>(null);
+  // Account-wide custom system prompt. Unlike the toggles this is a
+  // free-text field, so it needs an explicit Save (we don't PATCH on
+  // every keystroke). ``savedPrompt`` is the last-persisted value; the
+  // Save button only lights up when the draft diverges from it.
+  const savedPrompt =
+    typeof user?.settings?.custom_system_prompt === "string"
+      ? user.settings.custom_system_prompt
+      : "";
+  const [customPrompt, setCustomPrompt] = useState<string>(savedPrompt);
+  const [busy, setBusy] = useState<
+    "tools" | "web" | "model" | "prompt" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
+  const promptDirty = customPrompt.trim() !== savedPrompt;
 
   // Pull the available-model list so the picker has something to
   // render. The query is shared with the chat header's selector via
@@ -55,6 +67,19 @@ export function ChatPreferencesPanel() {
     setTools(user.settings.default_tools_enabled ?? true);
     setWebMode(user.settings.default_web_search_mode ?? "auto");
   }, [user?.settings]);
+
+  // Adopt a fresh server value for the prompt (late user load, save in
+  // another tab) but only when the local draft hasn't diverged from the
+  // value we last synced — never clobber an in-progress edit.
+  const lastSyncedPrompt = useRef(savedPrompt);
+  useEffect(() => {
+    if (savedPrompt !== lastSyncedPrompt.current) {
+      setCustomPrompt((draft) =>
+        draft === lastSyncedPrompt.current ? savedPrompt : draft
+      );
+      lastSyncedPrompt.current = savedPrompt;
+    }
+  }, [savedPrompt]);
 
   // Generic persistence helper. Keyed on the preference + busy slot so
   // the spinner only attaches to the row the user just touched. On
@@ -97,6 +122,30 @@ export function ChatPreferencesPanel() {
   const handleWebModeChange = (next: WebSearchMode) => {
     setWebMode(next);
     void persist("default_web_search_mode", next, "web");
+  };
+
+  // Free-text prompt is saved explicitly (not per-keystroke). A trimmed
+  // empty value clears the setting server-side (the merge layer drops
+  // ``""`` keys), so "Save" with an empty box is the Reset affordance.
+  const handleSavePrompt = async () => {
+    setError(null);
+    setBusy("prompt");
+    const next = customPrompt.trim();
+    const previous = user?.settings?.custom_system_prompt;
+    patchSettings({ custom_system_prompt: next });
+    try {
+      const fresh = await authApi.updatePreferences({
+        custom_system_prompt: next,
+      });
+      setUser(fresh);
+      setCustomPrompt(next);
+      lastSyncedPrompt.current = next;
+    } catch (err) {
+      patchSettings({ custom_system_prompt: previous as string | undefined });
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
   };
 
   // Default-model persistence. Sent as a *pair* so the server never
@@ -185,6 +234,15 @@ export function ChatPreferencesPanel() {
           mode={webMode}
           onChange={handleWebModeChange}
           disabled={busy === "web"}
+        />
+        <div className="border-t border-[var(--border)]" />
+        <CustomInstructionsRow
+          value={customPrompt}
+          onChange={setCustomPrompt}
+          onSave={handleSavePrompt}
+          dirty={promptDirty}
+          saving={busy === "prompt"}
+          disabled={busy !== null && busy !== "prompt"}
         />
 
         {error && (
@@ -340,6 +398,77 @@ function WebSearchModeRow({
                 </button>
               );
             })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomInstructionsRow({
+  value,
+  onChange,
+  onSave,
+  dirty,
+  saving,
+  disabled,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  onSave: () => void;
+  dirty: boolean;
+  saving: boolean;
+  disabled?: boolean;
+}) {
+  const MAX = 8000;
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10">
+          <MessageSquareText className="h-4 w-4 text-[var(--accent)]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">Custom instructions</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Standing instructions added to the system prompt of every
+            chat — e.g. <span className="font-medium">"Always reply in
+            British English"</span> or{" "}
+            <span className="font-medium">"Be concise and skip
+            preamble."</span>{" "}
+            A specific chat or project's own instructions take precedence.
+          </p>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value.slice(0, MAX))}
+            disabled={saving}
+            rows={4}
+            placeholder="e.g. You are talking to a senior engineer — keep answers terse and technical."
+            className={cn(
+              "mt-3 w-full resize-y rounded-input border bg-[var(--bg)] px-3 py-2 text-sm",
+              "border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)]",
+              "focus:border-[var(--accent)] focus:outline-none",
+              "disabled:cursor-not-allowed disabled:opacity-60"
+            )}
+          />
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-[11px] text-[var(--text-muted)]">
+              {value.length.toLocaleString()} / {MAX.toLocaleString()}
+              {value.trim() === "" && " · empty disables this"}
+            </span>
+            <Button
+              size="sm"
+              onClick={onSave}
+              disabled={!dirty || saving || disabled}
+            >
+              {saving ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Saving
+                </span>
+              ) : (
+                "Save"
+              )}
+            </Button>
           </div>
         </div>
       </div>

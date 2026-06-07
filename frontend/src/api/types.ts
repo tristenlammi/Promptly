@@ -62,6 +62,10 @@ export interface UserSettings {
   memory_mode?: "off" | "auto" | "manual";
   /** Conversation ids the user has hidden from their own sidebar. */
   hidden_conversations?: string[];
+  /** Account-wide custom system prompt injected into every new chat's
+   *  system prompt. Overridden by per-project and per-chat instructions.
+   *  Capped at 8000 chars server-side. */
+  custom_system_prompt?: string;
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -88,6 +92,8 @@ export interface UserPreferencesUpdate {
   memory_mode?: "off" | "auto" | "manual";
   /** Replace the full set of conversation ids hidden from the sidebar. */
   hidden_conversations?: string[];
+  /** Account-wide custom system prompt. Pass an empty string to clear. */
+  custom_system_prompt?: string;
 }
 
 export interface User {

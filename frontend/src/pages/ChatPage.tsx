@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Check,
   Clock,
   FolderKanban,
   Ghost,
@@ -794,6 +795,29 @@ export function ChatPage() {
     }
   }, [id, queryClient]);
 
+  // "Keep this chat" — promote the current temporary chat to a permanent
+  // one. Clears the temporary lifecycle server-side (and the sweeper
+  // deadline) so it survives navigation and stops counting down. Only
+  // meaningful for a persisted, owned temporary chat.
+  const handleKeepChat = useCallback(async () => {
+    if (!id) return;
+    try {
+      await chatApi.update(id, { temporary_mode: null });
+      queryClient.setQueryData<ConversationDetail>(
+        ["conversation", id],
+        (old) =>
+          old ? { ...old, temporary_mode: null, expires_at: null } : old
+      );
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast.success("Chat kept — it won't expire anymore");
+    } catch (err) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Couldn't keep the chat. Try again in a moment.";
+      toast.error(detail);
+    }
+  }, [id, queryClient]);
+
   // Raw (possibly null) title — EditableTitle handles the placeholder.
   const rawTitle = conversation?.title ?? null;
   const subtitle = selectedModel
@@ -913,6 +937,14 @@ export function ChatPage() {
             <TemporaryChatBanner
               mode={effectiveTemporaryMode}
               expiresAt={conversation?.expires_at ?? null}
+              // Conversion only applies once the chat is actually
+              // persisted (an in-flight pre-creation selection has no
+              // row to PATCH) and only for its owner.
+              onKeep={
+                id && isOwner && conversation?.temporary_mode
+                  ? handleKeepChat
+                  : undefined
+              }
             />
           )}
           {conversation?.parent_conversation_id && (
@@ -1144,10 +1176,16 @@ function BranchBanner({ parentId, parentMessageId }: BranchBannerProps) {
 function TemporaryChatBanner({
   mode,
   expiresAt,
+  onKeep,
 }: {
   mode: TemporaryMode;
   expiresAt: string | null;
+  /** When provided, renders a "Keep this chat" action that promotes the
+   *  temporary chat to a permanent one. Omitted for pre-creation
+   *  selections (nothing to PATCH yet) and non-owners. */
+  onKeep?: () => void | Promise<void>;
 }) {
+  const [keeping, setKeeping] = useState(false);
   // Tick once a minute for the 1-hour countdown so the visible "47m
   // remaining" stays roughly accurate without burning CPU.
   const [, force] = useState(0);
@@ -1200,6 +1238,27 @@ function TemporaryChatBanner({
       <span className="hidden text-amber-700/80 dark:text-amber-200/70 sm:inline">
         · {detail}
       </span>
+      {onKeep && (
+        <button
+          type="button"
+          disabled={keeping}
+          onClick={() => {
+            setKeeping(true);
+            // Parent handler swallows its own errors + toasts; we just
+            // need the spinner to clear if the row sticks around (it
+            // unmounts on success, so this mostly matters on failure).
+            void Promise.resolve(onKeep()).finally(() => setKeeping(false));
+          }}
+          className={cn(
+            "ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 font-semibold transition",
+            "border-amber-500/40 hover:bg-amber-500/20",
+            "disabled:cursor-not-allowed disabled:opacity-60"
+          )}
+        >
+          <Check className="h-3 w-3" />
+          Keep this chat
+        </button>
+      )}
     </div>
   );
 }

@@ -242,6 +242,13 @@ class ConversationUpdate(BaseModel):
     system_prompt: str | None = Field(default=None, max_length=8000)
     # Phase 9 — pause/resume auto-capture for this conversation.
     memory_capture_paused: bool | None = None
+    # Convert a temporary chat into a permanent one ("Keep this chat").
+    # Only clearing is supported: send ``null`` to drop the temporary
+    # lifecycle (the router also clears ``expires_at`` so the sweeper
+    # leaves it alone). A non-null value is rejected — chats are only
+    # made temporary at creation time, never promoted here. ``None``
+    # (field absent) leaves the chat untouched.
+    temporary_mode: TemporaryMode | None = None
 
 
 class SendMessageRequest(BaseModel):

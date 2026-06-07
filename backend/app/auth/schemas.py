@@ -177,6 +177,14 @@ class UserPreferencesUpdate(BaseModel):
     # (e.g. a chat that reached them before per-chat sharing was retired,
     # which they don't own and so can't delete). Stored as id strings.
     hidden_conversations: list[str] | None = None
+    # Account-wide custom system prompt. Free-text persona / standing
+    # instructions ("always reply in British English", "be terse") that
+    # get injected into the system prompt of EVERY new chat. The global
+    # counterpart to per-conversation ``system_prompt`` and per-project
+    # ``instructions``; both of those take precedence over this. ``None``
+    # = no change, ``""`` (or whitespace-only) clears it. Capped to keep
+    # the per-turn prompt overhead bounded.
+    custom_system_prompt: str | None = Field(default=None, max_length=8000)
 
     @field_validator("hidden_nav")
     @classmethod
@@ -220,6 +228,16 @@ class UserPreferencesUpdate(BaseModel):
             return None
         v = v.strip()
         return v  # empty string means "clear this field"
+
+    @field_validator("custom_system_prompt")
+    @classmethod
+    def _normalise_custom_system_prompt(cls, v: str | None) -> str | None:
+        # Trim so a whitespace-only paste collapses to ``""`` (which the
+        # merge layer treats as "clear"), and stray leading/trailing
+        # newlines never bloat the system prompt.
+        if v is None:
+            return None
+        return v.strip()
 
     @field_validator("timezone")
     @classmethod

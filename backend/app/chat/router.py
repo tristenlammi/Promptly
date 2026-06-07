@@ -962,6 +962,18 @@ async def update_conversation(
         conv.system_prompt = cleaned or None
     if "memory_capture_paused" in payload.model_fields_set and payload.memory_capture_paused is not None:
         conv.memory_capture_paused = payload.memory_capture_paused
+    # "Keep this chat" — promote a temporary chat to a permanent one.
+    # Only clearing is allowed; we never let a PATCH turn a normal chat
+    # temporary (that's a creation-time decision). Dropping the mode also
+    # clears the sweeper deadline so the chat can't be auto-deleted.
+    if "temporary_mode" in payload.model_fields_set:
+        if payload.temporary_mode is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A chat can only be made permanent, not temporary.",
+            )
+        conv.temporary_mode = None
+        conv.expires_at = None
     # Phase P1 — project reassignment. Only honour the field when the
     # client explicitly sent it (``model_fields_set`` check) so this
     # PATCH stays idempotent for the common "just toggle pinned"
@@ -3536,6 +3548,18 @@ async def _stream_generator(
         # merged on top below, each taking precedence (since
         # ``merge_system_prompt`` puts the first argument first).
         system_prompt: str | None = project_system_prompt
+        # Account-wide custom system prompt. A global persona / standing
+        # instruction the user set in Chat defaults that seeds EVERY new
+        # chat. It's the broadest steer, so it sits *under* both the
+        # project prompt and the per-chat instructions — we merge it as
+        # the base (second arg wins least) so anything more specific
+        # overrides it. Empty / whitespace-only is treated as unset.
+        account_prompt = (user.settings or {}).get("custom_system_prompt")
+        account_prompt = (
+            account_prompt.strip() if isinstance(account_prompt, str) else None
+        )
+        if account_prompt:
+            system_prompt = merge_system_prompt(system_prompt or "", account_prompt)
         # Per-conversation custom instructions (Phase 1). A free-text
         # steer ("answer concisely", "you're a Rust expert") that lives
         # on the chat itself — narrower than the project prompt, so it

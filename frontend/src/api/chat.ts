@@ -72,6 +72,9 @@ export interface UpdateConversationPayload {
   system_prompt?: string;
   /** Phase 9 — pause / resume auto-memory capture for this conversation. */
   memory_capture_paused?: boolean;
+  /** "Keep this chat" — pass ``null`` to promote a temporary chat to a
+   *  permanent one. Only clearing is accepted by the server. */
+  temporary_mode?: TemporaryMode | null;
 }
 
 export interface SendMessagePayload {
