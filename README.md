@@ -9,7 +9,6 @@ A self-hosted AI chat platform. Connect your own API keys, run local models, and
 ## What it does
 
 - **Chat** with any AI model — OpenAI, Anthropic, Google Gemini, DeepSeek, OpenRouter, or local models via Ollama
-- **Compare** responses from multiple models side by side
 - **Deep research** — breaks a question into sub-questions, fetches real page content, and writes a cited report
 - **Study mode** — generates a full course on any topic, tutors you unit by unit, and gives you a timed final exam
 - **Scheduled tasks** — set up recurring AI jobs on a cron schedule and notify you when done
