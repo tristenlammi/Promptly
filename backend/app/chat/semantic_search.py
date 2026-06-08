@@ -72,7 +72,10 @@ async def embed_query(cfg: EmbeddingConfig, q: str) -> list[float] | None:
         return None
     try:
         vectors = await embed_texts(
-            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+            provider=cfg.provider,
+            model_id=cfg.model_id,
+            texts=[cleaned],
+            dimensions=cfg.dim,
         )
     except Exception as exc:  # noqa: BLE001 - best-effort
         logger.warning("semantic search embed failed: %s", exc)

@@ -1215,13 +1215,13 @@ function ContentGrid({
     );
   }
 
-  const sortedFolders = [...data.folders].sort((a, b) => {
-    const aSys = a.system_kind ? 0 : 1;
-    const bSys = b.system_kind ? 0 : 1;
-    return aSys - bSys;
-  });
+  // User-created folders respect the active sort; system-managed folders
+  // are pinned to a separate "System" section at the bottom so they don't
+  // crowd the user's own content or imply they can be renamed / trashed.
+  const userFolders = data.folders.filter((f) => !f.system_kind);
+  const systemFolders = data.folders.filter((f) => !!f.system_kind);
 
-  const folderRows = sortedFolders.map((f) => (
+  const renderFolderRow = (f: (typeof data.folders)[number]) => (
     <FolderRow
       key={f.id}
       folder={f}
@@ -1237,7 +1237,10 @@ function ContentGrid({
       onOpenMove={onOpenMove}
       onShare={() => onShare({ kind: "folder", id: f.id, name: f.name })}
     />
-  ));
+  );
+
+  const userFolderRows = userFolders.map(renderFolderRow);
+  const systemFolderRows = systemFolders.map(renderFolderRow);
   const fileRows = data.files.map((f) => (
     <FileRow
       key={f.id}
@@ -1269,8 +1272,20 @@ function ContentGrid({
           gridTemplateColumns: `repeat(auto-fill, minmax(${gridTile}px, 1fr))`,
         }}
       >
-        {folderRows}
+        {userFolderRows}
         {fileRows}
+        {systemFolderRows.length > 0 && (
+          <>
+            {/* Full-width section divider before system folders. */}
+            <li className="col-span-full flex items-center gap-2 pt-1" aria-hidden>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                System
+              </span>
+              <span className="flex-1 border-t border-[var(--border)]" />
+            </li>
+            {systemFolderRows}
+          </>
+        )}
       </ul>
     );
   }
@@ -1281,6 +1296,8 @@ function ContentGrid({
           drive-like read. Columns hide on small screens so the row
           collapses to name-only. */}
       <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+        {/* Spacer matching the checkbox on user-folder rows. */}
+        <span className="w-5 shrink-0" aria-hidden />
         <SortHeader
           className="flex-1"
           label="Name"
@@ -1307,8 +1324,23 @@ function ContentGrid({
         <span className="w-8 shrink-0" aria-hidden />
       </div>
       <ul className="divide-y divide-[var(--border)]">
-        {folderRows}
+        {userFolderRows}
         {fileRows}
+        {systemFolderRows.length > 0 && (
+          <>
+            {/* Subtle section header to visually separate system-managed
+                folders (Chat Uploads, Generated Files, etc.) from the
+                user's own content. These folders can't be renamed or
+                trashed, so breaking them into their own section prevents
+                the UI from implying they can. */}
+            <li className="bg-[var(--bg)] px-3 py-1.5" aria-hidden>
+              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                System
+              </span>
+            </li>
+            {systemFolderRows}
+          </>
+        )}
       </ul>
     </div>
   );
@@ -1594,7 +1626,7 @@ function FolderRow({
             <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
           )}
           {isSystem && (
-            <span className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
+            <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
               system
             </span>
           )}
@@ -1634,12 +1666,16 @@ function FolderRow({
         over && "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
       )}
     >
-      {userCanMutate && (
+      {/* Checkbox — only for user-owned folders. A spacer keeps the
+          name column aligned with file rows and user folder rows. */}
+      {userCanMutate ? (
         <SelectCheckbox
           checked={selected}
           active={selectionActive}
           onToggle={onToggleSelect}
         />
+      ) : (
+        <span className="w-5 shrink-0" aria-hidden />
       )}
       <button
         onClick={onOpen}
@@ -1652,7 +1688,9 @@ function FolderRow({
           <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
         )}
         {isSystem && (
-          <span className="rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
+          /* Muted badge — system is informational, not interactive,
+             so avoid using the accent colour that implies clickability. */
+          <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
             system
           </span>
         )}
@@ -1693,12 +1731,16 @@ function FolderRow({
         />
       )}
 
-      {userCanMutate && (
+      {/* Row menu — only for user-owned folders. A spacer keeps the
+          right edge of each row aligned when the menu is absent. */}
+      {userCanMutate ? (
         <RowMenu
           open={menuOpen}
           onOpenChange={setMenuOpen}
           items={mutationItems}
         />
+      ) : (
+        <span className="w-8 shrink-0" aria-hidden />
       )}
 
       {overlays}

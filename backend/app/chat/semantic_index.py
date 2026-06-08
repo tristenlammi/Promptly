@@ -116,7 +116,10 @@ async def _index_batch(db, cfg: EmbeddingConfig) -> int:
         for c in candidates
     ]
     vectors = await embed_texts(
-        provider=cfg.provider, model_id=cfg.model_id, texts=to_embed
+        provider=cfg.provider,
+        model_id=cfg.model_id,
+        texts=to_embed,
+        dimensions=cfg.dim,
     )
     if len(vectors) != len(candidates):
         logger.warning(

@@ -286,7 +286,13 @@ async def retrieve_relevant_memories(
 
     try:
         vectors = await embed_texts(
-            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+            provider=cfg.provider,
+            model_id=cfg.model_id,
+            texts=[cleaned],
+            # Pass matryoshka truncation so providers like qwen3-embedding-8b
+            # return cfg.dim dimensions instead of their native 4096, which
+            # would be rejected by the vector(cfg.dim) column.
+            dimensions=cfg.dim,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval embed failed user=%s: %s", user_id, exc)
@@ -309,12 +315,18 @@ async def retrieve_relevant_memories(
         """
     )
     try:
-        rows_raw = (
-            await db.execute(
-                sql,
-                {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k},
-            )
-        ).all()
+        # Use a savepoint so a dimension mismatch (or any other pgvector
+        # error) only rolls back this nested block and not the entire session
+        # transaction.  Without it, asyncpg marks the outer transaction as
+        # aborted, causing the load_memories fallback to also fail with
+        # InFailedSQLTransactionError — crashing the whole chat stream.
+        async with db.begin_nested():
+            rows_raw = (
+                await db.execute(
+                    sql,
+                    {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k},
+                )
+            ).all()
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval query failed user=%s: %s", user_id, exc)
         rows = await load_memories(db, user_id, limit=k + len(_excl))
