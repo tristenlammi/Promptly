@@ -88,3 +88,4 @@ frontend/public/apple-touch-icon.png
 frontend/public/favicon.png
 frontend/public/pwa-icons.generated
 *.md
+!README.md
