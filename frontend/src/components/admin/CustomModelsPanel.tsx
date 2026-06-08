@@ -437,6 +437,36 @@ function EmbeddingTestResult({ result }: { result: EmbeddingConfigTestResult }) 
 
 type EmbeddingMode = "local" | "api";
 
+// Client-side mirror of backend ``is_embedding_model_id()``.
+// Filters provider catalogs to embedding-likely models so the picker
+// doesn't force the admin to scroll through hundreds of chat models.
+function isEmbeddingModelId(
+  id: string,
+  knownDims: Record<string, number>
+): boolean {
+  if (!id) return false;
+  const base = id.split(":")[0];
+  if (base in knownDims) return true;
+  const lower = base.toLowerCase();
+  return (
+    lower.includes("embed") ||
+    lower.includes("bge-") ||
+    lower.includes("/bge") ||
+    lower.includes("e5-") ||
+    lower.includes("/e5-") ||
+    lower.includes("gte-") ||
+    lower.includes("/gte-") ||
+    lower.includes("minilm")
+  );
+}
+
+interface EmbeddingModelOption {
+  id: string;
+  /** Human-readable label shown in the selector, e.g. "text-embedding-3-small (1536-dim)". */
+  label: string;
+  dim: number | null;
+}
+
 /**
  * Modal that lets the admin switch between the bundled local Ollama
  * embedding runtime and any configured API provider at any time.
@@ -474,7 +504,12 @@ function EmbeddingConfigDialog({
 
   const [mode, setMode] = useState<EmbeddingMode>("local");
   const [providerId, setProviderId] = useState<string>("");
+  // modelId holds the selected model's id, or the sentinel "__custom__"
+  // when the user has chosen to type a model ID manually.
   const [modelId, setModelId] = useState<string>("");
+  // customId holds the raw text when modelId === "__custom__" or when
+  // the existing configured model isn't in the suggestions list.
+  const [customId, setCustomId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -483,12 +518,17 @@ function EmbeddingConfigDialog({
     if (current?.embedding_provider_id && !currentIsLocal) {
       setMode("api");
       setProviderId(current.embedding_provider_id);
-      setModelId(current.embedding_model_id ?? "");
+      const mid = current.embedding_model_id ?? "";
+      setModelId(mid);
+      // Pre-fill customId so if the current model isn't in the dropdown
+      // the user sees it in the text field rather than a blank.
+      setCustomId(mid);
     } else {
       setMode(currentIsLocal ? "local" : "local");
       const firstApi = apiProviders[0]?.id ?? "";
       setProviderId(firstApi);
       setModelId("");
+      setCustomId("");
     }
   }, [open, current, currentIsLocal, apiProviders]);
 
@@ -497,24 +537,61 @@ function EmbeddingConfigDialog({
     [apiProviders, providerId]
   );
 
-  // Offer the curated known-dim embedding models first, then any
-  // other model IDs the provider happens to advertise. Dedup while
-  // preserving order.
-  const modelSuggestions = useMemo<string[]>(() => {
-    const known = Object.keys(knownModels ?? {});
-    const catalog = (selectedProvider?.models ?? []).map((m) => m.id);
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const id of [...known, ...catalog]) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        out.push(id);
-      }
-    }
-    return out;
+  // Embedding models from the selected provider's catalog, filtered
+  // by name heuristics (same logic as the backend's is_embedding_model_id).
+  // These appear first in the selector under a "From <provider>" group.
+  const providerOptions = useMemo<EmbeddingModelOption[]>(() => {
+    const knownDims = knownModels ?? {};
+    return (selectedProvider?.models ?? [])
+      .filter((m) => isEmbeddingModelId(m.id, knownDims))
+      .map((m) => {
+        const dim = knownDims[m.id] ?? null;
+        const dimStr = dim ? ` (${dim}-dim)` : "";
+        // Use the model's display_name when it differs from the raw ID;
+        // otherwise just the ID so the admin can see what they're picking.
+        const label =
+          m.display_name && m.display_name !== m.id
+            ? `${m.display_name}${dimStr}`
+            : `${m.id}${dimStr}`;
+        return { id: m.id, label, dim };
+      });
   }, [knownModels, selectedProvider]);
 
-  const predictedDim = knownModels?.[modelId] ?? null;
+  // Well-known embedding models not already surfaced above (i.e. they're
+  // not in the selected provider's catalog). These appear in a secondary
+  // group so the admin has sensible defaults to pick from regardless of
+  // which provider they chose.
+  const knownOptions = useMemo<EmbeddingModelOption[]>(() => {
+    const knownDims = knownModels ?? {};
+    const providerIds = new Set(providerOptions.map((o) => o.id));
+    return Object.entries(knownDims)
+      .filter(([id]) => !providerIds.has(id))
+      .map(([id, dim]) => ({ id, label: `${id} (${dim}-dim)`, dim }));
+  }, [knownModels, providerOptions]);
+
+  // True when the current modelId is represented in the selector; false
+  // when the configured model was typed manually and isn't in the list.
+  const modelInOptions = useMemo(
+    () =>
+      providerOptions.some((m) => m.id === modelId) ||
+      knownOptions.some((m) => m.id === modelId),
+    [providerOptions, knownOptions, modelId]
+  );
+
+  // Value to bind to the <select> element. If the model isn't in any
+  // group we fall back to the "__custom__" sentinel so that option
+  // appears selected and the text input is shown below.
+  const selectValue = modelInOptions
+    ? modelId
+    : modelId
+      ? "__custom__"
+      : "";
+
+  // The model ID that will actually be sent to the backend.
+  const effectiveModelId =
+    modelId === "__custom__" ? customId.trim() : modelId;
+
+  const predictedDim = knownModels?.[effectiveModelId] ?? null;
   const currentDim = current?.embedding_dim ?? null;
   const dimChanging =
     predictedDim !== null && currentDim !== null && predictedDim !== currentDim;
@@ -531,13 +608,13 @@ function EmbeddingConfigDialog({
           setError("Pick a provider.");
           return;
         }
-        if (!modelId.trim()) {
-          setError("Enter an embedding model ID.");
+        if (!effectiveModelId) {
+          setError("Select or enter an embedding model ID.");
           return;
         }
         await setConfig.mutateAsync({
           embedding_provider_id: providerId,
-          embedding_model_id: modelId.trim(),
+          embedding_model_id: effectiveModelId,
         });
       }
       onClose();
@@ -562,7 +639,7 @@ function EmbeddingConfigDialog({
             variant="primary"
             onClick={save}
             loading={saving}
-            disabled={mode === "api" && (!providerId || !modelId.trim())}
+            disabled={mode === "api" && (!providerId || !effectiveModelId)}
           >
             Save
           </Button>
@@ -615,27 +692,73 @@ function EmbeddingConfigDialog({
 
             <label className="block text-xs">
               <span className="mb-1 block font-medium">
-                Embedding model ID
+                Embedding model
               </span>
-              <input
-                type="text"
-                list="embedding-model-suggestions"
-                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm font-mono"
-                placeholder="e.g. text-embedding-3-small"
-                value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
-                autoComplete="off"
-              />
-              <datalist id="embedding-model-suggestions">
-                {modelSuggestions.map((id) => (
-                  <option key={id} value={id} />
-                ))}
-              </datalist>
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
-                Unknown dimensions are auto-probed with a test embed call when
-                you save.
-              </span>
+              <select
+                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm"
+                value={selectValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__custom__") {
+                    setModelId("__custom__");
+                    // Don't wipe customId — the user may have already
+                    // typed something, or it was pre-filled from the
+                    // current config.
+                  } else {
+                    setModelId(v);
+                    setCustomId("");
+                  }
+                }}
+              >
+                <option value="">Select an embedding model…</option>
+                {providerOptions.length > 0 && (
+                  <optgroup
+                    label={`From ${selectedProvider?.name ?? "provider"}`}
+                  >
+                    {providerOptions.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {knownOptions.length > 0 && (
+                  <optgroup label="Well-known embedding models">
+                    {knownOptions.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value="__custom__">
+                  Other — enter model ID manually…
+                </option>
+              </select>
             </label>
+
+            {/* Custom model ID text input — shown when "manually" is
+                selected or when the current configured model ID isn't
+                in the suggestions (e.g. a freshly-added catalog entry). */}
+            {selectValue === "__custom__" && (
+              <label className="block text-xs">
+                <span className="mb-1 block font-medium text-[var(--text-muted)]">
+                  Custom model ID
+                </span>
+                <input
+                  type="text"
+                  className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm font-mono"
+                  placeholder="e.g. qwen/qwen3-embedding"
+                  value={customId}
+                  onChange={(e) => setCustomId(e.target.value)}
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                />
+                <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+                  Dimensions are auto-probed with a test embed call on save.
+                </span>
+              </label>
+            )}
 
             {predictedDim !== null && (
               <div className="text-[11px] text-[var(--text-muted)]">
