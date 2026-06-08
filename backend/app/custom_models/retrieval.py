@@ -86,6 +86,7 @@ async def _resolve_query_vector(
             provider=provider,
             model_id=settings.embedding_model_id,
             texts=[normalise_for_embedding(query)],
+            dimensions=dim,
         )
     except Exception as exc:  # noqa: BLE001 - best-effort retrieval
         logger.warning("retrieval: embed call failed: %s", exc)

@@ -510,6 +510,10 @@ function EmbeddingConfigDialog({
   // customId holds the raw text when modelId === "__custom__" or when
   // the existing configured model isn't in the suggestions list.
   const [customId, setCustomId] = useState<string>("");
+  // targetDim: "" = auto-detect (let backend probe), "768" or "1536" =
+  // request matryoshka truncation so large-native-dim models (Qwen3,
+  // etc.) produce a vector size the database can store.
+  const [targetDim, setTargetDim] = useState<"" | "768" | "1536">("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -523,12 +527,20 @@ function EmbeddingConfigDialog({
       // Pre-fill customId so if the current model isn't in the dropdown
       // the user sees it in the text field rather than a blank.
       setCustomId(mid);
+      // Restore whatever dim the admin previously chose; fall back to
+      // auto if it's not one of the two explicit choices (e.g. came
+      // from a local Ollama model that was detected at 768 automatically).
+      const storedDim = current.embedding_dim;
+      setTargetDim(
+        storedDim === 768 ? "768" : storedDim === 1536 ? "1536" : ""
+      );
     } else {
       setMode(currentIsLocal ? "local" : "local");
       const firstApi = apiProviders[0]?.id ?? "";
       setProviderId(firstApi);
       setModelId("");
       setCustomId("");
+      setTargetDim("");
     }
   }, [open, current, currentIsLocal, apiProviders]);
 
@@ -615,6 +627,11 @@ function EmbeddingConfigDialog({
         await setConfig.mutateAsync({
           embedding_provider_id: providerId,
           embedding_model_id: effectiveModelId,
+          // When the admin picked an explicit dim, send it so the
+          // backend passes it as the ``dimensions`` parameter to the
+          // API — enabling matryoshka truncation on models whose
+          // default output exceeds a supported column size.
+          ...(targetDim ? { embedding_dim: parseInt(targetDim, 10) } : {}),
         });
       }
       onClose();
@@ -735,6 +752,26 @@ function EmbeddingConfigDialog({
                   Other — enter model ID manually…
                 </option>
               </select>
+            </label>
+
+            <label className="block text-xs">
+              <span className="mb-1 block font-medium">Output dimensions</span>
+              <select
+                className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm"
+                value={targetDim}
+                onChange={(e) =>
+                  setTargetDim(e.target.value as "" | "768" | "1536")
+                }
+              >
+                <option value="">Auto-detect (use model default)</option>
+                <option value="768">768 — compact, fast</option>
+                <option value="1536">1536 — higher fidelity</option>
+              </select>
+              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+                Set this when your model's native output is larger than
+                supported (e.g. Qwen3-embedding outputs 4096 by default).
+                Matryoshka-capable models truncate cleanly to 768 or 1536.
+              </span>
             </label>
 
             {/* Custom model ID text input — shown when "manually" is

@@ -363,6 +363,7 @@ async def embed_texts(
     provider: ModelProvider,
     model_id: str,
     texts: list[str],
+    dimensions: int | None = None,
 ) -> list[list[float]]:
     """Embed a batch of strings via the configured provider.
 
@@ -371,6 +372,17 @@ async def embed_texts(
     ``AsyncOpenAI`` instance — no per-provider branching in this
     module. Empty inputs are filtered before the API call (some
     providers 400 on empty strings).
+
+    ``dimensions`` requests the provider to truncate the output vector
+    to the given size. This is the standard mechanism for models that
+    support Matryoshka Representation Learning (MRL) — e.g. OpenAI's
+    text-embedding-3 family and Qwen3-embedding — where the vector can
+    be shortened without retraining and still represent the text well.
+    Pass the workspace ``embedding_dim`` so that models whose default
+    output size exceeds the supported database columns (768 / 1536)
+    still produce storable vectors. Providers that don't support the
+    parameter typically ignore it; those that error will surface the
+    error to the caller, which is the correct behaviour.
     """
     cleaned = [t for t in texts if t and t.strip()]
     if not cleaned:
@@ -381,7 +393,13 @@ async def embed_texts(
     # because all current providers return them in submission order;
     # the ``[d.embedding for d in resp.data]`` comprehension just
     # mirrors the input ordering.
-    resp = await client.embeddings.create(model=model_id, input=cleaned)
+    resp = await client.embeddings.create(
+        model=model_id,
+        input=cleaned,
+        # ``dimensions`` is omitted entirely when None so providers
+        # that don't accept the field don't receive an unexpected key.
+        **({"dimensions": dimensions} if dimensions is not None else {}),
+    )
     return [list(d.embedding) for d in resp.data]
 
 

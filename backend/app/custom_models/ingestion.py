@@ -204,7 +204,10 @@ async def embed_file_to_chunks(
     for start in range(0, len(chunks), EMBED_BATCH_SIZE):
         batch = chunks[start : start + EMBED_BATCH_SIZE]
         vecs = await embed_texts(
-            provider=provider, model_id=model_id, texts=[c.text for c in batch]
+            provider=provider,
+            model_id=model_id,
+            texts=[c.text for c in batch],
+            dimensions=dim,
         )
         if len(vecs) != len(batch):
             raise RuntimeError(

@@ -400,6 +400,13 @@ async def set_embedding_config(
                 provider=provider,
                 model_id=payload.embedding_model_id,
                 texts=["x"],
+                # Pass the admin's requested dimension so MRL-capable
+                # models (Qwen3, text-embedding-3, …) truncate the
+                # probe vector to the target size. Without this the
+                # probe returns the model's native dim (often 4096)
+                # and the SUPPORTED_DIMS guard rejects it even though
+                # the model can produce a perfectly valid 1536-dim vec.
+                dimensions=payload.embedding_dim,
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
@@ -517,6 +524,7 @@ async def test_embedding_config(
             provider=provider,
             model_id=settings.embedding_model_id,
             texts=[probe_text],
+            dimensions=settings.embedding_dim,
         )
     except Exception as exc:  # noqa: BLE001 — surface any upstream error
         latency_ms = int((time.perf_counter() - start) * 1000)
