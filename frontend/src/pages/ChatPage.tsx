@@ -11,7 +11,6 @@ import {
   Zap,
 } from "lucide-react";
 
-import { authApi } from "@/api/auth";
 import { chatApi } from "@/api/chat";
 import { TopNav } from "@/components/layout/TopNav";
 import { ChatWindow } from "@/components/chat/ChatWindow";
@@ -101,13 +100,11 @@ export function ChatPage() {
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
 
-  // Both toggles seed from the user's persisted preferences (server-side
-  // ``users.settings``) and write back whenever the user flips them. The
-  // PATCH is fire-and-forget with optimistic local update — the worst case
-  // is the next reload reverts to the stored value.
+  // Both toggles seed from the user's account defaults whenever a new chat
+  // starts. Web search mode also reads the per-conversation stored value
+  // when opening an existing chat. Toggle changes inside a chat are
+  // local-only and do NOT overwrite account-level defaults.
   const userSettings = useAuthStore((s) => s.user?.settings);
-  const patchSettings = useAuthStore((s) => s.patchSettings);
-  const setUser = useAuthStore((s) => s.setUser);
 
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
     () => userSettings?.default_web_search_mode ?? DEFAULT_WEB_SEARCH_MODE
@@ -184,28 +181,54 @@ export function ChatPage() {
     return list.length > 1 ? list : null; // only render chips on multi-party chats
   }, [conversation]);
 
+  // Tracks which conversation id we've already seeded webSearchMode from —
+  // avoids re-seeding on every incremental background refresh of the
+  // conversation query.
+  const webSearchSeededForRef = useRef<string | null>(null);
+
   // First-time hydration: when the user object lands (post-bootstrap or
-  // after a slow /me round-trip), seed the toggles once.
+  // after a slow /me round-trip), seed the toggles once. Tools always
+  // come from account defaults. Web search mode only falls back to the
+  // account default here when we're not already in a conversation that
+  // has seeded its own value (avoids clobbering a conversation-specific
+  // mode if the user object arrives after the conversation query).
   useEffect(() => {
     if (!userSettings || seededFromUser) return;
-    setWebSearchMode(
-      userSettings.default_web_search_mode ?? DEFAULT_WEB_SEARCH_MODE
-    );
+    if (!id || webSearchSeededForRef.current !== id) {
+      setWebSearchMode(
+        userSettings.default_web_search_mode ?? DEFAULT_WEB_SEARCH_MODE
+      );
+    }
     setToolsEnabled(userSettings.default_tools_enabled ?? DEFAULT_TOOLS_ENABLED);
     setSeededFromUser(true);
-  }, [userSettings, seededFromUser]);
+  }, [userSettings, seededFromUser, id]);
 
-  // When the active conversation switches, re-seed the toggles from the
-  // current persisted preferences. Local toggle changes already persist
-  // server-side, so this is just "honour the user's saved default for
-  // each fresh chat".
+  // When the active conversation switches, seed toggles from account
+  // defaults. Tools have no per-conversation storage so they always come
+  // from the account default. Web search mode for *existing* chats is
+  // seeded from the loaded conversation in the effect below.
   useEffect(() => {
     setActive(id ?? null);
+    // Reset per-conversation seed tracking on every chat switch.
+    webSearchSeededForRef.current = null;
     const s = useAuthStore.getState().user?.settings;
-    if (!s) return;
-    setWebSearchMode(s.default_web_search_mode ?? DEFAULT_WEB_SEARCH_MODE);
-    setToolsEnabled(s.default_tools_enabled ?? DEFAULT_TOOLS_ENABLED);
+    // Tools always come from account defaults (no per-conversation storage).
+    if (s) setToolsEnabled(s.default_tools_enabled ?? DEFAULT_TOOLS_ENABLED);
+    // For new chats there is no conversation to seed from — use account default.
+    if (!id && s) {
+      setWebSearchMode(s.default_web_search_mode ?? DEFAULT_WEB_SEARCH_MODE);
+    }
   }, [id, setActive]);
+
+  // Seed webSearchMode from the loaded conversation's stored mode once per
+  // conversation. Guarded by the ref so in-chat toggle changes aren't
+  // clobbered on every background refresh of the conversation query.
+  useEffect(() => {
+    if (!id || !conversation) return;
+    if (webSearchSeededForRef.current === id) return;
+    webSearchSeededForRef.current = id;
+    setWebSearchMode(conversation.web_search_mode ?? DEFAULT_WEB_SEARCH_MODE);
+  }, [id, conversation]);
 
   // Default-model behaviour: every NEW chat starts on the user's
   // configured default; opening an EXISTING chat snaps the picker to
@@ -262,46 +285,15 @@ export function ChatPage() {
     return userSettings?.memory_enabled !== false;
   })();
 
-  // Persist a preference flip to the server. Optimistic: update local
-  // state + cached user immediately, fire the PATCH, roll back on
-  // failure. Generic over the whitelisted preference keys so we can
-  // share the same path for the boolean (``tools_enabled``) and the
-  // tri-state web-search mode.
-  const persistPreference = useCallback(
-    async <K extends "default_tools_enabled" | "default_web_search_mode">(
-      key: K,
-      value: K extends "default_tools_enabled" ? boolean : WebSearchMode
-    ) => {
-      const previous = useAuthStore.getState().user?.settings?.[key];
-      patchSettings({ [key]: value });
-      try {
-        const fresh = await authApi.updatePreferences({
-          [key]: value,
-        } as Record<K, typeof value>);
-        setUser(fresh);
-      } catch (err) {
-        patchSettings({ [key]: previous as never });
-        console.warn(`Failed to persist preference ${key}`, err);
-      }
-    },
-    [patchSettings, setUser]
-  );
+  // Toggle changes in a chat are local-only — they never touch account
+  // defaults. Account defaults only change through the Settings page.
+  const handleWebSearchModeChange = useCallback((next: WebSearchMode) => {
+    setWebSearchMode(next);
+  }, []);
 
-  const handleWebSearchModeChange = useCallback(
-    (next: WebSearchMode) => {
-      setWebSearchMode(next);
-      void persistPreference("default_web_search_mode", next);
-    },
-    [persistPreference]
-  );
-
-  const handleToolsChange = useCallback(
-    (next: boolean) => {
-      setToolsEnabled(next);
-      void persistPreference("default_tools_enabled", next);
-    },
-    [persistPreference]
-  );
+  const handleToolsChange = useCallback((next: boolean) => {
+    setToolsEnabled(next);
+  }, []);
 
   // Reasoning effort isn't a user-wide default — it's per-conversation
   // and only meaningful for DeepSeek models. Picking a value updates
