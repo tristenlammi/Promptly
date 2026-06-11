@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -56,6 +57,19 @@ _MAX_OUTPUT_TOKENS = 8000
 
 class TaskRunError(RuntimeError):
     """Controlled failure during a run — message is safe to store."""
+
+
+# Some providers (or edge-case model outputs) leak raw XML-style tool-call
+# markup into the text stream alongside the structured ToolCallDelta events.
+# Strip it from the final report before saving so it never reaches storage.
+_TOOL_CALL_XML_RE = re.compile(
+    r"<\s*tool_calls\s*>.*?</\s*tool_calls\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _strip_tool_call_xml(text: str) -> str:
+    return _TOOL_CALL_XML_RE.sub("", text).strip()
 
 
 def _build_system_prompt(task: Task, now_local_iso: str) -> str:
@@ -191,7 +205,7 @@ async def _generate(
     for _hop in range(_MAX_HOPS):
         hop_text, hop_reasoning, pending, finish = await _consume(tools)
 
-        text_now = "".join(hop_text).strip()
+        text_now = _strip_tool_call_xml("".join(hop_text).strip())
         if text_now:
             last_text = text_now
 
@@ -208,7 +222,7 @@ async def _generate(
         # No tool calls (or the model finished normally) → this hop's text
         # is the report.
         if not tool_calls or finish != "tool_calls":
-            final_text = text_now or last_text
+            final_text = _strip_tool_call_xml(text_now or last_text)
             break
 
         # Otherwise append the assistant tool-call turn + each result and
@@ -255,7 +269,7 @@ async def _generate(
     else:
         # Loop exhausted while still wanting tools — keep the best prose so
         # far for the forced-synthesis fallback below.
-        final_text = last_text
+        final_text = _strip_tool_call_xml(last_text)
 
     # Forced synthesis: if the tool loop never produced visible prose (a
     # reasoning model that thought + searched but never "spoke", or a hop
@@ -273,7 +287,7 @@ async def _generate(
             }
         )
         hop_text, _r, _p, _f = await _consume(None)
-        final_text = "".join(hop_text).strip() or last_text
+        final_text = _strip_tool_call_xml("".join(hop_text).strip() or last_text)
 
     if not final_text:
         logger.info(
