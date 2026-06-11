@@ -155,6 +155,7 @@ from app.models_config.provider import (
     model_router,
 )
 from app.rate_limit import enforce_user_message_rate
+from app.chat.base_prompt import PROMPTLY_BASE_PROMPT
 from app.search.service import (
     canonicalise_url,
     distill_query,
@@ -3547,7 +3548,12 @@ async def _stream_generator(
         # system prompt. Tool-aware + personal-context prompts are
         # merged on top below, each taking precedence (since
         # ``merge_system_prompt`` puts the first argument first).
-        system_prompt: str | None = project_system_prompt
+        # Promptly base guidelines (lowest priority — every user/project/tool
+        # layer stacked on top overrides these). Covers rendering capabilities
+        # (KaTeX, markdown tables) and basic response quality steer.
+        system_prompt: str | None = merge_system_prompt(
+            project_system_prompt or "", PROMPTLY_BASE_PROMPT
+        )
         # Account-wide custom system prompt. A global persona / standing
         # instruction the user set in Chat defaults that seeds EVERY new
         # chat. It's the broadest steer, so it sits *under* both the
