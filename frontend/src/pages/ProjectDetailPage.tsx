@@ -461,7 +461,7 @@ function ConversationsTab({
 
   const { data: hits, isFetching } = useQuery({
     queryKey: ["chat-project-search", projectId, query],
-    queryFn: () => chatApi.search(query, 20, projectId),
+    queryFn: () => chatApi.search(query, 20, { projectId }),
     enabled: query.length > 0,
   });
 

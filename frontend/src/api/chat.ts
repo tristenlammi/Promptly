@@ -312,11 +312,23 @@ export const chatApi = {
   async search(
     q: string,
     limit = 20,
-    projectId?: string
+    opts: { projectId?: string; start?: string; end?: string } = {}
   ): Promise<ConversationSearchHit[]> {
+    const { projectId, start, end } = opts;
+    const trimmed = q.trim();
     const { data } = await apiClient.get<ConversationSearchHit[]>(
       "/chat/conversations/search",
-      { params: { q, limit, ...(projectId ? { project_id: projectId } : {}) } }
+      {
+        params: {
+          // ``q`` is omitted entirely when empty so the backend switches
+          // into date-only browse mode rather than rejecting the request.
+          ...(trimmed ? { q: trimmed } : {}),
+          limit,
+          ...(projectId ? { project_id: projectId } : {}),
+          ...(start ? { start } : {}),
+          ...(end ? { end } : {}),
+        },
+      }
     );
     return data;
   },

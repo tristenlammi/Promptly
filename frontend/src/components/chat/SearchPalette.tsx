@@ -12,6 +12,7 @@ import {
 import { chatApi } from "@/api/chat";
 import type { ConversationSearchHit } from "@/api/types";
 import { cn } from "@/utils/cn";
+import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
 
 /**
  * Global command palette for full-text conversation search.
@@ -47,6 +48,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   const navigate = useNavigate();
 
   const [query, setQuery] = useState("");
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [hits, setHits] = useState<ConversationSearchHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +56,9 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  // True while the date-filter popover is open — the palette yields its
+  // keyboard handling (Escape / arrows) to the popover during that time.
+  const dateOpenRef = useRef(false);
   // Increments on every keystroke; stale fetches compare against it so
   // a slow request from an older query doesn't clobber the UI once
   // the user has kept typing.
@@ -64,6 +69,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setDateRange(null);
       setHits([]);
       setError(null);
       setCursor(0);
@@ -74,12 +80,14 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     queueMicrotask(() => inputRef.current?.focus());
   }, [open]);
 
-  // Debounced search — trailing only. Empty query clears results
-  // immediately without a round-trip.
+  // Debounced search — trailing only. Fires when there's a text query, a
+  // date filter, or both. With no query but a date range it switches into
+  // "browse by date" mode (the backend returns the chats active in the
+  // window). With neither, results clear without a round-trip.
   useEffect(() => {
     if (!open) return;
     const trimmed = query.trim();
-    if (!trimmed) {
+    if (!trimmed && !dateRange) {
       setHits([]);
       setError(null);
       setLoading(false);
@@ -89,7 +97,10 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     setLoading(true);
     const t = window.setTimeout(async () => {
       try {
-        const results = await chatApi.search(trimmed, 30);
+        const results = await chatApi.search(trimmed, 30, {
+          start: dateRange?.start ?? undefined,
+          end: dateRange?.end ?? undefined,
+        });
         if (seq !== fetchSeq.current) return; // superseded
         setHits(results);
         setError(null);
@@ -102,7 +113,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       }
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(t);
-  }, [query, open]);
+  }, [query, open, dateRange]);
 
   // Split hits into the two sections we render. We keep the original
   // rank order within each section so the "most relevant" within a
@@ -124,6 +135,9 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      // While the date popover is open it owns the keyboard — don't let
+      // Escape close the whole palette or arrows move the result cursor.
+      if (dateOpenRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
@@ -195,6 +209,13 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           {loading && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />
           )}
+          <SearchDateFilter
+            value={dateRange}
+            onChange={setDateRange}
+            onOpenChange={(o) => {
+              dateOpenRef.current = o;
+            }}
+          />
           <button
             type="button"
             onClick={onClose}
@@ -214,14 +235,34 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               {error}
             </div>
           )}
-          {!error && query.trim() && !loading && flat.length === 0 && (
+          {!error &&
+            !loading &&
+            flat.length === 0 &&
+            (query.trim() || dateRange) && (
+              <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
+                {query.trim() ? (
+                  <>
+                    No matches for "{query.trim()}"
+                    {dateRange ? ` in ${dateRange.label}` : ""}.
+                  </>
+                ) : (
+                  <>No chats found for {dateRange!.label}.</>
+                )}
+              </div>
+            )}
+          {!error && !query.trim() && !dateRange && (
             <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
-              No matches for "{query.trim()}".
+              Type to search across your messages, or filter by date to
+              browse your chats.
             </div>
           )}
-          {!error && !query.trim() && (
-            <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
-              Type to search across every message in your chats.
+
+          {/* Browse-by-date caption — results here are one row per chat
+              rather than per-message hits, so name what's being shown. */}
+          {!error && dateRange && !query.trim() && flat.length > 0 && (
+            <div className="px-3 pt-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+              {flat.length} chat{flat.length === 1 ? "" : "s"} in{" "}
+              {dateRange.label}
             </div>
           )}
 

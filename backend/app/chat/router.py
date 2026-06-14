@@ -197,9 +197,11 @@ def _to_websearch_query(raw: str) -> str:
 
 @router.get("/conversations/search", response_model=list[ConversationSearchHit])
 async def search_conversations(
-    q: str = Query(..., min_length=1, max_length=200),
+    q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
     project_id: uuid.UUID | None = Query(default=None),
+    start: datetime | None = Query(default=None),
+    end: datetime | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ConversationSearchHit]:
@@ -217,9 +219,18 @@ async def search_conversations(
     scoped to chats inside that project (intersected with the caller's
     accessible set, so it never widens access — an inaccessible project
     just yields no results).
+
+    The optional ``start`` / ``end`` instants bound matches by
+    ``created_at`` (``start`` inclusive, ``end`` exclusive). They can be
+    supplied *with* a text query (filter the search) or *without* one
+    (browse mode — list the chats active in that window, newest first).
+    The frontend resolves the user's local day boundaries to UTC before
+    sending, so the range means what the user picked in their timezone.
     """
-    cleaned = _to_websearch_query(q)
-    if not cleaned:
+    cleaned = _to_websearch_query(q) if q else ""
+    has_date_filter = start is not None or end is not None
+    # Need something to search on: a text query, a date range, or both.
+    if not cleaned and not has_date_filter:
         return []
 
     # Search across owned chats *and* project-shared chats.
@@ -245,12 +256,37 @@ async def search_conversations(
         if not accessible_ids:
             return []
 
+    # Optional ``created_at`` range, ANDed into every retriever below.
+    # ``start`` is inclusive, ``end`` exclusive — the frontend already
+    # resolved local day boundaries to UTC instants, so we just bind them.
+    date_sql = ""
+    date_params: dict[str, datetime] = {}
+    if start is not None:
+        date_sql += " AND m.created_at >= :start"
+        date_params["start"] = start
+    if end is not None:
+        date_sql += " AND m.created_at < :end"
+        date_params["end"] = end
+
+    # Date-only browse: no text query, just "which chats did I touch in
+    # this window". Returns one representative hit per conversation (its
+    # latest message in range), newest-first.
+    if not cleaned:
+        return await _browse_conversations_by_date(
+            db,
+            conv_ids=accessible_ids,
+            user_id=user.id,
+            date_sql=date_sql,
+            date_params=date_params,
+            limit=limit,
+        )
+
     # Pull a wider slate from each retriever than the caller asked for so
     # the fusion below has material to re-rank before we trim to ``limit``.
     fetch = min(50, max(limit * 2, 30))
 
     fts_sql = text(
-        """
+        f"""
         SELECT
             m.conversation_id            AS conversation_id,
             m.id                         AS message_id,
@@ -272,7 +308,9 @@ async def search_conversations(
         FROM messages m
         JOIN conversations c ON c.id = m.conversation_id
         WHERE m.conversation_id = ANY(:conv_ids)
+          AND c.archived_at IS NULL
           AND m.content_tsv @@ websearch_to_tsquery('english', :q)
+          {date_sql}
         ORDER BY rank DESC, m.created_at DESC
         LIMIT :limit
         """
@@ -285,6 +323,7 @@ async def search_conversations(
                 "conv_ids": accessible_ids,
                 "limit": fetch,
                 "user_id": user.id,
+                **date_params,
             },
         )
     ).mappings().all()
@@ -304,6 +343,8 @@ async def search_conversations(
                 conv_ids=accessible_ids,
                 user_id=user.id,
                 limit=fetch,
+                start=start,
+                end=end,
             )
 
     return _fuse_search_hits(fts_rows, sem_rows, limit=limit)
@@ -411,6 +452,76 @@ def _synth_snippet(content: str, max_chars: int = 200) -> str:
     if len(text_) <= max_chars:
         return text_
     return text_[:max_chars].rstrip() + " …"
+
+
+async def _browse_conversations_by_date(
+    db: AsyncSession,
+    *,
+    conv_ids: list[uuid.UUID],
+    user_id: uuid.UUID,
+    date_sql: str,
+    date_params: dict[str, datetime],
+    limit: int,
+) -> list[ConversationSearchHit]:
+    """List conversations with activity in a date range (no text query).
+
+    One row per conversation — its most recent message inside the window —
+    ordered newest-first. Powers the palette's "browse by date" mode where
+    the user just wants to see which chats they touched in a period. The
+    ``DISTINCT ON`` collapses each conversation to its latest in-range
+    message; the outer query then orders those representatives globally and
+    trims to ``limit``.
+    """
+    sql = text(
+        f"""
+        SELECT sub.* FROM (
+            SELECT DISTINCT ON (m.conversation_id)
+                m.conversation_id            AS conversation_id,
+                m.id                         AS message_id,
+                c.title                      AS conversation_title,
+                m.role                       AS role,
+                m.content                    AS content,
+                m.created_at                 AS created_at,
+                CASE
+                    WHEN c.user_id = :user_id THEN 'owner'
+                    ELSE 'collaborator'
+                END                          AS access
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.conversation_id = ANY(:conv_ids)
+              AND c.archived_at IS NULL
+              {date_sql}
+            ORDER BY m.conversation_id, m.created_at DESC
+        ) sub
+        ORDER BY sub.created_at DESC
+        LIMIT :limit
+        """
+    )
+    rows = (
+        await db.execute(
+            sql,
+            {
+                "conv_ids": conv_ids,
+                "user_id": user_id,
+                "limit": limit,
+                **date_params,
+            },
+        )
+    ).mappings().all()
+    return [
+        ConversationSearchHit(
+            conversation_id=r["conversation_id"],
+            message_id=r["message_id"],
+            conversation_title=r["conversation_title"],
+            role=r["role"],
+            snippet=_synth_snippet(str(r["content"] or "")),
+            rank=0.0,
+            created_at=r["created_at"],
+            access=r["access"],
+            match="keyword",
+        )
+        for r in rows
+    ]
 
 
 def _fuse_search_hits(

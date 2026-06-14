@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from sqlalchemy import text
@@ -91,15 +92,30 @@ async def semantic_search_messages(
     conv_ids: list[uuid.UUID],
     user_id: uuid.UUID,
     limit: int,
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> list[dict]:
     """Cosine-similarity search over indexed messages in ``conv_ids``.
 
     Returns row dicts with the same field names as the FTS query plus a
     ``content`` field (for snippet synthesis) and a 0–1 ``score``.
+
+    ``start`` / ``end`` optionally bound matches by ``created_at`` so the
+    semantic recall honours the same date filter the keyword path does.
     """
     if not conv_ids:
         return []
     column = f"embedding_{cfg.dim}"
+    # Optional created_at range — mirrors the FTS path so a hybrid search
+    # with a date filter doesn't leak out-of-range semantic hits.
+    date_sql = ""
+    date_params: dict[str, datetime] = {}
+    if start is not None:
+        date_sql += " AND m.created_at >= :start"
+        date_params["start"] = start
+    if end is not None:
+        date_sql += " AND m.created_at < :end"
+        date_params["end"] = end
     sql = text(
         f"""
         SELECT
@@ -119,6 +135,8 @@ async def semantic_search_messages(
         JOIN conversations c ON c.id = m.conversation_id
         WHERE e.conversation_id = ANY(:conv_ids)
           AND e.{column} IS NOT NULL
+          AND c.archived_at IS NULL
+          {date_sql}
         ORDER BY e.{column} <=> CAST(:qvec AS vector({cfg.dim}))
         LIMIT :limit
         """
@@ -131,6 +149,7 @@ async def semantic_search_messages(
                 "conv_ids": conv_ids,
                 "user_id": user_id,
                 "limit": limit,
+                **date_params,
             },
         )
     ).mappings().all()
