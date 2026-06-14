@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
   ChevronLeft,
   ChevronRight,
   Check,
@@ -12,7 +13,6 @@ import {
   FolderMinus,
   Loader2,
   Pin,
-  Trash2,
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -36,8 +36,9 @@ interface Props {
   pinned: boolean;
   /** Toggle the pin. The row owns the mutation; the menu just fires it. */
   onTogglePin: () => void;
-  /** Open the delete confirmation. The row owns the modal. */
-  onRequestDelete: () => void;
+  /** Archive the chat. The row owns the mutation; the menu just fires it.
+   *  Permanent deletion lives on the Archive page, not here. */
+  onArchive: () => void;
   position: Position;
   onClose: () => void;
 }
@@ -63,7 +64,7 @@ export function ConversationRowContextMenu({
   currentProjectId,
   pinned,
   onTogglePin,
-  onRequestDelete,
+  onArchive,
   position,
   onClose,
 }: Props) {
@@ -222,17 +223,17 @@ export function ConversationRowContextMenu({
               role="menuitem"
               onClick={() => {
                 onClose();
-                onRequestDelete();
+                onArchive();
               }}
               className={cn(
                 "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
-                "text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                "text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
               )}
             >
               <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                <Trash2 className="h-3.5 w-3.5" />
+                <Archive className="h-3.5 w-3.5" />
               </span>
-              <span className="flex-1 font-medium">Delete</span>
+              <span className="flex-1 font-medium">Archive</span>
             </button>
 
             <div className="my-1 border-t border-[var(--border)]" />

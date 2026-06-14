@@ -25,6 +25,7 @@ import { StudyPage } from "@/pages/StudyPage";
 import { ReviewPage } from "@/pages/ReviewPage";
 import { StudySessionPage } from "@/pages/StudySessionPage";
 import { StudyTopicPage } from "@/pages/StudyTopicPage";
+import { ArchivePage } from "@/pages/ArchivePage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
@@ -255,6 +256,7 @@ export default function App() {
         <Route path="/files/shared" element={<SharedWithMePage />} />
         <Route path="/files/trash" element={<TrashPage />} />
         <Route path="/files/search" element={<SearchResultsPage />} />
+        <Route path="/archive" element={<ArchivePage />} />
         <Route path="/account/security" element={<AccountSecurityPage />} />
         <Route
           path="/admin"

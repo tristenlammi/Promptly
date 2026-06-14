@@ -178,6 +178,14 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Archive (0082). Soft-hide a chat from the main sidebar + global
+    # search without deleting it. NULL = active; a set timestamp moves
+    # the chat to the dedicated Archive page where it can be read,
+    # restored, or permanently deleted.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation id={self.id} title={self.title!r}>"
 

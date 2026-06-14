@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
+  Archive,
   Clock,
   LogOut,
   MoreHorizontal,
@@ -10,7 +11,6 @@ import {
   Settings,
   ShieldCheck,
   Star,
-  Trash2,
 } from "lucide-react";
 
 import { NAV_ITEMS, type NavItem as NavItemConfig } from "./navItems";
@@ -19,8 +19,8 @@ import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import {
   hideConversationFromHistory,
+  useArchiveConversation,
   useConversationsQuery,
-  useDeleteConversation,
   useUpdateConversation,
 } from "@/hooks/useConversations";
 import { useProjectInvites } from "@/hooks/useChatProjects";
@@ -35,7 +35,6 @@ import { Inbox } from "lucide-react";
 
 import { ConversationSearchBox } from "./ConversationSearchBox";
 import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
-import { DeleteChatModal } from "./DeleteChatModal";
 import { InstallAppButton } from "./InstallAppButton";
 import { NewChatButton } from "./NewChatButton";
 
@@ -70,7 +69,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Filter them out at the source so pinned/unpinned/search all
   // honour the same rule.
   const personalConversations = useMemo(
-    () => conversations.filter((c) => !c.project_id),
+    // Archived chats live on the Archive page; the backend already
+    // excludes them from this list, but filter defensively so an
+    // optimistic store update can't flash an archived row.
+    () => conversations.filter((c) => !c.project_id && !c.archived_at),
     [conversations]
   );
   const pinned = useMemo(
@@ -128,6 +130,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               />
             );
           })}
+          <SideIcon
+            to="/archive"
+            icon={<Archive className="h-4 w-4" />}
+            label="Archive"
+          />
           {isAdmin && (
             <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
           )}
@@ -404,11 +411,10 @@ function ConversationRow({
 }) {
   const navigate = useNavigate();
   const update = useUpdateConversation();
-  const remove = useDeleteConversation();
+  const archive = useArchiveConversation();
   const isMobile = useIsMobile();
   const isActive = activeId === conv.id;
   const title = conv.title?.trim() || "New chat";
-  const [confirmOpen, setConfirmOpen] = useState(false);
   // Position is in *viewport* coordinates because the menu is rendered
   // through a portal with ``position: fixed``.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(
@@ -443,37 +449,31 @@ function ConversationRow({
   const onTouchEndOrCancel = () => cancelLongPress();
   const onTouchMove = () => cancelLongPress();
 
-  const handleDelete = () =>
-    new Promise<void>((resolve, reject) => {
-      remove.mutate(conv.id, {
-        onSuccess: () => {
-          if (isActive) navigate("/chat");
-          setConfirmOpen(false);
-          resolve();
-        },
-        onError: async (err) => {
-          // A chat we can see but don't own (e.g. one shared to us before
-          // per-chat sharing was retired) returns 404/403 from delete.
-          // Fall back to hiding it from our own history so the row always
-          // clears — without touching the owner's copy.
-          const status = (err as { response?: { status?: number } })?.response
-            ?.status;
-          if (status === 404 || status === 403) {
-            try {
-              await hideConversationFromHistory(conv.id);
-              if (isActive) navigate("/chat");
-              setConfirmOpen(false);
-              resolve();
-              return;
-            } catch (e2) {
-              reject(e2 instanceof Error ? e2 : new Error(String(e2)));
-              return;
-            }
+  // Archive is reversible, so it fires immediately (no confirm dialog) —
+  // permanent deletion lives on the Archive page. The row clears from the
+  // sidebar via the mutation's store update.
+  const handleArchive = () => {
+    archive.mutate(conv.id, {
+      onSuccess: () => {
+        if (isActive) navigate("/chat");
+      },
+      onError: async (err) => {
+        // A chat we can see but don't own (e.g. one shared to us before
+        // per-chat sharing was retired) returns 404/403 from archive.
+        // Fall back to hiding it from our own history so the row clears.
+        const status = (err as { response?: { status?: number } })?.response
+          ?.status;
+        if (status === 404 || status === 403) {
+          try {
+            await hideConversationFromHistory(conv.id);
+            if (isActive) navigate("/chat");
+          } catch {
+            /* best-effort — nothing more we can do here */
           }
-          reject(err instanceof Error ? err : new Error(String(err)));
-        },
-      });
+        }
+      },
     });
+  };
 
   return (
     <>
@@ -561,24 +561,17 @@ function ConversationRow({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setConfirmOpen(true);
+                handleArchive();
               }}
-              className="rounded p-1 text-[var(--danger)] hover:bg-[var(--danger-bg)]"
-              title="Delete"
-              aria-label="Delete conversation"
+              className="rounded p-1 text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
+              title="Archive"
+              aria-label="Archive conversation"
             >
-              <Trash2 className="h-3 w-3" />
+              <Archive className="h-3 w-3" />
             </button>
           </div>
         )}
       </div>
-
-      <DeleteChatModal
-        open={confirmOpen}
-        conversationTitle={title}
-        onConfirm={handleDelete}
-        onClose={() => setConfirmOpen(false)}
-      />
 
       {menuPos && (
         <ConversationRowContextMenu
@@ -588,7 +581,7 @@ function ConversationRow({
           onTogglePin={() =>
             update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } })
           }
-          onRequestDelete={() => setConfirmOpen(true)}
+          onArchive={handleArchive}
           position={menuPos}
           onClose={() => setMenuPos(null)}
         />
@@ -618,6 +611,18 @@ function UserFooter() {
   return (
     <div className="border-t border-[var(--border)] p-3 pb-safe">
       <InstallAppButton />
+      {/* Archived chats — sits above Account/Settings so it reads as a
+          chat surface (where your put-away conversations live) rather
+          than an account control. */}
+      <button
+        onClick={() => navigate("/archive")}
+        className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+        title="Archived chats"
+        aria-label="Open archived chats"
+      >
+        <Archive className="h-4 w-4" />
+        <span className="font-medium">Archive</span>
+      </button>
       {/* Per-user account settings — every authenticated user gets one.
           Hosts chat-default preferences plus MFA / trusted devices. The
           route still ends in /security for backwards compatibility but

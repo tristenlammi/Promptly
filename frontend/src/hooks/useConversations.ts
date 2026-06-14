@@ -83,6 +83,49 @@ export function useDeleteConversation() {
     onSuccess: (_data, id) => {
       remove(id);
       qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+      qc.invalidateQueries({ queryKey: ARCHIVED_KEY });
+    },
+  });
+}
+
+const ARCHIVED_KEY = ["conversations", "archived"] as const;
+
+/** Archived chats for the dedicated Archive page. Kept separate from the
+ *  sidebar store (``CONVERSATIONS_KEY``) so archived rows never leak into
+ *  the active list. */
+export function useArchivedConversationsQuery() {
+  return useQuery({
+    queryKey: ARCHIVED_KEY,
+    queryFn: () => chatApi.list(200, 0, true),
+  });
+}
+
+/** Archive a chat — drops it from the sidebar store immediately, then
+ *  refreshes the archive list. */
+export function useArchiveConversation() {
+  const qc = useQueryClient();
+  const remove = useChatStore((s) => s.removeConversation);
+  return useMutation({
+    mutationFn: (id: string) => chatApi.archive(id),
+    onSuccess: (_data, id) => {
+      remove(id);
+      qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+      qc.invalidateQueries({ queryKey: ARCHIVED_KEY });
+    },
+  });
+}
+
+/** Restore an archived chat — adds it back to the sidebar store and
+ *  refreshes both lists. */
+export function useUnarchiveConversation() {
+  const qc = useQueryClient();
+  const upsert = useChatStore((s) => s.upsertConversation);
+  return useMutation({
+    mutationFn: (id: string) => chatApi.unarchive(id),
+    onSuccess: (updated) => {
+      upsert(updated);
+      qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+      qc.invalidateQueries({ queryKey: ARCHIVED_KEY });
     },
   });
 }

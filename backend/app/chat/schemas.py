@@ -174,6 +174,9 @@ class ConversationSummary(BaseModel):
     system_prompt: str | None = None
     # Phase 9 — per-conversation memory capture pause.
     memory_capture_paused: bool = False
+    # Archive (0082). NULL when the chat is active; set when it's been
+    # archived (lives on the Archive page rather than the sidebar).
+    archived_at: datetime | None = None
 
 
 class ConversationParticipantBrief(BaseModel):

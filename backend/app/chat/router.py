@@ -637,6 +637,9 @@ async def list_mention_candidates(
     base_select = (
         select(Conversation)
         .where(Conversation.user_id == user.id)
+        # Archived chats aren't valid @-mention targets — they've been
+        # put away, so keep them out of the autocomplete.
+        .where(Conversation.archived_at.is_(None))
         .where(
             # Exclude uncrowned compare columns. A crowned compare
             # column becomes a normal chat (its ``compare_group_id``
@@ -723,6 +726,7 @@ async def list_mention_candidates(
 async def list_conversations(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    archived: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ConversationSummary]:
@@ -731,6 +735,11 @@ async def list_conversations(
     Per-chat sharing was removed, so the sidebar list is owned-only.
     (Chats inside a shared *project* are surfaced under the project
     view, not the global list.)
+
+    ``archived`` flips the listing between the two surfaces: the default
+    (``False``) returns the active sidebar list (``archived_at IS NULL``)
+    ordered pinned-then-recent; ``True`` returns the Archive page's list
+    (``archived_at IS NOT NULL``) ordered by most-recently-archived.
     """
     # Phase Z1 — temporary chat filtering:
     #   * Ephemeral chats are never listed; they're meant to be
@@ -784,11 +793,22 @@ async def list_conversations(
         )
         .where(Conversation.id.not_in(select(non_crowned_compare)))
     )
+    # Archive split: the active list hides archived chats; the archive
+    # list shows only them, newest-archived first.
+    if archived:
+        query = query.where(Conversation.archived_at.is_not(None))
+    else:
+        query = query.where(Conversation.archived_at.is_(None))
     if hidden_ids:
         query = query.where(Conversation.id.not_in(hidden_ids))
+    order = (
+        (Conversation.archived_at.desc(),)
+        if archived
+        else (Conversation.pinned.desc(), Conversation.updated_at.desc())
+    )
     result = await db.execute(
         query
-        .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
+        .order_by(*order)
         .limit(limit)
         .offset(offset)
     )
@@ -1225,6 +1245,49 @@ async def branch_conversation(
     await db.refresh(branch)
 
     summary = ConversationSummary.model_validate(branch)
+    summary.role = "owner"
+    return summary
+
+
+@router.post(
+    "/conversations/{conversation_id}/archive",
+    response_model=ConversationSummary,
+)
+async def archive_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ConversationSummary:
+    """Soft-archive a chat: hide it from the sidebar + global search and
+    move it to the Archive page. Idempotent — re-archiving keeps the
+    original timestamp. Owner-only (per ``_get_owned_conversation``)."""
+    conv = await _get_owned_conversation(conversation_id, user, db)
+    if conv.archived_at is None:
+        conv.archived_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(conv)
+    summary = ConversationSummary.model_validate(conv)
+    summary.role = "owner"
+    return summary
+
+
+@router.post(
+    "/conversations/{conversation_id}/unarchive",
+    response_model=ConversationSummary,
+)
+async def unarchive_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ConversationSummary:
+    """Restore an archived chat back to the active sidebar list.
+    Idempotent — a no-op on a chat that isn't archived."""
+    conv = await _get_owned_conversation(conversation_id, user, db)
+    if conv.archived_at is not None:
+        conv.archived_at = None
+        await db.commit()
+        await db.refresh(conv)
+    summary = ConversationSummary.model_validate(conv)
     summary.role = "owner"
     return summary
 

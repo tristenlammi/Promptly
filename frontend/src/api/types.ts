@@ -654,6 +654,10 @@ export interface ConversationSummary {
   /** Phase 9 — when true, auto-capture is paused for this conversation.
    *  Existing memories are still injected; only new fact extraction is off. */
   memory_capture_paused?: boolean;
+  /** Archive (0082). ISO timestamp when the chat was archived, else
+   *  ``null``/absent. Archived chats are hidden from the sidebar + global
+   *  search and live on the dedicated Archive page. */
+  archived_at?: string | null;
 }
 
 /** Phase Z1 — short-lived conversation modes. See ConversationSummary

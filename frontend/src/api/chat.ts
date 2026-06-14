@@ -140,10 +140,14 @@ export interface ImportConversationsResponse {
 }
 
 export const chatApi = {
-  async list(limit = 50, offset = 0): Promise<ConversationSummary[]> {
+  async list(
+    limit = 50,
+    offset = 0,
+    archived = false
+  ): Promise<ConversationSummary[]> {
     const { data } = await apiClient.get<ConversationSummary[]>(
       "/chat/conversations",
-      { params: { limit, offset } }
+      { params: { limit, offset, archived } }
     );
     return data;
   },
@@ -172,6 +176,21 @@ export const chatApi = {
   },
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/chat/conversations/${id}`);
+  },
+  /** Soft-archive a chat — hides it from the sidebar + global search and
+   *  moves it to the Archive page. Returns the updated summary. */
+  async archive(id: string): Promise<ConversationSummary> {
+    const { data } = await apiClient.post<ConversationSummary>(
+      `/chat/conversations/${id}/archive`
+    );
+    return data;
+  },
+  /** Restore an archived chat back to the active sidebar list. */
+  async unarchive(id: string): Promise<ConversationSummary> {
+    const { data } = await apiClient.post<ConversationSummary>(
+      `/chat/conversations/${id}/unarchive`
+    );
+    return data;
   },
   async sendMessage(
     id: string,
