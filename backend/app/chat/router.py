@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -2715,6 +2716,42 @@ def _classify_upstream_error(
     return None
 
 
+# Some providers occasionally stream a tool call as literal XML text in the
+# content channel instead of as a structured tool_call (a known failure
+# mode where the OpenAI-compat layer doesn't parse the model's native
+# function-call syntax — e.g. a model that emits Anthropic-style
+# ``<tool_calls><invoke name="web_search">…</invoke></tool_calls>`` markup).
+# Left untouched, that markup gets persisted + rendered as the assistant's
+# reply (a wall of broken XML instead of an answer). We strip it at the
+# persistence boundary; when stripping empties a reply that *did* run tools,
+# the synthesis-retry net regenerates a real answer from what was gathered.
+_LEAKED_TOOL_XML_RES: tuple[re.Pattern[str], ...] = (
+    # Whole ``<tool_calls>…</tool_calls>`` block (closed or cut off at EOS).
+    re.compile(
+        r"<\s*tool_calls\s*>.*?(?:</\s*tool_calls\s*>|$)",
+        re.DOTALL | re.IGNORECASE,
+    ),
+    # Stray ``<invoke name=…>…</invoke>`` block with no wrapper.
+    re.compile(
+        r"<\s*invoke\b[^>]*>.*?(?:</\s*invoke\s*>|$)",
+        re.DOTALL | re.IGNORECASE,
+    ),
+)
+
+
+def _strip_leaked_tool_call_xml(text: str) -> str:
+    """Remove leaked tool-call XML from streamed assistant content.
+
+    Cheap no-op on the overwhelmingly common case (content with no ``<``).
+    """
+    if not text or "<" not in text:
+        return text
+    cleaned = text
+    for rx in _LEAKED_TOOL_XML_RES:
+        cleaned = rx.sub("", cleaned)
+    return cleaned.strip()
+
+
 def _dedupe_sources(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Final dedup pass on the per-stream sources accumulator.
 
@@ -4402,7 +4439,10 @@ async def _stream_generator(
         # already deduped at the provider level, but we run a final
         # canonical-URL pass here too in case a single turn ran multiple
         # searches that happened to pull the same source.
-        full = "".join(collected_text)
+        # Strip any leaked tool-call XML the model emitted as text instead
+        # of a structured call. If this empties a reply that ran tools, the
+        # synthesis-retry net just below regenerates a real answer.
+        full = _strip_leaked_tool_call_xml("".join(collected_text))
         sources_payload: list[dict[str, Any]] | None = (
             _dedupe_sources(sources_accumulator) if sources_accumulator else None
         )
@@ -4540,9 +4580,11 @@ async def _stream_generator(
             if retry_text.strip():
                 # Synthesis-retry succeeded; promote it to the final
                 # ``full`` so the assistant message persists with the
-                # synthesised answer instead of an empty string.
+                # synthesised answer instead of an empty string. Re-strip
+                # so the earlier leaked XML (still in ``collected_text``)
+                # doesn't ride along with the clean retry text.
                 collected_text.append(retry_text)
-                full = "".join(collected_text)
+                full = _strip_leaked_tool_call_xml("".join(collected_text))
             else:
                 # Even the synthesis-retry produced nothing — surface
                 # the actionable error chip as a last resort. The
