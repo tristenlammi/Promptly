@@ -66,6 +66,7 @@
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "tiptap-markdown": "^0.8.10",
+    "tldraw": "^5.1.1",
     "unicode-emoji-json": "^0.6.0",
     "y-prosemirror": "^1.2.15",
     "y-protocols": "^1.0.6",

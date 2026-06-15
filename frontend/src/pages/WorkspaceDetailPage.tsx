@@ -20,6 +20,7 @@ import { ImportConversationsModal } from "@/components/chat/ImportConversationsM
 import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { TopNav } from "@/components/layout/TopNav";
+import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { chatApi } from "@/api/chat";
@@ -287,6 +288,10 @@ function WorkspaceMainPane({
     return <WorkspaceNotePane node={node} onClose={onCloseNote} />;
   }
 
+  if (node && node.kind === "canvas") {
+    return <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />;
+  }
+
   // No item selected → an overview / empty state with the banners that
   // used to live at the top of the old tabbed page.
   return (
@@ -362,9 +367,9 @@ function WorkspaceMainPane({
           Select an item to open it
         </p>
         <p className="mt-1 max-w-sm text-xs text-[var(--text-muted)]">
-          Pick a note or chat from the left, or use{" "}
+          Pick a note, canvas, or chat from the left, or use{" "}
           <span className="font-medium text-[var(--text)]">+ New</span> to create
-          a note. Chats open in the main chat view.
+          a note or canvas. Chats open in the main chat view.
         </p>
       </div>
     </div>
@@ -442,6 +447,39 @@ function WorkspaceNotePane({
           onFileUpdated={(f) => setFile(f)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline frame for a selected canvas item. Unlike the note pane (which
+ * pops the document editor as a modal), the canvas renders a real inline
+ * editor — tldraw fills this positioned, full-height container.
+ *
+ * The canvas item's ``ref_id`` is the canvas id the collab room + token
+ * endpoints key off. Viewers (no edit access) get a read-only board.
+ */
+function WorkspaceCanvasPaneFrame({
+  node,
+  canEdit,
+}: {
+  node: WorkspaceItemNode;
+  canEdit: boolean;
+}) {
+  if (!node.ref_id) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
+        <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+          This canvas has no underlying board.
+        </div>
+      </div>
+    );
+  }
+  return (
+    // ``min-h-0`` lets this flex child shrink so the absolutely-positioned
+    // tldraw surface gets a real height inside the scrolling main pane.
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <WorkspaceCanvasPane canvasId={node.ref_id} readOnly={!canEdit} />
     </div>
   );
 }

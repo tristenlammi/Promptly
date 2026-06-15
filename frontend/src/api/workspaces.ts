@@ -114,7 +114,7 @@ export interface WorkspaceItemResponse {
 }
 
 export interface CreateWorkspaceItemPayload {
-  kind: "folder" | "note";
+  kind: "folder" | "note" | "canvas";
   parent_id?: string | null;
   title?: string;
 }

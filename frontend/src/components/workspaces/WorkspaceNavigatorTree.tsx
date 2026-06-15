@@ -11,7 +11,9 @@ import {
   MessageSquare,
   MoreHorizontal,
   Pencil,
+  PenTool,
   Plus,
+  Shapes,
   Trash2,
 } from "lucide-react";
 
@@ -51,14 +53,14 @@ export function WorkspaceNavigatorTree({
   const create = useCreateWorkspaceItem(workspaceId);
 
   const handleCreate = async (
-    kind: "folder" | "note",
+    kind: "folder" | "note" | "canvas",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
-    // A freshly-created note should open straight away. Folders just
-    // appear in place. We synthesise a node so the pane can open the
+    // A freshly-created note or canvas should open straight away. Folders
+    // just appear in place. We synthesise a node so the pane can open the
     // editor without waiting for the tree refetch.
-    if (kind === "note") {
+    if (kind === "note" || kind === "canvas") {
       onSelect({
         id: item.id,
         kind: item.kind,
@@ -83,6 +85,7 @@ export function WorkspaceNavigatorTree({
             disabled={create.isPending}
             onNewFolder={() => handleCreate("folder", null)}
             onNewNote={() => handleCreate("note", null)}
+            onNewCanvas={() => handleCreate("canvas", null)}
           />
         )}
       </div>
@@ -132,7 +135,10 @@ function TreeNode({
   selectedId: string | null;
   onSelect: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
-  onCreateInFolder: (kind: "folder" | "note", parentId: string) => void;
+  onCreateInFolder: (
+    kind: "folder" | "note" | "canvas",
+    parentId: string
+  ) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [renaming, setRenaming] = useState(false);
@@ -242,6 +248,7 @@ function TreeNode({
             }}
             onDelete={() => remove.mutate(node.id)}
             onNewNote={() => onCreateInFolder("note", node.id)}
+            onNewCanvas={() => onCreateInFolder("canvas", node.id)}
             onNewFolder={() => onCreateInFolder("folder", node.id)}
             deleting={remove.isPending}
           />
@@ -291,6 +298,8 @@ function NodeIcon({
       );
     case "chat":
       return <MessageSquare className={cls} />;
+    case "canvas":
+      return <Shapes className={cls} />;
     case "note":
     default:
       return <FileText className={cls} />;
@@ -308,6 +317,7 @@ function NodeActions({
   onRename,
   onDelete,
   onNewNote,
+  onNewCanvas,
   onNewFolder,
   deleting,
 }: {
@@ -315,6 +325,7 @@ function NodeActions({
   onRename: () => void;
   onDelete: () => void;
   onNewNote: () => void;
+  onNewCanvas: () => void;
   onNewFolder: () => void;
   deleting: boolean;
 }) {
@@ -381,6 +392,14 @@ function NodeActions({
                     onClick={() => {
                       setMenuOpen(false);
                       onNewNote();
+                    }}
+                  />
+                  <MenuItem
+                    icon={<PenTool className="h-3.5 w-3.5" />}
+                    label="New canvas"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNewCanvas();
                     }}
                   />
                   <MenuItem
@@ -454,10 +473,12 @@ function MenuItem({
 function NewMenu({
   onNewFolder,
   onNewNote,
+  onNewCanvas,
   disabled,
 }: {
   onNewFolder: () => void;
   onNewNote: () => void;
+  onNewCanvas: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -497,6 +518,14 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewNote();
+              }}
+            />
+            <MenuItem
+              icon={<PenTool className="h-3.5 w-3.5" />}
+              label="New canvas"
+              onClick={() => {
+                setOpen(false);
+                onNewCanvas();
               }}
             />
             <MenuItem
