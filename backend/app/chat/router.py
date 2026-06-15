@@ -69,6 +69,7 @@ from app.chat.schemas import (
     EnhancePromptResponse,
     MentionCandidate,
     MentionCandidatesResponse,
+    MentionFileCandidate,
     MessageResponse,
     MessageFeedbackRequest,
     PatchAssistantMessageRequest,
@@ -669,6 +670,7 @@ async def list_mention_candidates(
         )
 
     workspace_rows: list[Conversation] = []
+    workspace_file_candidates: list[MentionFileCandidate] = []
     if workspace_id is not None:
         # Verify the workspace belongs to the caller before including
         # its chats — a malicious client shouldn't be able to enumerate
@@ -679,6 +681,56 @@ async def list_mention_candidates(
                 base_select.where(Conversation.workspace_id == workspace_id).limit(limit)
             )
             workspace_rows = list(ws_result.scalars().all())
+
+            # Workspace files: every UserFile under the workspace's Drive
+            # folder subtree (notes, uploads, canvas text files). Notes are
+            # ``document`` rows; canvases ride their backing ``canvas_text``
+            # file — all UserFiles, so they reference via the same
+            # ``file:`` mention mechanism. Hidden inline doc assets are
+            # excluded.
+            if ws.root_folder_id is not None:
+                file_rows = (
+                    await db.execute(
+                        text(
+                            """
+                            WITH RECURSIVE subtree AS (
+                                SELECT id FROM file_folders WHERE id = :root
+                                UNION ALL
+                                SELECT f.id FROM file_folders f
+                                JOIN subtree s ON f.parent_id = s.id
+                            )
+                            SELECT id, filename, source_kind
+                            FROM files
+                            WHERE folder_id IN (SELECT id FROM subtree)
+                              AND trashed_at IS NULL
+                              AND (source_kind IS NULL
+                                   OR source_kind <> 'document_asset')
+                              AND (:q = '' OR lower(filename) LIKE :qlike)
+                            ORDER BY updated_at DESC
+                            LIMIT :lim
+                            """
+                        ),
+                        {
+                            "root": str(ws.root_folder_id),
+                            "q": q_norm,
+                            "qlike": f"%{q_norm}%",
+                            "lim": limit,
+                        },
+                    )
+                ).all()
+                for fid, fname, skind in file_rows:
+                    kind = (
+                        "note"
+                        if skind == "document"
+                        else "canvas"
+                        if skind == "canvas_text"
+                        else "file"
+                    )
+                    workspace_file_candidates.append(
+                        MentionFileCandidate(
+                            id=fid, filename=fname or "Untitled", kind=kind
+                        )
+                    )
 
     # Recents: the same base but *excluding* anything already in
     # workspace_rows so the two lists don't duplicate the same chat.
@@ -720,6 +772,7 @@ async def list_mention_candidates(
         workspace_context_id=workspace_id,
         workspace_candidates=[to_candidate(c) for c in workspace_rows],
         recent_candidates=[to_candidate(c) for c in recent_rows],
+        workspace_file_candidates=workspace_file_candidates,
     )
 
 

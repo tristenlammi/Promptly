@@ -8,8 +8,17 @@ import {
 import { AtSign, FileText, FolderKanban, MessagesSquare } from "lucide-react";
 
 import { chatApi, type MentionCandidate } from "@/api/chat";
-import { filesApi, type FileItem } from "@/api/files";
+import { filesApi } from "@/api/files";
 import { cn } from "@/utils/cn";
+
+/** Minimal file shape the popover needs — works for both a global Drive
+ *  ``FileItem`` and a workspace-scoped ``MentionFileCandidate``. */
+type MentionFile = {
+  id: string;
+  filename: string;
+  kind?: string;
+  mime_type?: string;
+};
 
 /** Pattern we detect in the textarea to trigger the popover.
  *  Matches ``@<query>`` where ``@`` sits at the start of input
@@ -33,7 +42,7 @@ export interface MentionPickState {
  *  icon / navigation behaviour of the rendered chip. */
 type MentionRow =
   | { kind: "chat"; cand: MentionCandidate }
-  | { kind: "file"; file: FileItem };
+  | { kind: "file"; file: MentionFile };
 
 /** Detect an active ``@``-mention trigger in ``text`` given the
  *  current caret position. Returns ``null`` if the caret isn't in
@@ -100,7 +109,7 @@ export function MentionAutocomplete({
   const [results, setResults] = useState<{
     workspace: MentionCandidate[];
     recent: MentionCandidate[];
-    files: FileItem[];
+    files: MentionFile[];
   }>({ workspace: [], recent: [], files: [] });
   const [highlighted, setHighlighted] = useState(0);
   const [fetching, setFetching] = useState(false);
@@ -128,12 +137,11 @@ export function MentionAutocomplete({
     const q = pick.query;
     const timer = window.setTimeout(async () => {
       setFetching(true);
-      // Files: a blank query browses recents. A non-blank query
-      // combines full-text search (content + whole-word filename
-      // matches) with a client-side filename *substring* filter over
-      // recents — so typing a partial name like "ta" still surfaces
-      // "tasks", which FTS alone (stemmed, whole-word) would miss.
-      const filesPromise = (async (): Promise<FileItem[]> => {
+      // Inside a workspace, ``@`` is scoped to that workspace: only its
+      // chats + its files/notes/canvases (all from the mention endpoint).
+      // Outside a workspace, browse the user's recents + whole Drive.
+      const globalFilesPromise = (async (): Promise<MentionFile[]> => {
+        if (workspaceId) return []; // workspace files come from the endpoint
         const qq = q.trim();
         if (!qq) {
           return (await filesApi.listRecent("mine", 6)).files;
@@ -142,7 +150,7 @@ export function MentionAutocomplete({
           filesApi.search(qq, "mine", 6),
           filesApi.listRecent("mine", 50),
         ]);
-        const byId = new Map<string, FileItem>();
+        const byId = new Map<string, MentionFile>();
         if (searchR.status === "fulfilled") {
           for (const h of searchR.value.hits) byId.set(h.file.id, h.file);
         }
@@ -156,22 +164,31 @@ export function MentionAutocomplete({
         }
         return Array.from(byId.values()).slice(0, 6);
       })();
-      const [chats, files] = await Promise.allSettled([
+      const [chats, gfiles] = await Promise.allSettled([
         chatApi.mentionCandidates({
           q,
           workspaceId,
           excludeId: currentConversationId,
           limit: 8,
         }),
-        filesPromise,
+        globalFilesPromise,
       ]);
       if (cancelled) return;
+      const chatVal = chats.status === "fulfilled" ? chats.value : null;
       setResults({
-        workspace:
-          chats.status === "fulfilled" ? chats.value.workspace_candidates : [],
-        recent:
-          chats.status === "fulfilled" ? chats.value.recent_candidates : [],
-        files: files.status === "fulfilled" ? files.value : [],
+        workspace: chatVal ? chatVal.workspace_candidates : [],
+        // Suppress the workspace-agnostic recents when composing inside a
+        // workspace — references should stay within it.
+        recent: chatVal && !workspaceId ? chatVal.recent_candidates : [],
+        files: workspaceId
+          ? (chatVal?.workspace_file_candidates ?? []).map((f) => ({
+              id: f.id,
+              filename: f.filename,
+              kind: f.kind,
+            }))
+          : gfiles.status === "fulfilled"
+            ? gfiles.value
+            : [],
       });
       setHighlighted(0);
       setFetching(false);
@@ -292,7 +309,13 @@ export function MentionAutocomplete({
         )}
         {results.files.length > 0 && (
           <FileGroup
-            heading={pick.query ? "Files" : "Recent files"}
+            heading={
+              workspaceId
+                ? "Workspace notes, canvases & files"
+                : pick.query
+                  ? "Files"
+                  : "Recent files"
+            }
             files={results.files}
             offset={fileOffset}
             highlighted={highlighted}
@@ -381,11 +404,11 @@ function CandidateGroup({
 
 interface FileGroupProps {
   heading: string;
-  files: FileItem[];
+  files: MentionFile[];
   offset: number;
   highlighted: number;
   setHighlighted: (i: number) => void;
-  onPick: (f: FileItem) => void;
+  onPick: (f: MentionFile) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -436,7 +459,7 @@ function FileGroup({
                 {f.filename}
               </span>
               <span className="mt-0.5 block truncate text-[10px] text-[var(--text-muted)]">
-                {f.mime_type}
+                {f.kind ?? f.mime_type}
               </span>
             </span>
           </button>

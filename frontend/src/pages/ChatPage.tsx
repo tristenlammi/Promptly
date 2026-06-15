@@ -63,8 +63,19 @@ import { cn } from "@/utils/cn";
 const DEFAULT_TOOLS_ENABLED = true;
 const DEFAULT_WEB_SEARCH_MODE: WebSearchMode = "auto";
 
-export function ChatPage() {
-  const { id } = useParams<{ id?: string }>();
+export function ChatPage({
+  embeddedConversationId,
+  embedded = false,
+}: {
+  /** When set, drive the page off this conversation id instead of the
+   *  route param — lets the Workspace navigator render a chat inline in
+   *  its main pane (rail + nav stay visible). */
+  embeddedConversationId?: string;
+  /** Hide the page chrome (TopNav) when rendered inside another shell. */
+  embedded?: boolean;
+} = {}) {
+  const { id: routeId } = useParams<{ id?: string }>();
+  const id = embeddedConversationId ?? routeId;
   const navigate = useNavigate();
   const location = useLocation();
   // Phase Z1 — temporary chat mode picked from the sidebar split button.
@@ -846,6 +857,7 @@ export function ChatPage() {
 
   return (
     <>
+      {!embedded && (
       <TopNav
         title={
           id ? (
@@ -917,6 +929,7 @@ export function ChatPage() {
           </div>
         }
       />
+      )}
       {/* Horizontal split — chat column on the left, artifact panel
           (when open) on the right with a draggable resizer between
           them. ``min-w-0`` on the chat column is critical: without

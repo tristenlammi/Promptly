@@ -397,19 +397,37 @@ class MentionCandidate(BaseModel):
     updated_at: datetime
 
 
+class MentionFileCandidate(BaseModel):
+    """A workspace file (note / upload / canvas text) for the ``@``
+    popover. Notes are documents, canvases are represented by their
+    backing text file — all ``UserFile`` rows, so they all reference
+    through the existing ``file:`` mention mechanism."""
+
+    id: uuid.UUID
+    filename: str
+    # 'note' | 'canvas' | 'file' — lets the popover show the right icon.
+    kind: str = "file"
+
+
 class MentionCandidatesResponse(BaseModel):
     """Response wrapper for ``GET /conversations/mention-candidates``.
 
-    Split into two lists so the UI can render the workspace's
-    sibling chats as a highlighted "In this workspace" group above
-    the generic recents. ``workspace_context_id`` echoes the query
-    param back so the frontend can verify it's scoping against
-    the right workspace.
+    Split into lists so the UI can render the workspace's sibling chats
+    as a highlighted "In this workspace" group above the generic
+    recents, plus the workspace's files/notes/canvases when composing
+    inside a workspace. ``workspace_context_id`` echoes the query param
+    back so the frontend can verify it's scoping against the right
+    workspace.
     """
 
     workspace_context_id: uuid.UUID | None = None
     workspace_candidates: list[MentionCandidate]
     recent_candidates: list[MentionCandidate]
+    # Workspace files (notes/uploads/canvas texts). Populated only when a
+    # ``workspace_id`` is supplied; empty otherwise.
+    workspace_file_candidates: list[MentionFileCandidate] = Field(
+        default_factory=list
+    )
 
 
 class SummariseToWorkspaceResponse(BaseModel):

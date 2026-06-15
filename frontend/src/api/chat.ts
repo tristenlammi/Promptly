@@ -40,6 +40,15 @@ export interface MentionCandidate {
   updated_at: string;
 }
 
+/** A workspace file (note / canvas / upload) offered in the @ popover
+ *  when composing inside a workspace. All are UserFiles, referenced via
+ *  the existing ``file:`` mention mechanism. */
+export interface MentionFileCandidate {
+  id: string;
+  filename: string;
+  kind: string; // 'note' | 'canvas' | 'file'
+}
+
 export interface CreateConversationPayload {
   title?: string | null;
   model_id?: string | null;
@@ -388,11 +397,13 @@ export const chatApi = {
     workspace_context_id: string | null;
     workspace_candidates: MentionCandidate[];
     recent_candidates: MentionCandidate[];
+    workspace_file_candidates: MentionFileCandidate[];
   }> {
     const { data } = await apiClient.get<{
       workspace_context_id: string | null;
       workspace_candidates: MentionCandidate[];
       recent_candidates: MentionCandidate[];
+      workspace_file_candidates: MentionFileCandidate[];
     }>("/chat/conversations/mention-candidates", {
       params: {
         q: params.q ?? "",

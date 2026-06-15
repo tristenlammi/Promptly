@@ -25,6 +25,8 @@ import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
+import { useQueryClient } from "@tanstack/react-query";
+import { ChatPage } from "./ChatPage";
 import { chatApi } from "@/api/chat";
 import { filesApi, type FileItem } from "@/api/files";
 import type { WorkspaceItemNode } from "@/api/workspaces";
@@ -51,6 +53,7 @@ import { useModelStore } from "@/store/modelStore";
 export function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: workspace, isLoading } = useWorkspace(id);
   const { data: conversations } = useWorkspaceConversations(id);
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
@@ -88,12 +91,9 @@ export function WorkspaceDetailPage() {
   const canEdit = (workspace?.access_role ?? "owner") !== "viewer";
   const collaboratorCount = workspace?.collaborators?.length ?? 0;
 
+  // Everything — chats included — opens inline in the main pane so the
+  // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
-    if (node.kind === "chat") {
-      // Chats live in the main chat UI — low-risk navigate.
-      if (node.ref_id) navigate(`/chat/${node.ref_id}`);
-      return;
-    }
     setSelected(node);
   };
 
@@ -153,7 +153,26 @@ export function WorkspaceDetailPage() {
               <Button
                 variant="primary"
                 leftIcon={<Plus className="h-4 w-4" />}
-                onClick={() => workspace && handleNewChat(workspace, navigate)}
+                onClick={() =>
+                  workspace &&
+                  handleNewChat(workspace, (conv) => {
+                    // Open the new chat inline + refresh the tree so it
+                    // appears in the rail.
+                    setSelected({
+                      id: conv.id,
+                      kind: "chat",
+                      ref_id: conv.id,
+                      title: conv.title ?? "New chat",
+                      icon: null,
+                      position: 0,
+                      indexing_status: null,
+                      children: [],
+                    });
+                    void qc.invalidateQueries({
+                      queryKey: ["workspaces", "tree", id],
+                    });
+                  })
+                }
               >
                 New chat
               </Button>
@@ -328,6 +347,18 @@ function WorkspaceMainPane({
     return <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />;
   }
 
+  if (node && node.kind === "chat" && node.ref_id) {
+    // Render the full chat experience inline (no page nav) — the chat
+    // is keyed by ref_id (conversation id). WorkspaceMainPane is already
+    // keyed by the selected node id upstream, so switching chats remounts
+    // cleanly and resets the chat store's active conversation.
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ChatPage embedded embeddedConversationId={node.ref_id} />
+      </div>
+    );
+  }
+
   // No item selected → an overview / empty state with the banners that
   // used to live at the top of the old tabbed page.
   return (
@@ -430,13 +461,11 @@ function WorkspaceNotePane({
 }) {
   const [file, setFile] = useState<FileItem | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setFile(null);
-    setOpen(true);
     if (!node.ref_id) {
       setError("This note has no underlying document.");
       return;
@@ -458,31 +487,37 @@ function WorkspaceNotePane({
     };
   }, [node.id, node.ref_id]);
 
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
-      {error ? (
+  if (error) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
         <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
           {error}
         </div>
-      ) : (
-        <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Opening "{node.title || "note"}"…
-        </div>
-      )}
+      </div>
+    );
+  }
 
-      {file && open && (
-        <DocumentEditorModal
-          file={file}
-          onClose={() => {
-            setOpen(false);
-            // Deselect so the pane returns to its empty state instead of
-            // getting stuck behind a closed editor.
-            onClose();
-          }}
-          onFileUpdated={(f) => setFile(f)}
-        />
-      )}
+  if (!file) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Opening “{node.title || "note"}”…
+        </span>
+      </div>
+    );
+  }
+
+  // Inline editor fills the pane (rail + nav stay visible). The editor's
+  // own X / onClose deselects the note back to the empty state.
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <DocumentEditorModal
+        file={file}
+        inline
+        onClose={onClose}
+        onFileUpdated={(f) => setFile(f)}
+      />
     </div>
   );
 }
@@ -528,7 +563,7 @@ async function handleNewChat(
     default_model_id: string | null;
     default_provider_id: string | null;
   },
-  navigate: (path: string) => void
+  onCreated: (conv: { id: string; title: string | null }) => void
 ) {
   const { selectedModelId, selectedProviderId } = useModelStore.getState();
   const modelId = workspace.default_model_id ?? selectedModelId ?? undefined;
@@ -542,7 +577,7 @@ async function handleNewChat(
       web_search_mode: "off",
       workspace_id: workspace.id,
     });
-    navigate(`/chat/${conv.id}`);
+    onCreated({ id: String(conv.id), title: conv.title ?? null });
   } catch {
     // Best-effort; failures already raise toasts via the axios interceptor.
   }
