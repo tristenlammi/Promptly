@@ -4,7 +4,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  FileText,
   FolderX,
   Loader2,
   Plus,
@@ -24,6 +23,7 @@ import { TopNav } from "@/components/layout/TopNav";
 import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
+import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChatPage } from "./ChatPage";
@@ -220,6 +220,9 @@ export function WorkspaceDetailPage() {
             <WorkspaceMainPane
               key={selected?.id ?? "empty"}
               node={selected}
+              workspaceId={id}
+              workspaceTitle={workspace.title}
+              onOpenItem={handleSelect}
               onCloseNote={() => setSelected(null)}
               isArchived={isArchived}
               isOwner={isOwner}
@@ -316,6 +319,9 @@ export function WorkspaceDetailPage() {
 
 function WorkspaceMainPane({
   node,
+  workspaceId,
+  workspaceTitle,
+  onOpenItem,
   onCloseNote,
   isArchived,
   isOwner,
@@ -328,6 +334,9 @@ function WorkspaceMainPane({
   canEdit,
 }: {
   node: WorkspaceItemNode | null;
+  workspaceId: string;
+  workspaceTitle: string;
+  onOpenItem: (node: WorkspaceItemNode) => void;
   onCloseNote: () => void;
   isArchived: boolean;
   isOwner: boolean;
@@ -359,10 +368,11 @@ function WorkspaceMainPane({
     );
   }
 
-  // No item selected → an overview / empty state with the banners that
-  // used to live at the top of the old tabbed page.
+  // No item selected → the workspace overview home (counts + tasks +
+  // recent), preceded by any archive/share banners.
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-6">
+    <div className="w-full">
+      <div className="mx-auto w-full max-w-3xl px-6 pt-6 empty:hidden">
       {isArchived && (
         <div className="mb-4 flex items-center justify-between gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
           <span className="inline-flex items-center gap-2 text-[var(--text-muted)]">
@@ -428,17 +438,13 @@ function WorkspaceMainPane({
         </div>
       )}
 
-      <div className="flex flex-col items-center justify-center rounded-card border border-dashed border-[var(--border)] px-6 py-20 text-center">
-        <FileText className="mb-3 h-8 w-8 text-[var(--text-muted)]" />
-        <p className="text-sm font-medium text-[var(--text)]">
-          Select an item to open it
-        </p>
-        <p className="mt-1 max-w-sm text-xs text-[var(--text-muted)]">
-          Pick a note, canvas, or chat from the left, or use{" "}
-          <span className="font-medium text-[var(--text)]">+ New</span> to create
-          a note or canvas. Chats open in the main chat view.
-        </p>
       </div>
+
+      <WorkspaceOverviewPane
+        workspaceId={workspaceId}
+        title={workspaceTitle}
+        onOpenItem={onOpenItem}
+      />
     </div>
   );
 }

@@ -129,6 +129,27 @@ export interface WorkspaceAskResponse {
   citations: WorkspaceAskCitation[];
 }
 
+export interface WorkspaceTaskItem {
+  text: string;
+  checked: boolean;
+  note_item_id: string;
+  note_ref_id: string | null;
+  note_title: string;
+}
+
+/** Workspace landing-pane summary (counts + tasks rollup + recent). */
+export interface WorkspaceOverview {
+  counts: { notes: number; canvases: number; chats: number; files: number };
+  tasks: WorkspaceTaskItem[];
+  open_task_count: number;
+  recent: {
+    id: string;
+    kind: string;
+    ref_id: string | null;
+    title: string;
+  }[];
+}
+
 export interface CreateWorkspaceItemPayload {
   kind: "folder" | "note" | "canvas";
   parent_id?: string | null;
@@ -357,6 +378,14 @@ export const workspacesApi = {
   async archivedItems(id: string): Promise<WorkspaceItemNode[]> {
     const { data } = await apiClient.get<WorkspaceItemNode[]>(
       `/workspaces/${id}/archived-items`
+    );
+    return data;
+  },
+
+  /** Landing-pane summary: counts, tasks rollup, recent items. */
+  async overview(id: string): Promise<WorkspaceOverview> {
+    const { data } = await apiClient.get<WorkspaceOverview>(
+      `/workspaces/${id}/overview`
     );
     return data;
   },

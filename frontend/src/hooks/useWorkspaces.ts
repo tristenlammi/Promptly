@@ -37,6 +37,7 @@ const KEYS = {
   shares: (id: string) => ["workspaces", "shares", id] as const,
   tree: (id: string) => ["workspaces", "tree", id] as const,
   archive: (id: string) => ["workspaces", "archive", id] as const,
+  overview: (id: string) => ["workspaces", "overview", id] as const,
   invites: ["workspace-invites"] as const,
 };
 
@@ -161,6 +162,14 @@ export function useWorkspaceArchive(id: string | undefined) {
   return useQuery<WorkspaceItemNode[]>({
     queryKey: id ? KEYS.archive(id) : ["workspaces", "archive", "_"],
     queryFn: () => workspacesApi.archivedItems(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+export function useWorkspaceOverview(id: string | undefined) {
+  return useQuery({
+    queryKey: id ? KEYS.overview(id) : ["workspaces", "overview", "_"],
+    queryFn: () => workspacesApi.overview(id as string),
     enabled: Boolean(id),
   });
 }
