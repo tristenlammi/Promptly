@@ -21,7 +21,6 @@ import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
-import { WorkspaceMembersDialog } from "@/components/workspaces/WorkspaceMembersDialog";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
@@ -69,7 +68,6 @@ export function WorkspaceDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
 
@@ -155,20 +153,6 @@ export function WorkspaceDetailPage() {
                 title="Share this workspace with a teammate"
               >
                 {collaboratorCount > 0 ? `Share (${collaboratorCount})` : "Share"}
-              </Button>
-            )}
-            {!isOwner && (
-              <Button
-                variant="ghost"
-                leftIcon={<Users className="h-4 w-4" />}
-                onClick={() => setMembersOpen(true)}
-                title="See who has access to this workspace"
-              >
-                <span className="hidden sm:inline">
-                  {collaboratorCount + 1 > 1
-                    ? `Members (${collaboratorCount + 1})`
-                    : "Members"}
-                </span>
               </Button>
             )}
             {!isArchived && canEdit && (
@@ -298,15 +282,6 @@ export function WorkspaceDetailPage() {
         />
       )}
 
-      {workspace && !isOwner && (
-        <WorkspaceMembersDialog
-          open={membersOpen}
-          onClose={() => setMembersOpen(false)}
-          workspaceTitle={workspace.title}
-          owner={workspace.owner}
-          collaborators={workspace.collaborators ?? []}
-        />
-      )}
 
       <ConfirmDoubleModal
         open={deleteOpen}

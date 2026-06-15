@@ -12,6 +12,7 @@ import {
   useWorkspaceTasks,
 } from "@/hooks/useWorkspaces";
 import { WorkspaceTasksPanel } from "./WorkspaceTasksPanel";
+import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 /**
  * Workspace overview "home" (Phase 4) — shown in the main pane when no
@@ -70,6 +71,11 @@ export function WorkspaceOverviewPane({
       {/* First-class workspace task list */}
       <div className="mt-8">
         <WorkspaceTasksPanel workspaceId={workspaceId} canEdit={canEdit} />
+      </div>
+
+      {/* Workspace drive — upload photos/documents, RAG-indexed on add */}
+      <div className="mt-8">
+        <WorkspaceFilesPanel workspaceId={workspaceId} canEdit={canEdit} />
       </div>
 
       {/* Secondary: checkboxes found inside notes (rollup) */}
