@@ -38,6 +38,7 @@ const KEYS = {
   tree: (id: string) => ["workspaces", "tree", id] as const,
   archive: (id: string) => ["workspaces", "archive", id] as const,
   overview: (id: string) => ["workspaces", "overview", id] as const,
+  graph: (id: string) => ["workspaces", "graph", id] as const,
   backlinks: (workspaceId: string, itemId: string) =>
     ["workspaces", "backlinks", workspaceId, itemId] as const,
   invites: ["workspace-invites"] as const,
@@ -191,6 +192,14 @@ export function useWorkspaceOverview(id: string | undefined) {
     queryKey: id ? KEYS.overview(id) : ["workspaces", "overview", "_"],
     queryFn: () => workspacesApi.overview(id as string),
     enabled: Boolean(id),
+  });
+}
+
+export function useWorkspaceGraph(id: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: id ? KEYS.graph(id) : ["workspaces", "graph", "_"],
+    queryFn: () => workspacesApi.graph(id as string),
+    enabled: Boolean(id) && enabled,
   });
 }
 

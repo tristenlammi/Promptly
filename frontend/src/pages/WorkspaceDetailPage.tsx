@@ -8,6 +8,7 @@ import {
   FolderX,
   Link2,
   Loader2,
+  Network,
   Plus,
   Search,
   Settings,
@@ -28,6 +29,7 @@ import {
 } from "@/components/files/documents/WikiLinkExtension";
 import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
+import { WorkspaceGraphPane } from "@/components/workspaces/WorkspaceGraphPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -71,6 +73,7 @@ export function WorkspaceDetailPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [graphOpen, setGraphOpen] = useState(false);
 
   // ⌘K / Ctrl+K opens the workspace command palette (jump / ask).
   useEffect(() => {
@@ -101,6 +104,7 @@ export function WorkspaceDetailPage() {
   // Everything — chats included — opens inline in the main pane so the
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
+    setGraphOpen(false);
     setSelected(node);
   };
 
@@ -136,6 +140,14 @@ export function WorkspaceDetailPage() {
                   ⌘K
                 </kbd>
               </span>
+            </Button>
+            <Button
+              variant={graphOpen ? "primary" : "ghost"}
+              leftIcon={<Network className="h-4 w-4" />}
+              onClick={() => setGraphOpen((g) => !g)}
+              title="Graph view — see how items connect"
+            >
+              <span className="hidden sm:inline">Graph</span>
             </Button>
             {!isArchived && isOwner && (
               <Button
@@ -223,28 +235,37 @@ export function WorkspaceDetailPage() {
           </aside>
 
           {/* Main pane */}
-          <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-            <WorkspaceMainPane
-              key={selected?.id ?? "empty"}
-              node={selected}
-              workspaceId={id}
-              workspaceTitle={workspace.title}
-              onOpenItem={handleSelect}
-              onCloseNote={() => setSelected(null)}
-              isArchived={isArchived}
-              isOwner={isOwner}
-              hasConversations={(conversations?.length ?? 0) > 0}
-              onUnarchive={() => unarchive.mutate(workspace.id)}
-              onDissolve={() => bulkRemoveConversations.mutate()}
-              dissolvePending={bulkRemoveConversations.isPending}
-              collaboratorNames={(workspace.collaborators ?? []).map(
-                (c) => c.username
-              )}
-              sharedByName={
-                !isOwner ? (workspace.shared_by?.username ?? null) : null
-              }
-              canEdit={canEdit}
-            />
+          <main
+            className={
+              "flex min-w-0 flex-1 flex-col " +
+              (graphOpen ? "overflow-hidden" : "overflow-y-auto")
+            }
+          >
+            {graphOpen ? (
+              <WorkspaceGraphPane workspaceId={id} onOpenItem={handleSelect} />
+            ) : (
+              <WorkspaceMainPane
+                key={selected?.id ?? "empty"}
+                node={selected}
+                workspaceId={id}
+                workspaceTitle={workspace.title}
+                onOpenItem={handleSelect}
+                onCloseNote={() => setSelected(null)}
+                isArchived={isArchived}
+                isOwner={isOwner}
+                hasConversations={(conversations?.length ?? 0) > 0}
+                onUnarchive={() => unarchive.mutate(workspace.id)}
+                onDissolve={() => bulkRemoveConversations.mutate()}
+                dissolvePending={bulkRemoveConversations.isPending}
+                collaboratorNames={(workspace.collaborators ?? []).map(
+                  (c) => c.username
+                )}
+                sharedByName={
+                  !isOwner ? (workspace.shared_by?.username ?? null) : null
+                }
+                canEdit={canEdit}
+              />
+            )}
           </main>
         </div>
       )}
