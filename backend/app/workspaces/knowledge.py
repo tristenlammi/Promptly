@@ -42,6 +42,7 @@ from app.chat.models import (
     Conversation,
     Message,
     Workspace,
+    WorkspaceCanvas,
     WorkspaceFile,
     WorkspaceItem,
 )
@@ -378,6 +379,113 @@ async def index_note_for_workspace(
                 pass
 
 
+async def index_canvas_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed a canvas's flattened shape text into the workspace pool.
+
+    The canvas text lives on a backing Drive file (``text_file_id``),
+    pushed by the client via ``POST /api/canvas/{id}/text``. We embed
+    that file so the canvas participates in retrieval just like a note.
+    Index status is tracked on the navigator item row (kind='canvas').
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "canvas" or item.ref_id is None:
+                return
+            canvas = await db.get(WorkspaceCanvas, item.ref_id)
+            if canvas is None or canvas.text_file_id is None:
+                return
+            file = await db.get(UserFile, canvas.text_file_id)
+            if file is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="canvas text file no longer exists",
+                )
+                return
+
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            # Empty board → drop any stale chunks, leave queued.
+            if not (file.content_text or "").strip():
+                await delete_existing_chunks(
+                    db,
+                    scope_kind="workspace",
+                    scope_id=workspace_id,
+                    user_file_id=file.id,
+                )
+                await _set_note_index_status(
+                    db, item_id=item_id, status="queued"
+                )
+                return
+
+            current_hash = file_content_hash(file)
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(
+                db, item_id=item_id, status="embedding"
+            )
+            try:
+                chunks, embeddings = await embed_file_to_chunks(
+                    file,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db,
+                item_id=item_id,
+                status="ready",
+                indexed_hash=current_hash,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("index_canvas_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
 # ---------------------------------------------------------------------
 # Injection (per-send)
 # ---------------------------------------------------------------------
@@ -436,31 +544,62 @@ async def _workspace_notes(
     return [(it, uf) for it, uf in rows if uf.id not in excluded]
 
 
-def _format_notes_block(
-    notes: list[tuple[WorkspaceItem, UserFile]]
+async def _workspace_canvases(
+    db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
+) -> list[tuple[WorkspaceItem, WorkspaceCanvas]]:
+    """Live canvas items paired with their canvas row, minus anything
+    this chat has excluded (by the canvas's backing text-file id)."""
+    rows = (
+        await db.execute(
+            select(WorkspaceItem, WorkspaceCanvas)
+            .join(WorkspaceCanvas, WorkspaceCanvas.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == workspace_id,
+                WorkspaceItem.kind == "canvas",
+            )
+            .order_by(WorkspaceItem.position.asc())
+        )
+    ).all()
+    return [
+        (it, c)
+        for it, c in rows
+        if c.text_file_id is None or c.text_file_id not in excluded
+    ]
+
+
+def _format_context_block(
+    notes: list[tuple[WorkspaceItem, UserFile]],
+    canvases: list[tuple[WorkspaceItem, "WorkspaceCanvas"]],
 ) -> str | None:
-    """Full text of the workspace's notes for full-dump mode. Capped so a
-    runaway set can't blow the context window (retrieval takes over past
-    the cap). Returns ``None`` when there's no note text to inject."""
+    """Full text of the workspace's notes + canvases for full-dump mode.
+    Capped so a runaway set can't blow the context window (retrieval
+    takes over past the cap). ``None`` when there's nothing to inject."""
+    sections: list[tuple[str, str]] = []
+    for it, uf in notes:
+        text = (uf.content_text or "").strip()
+        if text:
+            sections.append((it.title, text))
+    for it, c in canvases:
+        text = (c.content_text or "").strip()
+        if text:
+            sections.append((f"{it.title} (canvas)", text))
+    if not sections:
+        return None
+
     header = (
-        "The user's notes in this workspace. Treat them as authoritative "
-        "context for this conversation:"
+        "The user's notes and canvases in this workspace. Treat them as "
+        "authoritative context for this conversation:"
     )
     parts: list[str] = []
     used = 0
-    for it, uf in notes:
-        text = (uf.content_text or "").strip()
-        if not text:
-            continue
-        seg = f"\n\n## {it.title}\n{text}"
+    for title, text in sections:
+        seg = f"\n\n## {title}\n{text}"
         if used + len(seg) > _NOTES_FULLDUMP_CHAR_CAP:
             seg = seg[: max(0, _NOTES_FULLDUMP_CHAR_CAP - used)]
         parts.append(seg)
         used += len(seg)
         if used >= _NOTES_FULLDUMP_CHAR_CAP:
             break
-    if not parts:
-        return None
     return header + "".join(parts)
 
 
@@ -495,7 +634,8 @@ async def build_workspace_injection(
     ).all()
     file_rows = [(wsf, uf) for wsf, uf in file_rows if uf.id not in excluded]
     note_rows = await _workspace_notes(db, workspace_id, excluded)
-    if not file_rows and not note_rows:
+    canvas_rows = await _workspace_canvases(db, workspace_id, excluded)
+    if not file_rows and not note_rows and not canvas_rows:
         return WorkspaceInjection()
 
     cfg = await get_embedding_config(db)
@@ -507,10 +647,10 @@ async def build_workspace_injection(
     )
 
     if not retrieval_active:
-        # Full-dump: pinned files ride the attachment path; notes are
-        # injected as text (they have no natural attachment form).
+        # Full-dump: pinned files ride the attachment path; notes and
+        # canvases are injected as text (they have no attachment form).
         return WorkspaceInjection(
-            system_block=_format_notes_block(note_rows),
+            system_block=_format_context_block(note_rows, canvas_rows),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
         )

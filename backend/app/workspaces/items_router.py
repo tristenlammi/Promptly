@@ -33,12 +33,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import Conversation, Workspace, WorkspaceItem
+from app.chat.models import (
+    Conversation,
+    Workspace,
+    WorkspaceCanvas,
+    WorkspaceItem,
+)
 from app.database import get_db
 from app.files.documents_router import create_blank_document
 from app.files.models import UserFile
 from app.files.safety import sanitize_filename
 from app.files.system_folders import get_or_create_subfolder
+from app.workspaces.canvas_router import create_canvas_with_item
 from app.workspaces.schemas import (
     WorkspaceItemCreate,
     WorkspaceItemMove,
@@ -55,6 +61,7 @@ router = APIRouter()
 
 _DEFAULT_NOTE_TITLE = "Untitled note"
 _DEFAULT_FOLDER_TITLE = "New folder"
+_DEFAULT_CANVAS_TITLE = "Untitled canvas"
 
 
 # ---------------------------------------------------------------------
@@ -99,15 +106,15 @@ async def _validate_parent(
         )
 
 
-async def _resolve_notes_folder_id(
-    db: AsyncSession, ws: Workspace, owner: User
+async def _resolve_subfolder_id(
+    db: AsyncSession, ws: Workspace, owner: User, name: str
 ) -> uuid.UUID:
-    """Drive folder id where this workspace's notes live.
+    """Drive folder id of a per-type bucket (``Notes`` / ``Canvases`` /
+    ``Files``) under the workspace's ``root_folder_id``.
 
-    Resolves ``Workspaces/<title>/Notes`` under the workspace's
-    ``root_folder_id`` — recreating the bucket if the user deleted it —
-    and self-heals a missing ``root_folder_id`` by seeding the whole
-    folder tree (defensive: every workspace gets one at create time)."""
+    Recreates the bucket if the user deleted it, and self-heals a missing
+    ``root_folder_id`` by seeding the whole folder tree (defensive: every
+    workspace gets one at create time)."""
     if ws.root_folder_id is None:
         # Should not happen post-create, but never 500 on a missing root.
         from app.files.system_folders import create_workspace_folder_tree
@@ -115,10 +122,10 @@ async def _resolve_notes_folder_id(
         ws_folder = await create_workspace_folder_tree(db, owner, ws.title)
         ws.root_folder_id = ws_folder.id
         await db.flush()
-    notes = await get_or_create_subfolder(
-        db, user_id=owner.id, parent_id=ws.root_folder_id, name="Notes"
+    sub = await get_or_create_subfolder(
+        db, user_id=owner.id, parent_id=ws.root_folder_id, name=name
     )
-    return notes.id
+    return sub.id
 
 
 def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
@@ -217,11 +224,12 @@ async def create_workspace_item(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceItemResponse:
-    """Create a folder or a note in the workspace tree.
+    """Create a folder, note, or canvas in the workspace tree.
 
-    A note also lays down a blank Drive Document in the workspace's
-    ``Notes`` folder; the two are committed together so we never leave a
-    dangling item row or an orphan document."""
+    A note lays down a blank Drive Document in ``Notes/``; a canvas a
+    tldraw board + backing text file in ``Canvases/``. The backing rows
+    and the item row commit together so we never leave a dangling item
+    or an orphan document/canvas."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     await _validate_parent(db, ws.id, payload.parent_id)
@@ -243,30 +251,47 @@ async def create_workspace_item(
         await db.refresh(item)
         return WorkspaceItemResponse.model_validate(item)
 
-    # kind == "note" — create the backing document, then the item.
-    # Notes live in the *owner's* Drive (the Workspaces folder is the
-    # owner's); a single-user workspace means owner == caller.
+    # Backing rows for notes / canvases live in the *owner's* Drive (the
+    # Workspaces folder is the owner's); a single-user workspace means
+    # owner == caller.
     owner = user if ws.user_id == user.id else await db.get(User, ws.user_id)
     if owner is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workspace owner is missing",
         )
-    note_title = title or _DEFAULT_NOTE_TITLE
-    notes_folder_id = await _resolve_notes_folder_id(db, ws, owner)
-    doc = await create_blank_document(
-        db, owner_id=owner.id, folder_id=notes_folder_id, name=note_title
-    )
-    item = WorkspaceItem(
-        workspace_id=ws.id,
-        parent_id=payload.parent_id,
-        kind="note",
-        ref_id=doc.id,
-        title=note_title,
-        position=position,
-        indexing_status="queued",
-    )
-    db.add(item)
+
+    if payload.kind == "note":
+        note_title = title or _DEFAULT_NOTE_TITLE
+        notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
+        doc = await create_blank_document(
+            db, owner_id=owner.id, folder_id=notes_folder_id, name=note_title
+        )
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=payload.parent_id,
+            kind="note",
+            ref_id=doc.id,
+            title=note_title,
+            position=position,
+            indexing_status="queued",
+        )
+        db.add(item)
+    else:  # kind == "canvas"
+        canvas_title = title or _DEFAULT_CANVAS_TITLE
+        canvases_folder_id = await _resolve_subfolder_id(
+            db, ws, owner, "Canvases"
+        )
+        item = await create_canvas_with_item(
+            db,
+            ws=ws,
+            owner=owner,
+            title=canvas_title,
+            parent_id=payload.parent_id,
+            position=position,
+            canvases_folder_id=canvases_folder_id,
+        )
+
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
@@ -405,6 +430,17 @@ async def delete_workspace_item(
             uf = await db.get(UserFile, it.ref_id)
             if uf is not None and uf.trashed_at is None:
                 uf.trashed_at = now
+        elif it.kind == "canvas" and it.ref_id is not None:
+            # Trash the backing text file and drop the canvas row (its
+            # chunks cascade off the file delete; the canvas isn't a
+            # tree-cascade target since ref_id isn't a real FK).
+            canvas = await db.get(WorkspaceCanvas, it.ref_id)
+            if canvas is not None:
+                if canvas.text_file_id is not None:
+                    tf = await db.get(UserFile, canvas.text_file_id)
+                    if tf is not None and tf.trashed_at is None:
+                        tf.trashed_at = now
+                await db.delete(canvas)
 
     # Deleting the top row cascades the descendant item rows via the
     # self-FK ON DELETE CASCADE.

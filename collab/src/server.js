@@ -59,20 +59,31 @@ const pool = new Pool({ connectionString: pgConnection });
 // Stringified JWT secret → Uint8Array, memoised once at startup.
 const jwtSecretBytes = new TextEncoder().encode(SECRET_KEY);
 
-// --- Document name parsing --------------------------------------------
+// --- Room name parsing ------------------------------------------------
 //
-// The client connects to `/api/collab/<document_uuid>`. Hocuspocus
-// hands us the trailing path segment verbatim as `documentName`. We
-// reject anything that doesn't look like a UUID so a typo can't touch
-// an unintended row.
+// A room name is either a bare document UUID (a Drive document — the
+// original behaviour) or ``canvas:<uuid>`` (a workspace tldraw canvas,
+// Phase 2). Parsing routes persistence to the right table and the auth
+// check to the right JWT claim. We reject anything that doesn't look
+// like a UUID so a typo can't touch an unintended row.
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function assertDocumentId(name) {
-  if (typeof name !== "string" || !UUID_RE.test(name)) {
+const CANVAS_PREFIX = "canvas:";
+
+function parseRoom(name) {
+  if (typeof name !== "string") {
+    throw new Error(`Invalid room: ${name}`);
+  }
+  if (name.startsWith(CANVAS_PREFIX)) {
+    const id = name.slice(CANVAS_PREFIX.length);
+    if (!UUID_RE.test(id)) throw new Error(`Invalid canvas id: ${id}`);
+    return { kind: "canvas", id };
+  }
+  if (!UUID_RE.test(name)) {
     throw new Error(`Invalid document id: ${name}`);
   }
-  return name;
+  return { kind: "doc", id: name };
 }
 
 // --- Snapshot debounce -------------------------------------------------
@@ -150,13 +161,18 @@ const server = new Server({
   extensions: [
     new Database({
       fetch: async ({ documentName }) => {
-        const documentId = assertDocumentId(documentName);
+        const { kind, id } = parseRoom(documentName);
+        // Table + key column are constants derived from the parsed kind
+        // (never user input), so interpolating them is safe.
+        const table =
+          kind === "canvas" ? "workspace_canvas" : "document_state";
+        const idCol = kind === "canvas" ? "id" : "file_id";
         const { rows } = await pool.query(
-          "SELECT yjs_update FROM document_state WHERE file_id = $1",
-          [documentId]
+          `SELECT yjs_update FROM ${table} WHERE ${idCol} = $1`,
+          [id]
         );
         if (rows.length === 0) {
-          console.log(`[collab] fetch: no row for ${documentId}`);
+          console.log(`[collab] fetch: no row for ${documentName}`);
           return null;
         }
         // pg returns a Buffer for BYTEA columns; Hocuspocus wants a
@@ -172,18 +188,31 @@ const server = new Server({
         // Hocuspocus start from a fresh Y.Doc for the first session.
         const buf = rows[0].yjs_update;
         if (!buf || buf.length === 0) {
-          console.log(`[collab] fetch: empty row for ${documentId}, starting fresh`);
+          console.log(`[collab] fetch: empty row for ${documentName}, starting fresh`);
           return null;
         }
-        console.log(`[collab] fetch: loaded ${buf.length} bytes for ${documentId}`);
+        console.log(`[collab] fetch: loaded ${buf.length} bytes for ${documentName}`);
         return new Uint8Array(buf);
       },
       store: async ({ documentName, state }) => {
-        const documentId = assertDocumentId(documentName);
-        console.log(`[collab] store: writing ${state.length} bytes for ${documentId}`);
-        // ON CONFLICT upsert — the row is seeded empty by the backend
-        // at document creation, but this keeps us honest if Hocuspocus
-        // ever races ahead.
+        const { kind, id } = parseRoom(documentName);
+        console.log(`[collab] store: writing ${state.length} bytes for ${documentName}`);
+        if (kind === "canvas") {
+          // The backend seeds the workspace_canvas row at creation with
+          // a NOT NULL workspace_id/title, so this is a plain UPDATE — an
+          // upsert would have to re-supply those columns. No HTML
+          // snapshot: canvases have no rendered form (text for RAG is
+          // pushed separately by the client to /api/canvas/:id/text).
+          await pool.query(
+            `UPDATE workspace_canvas
+               SET yjs_update = $2, version = version + 1, updated_at = NOW()
+             WHERE id = $1`,
+            [id, Buffer.from(state)]
+          );
+          return;
+        }
+        // Document path — ON CONFLICT upsert (row seeded empty by the
+        // backend at document creation) + debounced HTML snapshot.
         await pool.query(
           `INSERT INTO document_state (file_id, yjs_update, version, updated_at)
            VALUES ($1, $2, 1, NOW())
@@ -191,17 +220,16 @@ const server = new Server({
              SET yjs_update = EXCLUDED.yjs_update,
                  version    = document_state.version + 1,
                  updated_at = NOW()`,
-          [documentId, Buffer.from(state)]
+          [id, Buffer.from(state)]
         );
-        // Debounced HTML snapshot back to the backend.
-        scheduleSnapshot(documentId, state);
+        scheduleSnapshot(id, state);
       },
     }),
   ],
 
   async onAuthenticate(data) {
     const { token, documentName } = data;
-    const documentId = assertDocumentId(documentName);
+    const { kind, id } = parseRoom(documentName);
 
     if (!token) throw new Error("Missing collab token");
     let payload;
@@ -212,17 +240,24 @@ const server = new Server({
       payload = result.payload;
     } catch (err) {
       console.warn(
-        `[collab] JWT verify failed for doc ${documentId}:`,
+        `[collab] JWT verify failed for room ${documentName}:`,
         err?.message || err
       );
       throw new Error("Invalid collab token");
     }
 
-    if (payload.type !== "collab") {
-      throw new Error("Wrong token type");
-    }
-    if (payload.document_id !== documentId) {
-      throw new Error("Token does not match document");
+    // Each room kind has its own token shape: documents mint
+    // ``type=collab``/``document_id``; canvases ``type=canvas``/``canvas_id``.
+    if (kind === "canvas") {
+      if (payload.type !== "canvas") throw new Error("Wrong token type");
+      if (payload.canvas_id !== id) {
+        throw new Error("Token does not match canvas");
+      }
+    } else {
+      if (payload.type !== "collab") throw new Error("Wrong token type");
+      if (payload.document_id !== id) {
+        throw new Error("Token does not match document");
+      }
     }
 
     const perm = payload.perm === "read" ? "read" : "write";

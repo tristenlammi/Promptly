@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -357,6 +357,59 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
             f"<WorkspaceItem id={self.id} kind={self.kind} "
             f"title={self.title!r}>"
         )
+
+
+class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
+    """A tldraw canvas in a workspace (Phase 2).
+
+    Multiplayer from day one: the tldraw store syncs over the **same
+    Yjs/Hocuspocus substrate as documents**, persisted here as a CRDT
+    update (``yjs_update``) keyed by the ``canvas:<id>`` collab room. The
+    columns mirror :class:`app.files.models.DocumentState` (``yjs_update``
+    + monotonic ``version``) — the collab server's Database extension
+    routes writes here when the room name carries the ``canvas:`` prefix.
+
+    ``content_text`` holds the flattened text of the canvas's shapes,
+    pushed by the client on a debounce (``POST /api/canvas/{id}/text``) —
+    the backend can't cheaply decode the tldraw Yjs schema, so the client
+    extracts it. It's mirrored onto a backing Drive text file
+    (``text_file_id``) so the canvas participates in workspace retrieval
+    through the existing ``knowledge_chunks`` pipeline (which keys on a
+    ``UserFile``).
+    """
+
+    __tablename__ = "workspace_canvas"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="Untitled canvas"
+    )
+    # Full merged Y.Doc state (tldraw store). Seeded empty at creation so
+    # the collab Database extension has a row to upsert; the first session
+    # starts from a fresh Y.Doc when this is empty (same as documents).
+    yjs_update: Mapped[bytes] = mapped_column(
+        LargeBinary, nullable=False, default=b""
+    )
+    version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    # Flattened shape text for RAG, pushed by the client. Mirrored onto
+    # ``text_file_id`` for the actual embedding.
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Backing Drive text file in the workspace's ``Canvases/`` folder that
+    # carries the canvas text into ``knowledge_chunks`` (which requires a
+    # ``UserFile``). ``ON DELETE SET NULL`` so a Drive-side delete of the
+    # text file doesn't cascade away the canvas.
+    text_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkspaceCanvas id={self.id} title={self.title!r}>"
 
 
 class WorkspaceFile(Base):

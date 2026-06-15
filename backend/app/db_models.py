@@ -16,6 +16,7 @@ from app.chat.models import (  # noqa: F401
     Message,
     MessageEmbedding,
     Workspace,
+    WorkspaceCanvas,
     WorkspaceFile,
     WorkspaceItem,
     WorkspaceShare,

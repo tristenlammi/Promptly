@@ -43,5 +43,11 @@ class GeneratedKind(str, Enum):
     # document's HTML.
     DOCUMENT_ASSET = "document_asset"
 
+    # Backing text file for a workspace canvas (Phase 2). Holds the
+    # flattened shape text the client pushes so the canvas can be
+    # embedded into ``knowledge_chunks`` like any other workspace file.
+    # Lives in the workspace's ``Canvases/`` Drive folder.
+    CANVAS_TEXT = "canvas_text"
+
 
 __all__ = ["GeneratedKind"]

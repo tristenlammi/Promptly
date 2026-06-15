@@ -254,11 +254,11 @@ class WorkspaceItemCreate(BaseModel):
     """Body for ``POST /workspaces/{wid}/items``.
 
     ``kind='folder'`` makes a tree-only organisation node. ``kind='note'``
-    creates a blank Drive Document in the workspace's ``Notes`` folder
-    and links it as a navigator item. ``title`` is optional for a note
-    (defaults to "Untitled note")."""
+    creates a blank Drive Document in the workspace's ``Notes`` folder;
+    ``kind='canvas'`` creates a tldraw board (+ backing text file in
+    ``Canvases``). ``title`` is optional (kind-specific default)."""
 
-    kind: Literal["folder", "note"]
+    kind: Literal["folder", "note", "canvas"]
     parent_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)
 
