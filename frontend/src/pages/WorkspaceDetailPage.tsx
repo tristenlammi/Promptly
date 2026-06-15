@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   FileText,
   FolderX,
+  Home,
   Link2,
   Loader2,
   Network,
@@ -127,6 +128,17 @@ export function WorkspaceDetailPage() {
               onClick={() => navigate("/workspaces")}
             >
               Back
+            </Button>
+            <Button
+              variant={!selected && !graphOpen ? "primary" : "ghost"}
+              leftIcon={<Home className="h-4 w-4" />}
+              onClick={() => {
+                setGraphOpen(false);
+                setSelected(null);
+              }}
+              title="Workspace home — overview, tasks, and recent items"
+            >
+              <span className="hidden sm:inline">Home</span>
             </Button>
             <Button
               variant="ghost"
@@ -486,6 +498,7 @@ function WorkspaceMainPane({
         workspaceId={workspaceId}
         title={workspaceTitle}
         onOpenItem={onOpenItem}
+        canEdit={canEdit && !isArchived}
       />
     </div>
   );

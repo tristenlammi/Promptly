@@ -266,6 +266,7 @@ from app.workspaces.canvas_router import router as workspace_canvas_router  # no
 from app.workspaces.ask_router import router as workspace_ask_router  # noqa: E402
 from app.workspaces.overview_router import router as workspace_overview_router  # noqa: E402
 from app.workspaces.graph_router import router as workspace_graph_router  # noqa: E402
+from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
@@ -325,6 +326,10 @@ app.include_router(
 # Workspace graph view (nodes + explicit/semantic edges).
 app.include_router(
     workspace_graph_router, prefix="/api/workspaces", tags=["workspaces"]
+)
+# Workspace task list (first-class, project-level to-dos).
+app.include_router(
+    workspace_tasks_router, prefix="/api/workspaces", tags=["workspaces"]
 )
 # Workspace share management endpoints — separate router so it can
 # be version-bumped independently of the core workspaces CRUD.

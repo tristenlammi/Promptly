@@ -39,6 +39,7 @@ const KEYS = {
   archive: (id: string) => ["workspaces", "archive", id] as const,
   overview: (id: string) => ["workspaces", "overview", id] as const,
   graph: (id: string) => ["workspaces", "graph", id] as const,
+  tasks: (id: string) => ["workspaces", "tasks", id] as const,
   backlinks: (workspaceId: string, itemId: string) =>
     ["workspaces", "backlinks", workspaceId, itemId] as const,
   invites: ["workspace-invites"] as const,
@@ -200,6 +201,54 @@ export function useWorkspaceGraph(id: string | undefined, enabled = true) {
     queryKey: id ? KEYS.graph(id) : ["workspaces", "graph", "_"],
     queryFn: () => workspacesApi.graph(id as string),
     enabled: Boolean(id) && enabled,
+  });
+}
+
+// ---------------------------------------------------------------------
+// Task list — first-class, project-level to-dos
+// ---------------------------------------------------------------------
+export function useWorkspaceTasks(id: string | undefined) {
+  return useQuery({
+    queryKey: id ? KEYS.tasks(id) : ["workspaces", "tasks", "_"],
+    queryFn: () => workspacesApi.tasks(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+export function useCreateWorkspaceTask(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (title: string) => workspacesApi.createTask(workspaceId, title),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.overview(workspaceId) });
+    },
+  });
+}
+
+export function useUpdateWorkspaceTask(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      taskId: string;
+      payload: { title?: string; done?: boolean; position?: number };
+    }) => workspacesApi.updateTask(workspaceId, vars.taskId, vars.payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.overview(workspaceId) });
+    },
+  });
+}
+
+export function useDeleteWorkspaceTask(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) =>
+      workspacesApi.deleteTask(workspaceId, taskId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.overview(workspaceId) });
+    },
   });
 }
 

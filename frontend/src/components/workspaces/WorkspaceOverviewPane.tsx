@@ -7,24 +7,31 @@ import {
 } from "lucide-react";
 
 import type { WorkspaceItemNode } from "@/api/workspaces";
-import { useWorkspaceOverview } from "@/hooks/useWorkspaces";
+import {
+  useWorkspaceOverview,
+  useWorkspaceTasks,
+} from "@/hooks/useWorkspaces";
+import { WorkspaceTasksPanel } from "./WorkspaceTasksPanel";
 
 /**
  * Workspace overview "home" (Phase 4) — shown in the main pane when no
- * item is selected. At-a-glance counts, an open-tasks rollup aggregated
- * from every note, and a few recently-touched items. Clicking a task or
- * recent row opens the underlying item.
+ * item is selected. At-a-glance counts, the workspace's first-class task
+ * list, a secondary rollup of checkboxes found in notes, and a few
+ * recently-touched items. Clicking a task or recent row opens the item.
  */
 export function WorkspaceOverviewPane({
   workspaceId,
   title,
   onOpenItem,
+  canEdit,
 }: {
   workspaceId: string;
   title: string;
   onOpenItem: (node: WorkspaceItemNode) => void;
+  canEdit: boolean;
 }) {
-  const { data: overview, isLoading } = useWorkspaceOverview(workspaceId);
+  const { data: overview } = useWorkspaceOverview(workspaceId);
+  const { data: workspaceTasks } = useWorkspaceTasks(workspaceId);
 
   const open = (
     partial: Pick<WorkspaceItemNode, "id" | "kind" | "ref_id" | "title">
@@ -42,6 +49,8 @@ export function WorkspaceOverviewPane({
   const openTasks = tasks.filter((t) => !t.checked);
   const doneTasks = tasks.filter((t) => t.checked);
   const recent = overview?.recent ?? [];
+  // Headline "Open tasks" stat now reflects the first-class task list.
+  const openTaskCount = (workspaceTasks ?? []).filter((t) => !t.done).length;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-8">
@@ -55,27 +64,20 @@ export function WorkspaceOverviewPane({
         <StatCard label="Notes" value={counts?.notes ?? 0} />
         <StatCard label="Canvases" value={counts?.canvases ?? 0} />
         <StatCard label="Chats" value={counts?.chats ?? 0} />
-        <StatCard
-          label="Open tasks"
-          value={overview?.open_task_count ?? 0}
-          accent
-        />
+        <StatCard label="Open tasks" value={openTaskCount} accent />
       </div>
 
-      {/* Tasks rollup */}
-      <section className="mt-8">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-          Tasks across your notes
-        </h2>
-        {isLoading ? (
-          <p className="text-sm text-[var(--text-muted)]">Loading…</p>
-        ) : tasks.length === 0 ? (
-          <p className="text-sm text-[var(--text-muted)]">
-            No tasks yet. Add a checklist to a note (type{" "}
-            <span className="font-mono text-[var(--text)]">/task</span>) and
-            they'll roll up here.
-          </p>
-        ) : (
+      {/* First-class workspace task list */}
+      <div className="mt-8">
+        <WorkspaceTasksPanel workspaceId={workspaceId} canEdit={canEdit} />
+      </div>
+
+      {/* Secondary: checkboxes found inside notes (rollup) */}
+      {tasks.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            From your notes
+          </h2>
           <div className="space-y-1">
             {[...openTasks, ...doneTasks].map((t, i) => (
               <button
@@ -113,8 +115,8 @@ export function WorkspaceOverviewPane({
               </button>
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* Recent */}
       {recent.length > 0 && (

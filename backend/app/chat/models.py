@@ -368,6 +368,49 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         )
 
 
+class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
+    """A first-class task on a workspace's shared task list.
+
+    This is distinct from the checkboxes a note's TipTap content can hold
+    (those still roll up into the overview): a ``WorkspaceTask`` is a
+    standalone, workspace-level to-do owned by the project as a whole, not
+    by any one note. The overview "home" renders the open ones front and
+    centre so the workspace doubles as a lightweight planner.
+
+    Ordering mirrors ``WorkspaceItem``: ``position`` is a float so a task
+    can be dropped between two neighbours by midpoint without renumbering.
+    """
+
+    __tablename__ = "workspace_tasks"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    position: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
+    # When the task was last marked done (cleared when it's reopened).
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Who added it — nullable so a deleted user doesn't drop the task.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<WorkspaceTask id={self.id} done={self.done} "
+            f"title={self.title!r}>"
+        )
+
+
 class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
     """A tldraw canvas in a workspace (Phase 2).
 

@@ -150,6 +150,18 @@ export interface WorkspaceOverview {
   }[];
 }
 
+/** A first-class workspace task (the dedicated project to-do list — not
+ *  the checkbox rollup parsed out of notes). */
+export interface WorkspaceTask {
+  id: string;
+  title: string;
+  done: boolean;
+  position: number;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkspaceGraphNode {
   id: string;
   kind: string;
@@ -433,6 +445,40 @@ export const workspacesApi = {
       { question }
     );
     return data;
+  },
+
+  // ------------------------------------------------------------------
+  // Task list — a first-class, project-level to-do list
+  // ------------------------------------------------------------------
+  async tasks(id: string): Promise<WorkspaceTask[]> {
+    const { data } = await apiClient.get<WorkspaceTask[]>(
+      `/workspaces/${id}/tasks`
+    );
+    return data;
+  },
+
+  async createTask(id: string, title: string): Promise<WorkspaceTask> {
+    const { data } = await apiClient.post<WorkspaceTask>(
+      `/workspaces/${id}/tasks`,
+      { title }
+    );
+    return data;
+  },
+
+  async updateTask(
+    id: string,
+    taskId: string,
+    payload: { title?: string; done?: boolean; position?: number }
+  ): Promise<WorkspaceTask> {
+    const { data } = await apiClient.patch<WorkspaceTask>(
+      `/workspaces/${id}/tasks/${taskId}`,
+      payload
+    );
+    return data;
+  },
+
+  async deleteTask(id: string, taskId: string): Promise<void> {
+    await apiClient.delete(`/workspaces/${id}/tasks/${taskId}`);
   },
 
   async pinFile(id: string, fileId: string): Promise<WorkspaceFilePin> {
