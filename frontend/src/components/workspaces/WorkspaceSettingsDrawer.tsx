@@ -664,16 +664,15 @@ function SettingsTab({
           onChange={setSystemPrompt}
           disabled={!canEdit}
         />
-        {canEdit && (
-          <WorkspaceModelField
-            modelId={modelId}
-            providerId={providerId}
-            onChange={(m, p) => {
-              setModelId(m);
-              setProviderId(p);
-            }}
-          />
-        )}
+        <WorkspaceModelField
+          modelId={modelId}
+          providerId={providerId}
+          disabled={!canEdit}
+          onChange={(m, p) => {
+            setModelId(m);
+            setProviderId(p);
+          }}
+        />
         {canEdit && (
           <div className="flex items-center justify-end">
             <Button
