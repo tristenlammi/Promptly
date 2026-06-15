@@ -265,6 +265,8 @@ class WorkspaceItemNode(BaseModel):
     # "Use as workspace context" — note/canvas items feed the shared RAG
     # pool when True (default). True/ignored for folders + chats.
     context_enabled: bool = True
+    # Surfaced in the rail's "Pinned" quick-access section when True.
+    pinned: bool = False
     children: list["WorkspaceItemNode"] = Field(default_factory=list)
 
 
@@ -289,6 +291,8 @@ class WorkspaceItemUpdate(BaseModel):
     icon: str | None = Field(default=None, max_length=64)
     # Toggle whether this note/canvas feeds the workspace RAG context.
     context_enabled: bool | None = None
+    # Toggle the rail Pinned section membership.
+    pinned: bool | None = None
 
 
 class WorkspaceItemMove(BaseModel):
@@ -317,3 +321,4 @@ class WorkspaceItemResponse(BaseModel):
     position: float
     indexing_status: str | None = None
     context_enabled: bool = True
+    pinned: bool = False

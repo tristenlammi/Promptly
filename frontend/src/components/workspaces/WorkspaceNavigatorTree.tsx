@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   ChevronDown,
   ChevronRight,
+  Columns2,
   FilePlus2,
   FileText,
   Folder,
@@ -15,6 +16,8 @@ import {
   MoreHorizontal,
   Pencil,
   PenTool,
+  Pin,
+  PinOff,
   Plus,
   Shapes,
   Trash2,
@@ -29,6 +32,7 @@ import {
   useCreateWorkspaceItem,
   useDeleteWorkspaceItem,
   useSetItemContext,
+  useSetItemPinned,
   useUnarchiveWorkspaceItem,
   useUpdateWorkspaceItem,
   useWorkspace,
@@ -54,12 +58,15 @@ export function WorkspaceNavigatorTree({
   tree,
   selectedId,
   onSelect,
+  onOpenToSide,
   canEdit,
 }: {
   workspaceId: string;
   tree: WorkspaceItemNode[];
   selectedId: string | null;
   onSelect: (node: WorkspaceItemNode) => void;
+  /** Open the item alongside the current one (split-screen). */
+  onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
@@ -143,6 +150,12 @@ export function WorkspaceNavigatorTree({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+        <PinnedSection
+          workspaceId={workspaceId}
+          tree={tree}
+          onSelect={onSelect}
+          canEdit={canEdit}
+        />
         {tree.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
             Nothing here yet. Use{" "}
@@ -159,6 +172,7 @@ export function WorkspaceNavigatorTree({
                 depth={0}
                 selectedId={selectedId}
                 onSelect={onSelect}
+                onOpenToSide={onOpenToSide}
                 canEdit={canEdit}
                 onCreateInFolder={(kind, parentId) =>
                   handleCreate(kind, parentId)
@@ -171,6 +185,91 @@ export function WorkspaceNavigatorTree({
 
       {/* Per-workspace Archive — pinned to the bottom of the rail. */}
       <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
+    </div>
+  );
+}
+
+/** Flatten the tree to every pinned node (any depth, any kind). */
+function collectPinned(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
+  const out: WorkspaceItemNode[] = [];
+  const walk = (list: WorkspaceItemNode[]) => {
+    for (const n of list) {
+      if (n.pinned) out.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+/**
+ * Pinned quick-access at the top of the rail. Shortcuts to the items the
+ * user pinned (notes / canvases / chats), regardless of where they live in
+ * the tree — so the things they manage most are always one click away.
+ * Hidden entirely when nothing is pinned.
+ */
+function PinnedSection({
+  workspaceId,
+  tree,
+  onSelect,
+  canEdit,
+}: {
+  workspaceId: string;
+  tree: WorkspaceItemNode[];
+  onSelect: (node: WorkspaceItemNode) => void;
+  canEdit: boolean;
+}) {
+  const setPinned = useSetItemPinned(workspaceId);
+  const qc = useQueryClient();
+  const pinned = collectPinned(tree);
+  if (pinned.length === 0) return null;
+
+  const unpin = async (node: WorkspaceItemNode) => {
+    if (node.kind === "chat") {
+      if (node.ref_id) {
+        await chatApi.update(node.ref_id, { pinned: false });
+        qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
+      }
+    } else {
+      setPinned.mutate({ itemId: node.id, pinned: false });
+    }
+  };
+
+  return (
+    <div className="mb-2 border-b border-[var(--border)] pb-2">
+      <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        <Pin className="h-3 w-3" />
+        Pinned
+      </div>
+      <ul>
+        {pinned.map((node) => (
+          <li
+            key={`pin-${node.id}`}
+            className="group flex items-center gap-1 rounded-md pr-1 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
+          >
+            <button
+              type="button"
+              onClick={() => onSelect(node)}
+              className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2 text-left"
+            >
+              <span className="w-3.5 shrink-0" />
+              <NodeIcon node={node} expanded={false} />
+              <span className="truncate">{node.title || "Untitled"}</span>
+            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => void unpin(node)}
+                title="Unpin"
+                aria-label={`Unpin ${node.title}`}
+                className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)] group-hover:opacity-100"
+              >
+                <PinOff className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -294,6 +393,7 @@ function TreeNode({
   depth,
   selectedId,
   onSelect,
+  onOpenToSide,
   canEdit,
   onCreateInFolder,
 }: {
@@ -302,6 +402,7 @@ function TreeNode({
   depth: number;
   selectedId: string | null;
   onSelect: (node: WorkspaceItemNode) => void;
+  onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
   onCreateInFolder: (
     kind: "folder" | "note" | "canvas",
@@ -316,6 +417,7 @@ function TreeNode({
   const remove = useDeleteWorkspaceItem(workspaceId);
   const archive = useArchiveWorkspaceItem(workspaceId);
   const setContext = useSetItemContext(workspaceId);
+  const setPinned = useSetItemPinned(workspaceId);
   const qc = useQueryClient();
   const [chatBusy, setChatBusy] = useState(false);
 
@@ -325,6 +427,22 @@ function TreeNode({
   // the "Use as workspace context" toggle. ``context_enabled`` defaults on.
   const isContextItem = node.kind === "note" || node.kind === "canvas";
   const contextOn = node.context_enabled !== false;
+  const isPinned = node.pinned === true;
+
+  const handleTogglePin = async () => {
+    if (isChat) {
+      if (!node.ref_id) return;
+      setChatBusy(true);
+      try {
+        await chatApi.update(node.ref_id, { pinned: !isPinned });
+        invalidateTreeAndArchive();
+      } finally {
+        setChatBusy(false);
+      }
+    } else {
+      setPinned.mutate({ itemId: node.id, pinned: !isPinned });
+    }
+  };
   // Every item gets a menu now (archive then delete). Chats are
   // synthesised, so their archive/delete go through the conversation
   // endpoints; folders/notes/canvases through the workspace_items ones.
@@ -387,7 +505,13 @@ function TreeNode({
       return;
     }
     try {
-      await update.mutateAsync({ itemId: node.id, payload: { title: next } });
+      if (isChat) {
+        // Chats aren't workspace_items — rename the conversation directly.
+        if (node.ref_id) await chatApi.update(node.ref_id, { title: next });
+        invalidateTreeAndArchive();
+      } else {
+        await update.mutateAsync({ itemId: node.id, payload: { title: next } });
+      }
     } catch {
       setDraftTitle(node.title);
     }
@@ -467,19 +591,20 @@ function TreeNode({
           <NodeActions
             isFolder={isFolder}
             isChat={isChat}
-            onRename={
-              isChat
-                ? undefined
-                : () => {
-                    setDraftTitle(node.title);
-                    setRenaming(true);
-                  }
-            }
+            onRename={() => {
+              setDraftTitle(node.title);
+              setRenaming(true);
+            }}
             onArchive={handleArchive}
             onDelete={handleDelete}
             onNewNote={() => onCreateInFolder("note", node.id)}
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
             onNewFolder={() => onCreateInFolder("folder", node.id)}
+            pinned={isPinned}
+            onTogglePin={handleTogglePin}
+            onOpenToSide={
+              !isFolder && onOpenToSide ? () => onOpenToSide(node) : undefined
+            }
             contextState={isContextItem ? (contextOn ? "on" : "off") : null}
             onToggleContext={
               isContextItem
@@ -502,6 +627,7 @@ function TreeNode({
               depth={depth + 1}
               selectedId={selectedId}
               onSelect={onSelect}
+              onOpenToSide={onOpenToSide}
               canEdit={canEdit}
               onCreateInFolder={onCreateInFolder}
             />
@@ -558,19 +684,25 @@ function NodeActions({
   onNewNote,
   onNewCanvas,
   onNewFolder,
+  pinned,
+  onTogglePin,
+  onOpenToSide,
   contextState,
   onToggleContext,
   deleting,
 }: {
   isFolder: boolean;
   isChat: boolean;
-  /** Omitted for chats (synthesised — no in-tree rename). */
   onRename?: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
   onNewFolder: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
+  /** Open this item alongside the current one (split-screen). */
+  onOpenToSide?: () => void;
   /** "on" / "off" for note+canvas (workspace-context toggle); null otherwise. */
   contextState?: "on" | "off" | null;
   onToggleContext?: () => void;
@@ -630,6 +762,32 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onRename();
+                  }}
+                />
+              )}
+              {onTogglePin && (
+                <MenuItem
+                  icon={
+                    pinned ? (
+                      <PinOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Pin className="h-3.5 w-3.5" />
+                    )
+                  }
+                  label={pinned ? "Unpin" : "Pin to top"}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onTogglePin();
+                  }}
+                />
+              )}
+              {onOpenToSide && (
+                <MenuItem
+                  icon={<Columns2 className="h-3.5 w-3.5" />}
+                  label="Open to the side"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenToSide();
                   }}
                 />
               )}

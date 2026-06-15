@@ -15,6 +15,7 @@ import {
   Share2,
   Upload,
   Users,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -65,6 +66,7 @@ export function WorkspaceDetailPage() {
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
 
   const [selected, setSelected] = useState<WorkspaceItemNode | null>(null);
+  const [secondary, setSecondary] = useState<WorkspaceItemNode | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -102,7 +104,33 @@ export function WorkspaceDetailPage() {
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
     setGraphOpen(false);
+    // Avoid the same item on both sides of a split.
+    if (secondary && secondary.id === node.id) setSecondary(null);
     setSelected(node);
+  };
+
+  // Split-screen: open a note/canvas/chat alongside the primary one. Folders
+  // can't be split (they only nest); with no primary yet, it just opens
+  // normally on the left.
+  const handleOpenToSide = (node: WorkspaceItemNode) => {
+    if (node.kind === "folder") return;
+    setGraphOpen(false);
+    if (!selected) {
+      setSelected(node);
+      return;
+    }
+    if (selected.id === node.id) return;
+    setSecondary(node);
+  };
+
+  // Closing the left pane while a split is open promotes the right pane.
+  const closePrimary = () => {
+    if (secondary) {
+      setSelected(secondary);
+      setSecondary(null);
+    } else {
+      setSelected(null);
+    }
   };
 
   return (
@@ -171,6 +199,7 @@ export function WorkspaceDetailPage() {
               onClick={() => {
                 setGraphOpen(false);
                 setSelected(null);
+                setSecondary(null);
               }}
               title="Workspace home — overview, tasks, and recent items"
             >
@@ -209,6 +238,7 @@ export function WorkspaceDetailPage() {
                 tree={tree ?? []}
                 selectedId={selected?.id ?? null}
                 onSelect={handleSelect}
+                onOpenToSide={handleOpenToSide}
                 canEdit={canEdit && !isArchived}
               />
             )}
@@ -218,11 +248,40 @@ export function WorkspaceDetailPage() {
           <main
             className={
               "flex min-w-0 flex-1 flex-col " +
-              (graphOpen ? "overflow-hidden" : "overflow-y-auto")
+              (graphOpen || secondary ? "overflow-hidden" : "overflow-y-auto")
             }
           >
             {graphOpen ? (
               <WorkspaceGraphPane workspaceId={id} onOpenItem={handleSelect} />
+            ) : secondary && selected ? (
+              // Split screen — primary on the left, secondary on the right.
+              <div className="flex min-h-0 flex-1">
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden border-r border-[var(--border)]">
+                  <SplitPaneHeader title={selected.title} onClose={closePrimary} />
+                  <WorkspaceItemView
+                    key={selected.id}
+                    node={selected}
+                    workspaceId={id}
+                    onOpenItem={handleSelect}
+                    onClose={closePrimary}
+                    canEdit={canEdit}
+                  />
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <SplitPaneHeader
+                    title={secondary.title}
+                    onClose={() => setSecondary(null)}
+                  />
+                  <WorkspaceItemView
+                    key={secondary.id}
+                    node={secondary}
+                    workspaceId={id}
+                    onOpenItem={handleSelect}
+                    onClose={() => setSecondary(null)}
+                    canEdit={canEdit}
+                  />
+                </div>
+              </div>
             ) : (
               <WorkspaceMainPane
                 key={selected?.id ?? "empty"}
@@ -357,41 +416,15 @@ function WorkspaceMainPane({
   sharedByName: string | null;
   canEdit: boolean;
 }) {
-  if (node && node.kind === "note") {
+  if (node && (node.kind === "note" || node.kind === "canvas" || node.kind === "chat")) {
     return (
-      <WorkspaceNotePane
+      <WorkspaceItemView
         node={node}
         workspaceId={workspaceId}
+        onOpenItem={onOpenItem}
         onClose={onCloseNote}
-        onOpenItem={onOpenItem}
-      />
-    );
-  }
-
-  if (node && node.kind === "canvas") {
-    return (
-      <WorkspaceCanvasPaneFrame
-        node={node}
         canEdit={canEdit}
-        workspaceId={workspaceId}
-        onOpenItem={onOpenItem}
       />
-    );
-  }
-
-  if (node && node.kind === "chat" && node.ref_id) {
-    // Render the full chat experience inline (no page nav) — the chat
-    // is keyed by ref_id (conversation id). WorkspaceMainPane is already
-    // keyed by the selected node id upstream, so switching chats remounts
-    // cleanly and resets the chat store's active conversation.
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <ChatPage
-          embedded
-          embeddedConversationId={node.ref_id}
-          onExitToWorkspace={onCloseNote}
-        />
-      </div>
     );
   }
 
@@ -475,6 +508,84 @@ function WorkspaceMainPane({
       />
     </div>
   );
+}
+
+/** Thin title bar above each pane in split-screen mode, with a close. */
+function SplitPaneHeader({
+  title,
+  onClose,
+}: {
+  title: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
+      <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--text)]">
+        {title || "Untitled"}
+      </span>
+      <button
+        type="button"
+        onClick={onClose}
+        title="Close this pane"
+        aria-label="Close pane"
+        className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Renders a single workspace item (note / canvas / chat). Pulled out of
+ * ``WorkspaceMainPane`` so the same renderer drives both the primary pane
+ * and the split-screen secondary pane.
+ */
+function WorkspaceItemView({
+  node,
+  workspaceId,
+  onOpenItem,
+  onClose,
+  canEdit,
+}: {
+  node: WorkspaceItemNode;
+  workspaceId: string;
+  onOpenItem: (node: WorkspaceItemNode) => void;
+  onClose: () => void;
+  canEdit: boolean;
+}) {
+  if (node.kind === "note") {
+    return (
+      <WorkspaceNotePane
+        node={node}
+        workspaceId={workspaceId}
+        onClose={onClose}
+        onOpenItem={onOpenItem}
+      />
+    );
+  }
+  if (node.kind === "canvas") {
+    return (
+      <WorkspaceCanvasPaneFrame
+        node={node}
+        canEdit={canEdit}
+        workspaceId={workspaceId}
+        onOpenItem={onOpenItem}
+      />
+    );
+  }
+  if (node.kind === "chat" && node.ref_id) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <ChatPage
+          embedded
+          embeddedConversationId={node.ref_id}
+          onExitToWorkspace={onClose}
+        />
+      </div>
+    );
+  }
+  return null;
 }
 
 /**
