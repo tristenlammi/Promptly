@@ -38,6 +38,8 @@ const KEYS = {
   tree: (id: string) => ["workspaces", "tree", id] as const,
   archive: (id: string) => ["workspaces", "archive", id] as const,
   overview: (id: string) => ["workspaces", "overview", id] as const,
+  backlinks: (workspaceId: string, itemId: string) =>
+    ["workspaces", "backlinks", workspaceId, itemId] as const,
   invites: ["workspace-invites"] as const,
 };
 
@@ -163,6 +165,24 @@ export function useWorkspaceArchive(id: string | undefined) {
     queryKey: id ? KEYS.archive(id) : ["workspaces", "archive", "_"],
     queryFn: () => workspacesApi.archivedItems(id as string),
     enabled: Boolean(id),
+  });
+}
+
+/** Notes that wiki-link to ``itemId`` (the "Linked from" / backlinks
+ *  panel in the note pane). Gated on both ids being present so the pane
+ *  can call it unconditionally. */
+export function useItemBacklinks(
+  workspaceId: string | undefined,
+  itemId: string | undefined
+) {
+  return useQuery<WorkspaceItemNode[]>({
+    queryKey:
+      workspaceId && itemId
+        ? KEYS.backlinks(workspaceId, itemId)
+        : ["workspaces", "backlinks", "_"],
+    queryFn: () =>
+      workspacesApi.backlinks(workspaceId as string, itemId as string),
+    enabled: Boolean(workspaceId && itemId),
   });
 }
 

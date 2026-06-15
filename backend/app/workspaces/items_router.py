@@ -535,6 +535,72 @@ async def get_workspace_archive(
 
 
 # ---------------------------------------------------------------------
+# Backlinks (Phase 4) — which notes [[wiki-link]] to this item
+# ---------------------------------------------------------------------
+@router.get(
+    "/{workspace_id}/items/{item_id}/backlinks",
+    response_model=list[WorkspaceItemNode],
+)
+async def get_item_backlinks(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[WorkspaceItemNode]:
+    """Notes whose content wiki-links to this item.
+
+    Wiki-links are rendered as in-app relative hrefs carrying
+    ``item=<itemId>`` (``/workspaces/<wid>?item=<itemId>``), which survive
+    the Yjs → HTML → sanitiser round-trip. We scan each live note's HTML
+    blob for that token — cheap and robust, no link table to keep in sync.
+    """
+    from app.files.storage import absolute_path
+
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    needle = f"item={item_id}"
+
+    notes = list(
+        (
+            await db.execute(
+                select(WorkspaceItem)
+                .where(
+                    WorkspaceItem.workspace_id == ws.id,
+                    WorkspaceItem.kind == "note",
+                    WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.id != item_id,
+                )
+                .order_by(WorkspaceItem.position.asc())
+            )
+        ).scalars()
+    )
+    out: list[WorkspaceItemNode] = []
+    for note in notes:
+        if note.ref_id is None:
+            continue
+        uf = await db.get(UserFile, note.ref_id)
+        if uf is None:
+            continue
+        try:
+            html = absolute_path(uf.storage_path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if needle in html:
+            out.append(
+                WorkspaceItemNode(
+                    id=note.id,
+                    kind="note",
+                    ref_id=note.ref_id,
+                    title=note.title,
+                    icon=note.icon,
+                    position=note.position,
+                    indexing_status=note.indexing_status,
+                    children=[],
+                )
+            )
+    return out
+
+
+# ---------------------------------------------------------------------
 # Delete (folder = its whole subtree)
 # ---------------------------------------------------------------------
 @router.delete(

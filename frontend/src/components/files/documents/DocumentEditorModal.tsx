@@ -20,6 +20,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/utils/cn";
 
 import { buildExtensions } from "./extensions";
+import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
 import { useCollabProvider } from "./useCollabProvider";
 
@@ -52,6 +53,10 @@ interface DocumentEditorModalProps {
    *  note opens in the main pane with the rail + nav still visible.
    *  Skips the backdrop, portal, body scroll-lock, and Esc-to-close. */
   inline?: boolean;
+  /** Workspace-note-only: enables the ``[[`` wiki-link autocomplete and
+   *  passes the items fetcher straight through to ``buildExtensions``.
+   *  Omitted for normal Drive documents so their editor is unchanged. */
+  wikiLink?: { items: (query: string) => Promise<WikiTarget[]> };
 }
 
 type SaveStatus = "idle" | "dirty" | "syncing" | "saved" | "offline";
@@ -61,6 +66,7 @@ export function DocumentEditorModal({
   onClose,
   onFileUpdated,
   inline = false,
+  wikiLink,
 }: DocumentEditorModalProps) {
   const queryClient = useQueryClient();
   const { ydoc, provider, status: collabStatus, user, error } =
@@ -111,8 +117,9 @@ export function DocumentEditorModal({
         provider,
         user,
         placeholder: "Start typing, or hit / for commands…",
+        wikiLink,
       }),
-    [ydoc, provider, user]
+    [ydoc, provider, user, wikiLink]
   );
 
   // ``editor`` from useEditor is the source of truth, but the
