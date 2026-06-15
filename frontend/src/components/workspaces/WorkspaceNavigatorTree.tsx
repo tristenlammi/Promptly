@@ -18,6 +18,8 @@ import {
   Plus,
   Shapes,
   Trash2,
+  Zap,
+  ZapOff,
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -26,6 +28,7 @@ import {
   useArchiveWorkspaceItem,
   useCreateWorkspaceItem,
   useDeleteWorkspaceItem,
+  useSetItemContext,
   useUnarchiveWorkspaceItem,
   useUpdateWorkspaceItem,
   useWorkspace,
@@ -312,11 +315,16 @@ function TreeNode({
   const update = useUpdateWorkspaceItem(workspaceId);
   const remove = useDeleteWorkspaceItem(workspaceId);
   const archive = useArchiveWorkspaceItem(workspaceId);
+  const setContext = useSetItemContext(workspaceId);
   const qc = useQueryClient();
   const [chatBusy, setChatBusy] = useState(false);
 
   const isFolder = node.kind === "folder";
   const isChat = node.kind === "chat";
+  // Only notes + canvases feed the workspace RAG context, so only they get
+  // the "Use as workspace context" toggle. ``context_enabled`` defaults on.
+  const isContextItem = node.kind === "note" || node.kind === "canvas";
+  const contextOn = node.context_enabled !== false;
   // Every item gets a menu now (archive then delete). Chats are
   // synthesised, so their archive/delete go through the conversation
   // endpoints; folders/notes/canvases through the workspace_items ones.
@@ -445,6 +453,14 @@ function TreeNode({
               <Loader2 className="h-3 w-3 animate-spin" />
             </span>
           )}
+          {isContextItem && !contextOn && !renaming && (
+            <span
+              title="Not used as workspace context"
+              className="inline-flex shrink-0 items-center text-[var(--text-muted)]"
+            >
+              <ZapOff className="h-3 w-3" />
+            </span>
+          )}
         </button>
 
         {editable && !renaming && (
@@ -464,6 +480,13 @@ function TreeNode({
             onNewNote={() => onCreateInFolder("note", node.id)}
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
             onNewFolder={() => onCreateInFolder("folder", node.id)}
+            contextState={isContextItem ? (contextOn ? "on" : "off") : null}
+            onToggleContext={
+              isContextItem
+                ? () =>
+                    setContext.mutate({ itemId: node.id, enabled: !contextOn })
+                : undefined
+            }
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
@@ -535,6 +558,8 @@ function NodeActions({
   onNewNote,
   onNewCanvas,
   onNewFolder,
+  contextState,
+  onToggleContext,
   deleting,
 }: {
   isFolder: boolean;
@@ -546,6 +571,9 @@ function NodeActions({
   onNewNote: () => void;
   onNewCanvas: () => void;
   onNewFolder: () => void;
+  /** "on" / "off" for note+canvas (workspace-context toggle); null otherwise. */
+  contextState?: "on" | "off" | null;
+  onToggleContext?: () => void;
   deleting: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -632,6 +660,26 @@ function NodeActions({
                     }}
                   />
                 </>
+              )}
+              {contextState && onToggleContext && (
+                <MenuItem
+                  icon={
+                    contextState === "on" ? (
+                      <ZapOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5" />
+                    )
+                  }
+                  label={
+                    contextState === "on"
+                      ? "Remove from context"
+                      : "Use as context"
+                  }
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onToggleContext();
+                  }}
+                />
               )}
               {/* Archive first (the soft step), then permanent delete. */}
               <MenuItem

@@ -361,6 +361,16 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # "Use as workspace context" — when True (the default) this note/canvas
+    # feeds the workspace's shared RAG pool so every chat can draw on it.
+    # Flip it off to keep an item in the tree but out of the AI's context
+    # (drafts, scratch, sensitive). Embeddings are kept either way so the
+    # toggle is instant; injection simply filters disabled items out.
+    # Ignored for folders/chats.
+    context_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+
     def __repr__(self) -> str:
         return (
             f"<WorkspaceItem id={self.id} kind={self.kind} "
@@ -514,6 +524,13 @@ class WorkspaceFile(Base):
     )
     indexed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    # "Use as workspace context" — when True (default) the file feeds the
+    # workspace RAG pool; flip off to keep it attached but out of the AI's
+    # context. Mirrors ``WorkspaceItem.context_enabled`` for notes/canvases.
+    context_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
     )
 
 
