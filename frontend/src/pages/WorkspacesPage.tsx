@@ -4,47 +4,47 @@ import { Archive, FolderKanban, Plus, Upload } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
-import { ChatProjectCard } from "@/components/projects/ChatProjectCard";
+import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
-import { NewChatProjectModal } from "@/components/projects/NewChatProjectModal";
+import { NewWorkspaceModal } from "@/components/workspaces/NewWorkspaceModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
-  useArchiveChatProject,
-  useChatProjects,
-  useDeleteChatProject,
-  useUnarchiveChatProject,
-} from "@/hooks/useChatProjects";
-import type { ChatProjectSummary } from "@/api/chatProjects";
+  useArchiveWorkspace,
+  useWorkspaces,
+  useDeleteWorkspace,
+  useUnarchiveWorkspace,
+} from "@/hooks/useWorkspaces";
+import type { WorkspaceSummary } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 
 type Tab = "active" | "archived";
 
-/** Projects home — tabbed (Active / Archive), mirrors the Study page
+/** Workspaces home — tabbed (Active / Archive), mirrors the Study page
  * layout so users don't need to relearn the pattern. */
-export function ProjectsPage() {
+export function WorkspacesPage() {
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("active");
 
-  const { data: activeProjects, isLoading: activeLoading } = useChatProjects({
+  const { data: activeWorkspaces, isLoading: activeLoading } = useWorkspaces({
     archived: false,
   });
-  const { data: archivedProjects, isLoading: archivedLoading } = useChatProjects(
+  const { data: archivedWorkspaces, isLoading: archivedLoading } = useWorkspaces(
     { archived: true }
   );
 
   const [deleteTarget, setDeleteTarget] =
-    useState<ChatProjectSummary | null>(null);
+    useState<WorkspaceSummary | null>(null);
   const [archiveTarget, setArchiveTarget] =
-    useState<ChatProjectSummary | null>(null);
+    useState<WorkspaceSummary | null>(null);
 
-  const deleteMutation = useDeleteChatProject();
-  const archiveMutation = useArchiveChatProject();
-  const unarchiveMutation = useUnarchiveChatProject();
+  const deleteMutation = useDeleteWorkspace();
+  const archiveMutation = useArchiveWorkspace();
+  const unarchiveMutation = useUnarchiveWorkspace();
 
-  const projects =
-    tab === "active" ? activeProjects ?? [] : archivedProjects ?? [];
+  const workspaces =
+    tab === "active" ? activeWorkspaces ?? [] : archivedWorkspaces ?? [];
   const isLoading = tab === "active" ? activeLoading : archivedLoading;
 
   const handleDelete = async () => {
@@ -62,7 +62,7 @@ export function ProjectsPage() {
   return (
     <>
       <TopNav
-        title="Projects"
+        title="Workspaces"
         subtitle="Group conversations with shared instructions and files"
         actions={
           <div className="flex items-center gap-2">
@@ -78,7 +78,7 @@ export function ProjectsPage() {
               leftIcon={<Plus className="h-4 w-4" />}
               onClick={() => setWizardOpen(true)}
             >
-              New project
+              New workspace
             </Button>
           </div>
         }
@@ -88,23 +88,23 @@ export function ProjectsPage() {
           <Tabs
             tab={tab}
             onChange={setTab}
-            activeCount={activeProjects?.length ?? 0}
-            archivedCount={archivedProjects?.length ?? 0}
+            activeCount={activeWorkspaces?.length ?? 0}
+            archivedCount={archivedWorkspaces?.length ?? 0}
           />
 
           {isLoading ? (
             <div className="mt-10 text-sm text-[var(--text-muted)]">
-              Loading projects...
+              Loading workspaces...
             </div>
-          ) : projects.length === 0 ? (
-            <EmptyState tab={tab} onNewProject={() => setWizardOpen(true)} />
+          ) : workspaces.length === 0 ? (
+            <EmptyState tab={tab} onNewWorkspace={() => setWizardOpen(true)} />
           ) : (
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {projects.map((p) => (
-                <ChatProjectCard
+              {workspaces.map((p) => (
+                <WorkspaceCard
                   key={p.id}
-                  project={p}
-                  onOpen={() => navigate(`/projects/${p.id}`)}
+                  workspace={p}
+                  onOpen={() => navigate(`/workspaces/${p.id}`)}
                   onDelete={() => setDeleteTarget(p)}
                   onArchive={
                     !p.archived_at ? () => setArchiveTarget(p) : undefined
@@ -121,10 +121,10 @@ export function ProjectsPage() {
         </div>
       </div>
 
-      <NewChatProjectModal
+      <NewWorkspaceModal
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onCreated={(id) => navigate(`/projects/${id}`)}
+        onCreated={(id) => navigate(`/workspaces/${id}`)}
       />
 
       <ImportConversationsModal
@@ -138,7 +138,7 @@ export function ProjectsPage() {
         onConfirm={handleDelete}
         destructive
         pending={deleteMutation.isPending}
-        firstTitle="Delete this project?"
+        firstTitle="Delete this workspace?"
         firstDescription={
           deleteTarget
             ? `"${deleteTarget.title}" will be deleted. Conversations inside it are preserved — they'll move back to your top-level chat list. Pinned files stay in your library. This cannot be undone.`
@@ -148,11 +148,11 @@ export function ProjectsPage() {
         secondTitle="Delete permanently"
         secondDescription={
           deleteTarget
-            ? `Type the project title to confirm permanent deletion of "${deleteTarget.title}".`
+            ? `Type the workspace title to confirm permanent deletion of "${deleteTarget.title}".`
             : ""
         }
         typeToConfirm={deleteTarget?.title}
-        secondConfirmLabel="Delete project"
+        secondConfirmLabel="Delete workspace"
       />
 
       <ConfirmDoubleModal
@@ -160,10 +160,10 @@ export function ProjectsPage() {
         onClose={() => setArchiveTarget(null)}
         onConfirm={handleArchive}
         pending={archiveMutation.isPending}
-        firstTitle="Archive this project?"
+        firstTitle="Archive this workspace?"
         firstDescription={
           archiveTarget
-            ? `"${archiveTarget.title}" will move to your archive. Conversations inside it stay readable; you can unarchive the project any time.`
+            ? `"${archiveTarget.title}" will move to your archive. Conversations inside it stay readable; you can unarchive the workspace any time.`
             : ""
         }
         firstConfirmLabel="Continue"
@@ -171,7 +171,7 @@ export function ProjectsPage() {
         secondDescription={
           archiveTarget ? `Archive "${archiveTarget.title}" now?` : ""
         }
-        secondConfirmLabel="Archive project"
+        secondConfirmLabel="Archive workspace"
       />
     </>
   );
@@ -249,10 +249,10 @@ function TabButton({
 
 function EmptyState({
   tab,
-  onNewProject,
+  onNewWorkspace,
 }: {
   tab: Tab;
-  onNewProject: () => void;
+  onNewWorkspace: () => void;
 }) {
   if (tab === "archived") {
     return (
@@ -262,7 +262,7 @@ function EmptyState({
         </div>
         <h2 className="text-lg font-semibold">Archive is empty</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
-          Projects you archive end up here. Archive one from its detail page or
+          Workspaces you archive end up here. Archive one from its detail page or
           the card action bar.
         </p>
       </div>
@@ -274,18 +274,18 @@ function EmptyState({
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/10">
         <FolderKanban className="h-5 w-5 text-[var(--accent)]" />
       </div>
-      <h2 className="text-lg font-semibold">Create your first project</h2>
+      <h2 className="text-lg font-semibold">Create your first workspace</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
-        A project gathers related chats under one roof with a shared system
+        A workspace gathers related chats under one roof with a shared system
         prompt, pinned reference files, and a default model.
       </p>
       <div className="mt-6">
         <Button
           variant="primary"
           leftIcon={<Plus className="h-4 w-4" />}
-          onClick={onNewProject}
+          onClick={onNewWorkspace}
         >
-          New project
+          New workspace
         </Button>
       </div>
     </div>

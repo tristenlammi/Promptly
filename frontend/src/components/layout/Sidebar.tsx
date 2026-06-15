@@ -23,7 +23,7 @@ import {
   useConversationsQuery,
   useUpdateConversation,
 } from "@/hooks/useConversations";
-import { useProjectInvites } from "@/hooks/useChatProjects";
+import { useWorkspaceInvites } from "@/hooks/useWorkspaces";
 import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
@@ -56,15 +56,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { isLoading: convLoading } = useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
-  const { data: projectInvites } = useProjectInvites();
-  // Pill shows the count of pending project invites (per-chat sharing
+  const { data: workspaceInvites } = useWorkspaceInvites();
+  // Pill shows the count of pending workspace invites (per-chat sharing
   // was removed) so the user notices new workspace invites.
-  const inviteCount = projectInvites?.length ?? 0;
+  const inviteCount = workspaceInvites?.length ?? 0;
 
-  // Project-scoped chats live exclusively inside their project's
+  // Workspace-scoped chats live exclusively inside their workspace's
   // detail page now — surfacing them again in the global sidebar
   // creates duplicate entries (one here, one under "Conversations"
-  // in the project) and clutters the date buckets with chats that
+  // in the workspace) and clutters the date buckets with chats that
   // belong to a shared workspace, not the user's personal stream.
   // Filter them out at the source so pinned/unpinned/search all
   // honour the same rule.
@@ -72,7 +72,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     // Archived chats live on the Archive page; the backend already
     // excludes them from this list, but filter defensively so an
     // optimistic store update can't flash an archived row.
-    () => conversations.filter((c) => !c.project_id && !c.archived_at),
+    () => conversations.filter((c) => !c.workspace_id && !c.archived_at),
     [conversations]
   );
   const pinned = useMemo(
@@ -258,7 +258,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
         {!convLoading && personalConversations.length === 0 && (
           <div className="mt-6 px-2 text-xs text-[var(--text-muted)]">
-            No personal chats yet. Start a new chat or open a project.
+            No personal chats yet. Start a new chat or open a workspace.
           </div>
         )}
       </div>
@@ -576,7 +576,7 @@ function ConversationRow({
       {menuPos && (
         <ConversationRowContextMenu
           conversationId={conv.id}
-          currentProjectId={conv.project_id ?? null}
+          currentWorkspaceId={conv.workspace_id ?? null}
           pinned={!!conv.pinned}
           onTogglePin={() =>
             update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } })

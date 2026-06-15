@@ -6,31 +6,31 @@ import { useModelStore } from "@/store/modelStore";
 import type { AvailableModel } from "@/api/types";
 import { cn } from "@/utils/cn";
 
-interface ProjectModelFieldProps {
-  /** The project's stored ``default_model_id`` (or null for "no default"). */
+interface WorkspaceModelFieldProps {
+  /** The workspace's stored ``default_model_id`` (or null for "no default"). */
   modelId: string | null;
-  /** The project's stored ``default_provider_id`` (or null). */
+  /** The workspace's stored ``default_provider_id`` (or null). */
   providerId: string | null;
   /** Fires with the new pair, or (null, null) when cleared. */
   onChange: (modelId: string | null, providerId: string | null) => void;
 }
 
-/** Controlled model picker for the project's default model.
+/** Controlled model picker for the workspace's default model.
  *
  * Deliberately NOT the chat ``ModelSelector`` — that component is wired
  * to the global ``modelStore`` selection and switching it would change
  * the model for the user's *current* chat. This one reads the same
  * ``available`` catalogue but is fully controlled by props, so it only
- * ever mutates the project record via ``onChange``.
+ * ever mutates the workspace record via ``onChange``.
  *
  * "No default" is a first-class choice: clearing it means new chats in
- * the project fall back to the user's current model, matching the
+ * the workspace fall back to the user's current model, matching the
  * behaviour before a default was ever set. */
-export function ProjectModelField({
+export function WorkspaceModelField({
   modelId,
   providerId,
   onChange,
-}: ProjectModelFieldProps) {
+}: WorkspaceModelFieldProps) {
   useAvailableModels(); // ensure the catalogue is loaded into the store
   const available = useModelStore((s) => s.available);
   const [open, setOpen] = useState(false);
@@ -90,7 +90,7 @@ export function ProjectModelField({
       <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
         Default model{" "}
         <span className="text-[var(--text-muted)]/70">
-          (new chats in this project start with this)
+          (new chats in this workspace start with this)
         </span>
       </label>
       <div ref={ref} className="relative">

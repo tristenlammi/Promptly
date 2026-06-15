@@ -91,11 +91,11 @@ interface InputBarProps {
    */
   autoFocus?: boolean;
   /** Phase C — enable ``@`` references. Required for the picker to
-   *  filter out the current chat and prioritise project siblings.
+   *  filter out the current chat and prioritise workspace siblings.
    *  Pass ``null`` for a not-yet-persisted chat; mentions still work
    *  but the "exclude self" step is a no-op. */
   currentConversationId?: string | null;
-  projectId?: string | null;
+  workspaceId?: string | null;
   /** When true, Enter inserts a newline instead of sending. The send
    *  button is the only submission path. Used by the study session
    *  page where students write multi-line answers. */
@@ -131,7 +131,7 @@ export function InputBar({
   allowAttachments = true,
   autoFocus = false,
   currentConversationId = null,
-  projectId = null,
+  workspaceId = null,
   onResearch,
   newlineOnEnter = false,
   showEnhance = true,
@@ -715,7 +715,7 @@ export function InputBar({
         caret={caret}
         onInsert={handleMentionInsert}
         currentConversationId={currentConversationId}
-        projectId={projectId}
+        workspaceId={workspaceId}
         onKeyRegister={registerMentionKeys}
       />
 

@@ -72,7 +72,7 @@ export const authApi = {
   },
   /** Search the user directory for ``q`` (matches username or email,
    *  case-insensitive). Used by the share pickers (conversation +
-   *  project). Returns at most ``limit`` rows, excluding the caller
+   *  workspace). Returns at most ``limit`` rows, excluding the caller
    *  so self-invites never appear as a dropdown option. */
   async directoryUsers(
     params: { q?: string; limit?: number } = {}

@@ -164,10 +164,10 @@ class ConversationSummary(BaseModel):
     # ``expires_at`` ticks the countdown on the client.
     temporary_mode: TemporaryMode | None = None
     expires_at: datetime | None = None
-    # Phase P1 — Chat Projects. Non-NULL when this conversation lives
-    # under a :class:`ChatProject`; surfaced so the sidebar can group
-    # chats by project and the breadcrumb can render "Project → Chat".
-    project_id: uuid.UUID | None = None
+    # Phase P1 — Workspaces. Non-NULL when this conversation lives
+    # under a :class:`Workspace`; surfaced so the sidebar can group
+    # chats by workspace and the breadcrumb can render "Workspace → Chat".
+    workspace_id: uuid.UUID | None = None
     # Phase 1 — per-conversation custom instructions. Hydrated into the
     # chat header's "Instructions" editor so the owner can see / tweak
     # the per-chat steer. NULL / blank when unset.
@@ -210,10 +210,10 @@ class ConversationCreate(BaseModel):
     # itself; the client only picks the mode.
     temporary_mode: TemporaryMode | None = None
     # Phase P1 — when set, the new conversation is created under the
-    # named :class:`ChatProject`. The project's system prompt + pinned
+    # named :class:`Workspace`. The workspace's system prompt + pinned
     # files are included automatically on every send. Temporary chats
-    # cannot belong to a project (the two lifecycles are in tension).
-    project_id: uuid.UUID | None = None
+    # cannot belong to a workspace (the two lifecycles are in tension).
+    workspace_id: uuid.UUID | None = None
 
 
 class ConversationUpdate(BaseModel):
@@ -231,13 +231,13 @@ class ConversationUpdate(BaseModel):
     reasoning_effort: ReasoningEffort | None = None
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
-    # Phase P1 — move this chat into / out of a project. ``None`` in
+    # Phase P1 — move this chat into / out of a workspace. ``None`` in
     # the payload means "leave untouched" (consistent with every other
-    # field here); to detach from a project, send ``""`` or use the
-    # dedicated ``DELETE /chat/projects/{pid}/conversations/{cid}``
+    # field here); to detach from a workspace, send ``""`` or use the
+    # dedicated ``DELETE /workspaces/{wid}/conversations/{cid}``
     # endpoint. We accept strings here because JSON can't round-trip
     # ``None`` vs "unset" cleanly.
-    project_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
     # Phase 1 — per-conversation custom instructions. ``None`` = leave
     # unchanged (field absent in the PATCH); an empty string clears it;
     # any other value sets it (the router trims it). Capped so a runaway
@@ -386,50 +386,68 @@ class MentionCandidate(BaseModel):
 
     Kept deliberately small — the autocomplete queries on every
     keystroke, so the wire payload is just the bits the UI needs
-    to render a two-line row (title + faint project hint) and
+    to render a two-line row (title + faint workspace hint) and
     build the ``@[title](id)`` token on selection.
     """
 
     id: uuid.UUID
     title: str
-    project_id: uuid.UUID | None = None
-    project_title: str | None = None
+    workspace_id: uuid.UUID | None = None
+    workspace_title: str | None = None
     updated_at: datetime
+
+
+class MentionFileCandidate(BaseModel):
+    """A workspace file (note / upload / canvas text) for the ``@``
+    popover. Notes are documents, canvases are represented by their
+    backing text file — all ``UserFile`` rows, so they all reference
+    through the existing ``file:`` mention mechanism."""
+
+    id: uuid.UUID
+    filename: str
+    # 'note' | 'canvas' | 'file' — lets the popover show the right icon.
+    kind: str = "file"
 
 
 class MentionCandidatesResponse(BaseModel):
     """Response wrapper for ``GET /conversations/mention-candidates``.
 
-    Split into two lists so the UI can render the project's
-    sibling chats as a highlighted "In this project" group above
-    the generic recents. ``project_context_id`` echoes the query
-    param back so the frontend can verify it's scoping against
-    the right project.
+    Split into lists so the UI can render the workspace's sibling chats
+    as a highlighted "In this workspace" group above the generic
+    recents, plus the workspace's files/notes/canvases when composing
+    inside a workspace. ``workspace_context_id`` echoes the query param
+    back so the frontend can verify it's scoping against the right
+    workspace.
     """
 
-    project_context_id: uuid.UUID | None = None
-    project_candidates: list[MentionCandidate]
+    workspace_context_id: uuid.UUID | None = None
+    workspace_candidates: list[MentionCandidate]
     recent_candidates: list[MentionCandidate]
+    # Workspace files (notes/uploads/canvas texts). Populated only when a
+    # ``workspace_id`` is supplied; empty otherwise.
+    workspace_file_candidates: list[MentionFileCandidate] = Field(
+        default_factory=list
+    )
 
 
-class SummariseToProjectResponse(BaseModel):
-    """Result of ``POST /conversations/{id}/summarise-to-project``.
+class SummariseToWorkspaceResponse(BaseModel):
+    """Result of ``POST /conversations/{id}/summarise-to-workspace``.
 
     The endpoint writes the generated Markdown summary to a new
     :class:`app.files.models.UserFile` in the caller's Generated
-    folder and auto-pins it to the conversation's parent project
-    so every other chat in that project picks it up on the next
-    turn (via the existing project-file injection path).
+    folder and auto-pins it to the conversation's parent workspace
+    so every other chat in that workspace picks it up on the next
+    turn (via the existing workspace-file injection path).
 
     We return enough context for the UI to show a success toast
-    that links to the project ("Summary saved to *Project X*") or
+    that links to the workspace ("Summary saved to *Workspace X*") or
     to open the file directly, without needing an extra round-trip.
     """
 
     file_id: uuid.UUID
     filename: str
-    project_id: uuid.UUID
-    project_title: str
+    workspace_id: uuid.UUID
+    workspace_title: str
     chars: int
 
 

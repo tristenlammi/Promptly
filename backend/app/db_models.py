@@ -10,13 +10,16 @@ from app.auth.events import AuthEvent  # noqa: F401
 from app.auth.models import User  # noqa: F401
 from app.billing.models import UsageDaily  # noqa: F401
 from app.chat.models import (  # noqa: F401
-    ChatProject,
-    ChatProjectFile,
     CompareGroup,
     Conversation,
+    ConversationExcludedWorkspaceFile,
     Message,
     MessageEmbedding,
-    ProjectShare,
+    Workspace,
+    WorkspaceCanvas,
+    WorkspaceFile,
+    WorkspaceItem,
+    WorkspaceShare,
 )
 from app.custom_models.models import (  # noqa: F401
     CustomModel,

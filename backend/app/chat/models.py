@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -142,14 +142,14 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    # Chat Projects (0027). When non-NULL, this conversation belongs
-    # to a project: the project's system prompt + pinned files are
+    # Workspaces (0027). When non-NULL, this conversation belongs
+    # to a workspace: the workspace's system prompt + pinned files are
     # mixed into the context on every send, and the chat shows up
-    # under that project in the sidebar. NULL means "top-level chat"
-    # (today's default). ``ON DELETE SET NULL`` so deleting a project
+    # under that workspace in the sidebar. NULL means "top-level chat"
+    # (today's default). ``ON DELETE SET NULL`` so deleting a workspace
     # doesn't nuke chat history — the chats resurface at top level.
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("chat_projects.id", ondelete="SET NULL"),
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -226,16 +226,16 @@ class CompareGroup(UUIDPKMixin, TimestampMixin, Base):
         return f"<CompareGroup id={self.id} title={self.title!r}>"
 
 
-class ChatProject(UUIDPKMixin, TimestampMixin, Base):
-    """A generic project bundle for non-Study conversations.
+class Workspace(UUIDPKMixin, TimestampMixin, Base):
+    """A generic workspace bundle for non-Study conversations.
 
     Holds the shared instructions + pinned files + default model used
     by every chat inside it. Distinct from :class:`StudyProject` —
-    Study projects are learning paths with units/exams, chat projects
+    Study projects are learning paths with units/exams, workspaces
     are ChatGPT/Claude-style bundles for arbitrary ongoing work.
     """
 
-    __tablename__ = "chat_projects"
+    __tablename__ = "workspaces"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -257,32 +257,184 @@ class ChatProject(UUIDPKMixin, TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Opt-in rolling project memory (Phase 4). When true, a background
-    # job maintains a single pinned "Project Memory" file, refreshed
-    # from whichever chat in the project most recently produced a reply.
-    # Off by default — distinct from the manual "Save summary to project".
+    # Opt-in rolling workspace memory (Phase 4). When true, a background
+    # job maintains a single pinned "Workspace Memory" file, refreshed
+    # from whichever chat in the workspace most recently produced a reply.
+    # Off by default — distinct from the manual "Save summary to workspace".
     auto_memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Drive folder backing this workspace (Phase 1). Points at the
+    # auto-created ``My files / Workspaces / <title>`` folder where the
+    # workspace's notes / canvases / uploaded files physically live, so
+    # they inherit Drive's preview / search / trash / quota plumbing.
+    # NULL only briefly during creation (or for a legacy row that
+    # predates folder seeding). ``ON DELETE SET NULL`` so deleting the
+    # folder out-of-band never cascade-deletes the workspace.
+    root_folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("file_folders.id", ondelete="SET NULL"), nullable=True
+    )
 
     def __repr__(self) -> str:
-        return f"<ChatProject id={self.id} title={self.title!r}>"
+        return f"<Workspace id={self.id} title={self.title!r}>"
 
 
-class ChatProjectFile(Base):
+class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
+    """A node in a workspace's navigator tree (Phase 1).
+
+    The workspace's left-rail tree is one unified, nestable,
+    reorderable list mixing kinds — ``folder`` rows for organisation
+    plus the actual work surfaces (``note`` today; ``canvas`` / ``file``
+    in later phases). It is the **source of truth for the navigator**,
+    which a ``file_folders`` tree can't be because that can't hold
+    chats or canvases as first-class nodes.
+
+    Chats are deliberately **not** stored here in Phase 1: they're
+    synthesised into the tree at read time from the conversations
+    carrying this ``workspace_id``, so a chat always shows up with zero
+    sync bookkeeping. (Persisting chat nodes — to drag them into
+    folders — is a later refinement.)
+
+    ``ref_id`` points at the backing entity for non-folder kinds: a
+    ``files.id`` (a ``source_kind='document'`` note) today. It is
+    intentionally **not** a DB FK because it's polymorphic across
+    target tables (files now, ``workspace_canvas`` later); the router
+    reconciles a dangling ref at read time. ``position`` orders
+    siblings as a float so a drag can insert between two neighbours by
+    midpoint without renumbering the whole list.
+    """
+
+    __tablename__ = "workspace_items"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Folder nesting *within* the workspace. NULL = top level of the
+    # tree. ``ON DELETE CASCADE`` so deleting a folder row drops its
+    # subtree of item rows in one go (the router trashes the backing
+    # blobs first — see the delete endpoint).
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # 'folder' | 'note' | 'canvas' | 'file'. (Chats are synthesised at
+    # read time, never stored, so they never carry this column.)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Backing entity id for non-folder kinds (-> files.id for a note).
+    # NULL for folders. Polymorphic, so not a FK.
+    ref_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional emoji or lucide icon name rendered on the tree row.
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Sibling ordering. Float so inserting between two neighbours is a
+    # midpoint, never a full renumber. A fresh item lands at the end by
+    # taking ``max(sibling positions) + 1``.
+    position: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
+
+    # --- RAG indexing lifecycle (Phase 1b) -------------------------------
+    # Per-item index status for note / canvas / file kinds — the same
+    # ``queued -> embedding -> ready | failed`` lifecycle the pinned-file
+    # chips use, but stored inline here (decision O3) so the tree renders
+    # without an extra join. Folder rows leave these NULL.
+    indexing_status: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    indexing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Soft-archive (workspace navigator). NULL = live in the tree; a set
+    # timestamp moves the item (and, for a folder, its whole subtree) to
+    # the workspace's Archive section at the bottom of the rail, where it
+    # can be restored or permanently deleted. Deleting the workspace still
+    # cascades archived rows away like any other.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<WorkspaceItem id={self.id} kind={self.kind} "
+            f"title={self.title!r}>"
+        )
+
+
+class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
+    """A tldraw canvas in a workspace (Phase 2).
+
+    Multiplayer from day one: the tldraw store syncs over the **same
+    Yjs/Hocuspocus substrate as documents**, persisted here as a CRDT
+    update (``yjs_update``) keyed by the ``canvas:<id>`` collab room. The
+    columns mirror :class:`app.files.models.DocumentState` (``yjs_update``
+    + monotonic ``version``) — the collab server's Database extension
+    routes writes here when the room name carries the ``canvas:`` prefix.
+
+    ``content_text`` holds the flattened text of the canvas's shapes,
+    pushed by the client on a debounce (``POST /api/canvas/{id}/text``) —
+    the backend can't cheaply decode the tldraw Yjs schema, so the client
+    extracts it. It's mirrored onto a backing Drive text file
+    (``text_file_id``) so the canvas participates in workspace retrieval
+    through the existing ``knowledge_chunks`` pipeline (which keys on a
+    ``UserFile``).
+    """
+
+    __tablename__ = "workspace_canvas"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="Untitled canvas"
+    )
+    # Full merged Y.Doc state (tldraw store). Seeded empty at creation so
+    # the collab Database extension has a row to upsert; the first session
+    # starts from a fresh Y.Doc when this is empty (same as documents).
+    yjs_update: Mapped[bytes] = mapped_column(
+        LargeBinary, nullable=False, default=b""
+    )
+    version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    # Flattened shape text for RAG, pushed by the client. Mirrored onto
+    # ``text_file_id`` for the actual embedding.
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Backing Drive text file in the workspace's ``Canvases/`` folder that
+    # carries the canvas text into ``knowledge_chunks`` (which requires a
+    # ``UserFile``). ``ON DELETE SET NULL`` so a Drive-side delete of the
+    # text file doesn't cascade away the canvas.
+    text_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkspaceCanvas id={self.id} title={self.title!r}>"
+
+
+class WorkspaceFile(Base):
     """Pinned-file join row — attaches a :class:`UserFile` to a
-    :class:`ChatProject` so every new conversation in the project
+    :class:`Workspace` so every new conversation in the workspace
     gets the file auto-attached to its send context.
 
-    Composite PK keeps (project, file) unique without a separate row
+    Composite PK keeps (workspace, file) unique without a separate row
     id. ``ON DELETE CASCADE`` on both FKs (see the migration) keeps
     the join clean when either side goes away.
     """
 
-    __tablename__ = "chat_project_files"
+    __tablename__ = "workspace_files"
 
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("chat_projects.id", ondelete="CASCADE"),
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         primary_key=True,
     )
     file_id: Mapped[uuid.UUID] = mapped_column(
@@ -294,7 +446,7 @@ class ChatProjectFile(Base):
         server_default=func.now(),
         nullable=False,
     )
-    # Who pinned the file (Phase 4). Powers the unpin guard: the project
+    # Who pinned the file (Phase 4). Powers the unpin guard: the workspace
     # owner can unpin anything, but a collaborator can only unpin files
     # they pinned themselves. NULL on pre-0071 rows (owner-only unpin).
     pinned_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -302,7 +454,7 @@ class ChatProjectFile(Base):
     )
 
     # RAG indexing lifecycle — mirrors ``custom_model_files`` so the
-    # project Files tab can render the same "indexing… → ready / failed"
+    # workspace Files tab can render the same "indexing… → ready / failed"
     # chips. ``queued`` until the background ingester picks the file up;
     # only text-extractable files (PDF / text) are ever indexed (images
     # stay on the attachment/vision path and keep status ``queued``,
@@ -322,17 +474,17 @@ class ChatProjectFile(Base):
     )
 
 
-class ConversationExcludedProjectFile(Base):
-    """Per-chat opt-out of a project's pinned files (Phase 4).
+class ConversationExcludedWorkspaceFile(Base):
+    """Per-chat opt-out of a workspace's pinned files (Phase 4).
 
-    Every chat in a project sees all pinned files by default. A row here
+    Every chat in a workspace sees all pinned files by default. A row here
     means "exclude ``file_id`` from *this* conversation's context" — the
     send path filters it out of both the full-dump attachment set and
     the retrieval candidate set. Composite PK; both FKs cascade so the
     row vanishes when either the chat or the file goes away.
     """
 
-    __tablename__ = "conversation_excluded_project_files"
+    __tablename__ = "conversation_excluded_workspace_files"
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True
@@ -433,26 +585,26 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
         return f"<Message id={self.id} role={self.role}>"
 
 
-class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
-    """Invite / membership row for shared chat projects (migration 0031).
+class WorkspaceShare(UUIDPKMixin, TimestampMixin, Base):
+    """Invite / membership row for shared workspaces (migration 0031).
 
     Same ``pending → accepted`` / ``pending → declined`` lifecycle, a
-    unique ``(project_id, invitee_user_id)`` constraint, and the same
+    unique ``(workspace_id, invitee_user_id)`` constraint, and the same
     "delete the row to revoke" policy.
 
     Semantically this is a *much bigger grant* than a single-chat
-    share, though: accepting a project invite gives the invitee
-    **complete access** to every conversation under that project
-    (past + future), the project's pinned files, and the system-
+    share, though: accepting a workspace invite gives the invitee
+    **complete access** to every conversation under that workspace
+    (past + future), the workspace's pinned files, and the system-
     prompt settings. The resolver in ``app/chat/shares.py`` walks
     this table as a second path alongside conversation-level
     shares when answering "can this user read this conversation?".
     """
 
-    __tablename__ = "project_shares"
+    __tablename__ = "workspace_shares"
 
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("chat_projects.id", ondelete="CASCADE"), nullable=False
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     inviter_user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
@@ -467,7 +619,7 @@ class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
     # back-compat with pre-0071 shares) grants full read+write — edit
     # settings, pin/unpin files, add chats. ``viewer`` is read-only.
     # Owner-only actions (delete / archive / manage shares) are never
-    # available to either; those gate on ``proj.user_id``.
+    # available to either; those gate on ``ws.user_id``.
     role: Mapped[str] = mapped_column(
         String(16), nullable=False, default="editor", server_default="editor"
     )
@@ -477,15 +629,15 @@ class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "project_id",
+            "workspace_id",
             "invitee_user_id",
-            name="uq_project_shares_project_invitee",
+            name="uq_workspace_shares_workspace_invitee",
         ),
     )
 
     def __repr__(self) -> str:
         return (
-            f"<ProjectShare id={self.id} project={self.project_id} "
+            f"<WorkspaceShare id={self.id} workspace={self.workspace_id} "
             f"invitee={self.invitee_user_id} status={self.status!r}>"
         )
 

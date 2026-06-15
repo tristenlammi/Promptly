@@ -42,7 +42,7 @@ interface Props {
 }
 
 /** Typeahead picker for resolving another Promptly user by username
- *  or email. Used by both the chat-share dialog and the project-
+ *  or email. Used by both the chat-share dialog and the workspace-
  *  share dialog so the two surfaces stay visually consistent.
  *
  *  Behaviour:

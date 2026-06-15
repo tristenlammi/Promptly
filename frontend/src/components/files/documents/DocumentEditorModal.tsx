@@ -47,6 +47,11 @@ interface DocumentEditorModalProps {
   /** Called whenever we mutate the underlying file (rename, etc.)
    *  so the caller can refresh any listing it renders. */
   onFileUpdated?: (file: FileItem) => void;
+  /** Render the editor *inline* (filling its parent) instead of as a
+   *  full-screen portal modal — used by the Workspace navigator so a
+   *  note opens in the main pane with the rail + nav still visible.
+   *  Skips the backdrop, portal, body scroll-lock, and Esc-to-close. */
+  inline?: boolean;
 }
 
 type SaveStatus = "idle" | "dirty" | "syncing" | "saved" | "offline";
@@ -55,6 +60,7 @@ export function DocumentEditorModal({
   file,
   onClose,
   onFileUpdated,
+  inline = false,
 }: DocumentEditorModalProps) {
   const queryClient = useQueryClient();
   const { ydoc, provider, status: collabStatus, user, error } =
@@ -378,17 +384,21 @@ export function DocumentEditorModal({
     };
   }, [ydoc]);
 
-  // Body scroll lock while the modal is open.
+  // Body scroll lock while the modal is open. (Inline mode lives inside
+  // the normal page flow, so it must not touch body scroll.)
   useEffect(() => {
+    if (inline) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, []);
+  }, [inline]);
 
-  // Escape closes the modal (matching the preview modal's UX).
+  // Escape closes the modal (matching the preview modal's UX). Skipped
+  // inline — Esc shouldn't yank the user out of a note in the pane.
   useEffect(() => {
+    if (inline) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !document.querySelector(".ProseMirror-menubar")) {
         e.preventDefault();
@@ -397,7 +407,7 @@ export function DocumentEditorModal({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, inline]);
 
   // Collaborator awareness — the CollaborationCursor extension
   // publishes each client's user object into the provider's
@@ -586,31 +596,19 @@ export function DocumentEditorModal({
     [onClose]
   );
 
-  const content = (
-    <div
-      className={cn(
-        "fixed inset-0 z-50 flex flex-col bg-black/70 backdrop-blur-sm",
-        // On md+ screens we inset the card so the backdrop is
-        // visible on all four sides — reinforces the "this is a
-        // modal" affordance. On mobile we keep it edge-to-edge so
-        // we don't waste precious viewport to chrome.
-        "md:p-6"
-      )}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="document-editor-title"
-      onMouseDown={handleBackdropClick}
-    >
-      {/* Card */}
+  // Inline mode fills its parent (no modal inset / rounding / shadow);
+  // modal mode keeps the centred, rounded, shadowed card on a backdrop.
+  const cardClass = inline
+    ? "flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg)]"
+    : cn(
+        "flex flex-1 flex-col overflow-hidden bg-[var(--bg)]",
+        "md:mx-auto md:w-full md:max-w-6xl md:rounded-2xl md:border md:border-[var(--border)] md:shadow-2xl"
+      );
+
+  const card = (
       <div
-        className={cn(
-          "flex flex-1 flex-col overflow-hidden bg-[var(--bg)]",
-          // Rounded corners + shadow kick in on tablet+ where the
-          // backdrop inset is visible. On phones the card fills
-          // the viewport so the extra chrome would just eat space.
-          "md:mx-auto md:w-full md:max-w-6xl md:rounded-2xl md:border md:border-[var(--border)] md:shadow-2xl"
-        )}
-        onMouseDown={(e) => e.stopPropagation()}
+        className={cardClass}
+        onMouseDown={inline ? undefined : (e) => e.stopPropagation()}
       >
       {/* Header */}
       <div
@@ -847,10 +845,24 @@ export function DocumentEditorModal({
         )}
       </div>
       </div>
-    </div>
   );
 
-  return createPortal(content, document.body);
+  if (inline) {
+    return <div className="flex h-full min-h-0 flex-col">{card}</div>;
+  }
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/70 backdrop-blur-sm md:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="document-editor-title"
+      onMouseDown={handleBackdropClick}
+    >
+      {card}
+    </div>,
+    document.body
+  );
 }
 
 function SaveIndicator({

@@ -435,7 +435,7 @@ function CustomInstructionsRow({
             British English"</span> or{" "}
             <span className="font-medium">"Be concise and skip
             preamble."</span>{" "}
-            A specific chat or project's own instructions take precedence.
+            A specific chat or workspace's own instructions take precedence.
           </p>
           <textarea
             value={value}

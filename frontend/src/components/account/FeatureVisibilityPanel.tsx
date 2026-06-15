@@ -12,7 +12,7 @@ import { cn } from "@/utils/cn";
 
 /** Per-user interface curation (Phase 2 — feature visibility).
  *
- * Lets each user hide optional top-level surfaces (Projects, Tasks,
+ * Lets each user hide optional top-level surfaces (Workspaces, Tasks,
  * Study) from their sidebar so they can keep their nav as clean or as
  * full as they like. Hiding a section is purely cosmetic — it never
  * disables the underlying feature or its routes, and the section can be

@@ -106,7 +106,7 @@ async def _similarity_search(
     k: int,
 ) -> list[RetrievedChunk]:
     """Top-K cosine search within one owner scope. ``scope_col`` is the
-    knowledge_chunks owner column (``custom_model_id`` / ``project_id``)."""
+    knowledge_chunks owner column (``custom_model_id`` / ``workspace_id``)."""
     column = f"embedding_{dim}"
     # ``<=>`` is pgvector's cosine distance operator (smaller = more
     # similar). We return ``1 - distance`` as the human "score" so the
@@ -176,14 +176,14 @@ async def retrieve_context(
     )
 
 
-async def retrieve_project_context(
+async def retrieve_workspace_context(
     db: AsyncSession,
     *,
-    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     query: str,
     top_k: int = 6,
 ) -> list[RetrievedChunk]:
-    """Top-K chunks most similar to ``query`` among a project's pinned,
+    """Top-K chunks most similar to ``query`` among a workspace's pinned,
     indexed files. Same graceful-degradation contract as
     :func:`retrieve_context`."""
     query = (query or "").strip()
@@ -195,8 +195,8 @@ async def retrieve_project_context(
     qvec_literal, dim = resolved
     return await _similarity_search(
         db,
-        scope_col="project_id",
-        scope_id=project_id,
+        scope_col="workspace_id",
+        scope_id=workspace_id,
         qvec_literal=qvec_literal,
         dim=dim,
         k=top_k,
@@ -212,7 +212,7 @@ async def retrieve_study_context(
 ) -> list[RetrievedChunk]:
     """Top-K chunks most similar to ``query`` among a study project's indexed
     materials. Same graceful-degradation contract as
-    :func:`retrieve_project_context`."""
+    :func:`retrieve_workspace_context`."""
     query = (query or "").strip()
     if not query:
         return []

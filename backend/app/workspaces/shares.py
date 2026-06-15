@@ -1,15 +1,15 @@
-"""Project-level share / invite lifecycle (migration 0031).
+"""Workspace-level share / invite lifecycle (migration 0031).
 
-Mirrors ``app.chat.shares`` for **projects**: create a pending
-``ProjectShare`` row, the invitee accepts or declines, the owner
+Mirrors ``app.chat.shares`` for **workspaces**: create a pending
+``WorkspaceShare`` row, the invitee accepts or declines, the owner
 can revoke, and once accepted the invitee gets complete access to
-every conversation under the project (past and future) plus the
-project's pinned files and settings.
+every conversation under the workspace (past and future) plus the
+workspace's pinned files and settings.
 
 Splitting this out from ``shares.py`` keeps the chat-share module
-focused and gives project sharing its own router prefix. The
-low-level access helpers (``_has_project_access``,
-``list_accessible_project_ids``) still live in ``shares.py`` so
+focused and gives workspace sharing its own router prefix. The
+low-level access helpers (``_has_workspace_access``,
+``list_accessible_workspace_ids``) still live in ``shares.py`` so
 ``get_accessible_conversation`` can import them without a circular
 dep.
 """
@@ -27,122 +27,122 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import ChatProject, ProjectShare
+from app.chat.models import Workspace, WorkspaceShare
 from app.chat.shares import ShareUserBrief, _brief, _resolve_invitee
 from app.database import get_db
 
-logger = logging.getLogger("promptly.chat.project_shares")
+logger = logging.getLogger("promptly.workspaces.shares")
 router = APIRouter()
 
-ProjectShareStatus = Literal["pending", "accepted", "declined"]
+WorkspaceShareStatus = Literal["pending", "accepted", "declined"]
 
 
 # ====================================================================
 # Access helpers
 # ====================================================================
-async def is_owner_of_project(
-    project_id: uuid.UUID, user: User, db: AsyncSession
-) -> ChatProject:
-    """Return the project iff ``user`` owns it, else 404.
+async def is_owner_of_workspace(
+    workspace_id: uuid.UUID, user: User, db: AsyncSession
+) -> Workspace:
+    """Return the workspace iff ``user`` owns it, else 404.
 
     Matches :func:`is_owner_of_conversation` in semantics — used
-    by share-management and destructive endpoints (delete project,
+    by share-management and destructive endpoints (delete workspace,
     archive) that should never be exposed to a collaborator, even
-    one with an accepted project share.
+    one with an accepted workspace share.
     """
-    proj = await db.get(ChatProject, project_id)
-    if proj is None or proj.user_id != user.id:
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None or ws.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
+            detail="Workspace not found",
         )
-    return proj
+    return ws
 
 
-ProjectAccessRole = Literal["owner", "editor", "viewer"]
+WorkspaceAccessRole = Literal["owner", "editor", "viewer"]
 
 
-async def get_accessible_project(
-    project_id: uuid.UUID,
+async def get_accessible_workspace(
+    workspace_id: uuid.UUID,
     user: User,
     db: AsyncSession,
-) -> tuple[ChatProject, ProjectAccessRole]:
+) -> tuple[Workspace, WorkspaceAccessRole]:
     """Owner *or* accepted collaborator, else 404.
 
     Returns the caller's effective role: ``owner`` for the creator, or
     the accepted share's ``role`` (``editor`` / ``viewer``) for a
     collaborator. Read endpoints can ignore the role; write endpoints
-    pass it through :func:`require_project_write`. Destructive endpoints
-    keep calling :func:`is_owner_of_project` directly.
+    pass it through :func:`require_workspace_write`. Destructive endpoints
+    keep calling :func:`is_owner_of_workspace` directly.
     """
-    proj = await db.get(ChatProject, project_id)
-    if proj is None:
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
+            detail="Workspace not found",
         )
-    if proj.user_id == user.id:
-        return proj, "owner"
+    if ws.user_id == user.id:
+        return ws, "owner"
     share = (
         await db.execute(
-            select(ProjectShare).where(
-                ProjectShare.project_id == project_id,
-                ProjectShare.invitee_user_id == user.id,
-                ProjectShare.status == "accepted",
+            select(WorkspaceShare).where(
+                WorkspaceShare.workspace_id == workspace_id,
+                WorkspaceShare.invitee_user_id == user.id,
+                WorkspaceShare.status == "accepted",
             )
         )
     ).scalars().first()
     if share is not None:
         # ``role`` is non-null post-0071; default to editor for any
         # pre-migration row that somehow lacks it.
-        role: ProjectAccessRole = (
+        role: WorkspaceAccessRole = (
             "viewer" if share.role == "viewer" else "editor"
         )
-        return proj, role
+        return ws, role
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail="Project not found",
+        detail="Workspace not found",
     )
 
 
-def require_project_write(role: ProjectAccessRole) -> None:
+def require_workspace_write(role: WorkspaceAccessRole) -> None:
     """403 when the caller is a read-only viewer. Owner + editor pass."""
     if role == "viewer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You have view-only access to this project.",
+            detail="You have view-only access to this workspace.",
         )
 
 
 # ====================================================================
 # DTOs
 # ====================================================================
-class ProjectShareRow(BaseModel):
-    """One row in the owner's "people on this project" list."""
+class WorkspaceShareRow(BaseModel):
+    """One row in the owner's "people on this workspace" list."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    workspace_id: uuid.UUID
     invitee: ShareUserBrief
-    status: ProjectShareStatus
+    status: WorkspaceShareStatus
     role: Literal["editor", "viewer"]
     created_at: datetime
     accepted_at: datetime | None
 
 
-class ProjectInviteRow(BaseModel):
-    """A pending project-share invitation as seen by the invitee."""
+class WorkspaceInviteRow(BaseModel):
+    """A pending workspace-share invitation as seen by the invitee."""
 
     id: uuid.UUID
-    project_id: uuid.UUID
-    project_title: str
+    workspace_id: uuid.UUID
+    workspace_title: str
     inviter: ShareUserBrief
     created_at: datetime
 
 
-class CreateProjectShareRequest(BaseModel):
-    """Owner asks to share a project with ``username`` or ``email``.
+class CreateWorkspaceShareRequest(BaseModel):
+    """Owner asks to share a workspace with ``username`` or ``email``.
 
     Mirrors ``CreateShareRequest`` for conversations — one of the
     two fields must be present. The user-picker in the frontend
@@ -157,41 +157,41 @@ class CreateProjectShareRequest(BaseModel):
     role: Literal["editor", "viewer"] = "editor"
 
 
-class ProjectParticipants(BaseModel):
-    """Owner + accepted collaborators surfaced in project detail."""
+class WorkspaceParticipants(BaseModel):
+    """Owner + accepted collaborators surfaced in workspace detail."""
 
     owner: ShareUserBrief
     collaborators: list[ShareUserBrief] = Field(default_factory=list)
 
 
-async def load_project_participants(
-    proj: ChatProject, db: AsyncSession
-) -> ProjectParticipants:
-    """Fetch the project's owner and every accepted collaborator.
+async def load_workspace_participants(
+    ws: Workspace, db: AsyncSession
+) -> WorkspaceParticipants:
+    """Fetch the workspace's owner and every accepted collaborator.
 
     One round-trip for the owner, one for the collaborators. Called
-    from :mod:`app.chat.projects_router` on the detail endpoint so
+    from :mod:`app.workspaces.router` on the detail endpoint so
     the frontend can render a "shared with Jane, Alex" chip in the
-    project header.
+    workspace header.
     """
-    owner = await db.get(User, proj.user_id)
+    owner = await db.get(User, ws.user_id)
     if owner is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Project owner missing",
+            detail="Workspace owner missing",
         )
     rows = (
         await db.execute(
             select(User)
-            .join(ProjectShare, ProjectShare.invitee_user_id == User.id)
+            .join(WorkspaceShare, WorkspaceShare.invitee_user_id == User.id)
             .where(
-                ProjectShare.project_id == proj.id,
-                ProjectShare.status == "accepted",
+                WorkspaceShare.workspace_id == ws.id,
+                WorkspaceShare.status == "accepted",
             )
             .order_by(User.username.asc())
         )
     ).scalars().all()
-    return ProjectParticipants(
+    return WorkspaceParticipants(
         owner=_brief(owner),
         collaborators=[_brief(u) for u in rows],
     )
@@ -201,28 +201,28 @@ async def load_project_participants(
 # Endpoints — owner perspective
 # ====================================================================
 @router.get(
-    "/{project_id}/shares",
-    response_model=list[ProjectShareRow],
+    "/{workspace_id}/shares",
+    response_model=list[WorkspaceShareRow],
 )
-async def list_project_shares(
-    project_id: uuid.UUID,
+async def list_workspace_shares(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[ProjectShareRow]:
-    """List every share row on a project. Owner only."""
-    proj = await is_owner_of_project(project_id, user, db)
+) -> list[WorkspaceShareRow]:
+    """List every share row on a workspace. Owner only."""
+    ws = await is_owner_of_workspace(workspace_id, user, db)
     rows = (
         await db.execute(
-            select(ProjectShare, User)
-            .join(User, User.id == ProjectShare.invitee_user_id)
-            .where(ProjectShare.project_id == proj.id)
-            .order_by(ProjectShare.created_at.desc())
+            select(WorkspaceShare, User)
+            .join(User, User.id == WorkspaceShare.invitee_user_id)
+            .where(WorkspaceShare.workspace_id == ws.id)
+            .order_by(WorkspaceShare.created_at.desc())
         )
     ).all()
     return [
-        ProjectShareRow(
+        WorkspaceShareRow(
             id=share.id,
-            project_id=share.project_id,
+            workspace_id=share.workspace_id,
             invitee=_brief(invitee),
             status=share.status,  # type: ignore[arg-type]
             role="viewer" if share.role == "viewer" else "editor",
@@ -234,23 +234,23 @@ async def list_project_shares(
 
 
 @router.post(
-    "/{project_id}/shares",
-    response_model=ProjectShareRow,
+    "/{workspace_id}/shares",
+    response_model=WorkspaceShareRow,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_project_share(
-    project_id: uuid.UUID,
-    payload: CreateProjectShareRequest,
+async def create_workspace_share(
+    workspace_id: uuid.UUID,
+    payload: CreateWorkspaceShareRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ProjectShareRow:
-    """Invite someone to collaborate on a project. Owner only.
+) -> WorkspaceShareRow:
+    """Invite someone to collaborate on a workspace. Owner only.
 
     Same idempotent behaviour as conversation shares: re-inviting a
     pending user returns the existing row; re-inviting after they
     declined flips the row back to ``pending``; self-invites 400.
     """
-    proj = await is_owner_of_project(project_id, user, db)
+    ws = await is_owner_of_workspace(workspace_id, user, db)
     # Reuse the conversation-share resolver so "find user by
     # username or email" stays a single code path for both share
     # surfaces.
@@ -265,14 +265,14 @@ async def create_project_share(
     if invitee.id == user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You already own this project.",
+            detail="You already own this workspace.",
         )
 
     existing = (
         await db.execute(
-            select(ProjectShare).where(
-                ProjectShare.project_id == proj.id,
-                ProjectShare.invitee_user_id == invitee.id,
+            select(WorkspaceShare).where(
+                WorkspaceShare.workspace_id == ws.id,
+                WorkspaceShare.invitee_user_id == invitee.id,
             )
         )
     ).scalars().first()
@@ -291,8 +291,8 @@ async def create_project_share(
         await db.refresh(existing)
         share = existing
     else:
-        share = ProjectShare(
-            project_id=proj.id,
+        share = WorkspaceShare(
+            workspace_id=ws.id,
             inviter_user_id=user.id,
             invitee_user_id=invitee.id,
             status="pending",
@@ -302,9 +302,9 @@ async def create_project_share(
         await db.commit()
         await db.refresh(share)
 
-    return ProjectShareRow(
+    return WorkspaceShareRow(
         id=share.id,
-        project_id=share.project_id,
+        workspace_id=share.workspace_id,
         invitee=_brief(invitee),
         status=share.status,  # type: ignore[arg-type]
         role="viewer" if share.role == "viewer" else "editor",
@@ -314,33 +314,33 @@ async def create_project_share(
 
 
 @router.delete(
-    "/{project_id}/shares/{share_id}",
+    "/{workspace_id}/shares/{share_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-async def revoke_project_share(
-    project_id: uuid.UUID,
+async def revoke_workspace_share(
+    workspace_id: uuid.UUID,
     share_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Owner revokes, or invitee leaves, a project share.
+    """Owner revokes, or invitee leaves, a workspace share.
 
-    Hard-deletes the row. The unique ``(project_id, invitee_user_id)``
+    Hard-deletes the row. The unique ``(workspace_id, invitee_user_id)``
     constraint means a follow-up invite starts cleanly as
     ``pending`` rather than surfacing a stale ``accepted`` row.
     """
-    share = await db.get(ProjectShare, share_id)
-    if share is None or share.project_id != project_id:
+    share = await db.get(WorkspaceShare, share_id)
+    if share is None or share.workspace_id != workspace_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Share not found"
         )
-    proj = await db.get(ChatProject, project_id)
-    if proj is None:
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
         )
-    is_owner = proj.user_id == user.id
+    is_owner = ws.user_id == user.id
     is_invitee = share.invitee_user_id == user.id
     if not (is_owner or is_invitee):
         raise HTTPException(
@@ -353,56 +353,56 @@ async def revoke_project_share(
 # ====================================================================
 # Endpoints — invitee perspective
 # ====================================================================
-# Mounted at ``/api/chat`` (sibling-namespace of conversations) so
-# the "my project invites" inbox sits alongside the existing
+# Mounted at ``/api`` (sibling-namespace of conversations) so
+# the "my workspace invites" inbox sits alongside the existing
 # ``/api/chat/share-invites`` for chats. We use a *second* router
 # with its own prefix-less endpoints below because it's the cleanest
-# way to attach the same ``/api/chat/project-share-invites`` URL
-# space without overloading the projects router.
+# way to attach the same ``/api/workspace-share-invites`` URL
+# space without overloading the workspaces router.
 invite_router = APIRouter()
 
 
-@invite_router.get("/project-share-invites", response_model=list[ProjectInviteRow])
-async def list_project_share_invites(
+@invite_router.get("/workspace-share-invites", response_model=list[WorkspaceInviteRow])
+async def list_workspace_share_invites(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[ProjectInviteRow]:
-    """Pending project-share invites for the caller."""
+) -> list[WorkspaceInviteRow]:
+    """Pending workspace-share invites for the caller."""
     rows = (
         await db.execute(
-            select(ProjectShare, ChatProject, User)
-            .join(ChatProject, ChatProject.id == ProjectShare.project_id)
-            .join(User, User.id == ProjectShare.inviter_user_id)
+            select(WorkspaceShare, Workspace, User)
+            .join(Workspace, Workspace.id == WorkspaceShare.workspace_id)
+            .join(User, User.id == WorkspaceShare.inviter_user_id)
             .where(
-                ProjectShare.invitee_user_id == user.id,
-                ProjectShare.status == "pending",
+                WorkspaceShare.invitee_user_id == user.id,
+                WorkspaceShare.status == "pending",
             )
-            .order_by(ProjectShare.created_at.desc())
+            .order_by(WorkspaceShare.created_at.desc())
         )
     ).all()
     return [
-        ProjectInviteRow(
+        WorkspaceInviteRow(
             id=share.id,
-            project_id=proj.id,
-            project_title=proj.title,
+            workspace_id=ws.id,
+            workspace_title=ws.title,
             inviter=_brief(inviter),
             created_at=share.created_at,
         )
-        for share, proj, inviter in rows
+        for share, ws, inviter in rows
     ]
 
 
 @invite_router.post(
-    "/project-share-invites/{share_id}/accept",
+    "/workspace-share-invites/{share_id}/accept",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-async def accept_project_share_invite(
+async def accept_workspace_share_invite(
     share_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    share = await db.get(ProjectShare, share_id)
+    share = await db.get(WorkspaceShare, share_id)
     if share is None or share.invitee_user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found"
@@ -416,16 +416,16 @@ async def accept_project_share_invite(
 
 
 @invite_router.post(
-    "/project-share-invites/{share_id}/decline",
+    "/workspace-share-invites/{share_id}/decline",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
 )
-async def decline_project_share_invite(
+async def decline_workspace_share_invite(
     share_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    share = await db.get(ProjectShare, share_id)
+    share = await db.get(WorkspaceShare, share_id)
     if share is None or share.invitee_user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found"
@@ -439,12 +439,13 @@ async def decline_project_share_invite(
 
 
 __all__ = [
-    "ProjectInviteRow",
-    "ProjectParticipants",
-    "ProjectShareRow",
-    "get_accessible_project",
+    "WorkspaceInviteRow",
+    "WorkspaceParticipants",
+    "WorkspaceShareRow",
+    "get_accessible_workspace",
     "invite_router",
-    "is_owner_of_project",
-    "load_project_participants",
+    "is_owner_of_workspace",
+    "load_workspace_participants",
+    "require_workspace_write",
     "router",
 ]

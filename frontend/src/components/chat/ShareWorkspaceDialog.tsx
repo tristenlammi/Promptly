@@ -4,42 +4,42 @@ import { Loader2, Trash2, UserPlus } from "lucide-react";
 import { Modal } from "@/components/shared/Modal";
 import { UserPicker, type UserPickerValue } from "@/components/shared/UserPicker";
 import {
-  useCreateProjectShare,
-  useDeleteProjectShare,
-  useProjectShares,
-} from "@/hooks/useChatProjects";
+  useCreateWorkspaceShare,
+  useDeleteWorkspaceShare,
+  useWorkspaceShares,
+} from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
 
 interface Props {
   open: boolean;
-  projectId: string;
-  projectTitle: string;
+  workspaceId: string;
+  workspaceTitle: string;
   onClose: () => void;
 }
 
-/** Owner-only modal for inviting teammates into a chat project.
+/** Owner-only modal for inviting teammates into a workspace.
  *
- *  Sharing a project is a *much bigger grant* than sharing a
+ *  Sharing a workspace is a *much bigger grant* than sharing a
  *  single conversation — the invitee gets complete access to
- *  every chat under the project (including the owner's) plus
- *  the project's pinned files and system-prompt settings. The
+ *  every chat under the workspace (including the owner's) plus
+ *  the workspace's pinned files and system-prompt settings. The
  *  wording in the modal calls this out explicitly so nobody
  *  clicks through without understanding what they're opening up.
  *
  *  Mirrors :class:`ShareConversationDialog` for layout consistency;
  *  the two modals share the same ``UserPicker`` component so the
  *  search-for-teammate flow is identical. */
-export function ShareProjectDialog({
+export function ShareWorkspaceDialog({
   open,
-  projectId,
-  projectTitle,
+  workspaceId,
+  workspaceTitle,
   onClose,
 }: Props) {
-  const { data, isLoading, isError } = useProjectShares(
-    open ? projectId : null
+  const { data, isLoading, isError } = useWorkspaceShares(
+    open ? workspaceId : null
   );
-  const create = useCreateProjectShare(projectId);
-  const remove = useDeleteProjectShare(projectId);
+  const create = useCreateWorkspaceShare(workspaceId);
+  const remove = useDeleteWorkspaceShare(workspaceId);
 
   const [picked, setPicked] = useState<UserPickerValue>(null);
   const [role, setRole] = useState<"editor" | "viewer">("editor");
@@ -79,8 +79,8 @@ export function ShareProjectDialog({
     <Modal
       open={open}
       onClose={onClose}
-      title={`Share "${projectTitle}"`}
-      description="Teammates you invite get complete access to this project — every chat inside it (including yours), all pinned files, and the project's system prompt. Whoever sends each message pays for that turn."
+      title={`Share "${workspaceTitle}"`}
+      description="Teammates you invite get complete access to this workspace — every chat inside it (including yours), all pinned files, and the workspace's system prompt. Whoever sends each message pays for that turn."
       widthClass="max-w-xl"
     >
       <form onSubmit={submit} className="flex items-start gap-2">

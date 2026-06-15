@@ -190,10 +190,10 @@ class KnowledgeChunk(Base):
         server_default=func.gen_random_uuid(),
     )
 
-    # Scope: exactly one of ``custom_model_id`` / ``project_id`` /
+    # Scope: exactly one of ``custom_model_id`` / ``workspace_id`` /
     # ``study_project_id`` is set (enforced by a CHECK constraint,
     # migration 0080). The chunk store is shared between Custom Models,
-    # Chat Projects, and Study projects — all reuse the same
+    # Workspaces, and Study projects — all reuse the same
     # ``embedding_<dim>`` vector columns + HNSW indexes.
     custom_model_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -201,9 +201,9 @@ class KnowledgeChunk(Base):
         nullable=True,
         index=True,
     )
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("chat_projects.id", ondelete="CASCADE"),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )

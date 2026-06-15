@@ -51,7 +51,7 @@ export interface UserSettings {
   default_provider_id?: string;
   /** Optional top-level nav surfaces the user has hidden from their
    *  sidebar (purely cosmetic — routes still work). One of
-   *  ``"projects" | "study" | "tasks"``. Absent / ``[]`` = show all. */
+   *  ``"workspaces" | "study" | "tasks"``. Absent / ``[]`` = show all. */
   hidden_nav?: string[];
   /** Legacy master switch for cross-chat memory (Phase 6). Superseded by
    *  ``memory_mode``; kept for back-compat reads. */
@@ -63,7 +63,7 @@ export interface UserSettings {
   /** Conversation ids the user has hidden from their own sidebar. */
   hidden_conversations?: string[];
   /** Account-wide custom system prompt injected into every new chat's
-   *  system prompt. Overridden by per-project and per-chat instructions.
+   *  system prompt. Overridden by per-workspace and per-chat instructions.
    *  Capped at 8000 chars server-side. */
   custom_system_prompt?: string;
   // Anything else the server might surface — kept loose on purpose so
@@ -644,9 +644,9 @@ export interface ConversationSummary {
    *  the live deadline so the UI can render a countdown. */
   temporary_mode?: TemporaryMode | null;
   expires_at?: string | null;
-  /** Phase P1 — Chat Projects. Non-null when this chat lives inside a
-   *  :class:`ChatProject`. Drives the sidebar grouping + breadcrumb. */
-  project_id?: string | null;
+  /** Phase P1 — Workspaces. Non-null when this chat lives inside a
+   *  :class:`Workspace`. Drives the sidebar grouping + breadcrumb. */
+  workspace_id?: string | null;
   /** Phase 1 — per-conversation custom instructions / system prompt.
    *  Free-text steer set from the chat header's "Instructions" editor.
    *  Null / empty when unset. */

@@ -2,7 +2,7 @@
 
 Per-conversation sharing (inviting another user to a single chat) was
 removed — it was little-used and left recipients unable to drop a
-shared chat from their list. **Project**-level sharing remains the
+shared chat from their list. **Workspace**-level sharing remains the
 single collaboration surface, so this module keeps the access helpers
 that both surfaces rely on:
 
@@ -10,11 +10,11 @@ that both surfaces rely on:
   endpoints that should never be exposed to a collaborator
   (delete, settings).
 * :func:`get_accessible_conversation` — owner *or* a collaborator who
-  reached the chat through an accepted *project* share.
+  reached the chat through an accepted *workspace* share.
 
 It also still owns the small share DTO/helper primitives
 (:class:`ShareUserBrief`, :func:`_brief`, :func:`_resolve_invitee`,
-:class:`CreateShareRequest`) that :mod:`app.chat.project_shares`
+:class:`CreateShareRequest`) that :mod:`app.workspaces.shares`
 imports so the "find user by handle" path stays a single code path.
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.chat.models import Conversation, ProjectShare
+from app.chat.models import Conversation, WorkspaceShare
 
 logger = logging.getLogger("promptly.chat.shares")
 
@@ -56,39 +56,39 @@ async def is_owner_of_conversation(
     return conv
 
 
-async def _has_project_access(
-    project_id: uuid.UUID | None, user: User, db: AsyncSession
+async def _has_workspace_access(
+    workspace_id: uuid.UUID | None, user: User, db: AsyncSession
 ) -> bool:
-    """Does ``user`` have any path to the given project?
+    """Does ``user`` have any path to the given workspace?
 
     Used by :func:`get_accessible_conversation` as a second check
-    after the ownership test: if the chat lives in a project the
-    caller either owns or has an accepted project share for, they
+    after the ownership test: if the chat lives in a workspace the
+    caller either owns or has an accepted workspace share for, they
     inherit read/post access.
 
-    Returning early for ``project_id is None`` keeps call sites
-    free of a None-guard — almost every conversation is project-less
+    Returning early for ``workspace_id is None`` keeps call sites
+    free of a None-guard — almost every conversation is workspace-less
     so this path short-circuits cheaply.
     """
-    if project_id is None:
+    if workspace_id is None:
         return False
     # Import lazily to avoid a circular import at module load — the
-    # projects router imports from ``shares.py`` for its own access
-    # helpers, and :class:`ChatProject` pulls in the whole project
+    # workspaces router imports from ``shares.py`` for its own access
+    # helpers, and :class:`Workspace` pulls in the whole workspace
     # tree.
-    from app.chat.models import ChatProject
+    from app.chat.models import Workspace
 
-    proj = await db.get(ChatProject, project_id)
-    if proj is None:
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None:
         return False
-    if proj.user_id == user.id:
+    if ws.user_id == user.id:
         return True
     share = (
         await db.execute(
-            select(ProjectShare).where(
-                ProjectShare.project_id == project_id,
-                ProjectShare.invitee_user_id == user.id,
-                ProjectShare.status == "accepted",
+            select(WorkspaceShare).where(
+                WorkspaceShare.workspace_id == workspace_id,
+                WorkspaceShare.invitee_user_id == user.id,
+                WorkspaceShare.status == "accepted",
             )
         )
     ).scalars().first()
@@ -128,13 +128,13 @@ async def get_accessible_conversation(
     if conv.user_id == user.id:
         return conv, "owner"
 
-    # 0031 — project-level sharing. If the chat lives in a project
+    # 0031 — workspace-level sharing. If the chat lives in a workspace
     # the caller has accepted a share on (or owns outright), they
     # inherit collaborator access to every conversation under that
-    # project. The ``owner`` role is reserved for the literal
+    # workspace. The ``owner`` role is reserved for the literal
     # conversation creator so the send path can still reject edits
     # on someone else's messages.
-    if await _has_project_access(conv.project_id, user, db):
+    if await _has_workspace_access(conv.workspace_id, user, db):
         return conv, "collaborator"
 
     raise HTTPException(
@@ -146,47 +146,47 @@ async def get_accessible_conversation(
 async def list_accessible_conversation_ids(
     user: User, db: AsyncSession
 ) -> list[uuid.UUID]:
-    """All conversation ids the caller can read — owned + project share.
+    """All conversation ids the caller can read — owned + workspace share.
 
     Used by the cross-chat full-text search to widen the ``WHERE``
-    clause without a JOIN at each call site. The project-share path
-    brings in every chat under any project the caller has accepted a
+    clause without a JOIN at each call site. The workspace-share path
+    brings in every chat under any workspace the caller has accepted a
     share on.
     """
-    # Project ids the caller has *any* access to (owned + accepted
+    # Workspace ids the caller has *any* access to (owned + accepted
     # share). Gather once and pass as an ``IN`` clause rather than
     # joining through more tables in the main query.
-    accessible_project_ids = await list_accessible_project_ids(user, db)
+    accessible_workspace_ids = await list_accessible_workspace_ids(user, db)
 
     conds = [Conversation.user_id == user.id]
-    if accessible_project_ids:
-        conds.append(Conversation.project_id.in_(accessible_project_ids))
+    if accessible_workspace_ids:
+        conds.append(Conversation.workspace_id.in_(accessible_workspace_ids))
 
     res = await db.execute(select(Conversation.id).where(or_(*conds)))
     return list({row[0] for row in res.all()})
 
 
-async def list_accessible_project_ids(
+async def list_accessible_workspace_ids(
     user: User, db: AsyncSession
 ) -> list[uuid.UUID]:
-    """Project ids the caller owns or has an accepted share on.
+    """Workspace ids the caller owns or has an accepted share on.
 
-    Deliberately tiny — the project share scale is "a handful per
+    Deliberately tiny — the workspace share scale is "a handful per
     user" so we don't bother with a composite index query. Called
-    by :func:`list_accessible_conversation_ids` and by the project
-    list endpoint to surface shared projects in the same UI as
+    by :func:`list_accessible_conversation_ids` and by the workspace
+    list endpoint to surface shared workspaces in the same UI as
     owned ones.
     """
-    # Import lazily — see note in ``_has_project_access``.
-    from app.chat.models import ChatProject
+    # Import lazily — see note in ``_has_workspace_access``.
+    from app.chat.models import Workspace
 
     owned_res = await db.execute(
-        select(ChatProject.id).where(ChatProject.user_id == user.id)
+        select(Workspace.id).where(Workspace.user_id == user.id)
     )
     shared_res = await db.execute(
-        select(ProjectShare.project_id).where(
-            ProjectShare.invitee_user_id == user.id,
-            ProjectShare.status == "accepted",
+        select(WorkspaceShare.workspace_id).where(
+            WorkspaceShare.invitee_user_id == user.id,
+            WorkspaceShare.status == "accepted",
         )
     )
     ids: set[uuid.UUID] = set()
@@ -214,8 +214,8 @@ class ConversationParticipants(BaseModel):
     """Owner + collaborators surfaced in the conversation detail view.
 
     Collaborators are the people who reached the chat through an
-    accepted share on its *project* (per-chat sharing was removed).
-    Used to render "from Jane" chips on user messages in project-
+    accepted share on its *workspace* (per-chat sharing was removed).
+    Used to render "from Jane" chips on user messages in workspace-
     shared chats.
     """
 
@@ -269,8 +269,8 @@ async def load_participants(
 ) -> ConversationParticipants:
     """Resolve the owner and collaborators for a conversation.
 
-    Collaborators come from accepted shares on the chat's *project*
-    (per-chat sharing was removed). A project-less chat therefore has
+    Collaborators come from accepted shares on the chat's *workspace*
+    (per-chat sharing was removed). A workspace-less chat therefore has
     no collaborators. Cheap enough to run on every conversation-detail
     request without caching.
     """
@@ -285,14 +285,14 @@ async def load_participants(
         )
 
     collaborators: list[ShareUserBrief] = []
-    if conv.project_id is not None:
+    if conv.workspace_id is not None:
         rows = (
             await db.execute(
                 select(User)
-                .join(ProjectShare, ProjectShare.invitee_user_id == User.id)
+                .join(WorkspaceShare, WorkspaceShare.invitee_user_id == User.id)
                 .where(
-                    ProjectShare.project_id == conv.project_id,
-                    ProjectShare.status == "accepted",
+                    WorkspaceShare.workspace_id == conv.workspace_id,
+                    WorkspaceShare.status == "accepted",
                 )
                 .order_by(User.username.asc())
             )

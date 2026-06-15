@@ -1,31 +1,31 @@
-"""Chat Projects API — CRUD, archive, pinned files, conversations listing.
+"""Workspaces API — CRUD, archive, pinned files, conversations listing.
 
 Separate module from :mod:`app.chat.router` because:
 
-* The chat router is already 2 k+ lines and growing; keeping projects
+* The chat router is already 2 k+ lines and growing; keeping workspaces
   isolated makes each area easier to reason about.
-* Project endpoints don't touch streaming / SSE plumbing, so the
+* Workspace endpoints don't touch streaming / SSE plumbing, so the
   import graph stays narrower than a single combined file would.
 
-Mounted under ``/api/chat/projects`` from ``app.main`` — see the
+Mounted under ``/api/workspaces`` from ``app.main`` — see the
 ``include_router`` block there.
 
 Surface area::
 
-    GET    /chat/projects                 list user's projects (active / archived)
-    POST   /chat/projects                 create a project
-    GET    /chat/projects/{pid}           full detail (incl. pinned files)
-    PATCH  /chat/projects/{pid}           rename / edit system prompt / change default model
-    DELETE /chat/projects/{pid}           permanently delete
-    POST   /chat/projects/{pid}/archive   move to archive
-    POST   /chat/projects/{pid}/unarchive bring back from archive
-    GET    /chat/projects/{pid}/conversations   list chats inside the project
-    POST   /chat/projects/{pid}/files     pin a file to the project
-    DELETE /chat/projects/{pid}/files/{fid}     unpin
+    GET    /workspaces                 list user's workspaces (active / archived)
+    POST   /workspaces                 create a workspace
+    GET    /workspaces/{wid}           full detail (incl. pinned files)
+    PATCH  /workspaces/{wid}           rename / edit system prompt / change default model
+    DELETE /workspaces/{wid}           permanently delete
+    POST   /workspaces/{wid}/archive   move to archive
+    POST   /workspaces/{wid}/unarchive bring back from archive
+    GET    /workspaces/{wid}/conversations   list chats inside the workspace
+    POST   /workspaces/{wid}/files     pin a file to the workspace
+    DELETE /workspaces/{wid}/files/{fid}     unpin
 
-Access control: every endpoint looks up the project via
-:func:`_get_owned_project`, which 404s when the caller isn't the
-owner. There is no sharing / collaborator story for chat projects
+Access control: every endpoint looks up the workspace via
+:func:`_get_owned_workspace`, which 404s when the caller isn't the
+owner. There is no sharing / collaborator story for workspaces
 today — if/when we add it, the check becomes a helper mirroring
 :func:`app.chat.shares.get_accessible_conversation`.
 """
@@ -48,39 +48,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.chat.models import (
-    ChatProject,
-    ChatProjectFile,
     Conversation,
     Message,
+    Workspace,
+    WorkspaceFile,
 )
-from app.chat.project_schemas import (
-    ChatProjectCreate,
-    ChatProjectDetail,
-    ChatProjectFilePin,
-    ChatProjectParticipant,
-    ChatProjectPinFile,
-    ChatProjectSummary,
-    ChatProjectUpdate,
-    ChatProjectUsage,
-    ChatProjectUsageModel,
+from app.workspaces.schemas import (
+    WorkspaceCreate,
+    WorkspaceDetail,
+    WorkspaceFilePin,
+    WorkspaceParticipant,
+    WorkspacePinFile,
+    WorkspaceSummary,
+    WorkspaceUpdate,
+    WorkspaceUsage,
+    WorkspaceUsageModel,
 )
-from app.chat.project_shares import (
-    get_accessible_project,
-    is_owner_of_project,
-    load_project_participants,
-    require_project_write,
+from app.workspaces.shares import (
+    get_accessible_workspace,
+    is_owner_of_workspace,
+    load_workspace_participants,
+    require_workspace_write,
 )
 from app.chat.schemas import ConversationSummary
-from app.chat.project_knowledge import (
-    delete_project_file_chunks,
-    index_file_for_project,
-    project_context_stats,
-    reindex_project,
+from app.workspaces.knowledge import (
+    delete_workspace_file_chunks,
+    index_file_for_workspace,
+    reindex_workspace,
+    workspace_context_stats,
 )
-from app.chat.shares import list_accessible_project_ids
+from app.chat.shares import list_accessible_workspace_ids
 from app.custom_models.resolver import is_custom_model_id
 from app.database import get_db
 from app.files.models import UserFile
+from app.files.system_folders import create_workspace_folder_tree
 from app.models_config.models import ModelProvider
 
 router = APIRouter()
@@ -91,17 +92,17 @@ router = APIRouter()
 # ---------------------------------------------------------------------
 
 
-async def _get_owned_project(
-    project_id: uuid.UUID, user: User, db: AsyncSession
-) -> ChatProject:
-    """Return the project iff ``user`` owns it, else 404.
+async def _get_owned_workspace(
+    workspace_id: uuid.UUID, user: User, db: AsyncSession
+) -> Workspace:
+    """Return the workspace iff ``user`` owns it, else 404.
 
-    Now a thin wrapper around :func:`is_owner_of_project` so the
+    Now a thin wrapper around :func:`is_owner_of_workspace` so the
     owner-vs-collaborator distinction lives in one place. Used by
     endpoints that should never be exposed to a collaborator
     (delete, archive / unarchive).
     """
-    return await is_owner_of_project(project_id, user, db)
+    return await is_owner_of_workspace(workspace_id, user, db)
 
 
 async def _validate_provider(
@@ -109,7 +110,7 @@ async def _validate_provider(
 ) -> ModelProvider | None:
     """Reject ``default_provider_id`` pointing at a provider the user
     isn't allowed to use. Mirrors the ACL rules the send-message
-    endpoint enforces, so a project can't be wired up with a
+    endpoint enforces, so a workspace can't be wired up with a
     provider the caller couldn't actually hit anyway.
 
     ``None`` is always fine (means "fall back to global selection")
@@ -171,42 +172,42 @@ async def _validate_default_model(
 
 
 async def _summary_with_rollups(
-    proj: ChatProject,
+    ws: Workspace,
     db: AsyncSession,
     caller: User,
-) -> ChatProjectSummary:
-    """Hydrate a :class:`ChatProjectSummary` with the conversation +
+) -> WorkspaceSummary:
+    """Hydrate a :class:`WorkspaceSummary` with the conversation +
     file counts the list/card UI needs.
 
     Also populates ``role`` / ``shared_by`` so collaborator-visible
     cards can render "shared by Jane" instead of the owner's
     timestamp line. Two cheap ``SELECT COUNT(*)`` queries are
     cheaper than joining and grouping for every list response; the
-    N-projects * 2-counts pattern is fine for the dozens of
-    projects a power user will accumulate.
+    N-workspaces * 2-counts pattern is fine for the dozens of
+    workspaces a power user will accumulate.
     """
     conv_count = await db.scalar(
         select(func.count())
         .select_from(Conversation)
-        .where(Conversation.project_id == proj.id)
+        .where(Conversation.workspace_id == ws.id)
     )
     file_count = await db.scalar(
         select(func.count())
-        .select_from(ChatProjectFile)
-        .where(ChatProjectFile.project_id == proj.id)
+        .select_from(WorkspaceFile)
+        .where(WorkspaceFile.workspace_id == ws.id)
     )
-    base = ChatProjectSummary.model_validate(proj)
+    base = WorkspaceSummary.model_validate(ws)
     base.conversation_count = int(conv_count or 0)
     base.file_count = int(file_count or 0)
 
-    if proj.user_id == caller.id:
+    if ws.user_id == caller.id:
         base.role = "owner"
         base.shared_by = None
     else:
         base.role = "collaborator"
-        owner = await db.get(User, proj.user_id)
+        owner = await db.get(User, ws.user_id)
         if owner is not None:
-            base.shared_by = ChatProjectParticipant(
+            base.shared_by = WorkspaceParticipant(
                 user_id=owner.id,
                 username=owner.username,
                 email=owner.email,
@@ -219,58 +220,58 @@ async def _summary_with_rollups(
 # ---------------------------------------------------------------------
 
 
-@router.get("", response_model=list[ChatProjectSummary])
-async def list_projects(
+@router.get("", response_model=list[WorkspaceSummary])
+async def list_workspaces(
     archived: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[ChatProjectSummary]:
-    """List projects the caller owns *or* has an accepted share on.
+) -> list[WorkspaceSummary]:
+    """List workspaces the caller owns *or* has an accepted share on.
 
-    ``archived=false`` (default) → only active projects
-    (``archived_at IS NULL``). Collaborator-visible projects always
+    ``archived=false`` (default) → only active workspaces
+    (``archived_at IS NULL``). Collaborator-visible workspaces always
     show in the active list — invitees don't get the archive UX
     since they can't archive/unarchive.
 
-    Owned and shared projects arrive in the same payload but each
+    Owned and shared workspaces arrive in the same payload but each
     row carries a ``role`` discriminator so the card UI can badge
     shared ones.
     """
-    accessible_ids = await list_accessible_project_ids(user, db)
+    accessible_ids = await list_accessible_workspace_ids(user, db)
     if not accessible_ids:
         return []
-    q = select(ChatProject).where(ChatProject.id.in_(accessible_ids))
+    q = select(Workspace).where(Workspace.id.in_(accessible_ids))
     if archived:
         # Archive is owner-facing only — collaborators don't get
-        # surfaced archived projects (the owner may have hidden it
+        # surfaced archived workspaces (the owner may have hidden it
         # for a reason; surfacing it to shared users would be
         # surprising).
         q = (
-            q.where(ChatProject.user_id == user.id)
-            .where(ChatProject.archived_at.is_not(None))
-            .order_by(ChatProject.archived_at.desc())
+            q.where(Workspace.user_id == user.id)
+            .where(Workspace.archived_at.is_not(None))
+            .order_by(Workspace.archived_at.desc())
         )
     else:
-        q = q.where(ChatProject.archived_at.is_(None)).order_by(
-            ChatProject.updated_at.desc()
+        q = q.where(Workspace.archived_at.is_(None)).order_by(
+            Workspace.updated_at.desc()
         )
     res = await db.execute(q)
     rows = list(res.scalars().all())
-    return [await _summary_with_rollups(p, db, user) for p in rows]
+    return [await _summary_with_rollups(w, db, user) for w in rows]
 
 
 @router.post(
-    "", response_model=ChatProjectSummary, status_code=status.HTTP_201_CREATED
+    "", response_model=WorkspaceSummary, status_code=status.HTTP_201_CREATED
 )
-async def create_project(
-    payload: ChatProjectCreate,
+async def create_workspace(
+    payload: WorkspaceCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectSummary:
+) -> WorkspaceSummary:
     await _validate_default_model(
         payload.default_provider_id, payload.default_model_id, user, db
     )
-    proj = ChatProject(
+    ws = Workspace(
         user_id=user.id,
         title=payload.title.strip(),
         description=payload.description,
@@ -278,10 +279,18 @@ async def create_project(
         default_model_id=payload.default_model_id,
         default_provider_id=payload.default_provider_id,
     )
-    db.add(proj)
+    db.add(ws)
+    # Flush to mint the workspace id before seeding its Drive folder tree.
+    await db.flush()
+    # Seed ``My files / Workspaces / <title> / {Notes,Canvases,Files}`` and
+    # point the workspace at its per-workspace folder. Notes / canvases /
+    # uploads created in the workspace physically land under here so they
+    # inherit Drive's preview / search / trash / quota plumbing.
+    ws_folder = await create_workspace_folder_tree(db, user, ws.title)
+    ws.root_folder_id = ws_folder.id
     await db.commit()
-    await db.refresh(proj)
-    return await _summary_with_rollups(proj, db, user)
+    await db.refresh(ws)
+    return await _summary_with_rollups(ws, db, user)
 
 
 # ---------------------------------------------------------------------
@@ -289,27 +298,27 @@ async def create_project(
 # ---------------------------------------------------------------------
 
 
-@router.get("/{project_id}", response_model=ChatProjectDetail)
-async def get_project(
-    project_id: uuid.UUID,
+@router.get("/{workspace_id}", response_model=WorkspaceDetail)
+async def get_workspace(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectDetail:
-    # Owner *or* accepted collaborator — project sharing grants
-    # read access to the project detail page and its files; the role
+) -> WorkspaceDetail:
+    # Owner *or* accepted collaborator — workspace sharing grants
+    # read access to the workspace detail page and its files; the role
     # tells the frontend whether to expose edit affordances.
-    proj, access_role = await get_accessible_project(project_id, user, db)
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     # Build the detail payload. Pinned files need a join against
     # ``user_files`` to pull the display metadata the frontend shows
     # on the Files tab.
     files_q = await db.execute(
-        select(ChatProjectFile, UserFile)
-        .join(UserFile, UserFile.id == ChatProjectFile.file_id)
-        .where(ChatProjectFile.project_id == proj.id)
-        .order_by(ChatProjectFile.pinned_at.asc())
+        select(WorkspaceFile, UserFile)
+        .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+        .where(WorkspaceFile.workspace_id == ws.id)
+        .order_by(WorkspaceFile.pinned_at.asc())
     )
     pins = [
-        ChatProjectFilePin(
+        WorkspaceFilePin(
             file_id=uf.id,
             filename=uf.filename,
             mime_type=uf.mime_type,
@@ -320,25 +329,25 @@ async def get_project(
         )
         for pin, uf in files_q.all()
     ]
-    summary = await _summary_with_rollups(proj, db, user)
-    stats = await project_context_stats(
-        db, project_id=proj.id, system_prompt=proj.system_prompt
+    summary = await _summary_with_rollups(ws, db, user)
+    stats = await workspace_context_stats(
+        db, workspace_id=ws.id, system_prompt=ws.system_prompt
     )
-    participants = await load_project_participants(proj, db)
-    # ``ChatProjectDetail`` extends ``ChatProjectSummary`` — merge the
+    participants = await load_workspace_participants(ws, db)
+    # ``WorkspaceDetail`` extends ``WorkspaceSummary`` — merge the
     # two payloads into one validated object so the HTTP shape stays
     # flat (no nested "summary" object the frontend has to unwrap).
-    return ChatProjectDetail(
+    return WorkspaceDetail(
         **summary.model_dump(),
-        system_prompt=proj.system_prompt,
+        system_prompt=ws.system_prompt,
         files=pins,
-        owner=ChatProjectParticipant(
+        owner=WorkspaceParticipant(
             user_id=participants.owner.user_id,
             username=participants.owner.username,
             email=participants.owner.email,
         ),
         collaborators=[
-            ChatProjectParticipant(
+            WorkspaceParticipant(
                 user_id=c.user_id, username=c.username, email=c.email
             )
             for c in participants.collaborators
@@ -349,21 +358,21 @@ async def get_project(
         retrieval_active=stats.retrieval_active,
         indexing_count=stats.indexing_count,
         access_role=access_role,
-        auto_memory_enabled=proj.auto_memory_enabled,
+        auto_memory_enabled=ws.auto_memory_enabled,
         embeddings_configured=stats.embeddings_configured,
     )
 
 
-@router.patch("/{project_id}", response_model=ChatProjectSummary)
-async def update_project(
-    project_id: uuid.UUID,
-    payload: ChatProjectUpdate,
+@router.patch("/{workspace_id}", response_model=WorkspaceSummary)
+async def update_workspace(
+    workspace_id: uuid.UUID,
+    payload: WorkspaceUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectSummary:
-    # Editors + owner can edit project settings; viewers are read-only.
-    proj, access_role = await get_accessible_project(project_id, user, db)
-    require_project_write(access_role)
+) -> WorkspaceSummary:
+    # Editors + owner can edit workspace settings; viewers are read-only.
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
     # ``model_fields_set`` tells us which keys were actually sent by
     # the client — lets us differentiate "leave alone" (absent) from
     # "set to null" (explicit clear). Matches the PATCH semantics
@@ -375,11 +384,11 @@ async def update_project(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Title cannot be empty",
             )
-        proj.title = payload.title.strip()
+        ws.title = payload.title.strip()
     if "description" in sent:
-        proj.description = payload.description
+        ws.description = payload.description
     if "system_prompt" in sent:
-        proj.system_prompt = payload.system_prompt
+        ws.system_prompt = payload.system_prompt
     # Default model + provider are validated as a *pair* against the
     # resulting state — sending one without the other (or a model the
     # provider doesn't enable) is rejected so the chat header and the
@@ -388,36 +397,36 @@ async def update_project(
         new_model = (
             payload.default_model_id
             if "default_model_id" in sent
-            else proj.default_model_id
+            else ws.default_model_id
         )
         new_provider = (
             payload.default_provider_id
             if "default_provider_id" in sent
-            else proj.default_provider_id
+            else ws.default_provider_id
         )
         await _validate_default_model(new_provider, new_model, user, db)
-        proj.default_model_id = new_model
-        proj.default_provider_id = new_provider
+        ws.default_model_id = new_model
+        ws.default_provider_id = new_provider
     if "auto_memory_enabled" in sent and payload.auto_memory_enabled is not None:
-        proj.auto_memory_enabled = payload.auto_memory_enabled
-    proj.updated_at = datetime.now(timezone.utc)
+        ws.auto_memory_enabled = payload.auto_memory_enabled
+    ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(proj)
-    return await _summary_with_rollups(proj, db, user)
+    await db.refresh(ws)
+    return await _summary_with_rollups(ws, db, user)
 
 
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_project(
-    project_id: uuid.UUID,
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """Permanently delete a project. Conversations inside the project
+    """Permanently delete a workspace. Conversations inside the workspace
     are *preserved* (the FK is ``ON DELETE SET NULL``) and bubble
     back up to the top-level list — we never silently destroy chat
     history."""
-    proj = await _get_owned_project(project_id, user, db)
-    await db.delete(proj)
+    ws = await _get_owned_workspace(workspace_id, user, db)
+    await db.delete(ws)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -427,64 +436,64 @@ async def delete_project(
 # ---------------------------------------------------------------------
 
 
-@router.post("/{project_id}/archive", response_model=ChatProjectSummary)
-async def archive_project(
-    project_id: uuid.UUID,
+@router.post("/{workspace_id}/archive", response_model=WorkspaceSummary)
+async def archive_workspace(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectSummary:
-    proj = await _get_owned_project(project_id, user, db)
-    if proj.archived_at is None:
-        proj.archived_at = datetime.now(timezone.utc)
-        proj.updated_at = proj.archived_at
+) -> WorkspaceSummary:
+    ws = await _get_owned_workspace(workspace_id, user, db)
+    if ws.archived_at is None:
+        ws.archived_at = datetime.now(timezone.utc)
+        ws.updated_at = ws.archived_at
         await db.commit()
-        await db.refresh(proj)
-    return await _summary_with_rollups(proj, db, user)
+        await db.refresh(ws)
+    return await _summary_with_rollups(ws, db, user)
 
 
-@router.post("/{project_id}/unarchive", response_model=ChatProjectSummary)
-async def unarchive_project(
-    project_id: uuid.UUID,
+@router.post("/{workspace_id}/unarchive", response_model=WorkspaceSummary)
+async def unarchive_workspace(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectSummary:
-    proj = await _get_owned_project(project_id, user, db)
-    if proj.archived_at is not None:
-        proj.archived_at = None
-        proj.updated_at = datetime.now(timezone.utc)
+) -> WorkspaceSummary:
+    ws = await _get_owned_workspace(workspace_id, user, db)
+    if ws.archived_at is not None:
+        ws.archived_at = None
+        ws.updated_at = datetime.now(timezone.utc)
         await db.commit()
-        await db.refresh(proj)
-    return await _summary_with_rollups(proj, db, user)
+        await db.refresh(ws)
+    return await _summary_with_rollups(ws, db, user)
 
 
 # ---------------------------------------------------------------------
-# Conversations inside a project
+# Conversations inside a workspace
 # ---------------------------------------------------------------------
 
 
 @router.get(
-    "/{project_id}/conversations",
+    "/{workspace_id}/conversations",
     response_model=list[ConversationSummary],
 )
-async def list_project_conversations(
-    project_id: uuid.UUID,
+async def list_workspace_conversations(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ConversationSummary]:
-    """Return every conversation under ``project_id`` (most recent
+    """Return every conversation under ``workspace_id`` (most recent
     first).
 
-    Project sharing is workspace-level: once the caller has access
-    to the project (owner or accepted collaborator), they see
+    Workspace sharing is workspace-level: once the caller has access
+    to the workspace (owner or accepted collaborator), they see
     **every** chat in it — the inviter's originals as well as
     anything other collaborators have added since. Individual
     conversation shares still work on top of this and remain
     invisible here; they're surfaced through the main sidebar.
     """
-    proj, _role = await get_accessible_project(project_id, user, db)
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
     q = (
         select(Conversation)
-        .where(Conversation.project_id == proj.id)
+        .where(Conversation.workspace_id == ws.id)
         .order_by(Conversation.updated_at.desc())
     )
     res = await db.execute(q)
@@ -494,36 +503,36 @@ async def list_project_conversations(
 
 
 @router.delete(
-    "/{project_id}/conversations",
+    "/{workspace_id}/conversations",
     response_model=dict,
     status_code=status.HTTP_200_OK,
 )
-async def remove_all_conversations_from_project(
-    project_id: uuid.UUID,
+async def remove_all_conversations_from_workspace(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Bulk-detach every conversation from this project.
+    """Bulk-detach every conversation from this workspace.
 
-    Sets ``project_id = NULL`` on every conversation currently under the
-    project. Conversations are *preserved* — they move back to the
+    Sets ``workspace_id = NULL`` on every conversation currently under the
+    workspace. Conversations are *preserved* — they move back to the
     top-level chat list. Useful when you want to dissolve an archived
-    project without losing history.
+    workspace without losing history.
 
     Owner-only: collaborators don't have permission to reorganise the
-    project's conversation list in bulk.
+    workspace's conversation list in bulk.
     """
-    proj = await _get_owned_project(project_id, user, db)
+    ws = await _get_owned_workspace(workspace_id, user, db)
     result = await db.execute(
-        select(Conversation).where(Conversation.project_id == proj.id)
+        select(Conversation).where(Conversation.workspace_id == ws.id)
     )
     convs = result.scalars().all()
     removed = 0
     for conv in convs:
-        conv.project_id = None
+        conv.workspace_id = None
         removed += 1
     if removed:
-        proj.updated_at = datetime.now(timezone.utc)
+        ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"removed": removed}
 
@@ -533,34 +542,34 @@ async def remove_all_conversations_from_project(
 # ---------------------------------------------------------------------
 
 
-@router.get("/{project_id}/usage", response_model=ChatProjectUsage)
-async def project_usage(
-    project_id: uuid.UUID,
+@router.get("/{workspace_id}/usage", response_model=WorkspaceUsage)
+async def workspace_usage(
+    workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectUsage:
+) -> WorkspaceUsage:
     """Token + cost usage aggregated over every conversation in the
-    project. Built from message-level stats because ``usage_daily`` is
-    keyed by ``(user_id, day)`` and can't be sliced by project.
+    workspace. Built from message-level stats because ``usage_daily`` is
+    keyed by ``(user_id, day)`` and can't be sliced by workspace.
 
-    Scoped to the project's conversations (all collaborators' chats),
-    gated by :func:`get_accessible_project`."""
-    proj, _role = await get_accessible_project(project_id, user, db)
+    Scoped to the workspace's conversations (all collaborators' chats),
+    gated by :func:`get_accessible_workspace`."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
 
     conv_count = int(
         await db.scalar(
             select(func.count())
             .select_from(Conversation)
-            .where(Conversation.project_id == proj.id)
+            .where(Conversation.workspace_id == ws.id)
         )
         or 0
     )
 
-    # One grouped pass over the project's messages, attributed to each
+    # One grouped pass over the workspace's messages, attributed to each
     # conversation's model (``messages`` rows don't carry a model — the
     # model lives on the conversation). This attributes a chat's whole
     # spend to its *current* model, which is the only model key we
-    # retain; good enough for a per-project rollup. ``model_id`` is NULL
+    # retain; good enough for a per-workspace rollup. ``model_id`` is NULL
     # for conversations that never had one persisted.
     rows = (
         await db.execute(
@@ -572,7 +581,7 @@ async def project_usage(
                 func.coalesce(func.sum(Message.cost_usd_micros), 0).label("cost"),
             )
             .join(Message, Message.conversation_id == Conversation.id)
-            .where(Conversation.project_id == proj.id)
+            .where(Conversation.workspace_id == ws.id)
             .group_by(Conversation.model_id)
         )
     ).all()
@@ -583,7 +592,7 @@ async def project_usage(
     cost_micros = sum(int(r.cost) for r in rows)
 
     by_model = [
-        ChatProjectUsageModel(
+        WorkspaceUsageModel(
             model_id=r.model_id,
             messages=int(r.messages),
             prompt_tokens=int(r.pt),
@@ -598,7 +607,7 @@ async def project_usage(
         key=lambda m: m.prompt_tokens + m.completion_tokens, reverse=True
     )
 
-    return ChatProjectUsage(
+    return WorkspaceUsage(
         conversation_count=conv_count,
         message_count=message_count,
         prompt_tokens=prompt_tokens,
@@ -615,25 +624,25 @@ async def project_usage(
 
 
 @router.post(
-    "/{project_id}/reindex",
+    "/{workspace_id}/reindex",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=dict,
 )
-async def reindex_project_files(
-    project_id: uuid.UUID,
+async def reindex_workspace_files(
+    workspace_id: uuid.UUID,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Queue a background re-index of every pinned file in the project.
+    """Queue a background re-index of every pinned file in the workspace.
 
     Useful after enabling an embedding provider for the first time, or
     to backfill files pinned before Phase-2 that are still ``queued``.
-    Owner-only: collaborators don't manage the project's embedding state.
+    Owner-only: collaborators don't manage the workspace's embedding state.
     Returns immediately; the Files tab's polling will show progress.
     """
-    proj = await _get_owned_project(project_id, user, db)
-    background.add_task(reindex_project, proj.id)
+    ws = await _get_owned_workspace(workspace_id, user, db)
+    background.add_task(reindex_workspace, ws.id)
     return {"queued": True}
 
 
@@ -643,31 +652,31 @@ async def reindex_project_files(
 
 
 @router.post(
-    "/{project_id}/files",
-    response_model=ChatProjectFilePin,
+    "/{workspace_id}/files",
+    response_model=WorkspaceFilePin,
     status_code=status.HTTP_201_CREATED,
 )
 async def pin_file(
-    project_id: uuid.UUID,
-    payload: ChatProjectPinFile,
+    workspace_id: uuid.UUID,
+    payload: WorkspacePinFile,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ChatProjectFilePin:
-    """Pin an existing :class:`UserFile` to the project.
+) -> WorkspaceFilePin:
+    """Pin an existing :class:`UserFile` to the workspace.
 
     File must be owned by the caller (``user_files.user_id`` match).
     Admin-managed shared-pool files (``user_id IS NULL``) are *not*
-    pinnable to a personal project today — the UX would be confusing
+    pinnable to a personal workspace today — the UX would be confusing
     (admins can already surface those via system folders).
 
-    Collaborators on a shared project can pin their *own* files;
-    the project owner (and other collaborators) will then see them
-    in the project's file list the same way they see the owner's
+    Collaborators on a shared workspace can pin their *own* files;
+    the workspace owner (and other collaborators) will then see them
+    in the workspace's file list the same way they see the owner's
     originals.
     """
-    proj, access_role = await get_accessible_project(project_id, user, db)
-    require_project_write(access_role)
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
 
     uf = await db.get(UserFile, payload.file_id)
     if uf is None or uf.user_id != user.id:
@@ -678,29 +687,29 @@ async def pin_file(
     # Idempotent: re-pinning is a no-op, returns the existing row's
     # data so the client doesn't have to case on "already pinned".
     existing_q = await db.execute(
-        select(ChatProjectFile).where(
-            ChatProjectFile.project_id == proj.id,
-            ChatProjectFile.file_id == uf.id,
+        select(WorkspaceFile).where(
+            WorkspaceFile.workspace_id == ws.id,
+            WorkspaceFile.file_id == uf.id,
         )
     )
     existing = existing_q.scalar_one_or_none()
     if existing is None:
-        pin = ChatProjectFile(
-            project_id=proj.id, file_id=uf.id, pinned_by=user.id
+        pin = WorkspaceFile(
+            workspace_id=ws.id, file_id=uf.id, pinned_by=user.id
         )
         db.add(pin)
-        proj.updated_at = datetime.now(timezone.utc)
+        ws.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(pin)
         # Kick off RAG indexing after the response is sent. The task
         # owns its own session and no-ops for images / when embeddings
         # aren't configured, so this is safe to fire unconditionally on
         # a fresh pin.
-        background.add_task(index_file_for_project, proj.id, uf.id)
+        background.add_task(index_file_for_workspace, ws.id, uf.id)
     else:
         pin = existing
 
-    return ChatProjectFilePin(
+    return WorkspaceFilePin(
         file_id=uf.id,
         filename=uf.filename,
         mime_type=uf.mime_type,
@@ -712,20 +721,20 @@ async def pin_file(
 
 
 @router.delete(
-    "/{project_id}/files/{file_id}",
+    "/{workspace_id}/files/{file_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def unpin_file(
-    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     file_id: uuid.UUID,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    proj, access_role = await get_accessible_project(project_id, user, db)
-    require_project_write(access_role)
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
 
-    pin = await db.get(ChatProjectFile, (proj.id, file_id))
+    pin = await db.get(WorkspaceFile, (ws.id, file_id))
     if pin is None:
         # Idempotent: already unpinned.
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -736,41 +745,41 @@ async def unpin_file(
     if access_role != "owner" and pin.pinned_by != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the project owner or the person who pinned this file can remove it.",
+            detail="Only the workspace owner or the person who pinned this file can remove it.",
         )
     await db.delete(pin)
-    proj.updated_at = datetime.now(timezone.utc)
+    ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    # Drop the file's project-scoped chunks so they stop surfacing in
+    # Drop the file's workspace-scoped chunks so they stop surfacing in
     # retrieval. Best-effort, after the response.
-    background.add_task(delete_project_file_chunks, proj.id, file_id)
+    background.add_task(delete_workspace_file_chunks, ws.id, file_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------
-# Move a conversation in / out of a project
+# Move a conversation in / out of a workspace
 # ---------------------------------------------------------------------
 
 
 @router.post(
-    "/{project_id}/conversations/{conversation_id}",
+    "/{workspace_id}/conversations/{conversation_id}",
     response_model=ConversationSummary,
 )
-async def move_conversation_into_project(
-    project_id: uuid.UUID,
+async def move_conversation_into_workspace(
+    workspace_id: uuid.UUID,
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ConversationSummary:
-    """Move an existing chat into the project.
+    """Move an existing chat into the workspace.
 
     Caller must own the conversation (no moving someone else's
     chats into your workspace) and have access to the target
-    project (owner or accepted collaborator). Temporary chats are
-    rejected: tying a short-lived chat to a project complicates the
+    workspace (owner or accepted collaborator). Temporary chats are
+    rejected: tying a short-lived chat to a workspace complicates the
     cleanup sweep for negligible benefit."""
-    proj, access_role = await get_accessible_project(project_id, user, db)
-    require_project_write(access_role)
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
     conv = await db.get(Conversation, conversation_id)
     if conv is None or conv.user_id != user.id:
         raise HTTPException(
@@ -779,41 +788,41 @@ async def move_conversation_into_project(
     if conv.temporary_mode is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Temporary chats can't belong to a project.",
+            detail="Temporary chats can't belong to a workspace.",
         )
-    conv.project_id = proj.id
+    conv.workspace_id = ws.id
     conv.updated_at = datetime.now(timezone.utc)
-    proj.updated_at = conv.updated_at
+    ws.updated_at = conv.updated_at
     await db.commit()
     await db.refresh(conv)
     return ConversationSummary.model_validate(conv)
 
 
 @router.delete(
-    "/{project_id}/conversations/{conversation_id}",
+    "/{workspace_id}/conversations/{conversation_id}",
     response_model=ConversationSummary,
 )
-async def remove_conversation_from_project(
-    project_id: uuid.UUID,
+async def remove_conversation_from_workspace(
+    workspace_id: uuid.UUID,
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ConversationSummary:
-    """Detach a chat from its project without deleting the chat
+    """Detach a chat from its workspace without deleting the chat
     itself — it resurfaces at the top level of the sidebar."""
-    proj, _role = await get_accessible_project(project_id, user, db)
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
     conv = await db.get(Conversation, conversation_id)
     if conv is None or conv.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
         )
-    if conv.project_id != proj.id:
+    if conv.workspace_id != ws.id:
         # Idempotent: already out, return the current state so the UI
         # doesn't need a special-case error path.
         return ConversationSummary.model_validate(conv)
-    conv.project_id = None
+    conv.workspace_id = None
     conv.updated_at = datetime.now(timezone.utc)
-    proj.updated_at = conv.updated_at
+    ws.updated_at = conv.updated_at
     await db.commit()
     await db.refresh(conv)
     return ConversationSummary.model_validate(conv)

@@ -138,7 +138,7 @@ export function RecentFilesPage() {
         onClose={() => setShareFor(null)}
         onChanged={() => {
           void qc.invalidateQueries({ queryKey: ["files"] });
-          void qc.invalidateQueries({ queryKey: ["chat-project-files"] });
+          void qc.invalidateQueries({ queryKey: ["workspace-files"] });
         }}
       />
 

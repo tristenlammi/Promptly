@@ -1,25 +1,26 @@
-"""Pydantic schemas for Chat Projects.
+"""Pydantic schemas for Workspaces.
 
 Split from :mod:`app.chat.schemas` so the already-long chat schemas
 module doesn't grow a second huge subject area. Imported by the
-chat-projects router; nothing else in the codebase should depend on
+workspaces router; nothing else in the codebase should depend on
 these directly.
 """
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------
 # Pinned file — trimmed view of :class:`UserFile` so the clients don't
-# need the full file record to render the Files tab in the project
+# need the full file record to render the Files tab in the workspace
 # detail page.
 # ---------------------------------------------------------------------
 
 
-class ChatProjectFilePin(BaseModel):
+class WorkspaceFilePin(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     file_id: uuid.UUID
@@ -35,19 +36,19 @@ class ChatProjectFilePin(BaseModel):
 
 
 # ---------------------------------------------------------------------
-# Core project — mirrors the ORM row 1:1 plus a couple of derived
+# Core workspace — mirrors the ORM row 1:1 plus a couple of derived
 # rollups the list/detail pages need. Kept flat on purpose: the
 # frontend cards and lists read directly off this shape without a
 # second transform.
 # ---------------------------------------------------------------------
 
 
-class ChatProjectParticipant(BaseModel):
-    """Minimal identity row for the project sharing UI.
+class WorkspaceParticipant(BaseModel):
+    """Minimal identity row for the workspace sharing UI.
 
     Mirrors :class:`app.chat.shares.ShareUserBrief` so the frontend
     can reuse a single ``UserChip`` component across chat and
-    project share surfaces.
+    workspace share surfaces.
     """
 
     user_id: uuid.UUID
@@ -55,10 +56,10 @@ class ChatProjectParticipant(BaseModel):
     email: str
 
 
-class ChatProjectSummary(BaseModel):
+class WorkspaceSummary(BaseModel):
     """Lightweight row returned by the list endpoints.
 
-    Holds everything the project card on ``/projects`` needs to render
+    Holds everything the workspace card on ``/workspaces`` needs to render
     — title, description, the conversation + file counts, and the
     archive flag — without touching the heavier ``system_prompt``
     blob (users might paste very long instructions and we don't want
@@ -79,35 +80,35 @@ class ChatProjectSummary(BaseModel):
     # and saves the frontend a second round-trip on every card.
     conversation_count: int = 0
     file_count: int = 0
-    # ``owner`` when the caller created the project, ``collaborator``
-    # when they have an accepted project share. Populated by the
+    # ``owner`` when the caller created the workspace, ``collaborator``
+    # when they have an accepted workspace share. Populated by the
     # router; the UI uses it to hide destructive actions (delete,
     # archive, manage-shares) from non-owners.
     role: str = "owner"
     # Non-null only for collaborators. Lets the card / list render
     # "shared by Jane" in place of the default timestamp hint so the
     # user can tell the two sources apart without clicking through.
-    shared_by: ChatProjectParticipant | None = None
+    shared_by: WorkspaceParticipant | None = None
 
 
-class ChatProjectDetail(ChatProjectSummary):
-    """Full project record, returned by ``GET /chat/projects/{id}``.
+class WorkspaceDetail(WorkspaceSummary):
+    """Full workspace record, returned by ``GET /workspaces/{id}``.
 
     Adds the heavy ``system_prompt`` and the pinned-files array so
-    the project detail page can render all three tabs (Conversations,
+    the workspace detail page can render all three tabs (Conversations,
     Files, Settings) from one request.
     """
 
     system_prompt: str | None = None
-    files: list[ChatProjectFilePin] = Field(default_factory=list)
-    # Owner + accepted collaborators on this project. Surfaced on
+    files: list[WorkspaceFilePin] = Field(default_factory=list)
+    # Owner + accepted collaborators on this workspace. Surfaced on
     # the detail payload so the header can show "Shared with Alex,
     # Sarah" and the share modal can seed its "People with access"
     # list without a second round-trip.
-    owner: ChatProjectParticipant | None = None
-    collaborators: list[ChatProjectParticipant] = Field(default_factory=list)
+    owner: WorkspaceParticipant | None = None
+    collaborators: list[WorkspaceParticipant] = Field(default_factory=list)
     # Per-turn context budget (Phase P2). ``per_turn_tokens`` is the
-    # honest cost every chat in the project pays: instructions plus the
+    # honest cost every chat in the workspace pays: instructions plus the
     # full pinned text in full-dump mode, or instructions plus a top-k
     # retrieval slice once ``retrieval_active`` flips on. ``indexing_count``
     # is how many pinned files are still being embedded.
@@ -121,7 +122,7 @@ class ChatProjectDetail(ChatProjectSummary):
     # ``viewer``. ``role`` (above) stays coarse (owner/collaborator) for
     # the list cards.
     access_role: str = "owner"
-    # Opt-in rolling project memory toggle (Phase 4).
+    # Opt-in rolling workspace memory toggle (Phase 4).
     auto_memory_enabled: bool = False
     # True when the workspace has an embedding provider configured so
     # semantic retrieval can actually run. Shown in the Files tab so
@@ -134,7 +135,7 @@ class ChatProjectDetail(ChatProjectSummary):
 # ---------------------------------------------------------------------
 
 
-class ChatProjectCreate(BaseModel):
+class WorkspaceCreate(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     title: str = Field(min_length=1, max_length=255)
@@ -144,7 +145,7 @@ class ChatProjectCreate(BaseModel):
     default_provider_id: uuid.UUID | None = None
 
 
-class ChatProjectUpdate(BaseModel):
+class WorkspaceUpdate(BaseModel):
     """PATCH payload. Every field is optional — only the keys present
     in the request body are written. Same convention as
     :class:`ConversationUpdate`.
@@ -164,9 +165,9 @@ class ChatProjectUpdate(BaseModel):
     auto_memory_enabled: bool | None = None
 
 
-class ChatProjectPinFile(BaseModel):
-    """Body for ``POST /chat/projects/{pid}/files`` — pin a user file
-    to the project so new conversations auto-attach it."""
+class WorkspacePinFile(BaseModel):
+    """Body for ``POST /workspaces/{wid}/files`` — pin a user file
+    to the workspace so new conversations auto-attach it."""
 
     file_id: uuid.UUID
 
@@ -176,8 +177,8 @@ class ChatProjectPinFile(BaseModel):
 # ---------------------------------------------------------------------
 
 
-class ConversationProjectFile(BaseModel):
-    """One of the project's pinned files, with whether *this* chat has
+class ConversationWorkspaceFile(BaseModel):
+    """One of the workspace's pinned files, with whether *this* chat has
     excluded it from its context."""
 
     file_id: uuid.UUID
@@ -186,7 +187,7 @@ class ConversationProjectFile(BaseModel):
     excluded: bool
 
 
-class ToggleProjectFileRequest(BaseModel):
+class ToggleWorkspaceFileRequest(BaseModel):
     excluded: bool
 
 
@@ -195,8 +196,8 @@ class ToggleProjectFileRequest(BaseModel):
 # ---------------------------------------------------------------------
 
 
-class ChatProjectUsageModel(BaseModel):
-    """Per-model slice of a project's spend."""
+class WorkspaceUsageModel(BaseModel):
+    """Per-model slice of a workspace's spend."""
 
     model_config = ConfigDict(protected_namespaces=())
 
@@ -207,10 +208,10 @@ class ChatProjectUsageModel(BaseModel):
     cost_usd: float
 
 
-class ChatProjectUsage(BaseModel):
+class WorkspaceUsage(BaseModel):
     """Aggregated token + cost usage across every conversation in a
-    project. Sourced from message-level stats (``usage_daily`` is only
-    keyed by user/day and can't be sliced by project)."""
+    workspace. Sourced from message-level stats (``usage_daily`` is only
+    keyed by user/day and can't be sliced by workspace)."""
 
     conversation_count: int
     message_count: int
@@ -218,4 +219,80 @@ class ChatProjectUsage(BaseModel):
     completion_tokens: int
     total_tokens: int
     cost_usd: float
-    by_model: list[ChatProjectUsageModel] = Field(default_factory=list)
+    by_model: list[WorkspaceUsageModel] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------
+# Navigator tree (Phase 1a) — the unified item tree that replaces the
+# 4-tab console as the workspace's primary surface.
+# ---------------------------------------------------------------------
+
+
+class WorkspaceItemNode(BaseModel):
+    """One node in the workspace navigator tree.
+
+    Serves both stored ``workspace_items`` rows (``folder`` / ``note``)
+    and chats synthesised at read time. For a synthesised ``chat`` node,
+    ``id`` is the conversation id and there is no backing item row — the
+    frontend opens it by ``ref_id`` (also the conversation id).
+    """
+
+    id: uuid.UUID
+    # 'folder' | 'note' | 'canvas' | 'file' | 'chat'
+    kind: str
+    # -> files.id for a note, conversation id for a chat. NULL for folders.
+    ref_id: uuid.UUID | None = None
+    title: str
+    icon: str | None = None
+    position: float = 0.0
+    # RAG index status for note/canvas/file kinds; NULL for folders/chats.
+    indexing_status: str | None = None
+    children: list["WorkspaceItemNode"] = Field(default_factory=list)
+
+
+class WorkspaceItemCreate(BaseModel):
+    """Body for ``POST /workspaces/{wid}/items``.
+
+    ``kind='folder'`` makes a tree-only organisation node. ``kind='note'``
+    creates a blank Drive Document in the workspace's ``Notes`` folder;
+    ``kind='canvas'`` creates a tldraw board (+ backing text file in
+    ``Canvases``). ``title`` is optional (kind-specific default)."""
+
+    kind: Literal["folder", "note", "canvas"]
+    parent_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=255)
+
+
+class WorkspaceItemUpdate(BaseModel):
+    """PATCH payload for renaming / re-iconing a tree item. PATCH
+    semantics: only keys present in the body are applied."""
+
+    title: str | None = Field(default=None, max_length=255)
+    icon: str | None = Field(default=None, max_length=64)
+
+
+class WorkspaceItemMove(BaseModel):
+    """Reparent + reorder a tree item. ``position`` is the new float
+    slot among the target parent's children — the frontend computes a
+    midpoint between neighbours so no renumber is needed."""
+
+    parent_id: uuid.UUID | None = None
+    position: float
+
+
+class WorkspaceItemResponse(BaseModel):
+    """Flat view of a single stored ``workspace_items`` row, returned by
+    create / rename / move so the client can update one node without
+    re-fetching the whole tree."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    parent_id: uuid.UUID | None
+    kind: str
+    ref_id: uuid.UUID | None
+    title: str
+    icon: str | None
+    position: float
+    indexing_status: str | None = None

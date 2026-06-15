@@ -11,7 +11,7 @@
  *      and offline-capable.
  *   2. SPA navigation fallback — URLs without a cached static
  *      match return ``/index.html`` so a hard reload on
- *      ``/projects/abc`` doesn't 404 when the network is flaky.
+ *      ``/workspaces/abc`` doesn't 404 when the network is flaky.
  *   3. Web Push: receive encrypted pushes from the backend,
  *      render native notifications, and open the right URL when
  *      the user clicks one. The push payload schema is mirrored
@@ -129,7 +129,7 @@ self.addEventListener("notificationclick", (event) => {
     (async () => {
       // Prefer focusing an already-open Promptly tab rather than
       // spawning a new one. Match by origin+path so "the tab already
-      // on /projects" gets reused when a second push arrives.
+      // on /workspaces" gets reused when a second push arrives.
       const wins = await self.clients.matchAll({
         type: "window",
         includeUncontrolled: true,
