@@ -57,11 +57,15 @@ export function WorkspaceFilesPanel({
     if (list.length === 0) return;
     setError(null);
     setUploading((u) => [...u, ...list.map((f) => f.name)]);
+    // Owners drop files straight into the workspace's ``Files`` Drive
+    // subfolder (tidy); collaborators can't write to the owner's folder, so
+    // they fall back to their own Drive root. Pinning is what kicks off RAG
+    // embedding with the configured provider either way.
+    const targetFolderId =
+      workspace?.role === "owner" ? (workspace?.files_folder_id ?? null) : null;
     for (const file of list) {
       try {
-        // Upload into the user's Drive, then pin to the workspace — pinning
-        // is what kicks off RAG embedding with the configured provider.
-        const uploaded = await filesApi.upload("mine", file, null);
+        const uploaded = await filesApi.upload("mine", file, targetFolderId);
         await pin.mutateAsync(uploaded.id);
       } catch {
         setError(

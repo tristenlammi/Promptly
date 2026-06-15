@@ -76,6 +76,11 @@ export interface WorkspaceDetail extends WorkspaceSummary {
    *  False → files stay in full-dump mode regardless of size;
    *  the Files tab shows an onboarding nudge when this is false. */
   embeddings_configured: boolean;
+  /** Drive folder id of the workspace's ``Files`` subfolder (owned by the
+   *  owner). The home uploader drops files here so the owner's Drive stays
+   *  tidy; null if not seeded. Only usable when the caller owns the
+   *  workspace — collaborators can't write to the owner's folder. */
+  files_folder_id: string | null;
 }
 
 /** Kinds the navigator tree can hold. ``folder``/``note`` are real
