@@ -1,12 +1,22 @@
-import { useCallback, useEffect, useRef } from "react";
-import { Loader2 } from "lucide-react";
-import { Tldraw, type Editor } from "tldraw";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Loader2,
+  Plus,
+  FileText,
+  MessageSquare,
+  PenLine,
+} from "lucide-react";
+import { Tldraw, createShapeId, type Editor } from "tldraw";
 import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
 import "tldraw/tldraw.css";
 
 import { canvasApi } from "@/api/canvas";
+import { useWorkspaceTree } from "@/hooks/useWorkspaces";
+import type { WorkspaceItemNode } from "@/api/workspaces";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useYjsCanvasStore } from "./useYjsCanvasStore";
+import { customShapeUtils } from "./canvas/customShapes";
+import { CanvasCardProvider, type ItemCardShape } from "./canvas/ItemCardShape";
 
 // Bundle tldraw's icons / fonts / translations through Vite so they load
 // from our own origin. Promptly's CSP is ``default-src 'self'`` with no
@@ -32,10 +42,17 @@ const TEXT_DEBOUNCE_MS = 1500;
 export function WorkspaceCanvasPane({
   canvasId,
   readOnly = false,
+  workspaceId,
+  onOpenItem,
 }: {
   canvasId: string;
   /** Viewer-role access → board opens read-only. */
   readOnly?: boolean;
+  /** Owning workspace — enables the "Insert card" picker + lets live
+   *  cards resolve their workspace context. */
+  workspaceId?: string;
+  /** Open a card's underlying item in the workspace main pane. */
+  onOpenItem?: (node: WorkspaceItemNode) => void;
 }) {
   const { ydoc, provider, user, error } = useCanvasCollabProvider(canvasId);
   const storeWithStatus = useYjsCanvasStore({ ydoc, provider, user });
@@ -138,13 +155,130 @@ export function WorkspaceCanvasPane({
     );
   }
 
+  // Drop a live card for a workspace item onto the board at the current
+  // viewport centre, then select it (so a chat card immediately goes live).
+  const insertCard = (node: WorkspaceItemNode) => {
+    const editor = editorRef.current;
+    if (!editor || !node.ref_id) return;
+    const center = editor.getViewportPageBounds().center;
+    const id = createShapeId();
+    editor.createShape<ItemCardShape>({
+      id,
+      type: "item-card",
+      x: center.x - 170,
+      y: center.y - 210,
+      props: {
+        w: 340,
+        h: 420,
+        itemId: node.id,
+        kind: node.kind,
+        refId: node.ref_id,
+        title: node.title,
+      },
+    });
+    editor.select(id);
+  };
+
   return (
-    <div className="relative h-full min-h-0 flex-1">
-      <Tldraw
-        store={storeWithStatus}
-        assetUrls={tldrawAssetUrls}
-        onMount={handleMount}
-      />
+    <CanvasCardProvider value={{ workspaceId: workspaceId ?? "", onOpenItem }}>
+      <div className="relative h-full min-h-0 flex-1">
+        <Tldraw
+          store={storeWithStatus}
+          shapeUtils={customShapeUtils}
+          assetUrls={tldrawAssetUrls}
+          onMount={handleMount}
+        />
+        {!readOnly && workspaceId && (
+          <InsertCardMenu workspaceId={workspaceId} onInsert={insertCard} />
+        )}
+      </div>
+    </CanvasCardProvider>
+  );
+}
+
+// --------------------------------------------------------------------------
+// Insert-card picker — a floating control listing the workspace's notes,
+// chats, and canvases. Selecting one drops a live card on the board.
+// --------------------------------------------------------------------------
+
+const INSERTABLE_ICON: Record<string, typeof FileText> = {
+  note: FileText,
+  chat: MessageSquare,
+  canvas: PenLine,
+};
+
+function flattenInsertable(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
+  const out: WorkspaceItemNode[] = [];
+  const walk = (list: WorkspaceItemNode[]) => {
+    for (const n of list) {
+      if (
+        n.ref_id &&
+        (n.kind === "note" || n.kind === "chat" || n.kind === "canvas")
+      ) {
+        out.push(n);
+      }
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+function InsertCardMenu({
+  workspaceId,
+  onInsert,
+}: {
+  workspaceId: string;
+  onInsert: (node: WorkspaceItemNode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: tree } = useWorkspaceTree(workspaceId);
+  const items = tree ? flattenInsertable(tree) : [];
+
+  return (
+    <div className="absolute left-3 top-3 z-10">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex items-center gap-1.5 rounded-card border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] shadow-sm hover:bg-[var(--hover)]"
+        title="Drop a live note, chat, or canvas card on the board"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Insert card
+      </button>
+      {open && (
+        <div className="mt-1 max-h-80 w-64 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
+          {items.length === 0 ? (
+            <p className="px-2 py-3 text-center text-[11px] text-[var(--text-muted)]">
+              No notes, chats, or canvases yet. Create some in the rail, then
+              drop them here.
+            </p>
+          ) : (
+            items.map((n) => {
+              const Icon = INSERTABLE_ICON[n.kind] ?? FileText;
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => {
+                    onInsert(n);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--hover)]"
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {n.title || "Untitled"}
+                  </span>
+                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                    {n.kind}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
     </div>
   );
 }
