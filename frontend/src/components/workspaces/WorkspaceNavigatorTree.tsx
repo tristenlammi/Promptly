@@ -17,7 +17,6 @@ import {
   Pencil,
   PenTool,
   Pin,
-  PinOff,
   Plus,
   Shapes,
   Trash2,
@@ -73,6 +72,11 @@ export function WorkspaceNavigatorTree({
   const qc = useQueryClient();
   const { data: workspace } = useWorkspace(workspaceId);
   const [creatingChat, setCreatingChat] = useState(false);
+
+  // Pinned items surface in a dedicated section and are pruned from the main
+  // tree (each item shows once), mirroring the chat sidebar.
+  const pinnedNodes = collectPinned(tree);
+  const mainTree = removePinned(tree);
 
   const handleCreate = async (
     kind: "folder" | "note" | "canvas",
@@ -150,21 +154,40 @@ export function WorkspaceNavigatorTree({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-        <PinnedSection
-          workspaceId={workspaceId}
-          tree={tree}
-          onSelect={onSelect}
-          canEdit={canEdit}
-        />
+        {pinnedNodes.length > 0 && (
+          <div className="mb-2 border-b border-[var(--border)] pb-2">
+            <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              <Pin className="h-3 w-3 fill-current" />
+              Pinned
+            </div>
+            <ul>
+              {pinnedNodes.map((node) => (
+                <TreeNode
+                  key={`pin-${node.id}`}
+                  workspaceId={workspaceId}
+                  node={node}
+                  depth={0}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onOpenToSide={onOpenToSide}
+                  canEdit={canEdit}
+                  onCreateInFolder={(kind, parentId) =>
+                    handleCreate(kind, parentId)
+                  }
+                />
+              ))}
+            </ul>
+          </div>
+        )}
         {tree.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
             Nothing here yet. Use{" "}
             <span className="font-medium text-[var(--text)]">+ New</span> to add
             a chat, note, canvas, or folder.
           </div>
-        ) : (
+        ) : mainTree.length === 0 ? null : (
           <ul>
-            {tree.map((node) => (
+            {mainTree.map((node) => (
               <TreeNode
                 key={node.id}
                 workspaceId={workspaceId}
@@ -189,89 +212,27 @@ export function WorkspaceNavigatorTree({
   );
 }
 
-/** Flatten the tree to every pinned node (any depth, any kind). */
+/** Top-most pinned nodes (doesn't descend into a pinned subtree). */
 function collectPinned(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
   const out: WorkspaceItemNode[] = [];
   const walk = (list: WorkspaceItemNode[]) => {
     for (const n of list) {
       if (n.pinned) out.push(n);
-      if (n.children?.length) walk(n.children);
+      else if (n.children?.length) walk(n.children);
     }
   };
   walk(nodes);
   return out;
 }
 
-/**
- * Pinned quick-access at the top of the rail. Shortcuts to the items the
- * user pinned (notes / canvases / chats), regardless of where they live in
- * the tree — so the things they manage most are always one click away.
- * Hidden entirely when nothing is pinned.
- */
-function PinnedSection({
-  workspaceId,
-  tree,
-  onSelect,
-  canEdit,
-}: {
-  workspaceId: string;
-  tree: WorkspaceItemNode[];
-  onSelect: (node: WorkspaceItemNode) => void;
-  canEdit: boolean;
-}) {
-  const setPinned = useSetItemPinned(workspaceId);
-  const qc = useQueryClient();
-  const pinned = collectPinned(tree);
-  if (pinned.length === 0) return null;
-
-  const unpin = async (node: WorkspaceItemNode) => {
-    if (node.kind === "chat") {
-      if (node.ref_id) {
-        await chatApi.update(node.ref_id, { pinned: false });
-        qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
-      }
-    } else {
-      setPinned.mutate({ itemId: node.id, pinned: false });
-    }
-  };
-
-  return (
-    <div className="mb-2 border-b border-[var(--border)] pb-2">
-      <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        <Pin className="h-3 w-3" />
-        Pinned
-      </div>
-      <ul>
-        {pinned.map((node) => (
-          <li
-            key={`pin-${node.id}`}
-            className="group flex items-center gap-1 rounded-md pr-1 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
-          >
-            <button
-              type="button"
-              onClick={() => onSelect(node)}
-              className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2 text-left"
-            >
-              <span className="w-3.5 shrink-0" />
-              <NodeIcon node={node} expanded={false} />
-              <span className="truncate">{node.title || "Untitled"}</span>
-            </button>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={() => void unpin(node)}
-                title="Unpin"
-                aria-label={`Unpin ${node.title}`}
-                className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)] group-hover:opacity-100"
-              >
-                <PinOff className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+/** The tree with pinned nodes removed (they render in the Pinned section
+ *  instead, so each item shows exactly once — matching the chat sidebar). */
+function removePinned(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
+  return nodes
+    .filter((n) => !n.pinned)
+    .map((n) =>
+      n.children?.length ? { ...n, children: removePinned(n.children) } : n
+    );
 }
 
 /**
@@ -726,6 +687,22 @@ function NodeActions({
           <Plus className="h-3.5 w-3.5" />
         </button>
       )}
+      {onTogglePin && (
+        <button
+          type="button"
+          title={pinned ? "Unpin" : "Pin to top"}
+          aria-label={pinned ? "Unpin" : "Pin to top"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin();
+          }}
+          className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
+        >
+          <Pin
+            className={cn("h-3.5 w-3.5", pinned && "fill-current text-[var(--accent)]")}
+          />
+        </button>
+      )}
       <div className="relative">
         <button
           type="button"
@@ -762,22 +739,6 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onRename();
-                  }}
-                />
-              )}
-              {onTogglePin && (
-                <MenuItem
-                  icon={
-                    pinned ? (
-                      <PinOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Pin className="h-3.5 w-3.5" />
-                    )
-                  }
-                  label={pinned ? "Unpin" : "Pin to top"}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onTogglePin();
                   }}
                 />
               )}
