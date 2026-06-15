@@ -37,6 +37,7 @@ import {
 import type { AttachedFile } from "@/components/chat/AttachmentPickerModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useWorkspace } from "@/hooks/useWorkspaces";
+import { useAvailableModels } from "@/hooks/useProviders";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useResearch } from "@/hooks/useResearch";
 import { useResearchStore, isResearchActive } from "@/store/researchStore";
@@ -116,6 +117,11 @@ export function ChatPage({
   const selectedModel = useSelectedModel();
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
+  // Load the model catalogue here (not only inside <ModelSelector>) so an
+  // embedded workspace chat — which hides the top bar + selector — still
+  // populates ``available``; otherwise the selected model can't resolve and
+  // sending is blocked with a "configure a model" dead end.
+  useAvailableModels();
 
   // Both toggles seed from the user's account defaults whenever a new chat
   // starts. Web search mode also reads the per-conversation stored value
@@ -256,21 +262,43 @@ export function ChatPage({
   const convModelId = conversation?.model_id ?? null;
   const convProviderId = conversation?.provider_id ?? null;
   const convReasoningEffort = conversation?.reasoning_effort ?? null;
+  // A workspace chat falls back to the workspace's default model when the
+  // conversation itself carries none — so chats in a workspace start on the
+  // workspace's model instead of a "configure a model" dead end.
+  const chatWorkspaceId = conversation?.workspace_id ?? undefined;
+  const { data: chatWorkspace } = useWorkspace(chatWorkspaceId);
+  const wsDefaultModelId = chatWorkspace?.default_model_id ?? null;
+  const wsDefaultProviderId = chatWorkspace?.default_provider_id ?? null;
   useEffect(() => {
     if (!id) {
       useModelStore.getState().applyDefault();
       return;
     }
+    const store = useModelStore.getState();
     if (convProviderId && convModelId) {
-      const store = useModelStore.getState();
       if (
         store.selectedProviderId !== convProviderId ||
         store.selectedModelId !== convModelId
       ) {
         store.setSelection(convProviderId, convModelId);
       }
+    } else if (
+      wsDefaultProviderId &&
+      wsDefaultModelId &&
+      !store.selectedModelId
+    ) {
+      // No per-conversation model + nothing selected yet → seed the
+      // workspace default. Guarded on an empty selection so we never stomp
+      // a model the user deliberately picked mid-chat.
+      store.setSelection(wsDefaultProviderId, wsDefaultModelId);
     }
-  }, [id, convProviderId, convModelId]);
+  }, [
+    id,
+    convProviderId,
+    convModelId,
+    wsDefaultProviderId,
+    wsDefaultModelId,
+  ]);
 
   // Hydrate the reasoning chip from the loaded conversation whenever
   // we switch into a different chat. We deliberately don't sync the
