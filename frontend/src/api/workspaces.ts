@@ -108,6 +108,8 @@ export interface WorkspaceItemNode {
    *  here so synthesised chat nodes don't need to set it. Treat undefined
    *  as enabled. */
   context_enabled?: boolean;
+  /** Surfaced in the rail's Pinned quick-access section when true. */
+  pinned?: boolean;
   children: WorkspaceItemNode[];
 }
 
@@ -124,6 +126,7 @@ export interface WorkspaceItemResponse {
   position: number;
   indexing_status: string | null;
   context_enabled?: boolean;
+  pinned?: boolean;
 }
 
 /** A source citation returned by "ask this workspace". ``item_id`` is the
@@ -405,6 +408,19 @@ export const workspacesApi = {
     const { data } = await apiClient.patch<WorkspaceItemResponse>(
       `/workspaces/${id}/items/${itemId}`,
       { context_enabled: enabled }
+    );
+    return data;
+  },
+
+  /** Pin / unpin a note, canvas, or folder to the rail's Pinned section. */
+  async setItemPinned(
+    id: string,
+    itemId: string,
+    pinned: boolean
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.patch<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}`,
+      { pinned }
     );
     return data;
   },

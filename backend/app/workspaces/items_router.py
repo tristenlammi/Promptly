@@ -172,6 +172,8 @@ def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
 
     def build(parent_id: uuid.UUID | None) -> list[WorkspaceItemNode]:
         nodes: list[WorkspaceItemNode] = []
+        # Natural (position) order — pinning surfaces items in the rail's
+        # dedicated Pinned section rather than reordering them in place.
         for it in children.get(parent_id, []):
             nodes.append(
                 WorkspaceItemNode(
@@ -183,6 +185,7 @@ def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
                     position=it.position,
                     indexing_status=it.indexing_status,
                     context_enabled=it.context_enabled,
+                    pinned=it.pinned,
                     children=build(it.id),
                 )
             )
@@ -245,9 +248,9 @@ async def get_workspace_tree(
                 ref_id=c.id,
                 title=c.title or "New chat",
                 icon=None,
-                # Sort chats after stored items; order within is the
-                # query's recency order.
+                # Sort chats after stored items; recency order within.
                 position=1_000_000.0 + idx,
+                pinned=bool(c.pinned),
                 children=[],
             )
         )
@@ -386,6 +389,8 @@ async def update_workspace_item(
         # Only note/canvas items participate in RAG context; folders/chats
         # carry the flag harmlessly but it's never consulted for them.
         item.context_enabled = payload.context_enabled
+    if "pinned" in sent and payload.pinned is not None:
+        item.pinned = payload.pinned
 
     item.updated_at = datetime.now(timezone.utc)
     await db.commit()

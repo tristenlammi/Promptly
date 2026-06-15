@@ -371,6 +371,13 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # Pinned items surface in a "Pinned" quick-access section at the top of
+    # the workspace rail (chats reuse ``conversations.pinned``). Purely a
+    # navigation convenience — no effect on context/indexing.
+    pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     def __repr__(self) -> str:
         return (
             f"<WorkspaceItem id={self.id} kind={self.kind} "

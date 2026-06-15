@@ -264,6 +264,17 @@ export function useSetItemContext(workspaceId: string) {
   });
 }
 
+export function useSetItemPinned(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { itemId: string; pinned: boolean }) =>
+      workspacesApi.setItemPinned(workspaceId, vars.itemId, vars.pinned),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
+  });
+}
+
 export function useSetFileContext(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
