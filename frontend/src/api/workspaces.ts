@@ -78,6 +78,57 @@ export interface WorkspaceDetail extends WorkspaceSummary {
   embeddings_configured: boolean;
 }
 
+/** Kinds the navigator tree can hold. ``folder``/``note`` are real
+ *  ``workspace_items`` rows; ``chat`` rows are synthesised at the root
+ *  from the workspace's conversations; ``canvas``/``file`` are reserved
+ *  for later phases but typed here so the tree renderer stays exhaustive. */
+export type WorkspaceItemKind = "folder" | "note" | "canvas" | "file" | "chat";
+
+/** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
+ *  ``children``; chats are appended flat at the root. */
+export interface WorkspaceItemNode {
+  id: string;
+  kind: WorkspaceItemKind;
+  /** Underlying resource id: a Drive Document id for notes, a
+   *  conversation id for chats, ``null`` for folders. */
+  ref_id: string | null;
+  title: string;
+  icon: string | null;
+  position: number;
+  indexing_status: string | null;
+  children: WorkspaceItemNode[];
+}
+
+/** Flat ``workspace_items`` row returned by the create / update / move
+ *  endpoints (no ``children``). */
+export interface WorkspaceItemResponse {
+  id: string;
+  workspace_id: string;
+  parent_id: string | null;
+  kind: WorkspaceItemKind;
+  ref_id: string | null;
+  title: string;
+  icon: string | null;
+  position: number;
+  indexing_status: string | null;
+}
+
+export interface CreateWorkspaceItemPayload {
+  kind: "folder" | "note";
+  parent_id?: string | null;
+  title?: string;
+}
+
+export interface UpdateWorkspaceItemPayload {
+  title?: string;
+  icon?: string;
+}
+
+export interface MoveWorkspaceItemPayload {
+  parent_id?: string | null;
+  position: number;
+}
+
 export type WorkspaceShareRole = "editor" | "viewer";
 
 /** One share row on the owner-facing management list. */
@@ -216,6 +267,55 @@ export const workspacesApi = {
       `/workspaces/${id}/conversations`
     );
     return data;
+  },
+
+  // ------------------------------------------------------------------
+  // Navigator tree (Phase 1c) — folders / notes / chats
+  // ------------------------------------------------------------------
+  async tree(id: string): Promise<WorkspaceItemNode[]> {
+    const { data } = await apiClient.get<WorkspaceItemNode[]>(
+      `/workspaces/${id}/tree`
+    );
+    return data;
+  },
+
+  async createItem(
+    id: string,
+    payload: CreateWorkspaceItemPayload
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.post<WorkspaceItemResponse>(
+      `/workspaces/${id}/items`,
+      payload
+    );
+    return data;
+  },
+
+  async updateItem(
+    id: string,
+    itemId: string,
+    payload: UpdateWorkspaceItemPayload
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.patch<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}`,
+      payload
+    );
+    return data;
+  },
+
+  async moveItem(
+    id: string,
+    itemId: string,
+    payload: MoveWorkspaceItemPayload
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.post<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}/move`,
+      payload
+    );
+    return data;
+  },
+
+  async deleteItem(id: string, itemId: string): Promise<void> {
+    await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
   },
 
   async pinFile(id: string, fileId: string): Promise<WorkspaceFilePin> {

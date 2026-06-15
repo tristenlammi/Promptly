@@ -20,6 +20,10 @@ import {
   type WorkspaceInviteRow,
   type WorkspaceShareRow,
   type UpdateWorkspacePayload,
+  type WorkspaceItemNode,
+  type CreateWorkspaceItemPayload,
+  type UpdateWorkspaceItemPayload,
+  type MoveWorkspaceItemPayload,
 } from "@/api/workspaces";
 
 const KEYS = {
@@ -31,6 +35,7 @@ const KEYS = {
     ["workspaces", "conversations", id] as const,
   usage: (id: string) => ["workspaces", "usage", id] as const,
   shares: (id: string) => ["workspaces", "shares", id] as const,
+  tree: (id: string) => ["workspaces", "tree", id] as const,
   invites: ["workspace-invites"] as const,
 };
 
@@ -68,6 +73,83 @@ export function useWorkspaceUsage(id: string | undefined) {
     queryKey: id ? KEYS.usage(id) : ["workspaces", "usage", "_"],
     queryFn: () => workspacesApi.usage(id as string),
     enabled: Boolean(id),
+  });
+}
+
+// ---------------------------------------------------------------------
+// Navigator tree (Phase 1c)
+//
+// The tree query holds folders + notes (nested) and chats (flat at root).
+// Every mutation invalidates the same tree key — the endpoint is cheap
+// and a workspace holds at most a few dozen items, so optimistic merging
+// isn't worth the complexity here.
+// ---------------------------------------------------------------------
+
+export function useWorkspaceTree(id: string | undefined) {
+  return useQuery<WorkspaceItemNode[]>({
+    queryKey: id ? KEYS.tree(id) : ["workspaces", "tree", "_"],
+    queryFn: () => workspacesApi.tree(id as string),
+    enabled: Boolean(id),
+    // Poll while any note is mid-index so the "indexing…" hint clears
+    // without a manual refresh; stop once everything has settled.
+    refetchInterval: (query) => {
+      const anyIndexing = (query.state.data ?? []).some(function check(
+        node: WorkspaceItemNode
+      ): boolean {
+        const status = node.indexing_status;
+        if (status === "queued" || status === "embedding") return true;
+        return node.children.some(check);
+      });
+      return anyIndexing ? 2500 : false;
+    },
+  });
+}
+
+export function useCreateWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateWorkspaceItemPayload) =>
+      workspacesApi.createItem(workspaceId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
+  });
+}
+
+export function useUpdateWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      itemId: string;
+      payload: UpdateWorkspaceItemPayload;
+    }) => workspacesApi.updateItem(workspaceId, args.itemId, args.payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
+  });
+}
+
+export function useMoveWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      itemId: string;
+      payload: MoveWorkspaceItemPayload;
+    }) => workspacesApi.moveItem(workspaceId, args.itemId, args.payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
+  });
+}
+
+export function useDeleteWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) =>
+      workspacesApi.deleteItem(workspaceId, itemId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
   });
 }
 
