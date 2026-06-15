@@ -388,7 +388,14 @@ function WorkspaceMainPane({
   }
 
   if (node && node.kind === "canvas") {
-    return <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />;
+    return (
+      <WorkspaceCanvasPaneFrame
+        node={node}
+        canEdit={canEdit}
+        workspaceId={workspaceId}
+        onOpenItem={onOpenItem}
+      />
+    );
   }
 
   if (node && node.kind === "chat" && node.ref_id) {
@@ -704,9 +711,13 @@ function BacklinksPanel({
 function WorkspaceCanvasPaneFrame({
   node,
   canEdit,
+  workspaceId,
+  onOpenItem,
 }: {
   node: WorkspaceItemNode;
   canEdit: boolean;
+  workspaceId: string;
+  onOpenItem: (node: WorkspaceItemNode) => void;
 }) {
   if (!node.ref_id) {
     return (
@@ -721,7 +732,12 @@ function WorkspaceCanvasPaneFrame({
     // ``min-h-0`` lets this flex child shrink so the absolutely-positioned
     // tldraw surface gets a real height inside the scrolling main pane.
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <WorkspaceCanvasPane canvasId={node.ref_id} readOnly={!canEdit} />
+      <WorkspaceCanvasPane
+        canvasId={node.ref_id}
+        readOnly={!canEdit}
+        workspaceId={workspaceId}
+        onOpenItem={onOpenItem}
+      />
     </div>
   );
 }

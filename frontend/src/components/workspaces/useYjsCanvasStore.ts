@@ -21,6 +21,7 @@ import {
 } from "tldraw";
 
 import type { CollabTokenResponse } from "@/api/documents";
+import { customShapeUtils } from "./canvas/customShapes";
 
 /**
  * Binds a tldraw ``TLStore`` to a shared ``Y.Doc`` from a Hocuspocus
@@ -45,7 +46,12 @@ import type { CollabTokenResponse } from "@/api/documents";
  * sync (the must-have) keeps working even if cursors degrade.
  */
 
-const shapeUtils: TLAnyShapeUtilConstructor[] = [...defaultShapeUtils];
+// Defaults + our ``item-card`` live-card util. The same array is passed to
+// ``<Tldraw shapeUtils>`` so the store and the editor agree on the schema.
+const shapeUtils: TLAnyShapeUtilConstructor[] = [
+  ...defaultShapeUtils,
+  ...customShapeUtils,
+];
 const bindingUtils: TLAnyBindingUtilConstructor[] = [...defaultBindingUtils];
 
 export function useYjsCanvasStore({
