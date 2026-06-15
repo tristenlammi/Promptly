@@ -152,8 +152,11 @@ function TreeNode({
   // Chats are synthesised — no rename/delete from the tree.
   const editable = canEdit && !isChat;
 
-  const indexing =
-    node.indexing_status === "queued" || node.indexing_status === "embedding";
+  // Only show the spinner while a chunk run is *actively in flight*.
+  // ``queued`` is a parked state — an empty note/canvas (or a workspace
+  // with no embedding provider) sits there indefinitely, so spinning on
+  // it just looks like something's stuck.
+  const indexing = node.indexing_status === "embedding";
 
   const handleClick = () => {
     if (isFolder) {

@@ -90,14 +90,16 @@ export function useWorkspaceTree(id: string | undefined) {
     queryKey: id ? KEYS.tree(id) : ["workspaces", "tree", "_"],
     queryFn: () => workspacesApi.tree(id as string),
     enabled: Boolean(id),
-    // Poll while any note is mid-index so the "indexing…" hint clears
-    // without a manual refresh; stop once everything has settled.
+    // Poll only while something is *actively embedding* so the spinner
+    // clears without a manual refresh. We intentionally do NOT poll on
+    // ``queued`` — an empty note/canvas (or a workspace with no embedding
+    // provider) parks there forever, which would otherwise refetch every
+    // few seconds indefinitely.
     refetchInterval: (query) => {
       const anyIndexing = (query.state.data ?? []).some(function check(
         node: WorkspaceItemNode
       ): boolean {
-        const status = node.indexing_status;
-        if (status === "queued" || status === "embedding") return true;
+        if (node.indexing_status === "embedding") return true;
         return node.children.some(check);
       });
       return anyIndexing ? 2500 : false;
