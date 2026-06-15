@@ -355,6 +355,16 @@ export const workspacesApi = {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
   },
 
+  /** Notes that wiki-link to this item (the backend scans note HTML for
+   *  the ``item=<itemId>`` substring). Returns the same node shape the
+   *  tree uses so rows can be rendered + opened identically. */
+  async backlinks(id: string, itemId: string): Promise<WorkspaceItemNode[]> {
+    const { data } = await apiClient.get<WorkspaceItemNode[]>(
+      `/workspaces/${id}/items/${itemId}/backlinks`
+    );
+    return data;
+  },
+
   /** Soft-archive an item (folder → its subtree) into the workspace
    *  Archive section. */
   async archiveItem(id: string, itemId: string): Promise<WorkspaceItemResponse> {

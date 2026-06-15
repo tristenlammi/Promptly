@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  FileText,
   FolderX,
+  Link2,
   Loader2,
   Plus,
   Search,
@@ -20,6 +22,10 @@ import { ImportConversationsModal } from "@/components/chat/ImportConversationsM
 import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { TopNav } from "@/components/layout/TopNav";
+import {
+  parseWikiHref,
+  type WikiTarget,
+} from "@/components/files/documents/WikiLinkExtension";
 import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -33,6 +39,7 @@ import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
   useArchiveWorkspace,
   useBulkRemoveConversationsFromWorkspace,
+  useItemBacklinks,
   useWorkspace,
   useWorkspaceConversations,
   useWorkspaceTree,
@@ -349,7 +356,14 @@ function WorkspaceMainPane({
   canEdit: boolean;
 }) {
   if (node && node.kind === "note") {
-    return <WorkspaceNotePane node={node} onClose={onCloseNote} />;
+    return (
+      <WorkspaceNotePane
+        node={node}
+        workspaceId={workspaceId}
+        onClose={onCloseNote}
+        onOpenItem={onOpenItem}
+      />
+    );
   }
 
   if (node && node.kind === "canvas") {
@@ -460,13 +474,75 @@ function WorkspaceMainPane({
  */
 function WorkspaceNotePane({
   node,
+  workspaceId,
   onClose,
+  onOpenItem,
 }: {
   node: WorkspaceItemNode;
+  workspaceId: string;
   onClose: () => void;
+  onOpenItem: (node: WorkspaceItemNode) => void;
 }) {
   const [file, setFile] = useState<FileItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Workspace tree → flat list of linkable targets (notes / canvases /
+  // chats) for both the ``[[`` autocomplete and click-to-open title
+  // lookup. Folders aren't linkable; they only nest.
+  const { data: tree } = useWorkspaceTree(workspaceId);
+  const linkables = useMemo(() => collectLinkables(tree ?? []), [tree]);
+
+  // ``[[`` autocomplete source: substring-filter the flattened tree,
+  // skip the current note itself, map to WikiTarget. Stable identity so
+  // the editor's ``buildExtensions`` memo doesn't churn on every render.
+  const wikiItems = useCallback(
+    async (query: string): Promise<WikiTarget[]> => {
+      const q = query.trim().toLowerCase();
+      return linkables
+        .filter((n) => n.id !== node.id)
+        .filter((n) => !q || n.title.toLowerCase().includes(q))
+        .slice(0, 8)
+        .map((n) => ({
+          id: n.id,
+          kind: n.kind,
+          refId: n.ref_id,
+          title: n.title,
+          workspaceId,
+        }));
+    },
+    [linkables, node.id, workspaceId]
+  );
+  const wikiLink = useMemo(() => ({ items: wikiItems }), [wikiItems]);
+
+  // Click-to-open: intercept clicks on wiki-link anchors (href carries
+  // ``?item=``) and open the target inline instead of navigating. Capture
+  // phase so we beat any default anchor handling.
+  const handleEditorClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const anchor = (e.target as HTMLElement | null)?.closest("a");
+      if (!anchor) return;
+      const parsed = parseWikiHref(anchor.getAttribute("href"));
+      if (!parsed) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Prefer the real title from the tree so the pane header isn't blank
+      // for a tick; the target pane refetches its own data regardless.
+      const known = linkables.find((n) => n.id === parsed.item);
+      onOpenItem(
+        known ?? {
+          id: parsed.item,
+          kind: parsed.kind as WorkspaceItemNode["kind"],
+          ref_id: parsed.ref,
+          title: "",
+          icon: null,
+          position: 0,
+          indexing_status: null,
+          children: [],
+        }
+      );
+    },
+    [linkables, onOpenItem]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -515,15 +591,83 @@ function WorkspaceNotePane({
   }
 
   // Inline editor fills the pane (rail + nav stay visible). The editor's
-  // own X / onClose deselects the note back to the empty state.
+  // own X / onClose deselects the note back to the empty state. The
+  // click-capture wrapper turns wiki-link anchors into inline navigation,
+  // and the backlinks strip sits below the editor.
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <DocumentEditorModal
-        file={file}
-        inline
-        onClose={onClose}
-        onFileUpdated={(f) => setFile(f)}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+      <div className="flex min-h-0 flex-1 flex-col" onClickCapture={handleEditorClick}>
+        <DocumentEditorModal
+          file={file}
+          inline
+          onClose={onClose}
+          onFileUpdated={(f) => setFile(f)}
+          wikiLink={wikiLink}
+        />
+      </div>
+      <BacklinksPanel
+        workspaceId={workspaceId}
+        itemId={node.id}
+        onOpenItem={onOpenItem}
       />
+    </div>
+  );
+}
+
+/** Flatten the workspace tree into the set of wiki-linkable items
+ *  (everything but folders). Used for ``[[`` autocomplete + click-to-open
+ *  title resolution. */
+function collectLinkables(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
+  const out: WorkspaceItemNode[] = [];
+  const walk = (list: WorkspaceItemNode[]) => {
+    for (const n of list) {
+      if (n.kind === "folder") {
+        walk(n.children);
+      } else {
+        out.push(n);
+        if (n.children.length) walk(n.children);
+      }
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+/** "Linked from" strip below a note — lists the notes that wiki-link to
+ *  it. Hidden entirely when there are no backlinks so it stays
+ *  unobtrusive. Each row opens its source note inline. */
+function BacklinksPanel({
+  workspaceId,
+  itemId,
+  onOpenItem,
+}: {
+  workspaceId: string;
+  itemId: string;
+  onOpenItem: (node: WorkspaceItemNode) => void;
+}) {
+  const { data: backlinks } = useItemBacklinks(workspaceId, itemId);
+  if (!backlinks || backlinks.length === 0) return null;
+  return (
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-2">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        <Link2 className="h-3 w-3" />
+        Linked from ({backlinks.length})
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {backlinks.map((b) => (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => onOpenItem(b)}
+            className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--accent)]/10"
+            title={b.title || "Untitled"}
+          >
+            <FileText className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+            <span className="truncate">{b.title || "Untitled"}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

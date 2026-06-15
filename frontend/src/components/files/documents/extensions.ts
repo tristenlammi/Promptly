@@ -23,6 +23,7 @@ import type { Doc as YDoc } from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 
 import { AudioExtension } from "./AudioExtension";
+import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 
 /**
  * Build the TipTap extension array used by the Drive Documents editor.
@@ -83,6 +84,10 @@ export interface BuildExtensionsOptions {
   provider: HocuspocusProvider | null;
   user: { id: string; name: string; color: string } | null;
   placeholder?: string;
+  /** Workspace-note-only: enables the ``[[`` wiki-link autocomplete.
+   *  Absent for normal Drive documents, so nothing changes there. The
+   *  ``items`` fetcher resolves the popup list for the current query. */
+  wikiLink?: { items: (query: string) => Promise<WikiTarget[]> };
 }
 
 // Lazily-built lowlight instance. Registers the "common" languages
@@ -96,6 +101,7 @@ export function buildExtensions({
   provider,
   user,
   placeholder = "Start typing, or hit / for commands…",
+  wikiLink,
 }: BuildExtensionsOptions): Extensions {
   const collabActive = Boolean(ydoc && provider);
 
@@ -179,6 +185,17 @@ export function buildExtensions({
     DetailsSummary,
     DetailsContent,
   ];
+
+  // Workspace notes opt into the ``[[`` wiki-link autocomplete. The
+  // extension only inserts a Link mark (in-app relative href) via normal
+  // chains, so it coexists with Collaboration without fighting the CRDT.
+  if (wikiLink) {
+    extensions.push(
+      WikiLinkExtension.configure({
+        items: wikiLink.items,
+      })
+    );
+  }
 
   // ``Collaboration`` binds the editor state to the Y.Doc. Register
   // it as soon as a Y.Doc exists — the provider is NOT required for
