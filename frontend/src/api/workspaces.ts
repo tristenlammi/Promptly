@@ -334,6 +334,33 @@ export const workspacesApi = {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
   },
 
+  /** Soft-archive an item (folder → its subtree) into the workspace
+   *  Archive section. */
+  async archiveItem(id: string, itemId: string): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.post<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}/archive`
+    );
+    return data;
+  },
+
+  async unarchiveItem(
+    id: string,
+    itemId: string
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.post<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}/unarchive`
+    );
+    return data;
+  },
+
+  /** Archived item roots + archived chats for the Archive section. */
+  async archivedItems(id: string): Promise<WorkspaceItemNode[]> {
+    const { data } = await apiClient.get<WorkspaceItemNode[]>(
+      `/workspaces/${id}/archived-items`
+    );
+    return data;
+  },
+
   /** Ask a grounded question across the whole workspace. Returns a cited
    *  answer; citations link back to the source note/canvas/file. */
   async ask(id: string, question: string): Promise<WorkspaceAskResponse> {

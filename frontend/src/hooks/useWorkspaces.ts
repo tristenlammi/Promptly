@@ -36,6 +36,7 @@ const KEYS = {
   usage: (id: string) => ["workspaces", "usage", id] as const,
   shares: (id: string) => ["workspaces", "shares", id] as const,
   tree: (id: string) => ["workspaces", "tree", id] as const,
+  archive: (id: string) => ["workspaces", "archive", id] as const,
   invites: ["workspace-invites"] as const,
 };
 
@@ -151,6 +152,39 @@ export function useDeleteWorkspaceItem(workspaceId: string) {
       workspacesApi.deleteItem(workspaceId, itemId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.archive(workspaceId) });
+    },
+  });
+}
+
+export function useWorkspaceArchive(id: string | undefined) {
+  return useQuery<WorkspaceItemNode[]>({
+    queryKey: id ? KEYS.archive(id) : ["workspaces", "archive", "_"],
+    queryFn: () => workspacesApi.archivedItems(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+export function useArchiveWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) =>
+      workspacesApi.archiveItem(workspaceId, itemId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.archive(workspaceId) });
+    },
+  });
+}
+
+export function useUnarchiveWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) =>
+      workspacesApi.unarchiveItem(workspaceId, itemId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.archive(workspaceId) });
     },
   });
 }

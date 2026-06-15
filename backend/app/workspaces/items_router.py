@@ -128,6 +128,31 @@ async def _resolve_subfolder_id(
     return sub.id
 
 
+async def _collect_subtree(
+    db: AsyncSession, workspace_id: uuid.UUID, item: WorkspaceItem
+) -> list[WorkspaceItem]:
+    """The item plus every descendant (BFS over ``parent_id``)."""
+    all_items = list(
+        (
+            await db.execute(
+                select(WorkspaceItem).where(
+                    WorkspaceItem.workspace_id == workspace_id
+                )
+            )
+        ).scalars()
+    )
+    by_parent: dict[uuid.UUID | None, list[WorkspaceItem]] = {}
+    for it in all_items:
+        by_parent.setdefault(it.parent_id, []).append(it)
+    out: list[WorkspaceItem] = []
+    stack = [item]
+    while stack:
+        cur = stack.pop()
+        out.append(cur)
+        stack.extend(by_parent.get(cur.id, []))
+    return out
+
+
 def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
     """Build the nested node list from a flat, position-ordered item list."""
     children: dict[uuid.UUID | None, list[WorkspaceItem]] = {}
@@ -175,7 +200,10 @@ async def get_workspace_tree(
         (
             await db.execute(
                 select(WorkspaceItem)
-                .where(WorkspaceItem.workspace_id == ws.id)
+                .where(
+                    WorkspaceItem.workspace_id == ws.id,
+                    WorkspaceItem.archived_at.is_(None),
+                )
                 .order_by(WorkspaceItem.position.asc())
             )
         ).scalars()
@@ -184,11 +212,15 @@ async def get_workspace_tree(
 
     # Synthesise chat nodes from the workspace's conversations. They
     # carry no item row (Phase 1) — the frontend opens them by ref_id.
+    # Archived chats drop to the workspace's Archive section.
     convs = list(
         (
             await db.execute(
                 select(Conversation)
-                .where(Conversation.workspace_id == ws.id)
+                .where(
+                    Conversation.workspace_id == ws.id,
+                    Conversation.archived_at.is_(None),
+                )
                 .order_by(Conversation.updated_at.desc())
             )
         ).scalars()
@@ -379,6 +411,127 @@ async def move_workspace_item(
     await db.commit()
     await db.refresh(item)
     return WorkspaceItemResponse.model_validate(item)
+
+
+# ---------------------------------------------------------------------
+# Archive / unarchive (folder = its whole subtree)
+# ---------------------------------------------------------------------
+@router.post(
+    "/{workspace_id}/items/{item_id}/archive",
+    response_model=WorkspaceItemResponse,
+)
+async def archive_workspace_item(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemResponse:
+    """Soft-archive an item (and, for a folder, its whole subtree) — it
+    drops out of the tree into the workspace's Archive section."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_item(db, ws.id, item_id)
+    now = datetime.now(timezone.utc)
+    for it in await _collect_subtree(db, ws.id, item):
+        it.archived_at = now
+    ws.updated_at = now
+    await db.commit()
+    await db.refresh(item)
+    return WorkspaceItemResponse.model_validate(item)
+
+
+@router.post(
+    "/{workspace_id}/items/{item_id}/unarchive",
+    response_model=WorkspaceItemResponse,
+)
+async def unarchive_workspace_item(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemResponse:
+    """Restore an archived item (+ its subtree) back into the tree."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_item(db, ws.id, item_id)
+    now = datetime.now(timezone.utc)
+    for it in await _collect_subtree(db, ws.id, item):
+        it.archived_at = None
+    ws.updated_at = now
+    await db.commit()
+    await db.refresh(item)
+    return WorkspaceItemResponse.model_validate(item)
+
+
+@router.get(
+    "/{workspace_id}/archived-items",
+    response_model=list[WorkspaceItemNode],
+)
+async def get_workspace_archive(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[WorkspaceItemNode]:
+    """The workspace's Archive: archived item *roots* (the top of each
+    archived subtree, so a folder shows one entry) plus archived
+    workspace chats, most-recently-archived first."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+
+    archived = list(
+        (
+            await db.execute(
+                select(WorkspaceItem)
+                .where(
+                    WorkspaceItem.workspace_id == ws.id,
+                    WorkspaceItem.archived_at.is_not(None),
+                )
+                .order_by(WorkspaceItem.archived_at.desc())
+            )
+        ).scalars()
+    )
+    archived_ids = {it.id for it in archived}
+    nodes: list[WorkspaceItemNode] = [
+        WorkspaceItemNode(
+            id=it.id,
+            kind=it.kind,
+            ref_id=it.ref_id,
+            title=it.title,
+            icon=it.icon,
+            position=it.position,
+            indexing_status=it.indexing_status,
+            children=[],
+        )
+        for it in archived
+        # Only the root of each archived subtree (its parent isn't archived).
+        if it.parent_id is None or it.parent_id not in archived_ids
+    ]
+
+    convs = list(
+        (
+            await db.execute(
+                select(Conversation)
+                .where(
+                    Conversation.workspace_id == ws.id,
+                    Conversation.archived_at.is_not(None),
+                )
+                .order_by(Conversation.archived_at.desc())
+            )
+        ).scalars()
+    )
+    for c in convs:
+        nodes.append(
+            WorkspaceItemNode(
+                id=c.id,
+                kind="chat",
+                ref_id=c.id,
+                title=c.title or "New chat",
+                icon=None,
+                position=0,
+                indexing_status=None,
+                children=[],
+            )
+        )
+    return nodes
 
 
 # ---------------------------------------------------------------------

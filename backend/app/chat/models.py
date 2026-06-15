@@ -352,6 +352,15 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Soft-archive (workspace navigator). NULL = live in the tree; a set
+    # timestamp moves the item (and, for a folder, its whole subtree) to
+    # the workspace's Archive section at the bottom of the rail, where it
+    # can be restored or permanently deleted. Deleting the workspace still
+    # cascades archived rows away like any other.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     def __repr__(self) -> str:
         return (
             f"<WorkspaceItem id={self.id} kind={self.kind} "

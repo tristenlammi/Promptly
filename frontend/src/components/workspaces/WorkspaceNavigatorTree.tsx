@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
+  ArchiveRestore,
   ChevronDown,
   ChevronRight,
   FilePlus2,
@@ -17,11 +20,15 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { chatApi } from "@/api/chat";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
+  useArchiveWorkspaceItem,
   useCreateWorkspaceItem,
   useDeleteWorkspaceItem,
+  useUnarchiveWorkspaceItem,
   useUpdateWorkspaceItem,
+  useWorkspaceArchive,
 } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
 
@@ -116,6 +123,122 @@ export function WorkspaceNavigatorTree({
           </ul>
         )}
       </div>
+
+      {/* Per-workspace Archive — pinned to the bottom of the rail. */}
+      <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
+    </div>
+  );
+}
+
+/**
+ * Collapsible Archive at the bottom of the workspace rail. Lists archived
+ * item roots + archived chats; each can be restored or permanently
+ * deleted. Hidden entirely when nothing is archived.
+ */
+function WorkspaceArchiveSection({
+  workspaceId,
+  canEdit,
+}: {
+  workspaceId: string;
+  canEdit: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: archived } = useWorkspaceArchive(workspaceId);
+  const unarchive = useUnarchiveWorkspaceItem(workspaceId);
+  const remove = useDeleteWorkspaceItem(workspaceId);
+  const qc = useQueryClient();
+
+  const entries = archived ?? [];
+  if (entries.length === 0) return null;
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
+    qc.invalidateQueries({ queryKey: ["workspaces", "archive", workspaceId] });
+  };
+
+  const restore = async (node: WorkspaceItemNode) => {
+    if (node.kind === "chat") {
+      if (node.ref_id) {
+        await chatApi.unarchive(node.ref_id);
+        invalidate();
+      }
+    } else {
+      unarchive.mutate(node.id);
+    }
+  };
+
+  const del = async (node: WorkspaceItemNode) => {
+    const ok = window.confirm(
+      node.kind === "chat"
+        ? "Permanently delete this chat?"
+        : node.kind === "folder"
+          ? "Permanently delete this folder and everything inside it?"
+          : "Permanently delete this item?"
+    );
+    if (!ok) return;
+    if (node.kind === "chat") {
+      if (node.ref_id) {
+        await chatApi.remove(node.ref_id);
+        invalidate();
+      }
+    } else {
+      remove.mutate(node.id);
+    }
+  };
+
+  return (
+    <div className="shrink-0 border-t border-[var(--border)]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" />
+        )}
+        <Archive className="h-3.5 w-3.5" />
+        Archive
+        <span className="ml-1 font-normal normal-case">({entries.length})</span>
+      </button>
+      {open && (
+        <ul className="max-h-48 overflow-y-auto px-1.5 pb-2">
+          {entries.map((node) => (
+            <li
+              key={node.id}
+              className="group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]"
+            >
+              <NodeIcon node={node} expanded={false} />
+              <span className="min-w-0 flex-1 truncate">
+                {node.title || "Untitled"}
+              </span>
+              {canEdit && (
+                <span className="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100">
+                  <button
+                    type="button"
+                    title="Restore"
+                    aria-label="Restore"
+                    onClick={() => void restore(node)}
+                    className="rounded p-1 hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
+                  >
+                    <ArchiveRestore className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete permanently"
+                    aria-label="Delete permanently"
+                    onClick={() => void del(node)}
+                    className="rounded p-1 text-red-500 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -146,11 +269,51 @@ function TreeNode({
 
   const update = useUpdateWorkspaceItem(workspaceId);
   const remove = useDeleteWorkspaceItem(workspaceId);
+  const archive = useArchiveWorkspaceItem(workspaceId);
+  const qc = useQueryClient();
+  const [chatBusy, setChatBusy] = useState(false);
 
   const isFolder = node.kind === "folder";
   const isChat = node.kind === "chat";
-  // Chats are synthesised — no rename/delete from the tree.
-  const editable = canEdit && !isChat;
+  // Every item gets a menu now (archive then delete). Chats are
+  // synthesised, so their archive/delete go through the conversation
+  // endpoints; folders/notes/canvases through the workspace_items ones.
+  const editable = canEdit;
+
+  const invalidateTreeAndArchive = () => {
+    qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
+    qc.invalidateQueries({ queryKey: ["workspaces", "archive", workspaceId] });
+  };
+
+  const handleArchive = async () => {
+    if (isChat) {
+      if (!node.ref_id) return;
+      setChatBusy(true);
+      try {
+        await chatApi.archive(node.ref_id);
+        invalidateTreeAndArchive();
+      } finally {
+        setChatBusy(false);
+      }
+    } else {
+      archive.mutate(node.id);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (isChat) {
+      if (!node.ref_id) return;
+      setChatBusy(true);
+      try {
+        await chatApi.remove(node.ref_id);
+        invalidateTreeAndArchive();
+      } finally {
+        setChatBusy(false);
+      }
+    } else {
+      remove.mutate(node.id);
+    }
+  };
 
   // Only show the spinner while a chunk run is *actively in flight*.
   // ``queued`` is a parked state — an empty note/canvas (or a workspace
@@ -245,15 +408,21 @@ function TreeNode({
         {editable && !renaming && (
           <NodeActions
             isFolder={isFolder}
-            onRename={() => {
-              setDraftTitle(node.title);
-              setRenaming(true);
-            }}
-            onDelete={() => remove.mutate(node.id)}
+            isChat={isChat}
+            onRename={
+              isChat
+                ? undefined
+                : () => {
+                    setDraftTitle(node.title);
+                    setRenaming(true);
+                  }
+            }
+            onArchive={handleArchive}
+            onDelete={handleDelete}
             onNewNote={() => onCreateInFolder("note", node.id)}
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
             onNewFolder={() => onCreateInFolder("folder", node.id)}
-            deleting={remove.isPending}
+            deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
       </div>
@@ -317,7 +486,9 @@ function isEmoji(s: string): boolean {
 
 function NodeActions({
   isFolder,
+  isChat,
   onRename,
+  onArchive,
   onDelete,
   onNewNote,
   onNewCanvas,
@@ -325,7 +496,10 @@ function NodeActions({
   deleting,
 }: {
   isFolder: boolean;
-  onRename: () => void;
+  isChat: boolean;
+  /** Omitted for chats (synthesised — no in-tree rename). */
+  onRename?: () => void;
+  onArchive: () => void;
   onDelete: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
@@ -379,14 +553,16 @@ function NodeActions({
               className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-lg"
               onClick={(e) => e.stopPropagation()}
             >
-              <MenuItem
-                icon={<Pencil className="h-3.5 w-3.5" />}
-                label="Rename"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onRename();
-                }}
-              />
+              {onRename && (
+                <MenuItem
+                  icon={<Pencil className="h-3.5 w-3.5" />}
+                  label="Rename"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRename();
+                  }}
+                />
+              )}
               {isFolder && (
                 <>
                   <MenuItem
@@ -415,6 +591,16 @@ function NodeActions({
                   />
                 </>
               )}
+              {/* Archive first (the soft step), then permanent delete. */}
+              <MenuItem
+                icon={<Archive className="h-3.5 w-3.5" />}
+                label="Archive"
+                disabled={deleting}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onArchive();
+                }}
+              />
               <MenuItem
                 icon={<Trash2 className="h-3.5 w-3.5" />}
                 label="Delete"
@@ -425,8 +611,10 @@ function NodeActions({
                   if (
                     window.confirm(
                       isFolder
-                        ? "Delete this folder and everything inside it?"
-                        : "Delete this note?"
+                        ? "Permanently delete this folder and everything inside it?"
+                        : isChat
+                          ? "Permanently delete this chat?"
+                          : "Permanently delete this item?"
                     )
                   ) {
                     onDelete();
