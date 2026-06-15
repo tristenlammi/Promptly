@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -264,9 +264,99 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
     auto_memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Drive folder backing this workspace (Phase 1). Points at the
+    # auto-created ``My files / Workspaces / <title>`` folder where the
+    # workspace's notes / canvases / uploaded files physically live, so
+    # they inherit Drive's preview / search / trash / quota plumbing.
+    # NULL only briefly during creation (or for a legacy row that
+    # predates folder seeding). ``ON DELETE SET NULL`` so deleting the
+    # folder out-of-band never cascade-deletes the workspace.
+    root_folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("file_folders.id", ondelete="SET NULL"), nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<Workspace id={self.id} title={self.title!r}>"
+
+
+class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
+    """A node in a workspace's navigator tree (Phase 1).
+
+    The workspace's left-rail tree is one unified, nestable,
+    reorderable list mixing kinds — ``folder`` rows for organisation
+    plus the actual work surfaces (``note`` today; ``canvas`` / ``file``
+    in later phases). It is the **source of truth for the navigator**,
+    which a ``file_folders`` tree can't be because that can't hold
+    chats or canvases as first-class nodes.
+
+    Chats are deliberately **not** stored here in Phase 1: they're
+    synthesised into the tree at read time from the conversations
+    carrying this ``workspace_id``, so a chat always shows up with zero
+    sync bookkeeping. (Persisting chat nodes — to drag them into
+    folders — is a later refinement.)
+
+    ``ref_id`` points at the backing entity for non-folder kinds: a
+    ``files.id`` (a ``source_kind='document'`` note) today. It is
+    intentionally **not** a DB FK because it's polymorphic across
+    target tables (files now, ``workspace_canvas`` later); the router
+    reconciles a dangling ref at read time. ``position`` orders
+    siblings as a float so a drag can insert between two neighbours by
+    midpoint without renumbering the whole list.
+    """
+
+    __tablename__ = "workspace_items"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Folder nesting *within* the workspace. NULL = top level of the
+    # tree. ``ON DELETE CASCADE`` so deleting a folder row drops its
+    # subtree of item rows in one go (the router trashes the backing
+    # blobs first — see the delete endpoint).
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # 'folder' | 'note' | 'canvas' | 'file'. (Chats are synthesised at
+    # read time, never stored, so they never carry this column.)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Backing entity id for non-folder kinds (-> files.id for a note).
+    # NULL for folders. Polymorphic, so not a FK.
+    ref_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional emoji or lucide icon name rendered on the tree row.
+    icon: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Sibling ordering. Float so inserting between two neighbours is a
+    # midpoint, never a full renumber. A fresh item lands at the end by
+    # taking ``max(sibling positions) + 1``.
+    position: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
+
+    # --- RAG indexing lifecycle (Phase 1b) -------------------------------
+    # Per-item index status for note / canvas / file kinds — the same
+    # ``queued -> embedding -> ready | failed`` lifecycle the pinned-file
+    # chips use, but stored inline here (decision O3) so the tree renders
+    # without an extra join. Folder rows leave these NULL.
+    indexing_status: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    indexing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<WorkspaceItem id={self.id} kind={self.kind} "
+            f"title={self.title!r}>"
+        )
 
 
 class WorkspaceFile(Base):

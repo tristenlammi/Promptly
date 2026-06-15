@@ -38,7 +38,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.chat.models import Workspace, WorkspaceFile, Conversation, Message
+from app.chat.models import (
+    Conversation,
+    Message,
+    Workspace,
+    WorkspaceFile,
+    WorkspaceItem,
+)
 from app.chat.semantic_search import get_embedding_config
 from app.models_config.models import ModelProvider
 from app.custom_models.embedding import (
@@ -239,6 +245,140 @@ async def reindex_workspace(workspace_id: uuid.UUID) -> None:
 
 
 # ---------------------------------------------------------------------
+# Note ingestion (first-class notes — Phase 1b)
+# ---------------------------------------------------------------------
+# A note is an ordinary Drive Document (``source_kind='document'``) whose
+# rendered HTML blob is text-extractable, so it rides the same embed
+# pipeline as pinned files. The only difference is bookkeeping: its index
+# lifecycle lives on the ``workspace_items`` row (decision O3), not on a
+# ``workspace_files`` pivot. Its chunks share the workspace scope
+# (``workspace_id`` + ``user_file_id``), so retrieval picks them up next
+# to pinned files with zero extra wiring.
+
+
+async def _set_note_index_status(
+    db: AsyncSession,
+    *,
+    item_id: uuid.UUID,
+    status: str,
+    error: str | None = None,
+    indexed_hash: str | None = None,
+) -> None:
+    item = await db.get(WorkspaceItem, item_id)
+    if item is None:
+        return
+    item.indexing_status = status
+    item.indexing_error = error
+    if status == "ready":
+        item.indexed_at = datetime.now(timezone.utc)
+        if indexed_hash is not None:
+            item.indexed_content_hash = indexed_hash
+    await db.commit()
+
+
+async def index_note_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed (or re-embed) a workspace note so chats can retrieve it.
+
+    Enqueued from the document snapshot endpoint when a note's content
+    changes. Owns its own session (``BackgroundTasks``-safe). No-ops
+    quietly when embeddings aren't configured or the note is still
+    empty — a blank note simply stays ``queued`` rather than failing.
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "note" or item.ref_id is None:
+                return
+            file = await db.get(UserFile, item.ref_id)
+            if file is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="note document no longer exists",
+                )
+                return
+
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return  # leave queued until an embedding provider exists
+
+            # Empty / never-typed note → nothing to embed. Leave queued
+            # (not failed) so the first real edit indexes it cleanly.
+            if not (file.content_text or "").strip():
+                return
+
+            current_hash = file_content_hash(file)
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(
+                db, item_id=item_id, status="embedding"
+            )
+            try:
+                chunks, embeddings = await embed_file_to_chunks(
+                    file,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db,
+                item_id=item_id,
+                status="ready",
+                indexed_hash=current_hash,
+            )
+            logger.info(
+                "indexed %d chunks for workspace=%s note=%s",
+                len(chunks),
+                workspace_id,
+                item_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - last-line catch
+            logger.exception("index_note_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
+# ---------------------------------------------------------------------
 # Injection (per-send)
 # ---------------------------------------------------------------------
 
@@ -269,6 +409,61 @@ async def _indexed_token_total(db: AsyncSession, workspace_id: uuid.UUID) -> int
     return int(total or 0)
 
 
+# Char ceiling for the full-dump "Workspace notes" block. ~6k tokens —
+# the same budget that flips a workspace into retrieval mode, so a
+# workspace whose notes exceed this is already being retrieved (chunked)
+# rather than dumped whole.
+_NOTES_FULLDUMP_CHAR_CAP = WORKSPACE_RETRIEVAL_TOKEN_BUDGET * 4
+
+
+async def _workspace_notes(
+    db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
+) -> list[tuple[WorkspaceItem, UserFile]]:
+    """Live note items in the workspace paired with their backing doc,
+    minus anything this chat has excluded (by note file id)."""
+    rows = (
+        await db.execute(
+            select(WorkspaceItem, UserFile)
+            .join(UserFile, UserFile.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == workspace_id,
+                WorkspaceItem.kind == "note",
+                UserFile.trashed_at.is_(None),
+            )
+            .order_by(WorkspaceItem.position.asc())
+        )
+    ).all()
+    return [(it, uf) for it, uf in rows if uf.id not in excluded]
+
+
+def _format_notes_block(
+    notes: list[tuple[WorkspaceItem, UserFile]]
+) -> str | None:
+    """Full text of the workspace's notes for full-dump mode. Capped so a
+    runaway set can't blow the context window (retrieval takes over past
+    the cap). Returns ``None`` when there's no note text to inject."""
+    header = (
+        "The user's notes in this workspace. Treat them as authoritative "
+        "context for this conversation:"
+    )
+    parts: list[str] = []
+    used = 0
+    for it, uf in notes:
+        text = (uf.content_text or "").strip()
+        if not text:
+            continue
+        seg = f"\n\n## {it.title}\n{text}"
+        if used + len(seg) > _NOTES_FULLDUMP_CHAR_CAP:
+            seg = seg[: max(0, _NOTES_FULLDUMP_CHAR_CAP - used)]
+        parts.append(seg)
+        used += len(seg)
+        if used >= _NOTES_FULLDUMP_CHAR_CAP:
+            break
+    if not parts:
+        return None
+    return header + "".join(parts)
+
+
 async def build_workspace_injection(
     db: AsyncSession,
     *,
@@ -278,17 +473,19 @@ async def build_workspace_injection(
 ) -> WorkspaceInjection:
     """Decide full-dump vs. retrieval for this turn and return the plan.
 
-    Hybrid rule: retrieval kicks in only when embeddings are configured
-    AND the workspace's indexed text exceeds
-    :data:`WORKSPACE_RETRIEVAL_TOKEN_BUDGET`. Otherwise we full-dump every
-    pinned file, exactly as the pre-retrieval code did.
+    Candidates are the workspace's pinned files **and** its first-class
+    notes. Hybrid rule: retrieval kicks in only when embeddings are
+    configured AND the workspace's indexed text exceeds
+    :data:`WORKSPACE_RETRIEVAL_TOKEN_BUDGET`. Otherwise we full-dump —
+    pinned files ride the attachment path and notes are spliced in as a
+    "Workspace notes" system block.
 
-    ``excluded_file_ids`` — files the current chat has opted out of
-    (per-chat toggle); they're dropped from both the attachment set and
+    ``excluded_file_ids`` — files / notes the current chat has opted out
+    of (per-chat toggle); dropped from attachments, the notes block, and
     the retrieved chunks so this conversation never sees them.
     """
     excluded = excluded_file_ids or set()
-    rows = (
+    file_rows = (
         await db.execute(
             select(WorkspaceFile, UserFile)
             .join(UserFile, UserFile.id == WorkspaceFile.file_id)
@@ -296,8 +493,9 @@ async def build_workspace_injection(
             .order_by(WorkspaceFile.pinned_at.asc())
         )
     ).all()
-    rows = [(wsf, uf) for wsf, uf in rows if uf.id not in excluded]
-    if not rows:
+    file_rows = [(wsf, uf) for wsf, uf in file_rows if uf.id not in excluded]
+    note_rows = await _workspace_notes(db, workspace_id, excluded)
+    if not file_rows and not note_rows:
         return WorkspaceInjection()
 
     cfg = await get_embedding_config(db)
@@ -309,18 +507,23 @@ async def build_workspace_injection(
     )
 
     if not retrieval_active:
-        # Full-dump: every pinned file rides the attachment path.
+        # Full-dump: pinned files ride the attachment path; notes are
+        # injected as text (they have no natural attachment form).
         return WorkspaceInjection(
-            attach_file_ids=[uf.id for _, uf in rows], retrieval_active=False
+            system_block=_format_notes_block(note_rows),
+            attach_file_ids=[uf.id for _, uf in file_rows],
+            retrieval_active=False,
         )
 
-    # Retrieval mode. Ready text files are represented by the retrieved
-    # block; everything else (images, binaries, text still indexing or
-    # failed) still rides the attachment path so nothing is silently
-    # dropped during the indexing window.
+    # Retrieval mode. The retrieved block already spans the whole
+    # workspace pool — pinned files *and* notes share the same
+    # ``(workspace_id, user_file_id)`` chunk scope. Ready text files are
+    # represented by that block; everything else (images, binaries, text
+    # still indexing or failed) still rides the attachment path so
+    # nothing is silently dropped during the indexing window.
     attach_ids = [
         uf.id
-        for wsf, uf in rows
+        for wsf, uf in file_rows
         if not (is_text_extractable(uf) and wsf.indexing_status == "ready")
     ]
     chunks = await retrieve_workspace_context(

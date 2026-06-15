@@ -40,6 +40,7 @@ from typing import Any
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     Form,
     Header,
@@ -52,7 +53,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from jose import JWTError, jwt
-from sqlalchemy import and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -298,6 +299,80 @@ def _file_to_response(f: UserFile, *, caller: User) -> FileResponseSchema:
 
 
 # --------------------------------------------------------------------
+# Reusable creation helper — used by the route below *and* by the
+# Workspaces items router (note creation), which composes it with a
+# ``workspace_items`` row inside one transaction.
+# --------------------------------------------------------------------
+async def create_blank_document(
+    db: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    folder_id: uuid.UUID | None,
+    name: str | None,
+) -> UserFile:
+    """Lay down a blank Drive Document — ``UserFile`` + ``DocumentState``
+    + a zero-byte HTML blob — flushed but **not committed** so the
+    caller owns the surrounding transaction. Returns the new
+    ``UserFile`` row. Cleans up the on-disk blob if a flush fails.
+
+    No ACL / folder validation here — the caller is responsible for
+    confirming ``owner_id`` may write into ``folder_id`` before calling.
+    """
+    # Seed the on-disk blob so preview + download work the moment the
+    # document exists. The snapshot endpoint overwrites it as soon as
+    # the first edit flushes through Hocuspocus.
+    new_id = uuid.uuid4()
+    rel_path = storage_path_for(owner_id, new_id, ".html")
+    ensure_bucket(owner_id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as f:
+        f.write("")
+
+    title = (name or _DEFAULT_DOCUMENT_TITLE).rstrip(".")
+    filename = title if title.lower().endswith(".html") else f"{title}.html"
+    filename = sanitize_filename(filename)
+
+    row = UserFile(
+        id=new_id,
+        user_id=owner_id,
+        folder_id=folder_id,
+        filename=filename,
+        original_filename=filename,
+        mime_type="text/html",
+        size_bytes=0,
+        storage_path=rel_path,
+        source_kind=GeneratedKind.DOCUMENT.value,
+        content_text=None,
+    )
+    db.add(row)
+
+    # Flush so the parent ``files`` row exists before the child
+    # ``document_state`` row references it. There's no ORM
+    # ``relationship()`` wiring the two together (by design — the
+    # collab service is the only writer of document_state and never
+    # loads the UserFile), so SQLAlchemy's unit of work doesn't know
+    # about the FK dependency and could otherwise flush the child first
+    # and trip ``document_state_file_id_fkey``.
+    try:
+        await db.flush()
+    except Exception:
+        delete_blob(rel_path)
+        raise
+
+    # Empty Y.Doc state so the Hocuspocus Database extension returns
+    # something instead of None on the very first fetch.
+    db.add(DocumentState(file_id=new_id, yjs_update=b"", version=0))
+    try:
+        await db.flush()
+    except Exception:
+        delete_blob(rel_path)
+        raise
+
+    return row
+
+
+# --------------------------------------------------------------------
 # POST /api/documents — create a blank document
 # --------------------------------------------------------------------
 @router.post("", response_model=FileResponseSchema, status_code=status.HTTP_201_CREATED)
@@ -328,64 +403,17 @@ async def create_document(
                 detail="Cannot create a document inside a trashed folder",
             )
 
-    # Seed the on-disk blob so preview + download work the moment
-    # the user creates the document. Intentionally minimal — the
-    # snapshot endpoint will overwrite it as soon as the first
-    # edit flushes through Hocuspocus.
-    new_id = uuid.uuid4()
-    rel_path = storage_path_for(owner_id, new_id, ".html")
-    ensure_bucket(owner_id)
-    abs_path = absolute_path(rel_path)
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(abs_path, "w", encoding="utf-8") as f:
-        f.write("")
-
-    title = (body.name or _DEFAULT_DOCUMENT_TITLE).rstrip(".")
-    filename = title if title.lower().endswith(".html") else f"{title}.html"
-    filename = sanitize_filename(filename)
-
-    row = UserFile(
-        id=new_id,
-        user_id=owner_id,
+    row = await create_blank_document(
+        db,
+        owner_id=owner_id,
         folder_id=parent_folder.id if parent_folder else None,
-        filename=filename,
-        original_filename=filename,
-        mime_type="text/html",
-        size_bytes=0,
-        storage_path=rel_path,
-        source_kind=GeneratedKind.DOCUMENT.value,
-        content_text=None,
+        name=body.name,
     )
-    db.add(row)
-
-    # Flush so the parent ``files`` row exists before the child
-    # ``document_state`` row references it. There's no ORM
-    # ``relationship()`` wiring the two together (by design — the
-    # collab service is the only writer of document_state and never
-    # loads the UserFile), so SQLAlchemy's unit of work doesn't
-    # know about the FK dependency and could otherwise flush the
-    # child first and trip ``document_state_file_id_fkey``.
-    try:
-        await db.flush()
-    except Exception:
-        delete_blob(rel_path)
-        raise
-
-    # Empty Y.Doc state. The client will initialise its own Y.Doc
-    # on first load; this row just lets the Hocuspocus Database
-    # extension return something instead of None on the very first
-    # fetch (avoids a spurious "new doc" path).
-    state = DocumentState(
-        file_id=new_id,
-        yjs_update=b"",
-        version=0,
-    )
-    db.add(state)
 
     try:
         await db.commit()
     except Exception:
-        delete_blob(rel_path)
+        delete_blob(row.storage_path)
         raise
     await db.refresh(row)
     return _file_to_response(row, caller=user)
@@ -454,6 +482,7 @@ def _constant_time_equal(a: str, b: str) -> bool:
 async def write_snapshot(
     document_id: uuid.UUID,
     request: Request,
+    background: BackgroundTasks,
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -501,6 +530,29 @@ async def write_snapshot(
     row.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
+
+    # If this document backs a workspace note, (re)index it so workspace
+    # chats stay grounded in the note's latest content. Local imports keep
+    # the workspace layer out of the generic documents import graph.
+    from app.chat.models import WorkspaceItem
+
+    note_item = (
+        await db.execute(
+            select(WorkspaceItem).where(
+                WorkspaceItem.ref_id == document_id,
+                WorkspaceItem.kind == "note",
+            )
+        )
+    ).scalars().first()
+    if note_item is not None:
+        from app.workspaces.knowledge import index_note_for_workspace
+
+        background.add_task(
+            index_note_for_workspace,
+            note_item.workspace_id,
+            note_item.id,
+        )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

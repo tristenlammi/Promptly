@@ -81,6 +81,7 @@ from app.chat.shares import list_accessible_workspace_ids
 from app.custom_models.resolver import is_custom_model_id
 from app.database import get_db
 from app.files.models import UserFile
+from app.files.system_folders import create_workspace_folder_tree
 from app.models_config.models import ModelProvider
 
 router = APIRouter()
@@ -279,6 +280,14 @@ async def create_workspace(
         default_provider_id=payload.default_provider_id,
     )
     db.add(ws)
+    # Flush to mint the workspace id before seeding its Drive folder tree.
+    await db.flush()
+    # Seed ``My files / Workspaces / <title> / {Notes,Canvases,Files}`` and
+    # point the workspace at its per-workspace folder. Notes / canvases /
+    # uploads created in the workspace physically land under here so they
+    # inherit Drive's preview / search / trash / quota plumbing.
+    ws_folder = await create_workspace_folder_tree(db, user, ws.title)
+    ws.root_folder_id = ws_folder.id
     await db.commit()
     await db.refresh(ws)
     return await _summary_with_rollups(ws, db, user)

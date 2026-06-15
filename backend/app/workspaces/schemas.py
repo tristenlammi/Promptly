@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -219,3 +220,79 @@ class WorkspaceUsage(BaseModel):
     total_tokens: int
     cost_usd: float
     by_model: list[WorkspaceUsageModel] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------
+# Navigator tree (Phase 1a) — the unified item tree that replaces the
+# 4-tab console as the workspace's primary surface.
+# ---------------------------------------------------------------------
+
+
+class WorkspaceItemNode(BaseModel):
+    """One node in the workspace navigator tree.
+
+    Serves both stored ``workspace_items`` rows (``folder`` / ``note``)
+    and chats synthesised at read time. For a synthesised ``chat`` node,
+    ``id`` is the conversation id and there is no backing item row — the
+    frontend opens it by ``ref_id`` (also the conversation id).
+    """
+
+    id: uuid.UUID
+    # 'folder' | 'note' | 'canvas' | 'file' | 'chat'
+    kind: str
+    # -> files.id for a note, conversation id for a chat. NULL for folders.
+    ref_id: uuid.UUID | None = None
+    title: str
+    icon: str | None = None
+    position: float = 0.0
+    # RAG index status for note/canvas/file kinds; NULL for folders/chats.
+    indexing_status: str | None = None
+    children: list["WorkspaceItemNode"] = Field(default_factory=list)
+
+
+class WorkspaceItemCreate(BaseModel):
+    """Body for ``POST /workspaces/{wid}/items``.
+
+    ``kind='folder'`` makes a tree-only organisation node. ``kind='note'``
+    creates a blank Drive Document in the workspace's ``Notes`` folder
+    and links it as a navigator item. ``title`` is optional for a note
+    (defaults to "Untitled note")."""
+
+    kind: Literal["folder", "note"]
+    parent_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=255)
+
+
+class WorkspaceItemUpdate(BaseModel):
+    """PATCH payload for renaming / re-iconing a tree item. PATCH
+    semantics: only keys present in the body are applied."""
+
+    title: str | None = Field(default=None, max_length=255)
+    icon: str | None = Field(default=None, max_length=64)
+
+
+class WorkspaceItemMove(BaseModel):
+    """Reparent + reorder a tree item. ``position`` is the new float
+    slot among the target parent's children — the frontend computes a
+    midpoint between neighbours so no renumber is needed."""
+
+    parent_id: uuid.UUID | None = None
+    position: float
+
+
+class WorkspaceItemResponse(BaseModel):
+    """Flat view of a single stored ``workspace_items`` row, returned by
+    create / rename / move so the client can update one node without
+    re-fetching the whole tree."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    parent_id: uuid.UUID | None
+    kind: str
+    ref_id: uuid.UUID | None
+    title: str
+    icon: str | None
+    position: float
+    indexing_status: str | None = None
