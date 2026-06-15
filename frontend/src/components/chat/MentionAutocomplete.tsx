@@ -70,10 +70,10 @@ interface MentionAutocompleteProps {
   /** Current conversation id so the backend can exclude it from
    *  candidates (users shouldn't @-mention themselves). */
   currentConversationId: string | null;
-  /** Current project id (if any) so same-project siblings surface
+  /** Current workspace id (if any) so same-workspace siblings surface
    *  first. Optional — standalone chats still get the generic
    *  recents section. */
-  projectId: string | null;
+  workspaceId: string | null;
   /** Parent uses this to intercept keystrokes (Up/Down/Enter/Esc)
    *  when the popover is open. */
   onKeyRegister: (handler: (e: { key: string }) => boolean) => void;
@@ -89,7 +89,7 @@ export function MentionAutocomplete({
   caret,
   onInsert,
   currentConversationId,
-  projectId,
+  workspaceId,
   onKeyRegister,
 }: MentionAutocompleteProps) {
   const pick = useMemo(
@@ -98,17 +98,17 @@ export function MentionAutocomplete({
   );
 
   const [results, setResults] = useState<{
-    project: MentionCandidate[];
+    workspace: MentionCandidate[];
     recent: MentionCandidate[];
     files: FileItem[];
-  }>({ project: [], recent: [], files: [] });
+  }>({ workspace: [], recent: [], files: [] });
   const [highlighted, setHighlighted] = useState(0);
   const [fetching, setFetching] = useState(false);
 
   // Flat list of rows the keyboard cycles through, in render order.
   const flat = useMemo<MentionRow[]>(
     () => [
-      ...results.project.map((c) => ({ kind: "chat" as const, cand: c })),
+      ...results.workspace.map((c) => ({ kind: "chat" as const, cand: c })),
       ...results.recent.map((c) => ({ kind: "chat" as const, cand: c })),
       ...results.files.map((f) => ({ kind: "file" as const, file: f })),
     ],
@@ -120,7 +120,7 @@ export function MentionAutocomplete({
   // both so the popover is useful the instant ``@`` is typed.
   useEffect(() => {
     if (!pick) {
-      setResults({ project: [], recent: [], files: [] });
+      setResults({ workspace: [], recent: [], files: [] });
       setHighlighted(0);
       return;
     }
@@ -159,7 +159,7 @@ export function MentionAutocomplete({
       const [chats, files] = await Promise.allSettled([
         chatApi.mentionCandidates({
           q,
-          projectId,
+          workspaceId,
           excludeId: currentConversationId,
           limit: 8,
         }),
@@ -167,8 +167,8 @@ export function MentionAutocomplete({
       ]);
       if (cancelled) return;
       setResults({
-        project:
-          chats.status === "fulfilled" ? chats.value.project_candidates : [],
+        workspace:
+          chats.status === "fulfilled" ? chats.value.workspace_candidates : [],
         recent:
           chats.status === "fulfilled" ? chats.value.recent_candidates : [],
         files: files.status === "fulfilled" ? files.value : [],
@@ -180,7 +180,7 @@ export function MentionAutocomplete({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [pick?.query, projectId, currentConversationId, pick]);
+  }, [pick?.query, workspaceId, currentConversationId, pick]);
 
   const insert = useCallback(
     (row: MentionRow) => {
@@ -233,7 +233,7 @@ export function MentionAutocomplete({
   if (!pick) return null;
 
   const empty = flat.length === 0 && !fetching;
-  const fileOffset = results.project.length + results.recent.length;
+  const fileOffset = results.workspace.length + results.recent.length;
 
   return (
     <div
@@ -266,10 +266,10 @@ export function MentionAutocomplete({
               : "No chats or files yet."}
           </div>
         )}
-        {results.project.length > 0 && (
+        {results.workspace.length > 0 && (
           <CandidateGroup
-            heading="In this project"
-            candidates={results.project}
+            heading="In this workspace"
+            candidates={results.workspace}
             offset={0}
             highlighted={highlighted}
             setHighlighted={setHighlighted}
@@ -280,10 +280,10 @@ export function MentionAutocomplete({
         {results.recent.length > 0 && (
           <CandidateGroup
             heading={
-              results.project.length > 0 ? "Other recent chats" : "Recent chats"
+              results.workspace.length > 0 ? "Other recent chats" : "Recent chats"
             }
             candidates={results.recent}
-            offset={results.project.length}
+            offset={results.workspace.length}
             highlighted={highlighted}
             setHighlighted={setHighlighted}
             onPick={(c) => insert({ kind: "chat", cand: c })}
@@ -365,10 +365,10 @@ function CandidateGroup({
               <span className="block truncate font-medium text-[var(--text)]">
                 {c.title || "Untitled chat"}
               </span>
-              {c.project_title && (
+              {c.workspace_title && (
                 <span className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
                   <FolderKanban className="h-2.5 w-2.5" />
-                  {c.project_title}
+                  {c.workspace_title}
                 </span>
               )}
             </span>

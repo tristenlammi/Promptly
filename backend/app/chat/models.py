@@ -142,14 +142,14 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    # Chat Projects (0027). When non-NULL, this conversation belongs
-    # to a project: the project's system prompt + pinned files are
+    # Workspaces (0027). When non-NULL, this conversation belongs
+    # to a workspace: the workspace's system prompt + pinned files are
     # mixed into the context on every send, and the chat shows up
-    # under that project in the sidebar. NULL means "top-level chat"
-    # (today's default). ``ON DELETE SET NULL`` so deleting a project
+    # under that workspace in the sidebar. NULL means "top-level chat"
+    # (today's default). ``ON DELETE SET NULL`` so deleting a workspace
     # doesn't nuke chat history — the chats resurface at top level.
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("chat_projects.id", ondelete="SET NULL"),
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -226,16 +226,16 @@ class CompareGroup(UUIDPKMixin, TimestampMixin, Base):
         return f"<CompareGroup id={self.id} title={self.title!r}>"
 
 
-class ChatProject(UUIDPKMixin, TimestampMixin, Base):
-    """A generic project bundle for non-Study conversations.
+class Workspace(UUIDPKMixin, TimestampMixin, Base):
+    """A generic workspace bundle for non-Study conversations.
 
     Holds the shared instructions + pinned files + default model used
     by every chat inside it. Distinct from :class:`StudyProject` —
-    Study projects are learning paths with units/exams, chat projects
+    Study projects are learning paths with units/exams, workspaces
     are ChatGPT/Claude-style bundles for arbitrary ongoing work.
     """
 
-    __tablename__ = "chat_projects"
+    __tablename__ = "workspaces"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -257,32 +257,32 @@ class ChatProject(UUIDPKMixin, TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Opt-in rolling project memory (Phase 4). When true, a background
-    # job maintains a single pinned "Project Memory" file, refreshed
-    # from whichever chat in the project most recently produced a reply.
-    # Off by default — distinct from the manual "Save summary to project".
+    # Opt-in rolling workspace memory (Phase 4). When true, a background
+    # job maintains a single pinned "Workspace Memory" file, refreshed
+    # from whichever chat in the workspace most recently produced a reply.
+    # Off by default — distinct from the manual "Save summary to workspace".
     auto_memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
 
     def __repr__(self) -> str:
-        return f"<ChatProject id={self.id} title={self.title!r}>"
+        return f"<Workspace id={self.id} title={self.title!r}>"
 
 
-class ChatProjectFile(Base):
+class WorkspaceFile(Base):
     """Pinned-file join row — attaches a :class:`UserFile` to a
-    :class:`ChatProject` so every new conversation in the project
+    :class:`Workspace` so every new conversation in the workspace
     gets the file auto-attached to its send context.
 
-    Composite PK keeps (project, file) unique without a separate row
+    Composite PK keeps (workspace, file) unique without a separate row
     id. ``ON DELETE CASCADE`` on both FKs (see the migration) keeps
     the join clean when either side goes away.
     """
 
-    __tablename__ = "chat_project_files"
+    __tablename__ = "workspace_files"
 
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("chat_projects.id", ondelete="CASCADE"),
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         primary_key=True,
     )
     file_id: Mapped[uuid.UUID] = mapped_column(
@@ -294,7 +294,7 @@ class ChatProjectFile(Base):
         server_default=func.now(),
         nullable=False,
     )
-    # Who pinned the file (Phase 4). Powers the unpin guard: the project
+    # Who pinned the file (Phase 4). Powers the unpin guard: the workspace
     # owner can unpin anything, but a collaborator can only unpin files
     # they pinned themselves. NULL on pre-0071 rows (owner-only unpin).
     pinned_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -302,7 +302,7 @@ class ChatProjectFile(Base):
     )
 
     # RAG indexing lifecycle — mirrors ``custom_model_files`` so the
-    # project Files tab can render the same "indexing… → ready / failed"
+    # workspace Files tab can render the same "indexing… → ready / failed"
     # chips. ``queued`` until the background ingester picks the file up;
     # only text-extractable files (PDF / text) are ever indexed (images
     # stay on the attachment/vision path and keep status ``queued``,
@@ -322,17 +322,17 @@ class ChatProjectFile(Base):
     )
 
 
-class ConversationExcludedProjectFile(Base):
-    """Per-chat opt-out of a project's pinned files (Phase 4).
+class ConversationExcludedWorkspaceFile(Base):
+    """Per-chat opt-out of a workspace's pinned files (Phase 4).
 
-    Every chat in a project sees all pinned files by default. A row here
+    Every chat in a workspace sees all pinned files by default. A row here
     means "exclude ``file_id`` from *this* conversation's context" — the
     send path filters it out of both the full-dump attachment set and
     the retrieval candidate set. Composite PK; both FKs cascade so the
     row vanishes when either the chat or the file goes away.
     """
 
-    __tablename__ = "conversation_excluded_project_files"
+    __tablename__ = "conversation_excluded_workspace_files"
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True
@@ -433,26 +433,26 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
         return f"<Message id={self.id} role={self.role}>"
 
 
-class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
-    """Invite / membership row for shared chat projects (migration 0031).
+class WorkspaceShare(UUIDPKMixin, TimestampMixin, Base):
+    """Invite / membership row for shared workspaces (migration 0031).
 
     Same ``pending → accepted`` / ``pending → declined`` lifecycle, a
-    unique ``(project_id, invitee_user_id)`` constraint, and the same
+    unique ``(workspace_id, invitee_user_id)`` constraint, and the same
     "delete the row to revoke" policy.
 
     Semantically this is a *much bigger grant* than a single-chat
-    share, though: accepting a project invite gives the invitee
-    **complete access** to every conversation under that project
-    (past + future), the project's pinned files, and the system-
+    share, though: accepting a workspace invite gives the invitee
+    **complete access** to every conversation under that workspace
+    (past + future), the workspace's pinned files, and the system-
     prompt settings. The resolver in ``app/chat/shares.py`` walks
     this table as a second path alongside conversation-level
     shares when answering "can this user read this conversation?".
     """
 
-    __tablename__ = "project_shares"
+    __tablename__ = "workspace_shares"
 
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("chat_projects.id", ondelete="CASCADE"), nullable=False
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     inviter_user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
@@ -467,7 +467,7 @@ class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
     # back-compat with pre-0071 shares) grants full read+write — edit
     # settings, pin/unpin files, add chats. ``viewer`` is read-only.
     # Owner-only actions (delete / archive / manage shares) are never
-    # available to either; those gate on ``proj.user_id``.
+    # available to either; those gate on ``ws.user_id``.
     role: Mapped[str] = mapped_column(
         String(16), nullable=False, default="editor", server_default="editor"
     )
@@ -477,15 +477,15 @@ class ProjectShare(UUIDPKMixin, TimestampMixin, Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "project_id",
+            "workspace_id",
             "invitee_user_id",
-            name="uq_project_shares_project_invitee",
+            name="uq_workspace_shares_workspace_invitee",
         ),
     )
 
     def __repr__(self) -> str:
         return (
-            f"<ProjectShare id={self.id} project={self.project_id} "
+            f"<WorkspaceShare id={self.id} workspace={self.workspace_id} "
             f"invitee={self.invitee_user_id} status={self.status!r}>"
         )
 

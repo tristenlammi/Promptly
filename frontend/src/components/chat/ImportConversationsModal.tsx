@@ -5,15 +5,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { chatApi, type ImportConversationsResponse } from "@/api/chat";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
-import { useChatProjects } from "@/hooks/useChatProjects";
+import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
 
 interface ImportConversationsModalProps {
   open: boolean;
   onClose: () => void;
-  /** Prefill the project target (e.g. when launched from a project's
+  /** Prefill the workspace target (e.g. when launched from a workspace's
    * detail page). Users can still clear it from the dropdown. */
-  defaultProjectId?: string | null;
+  defaultWorkspaceId?: string | null;
 }
 
 /** Bulk import modal. Accepts a single file (JSON, ZIP, or Markdown)
@@ -25,14 +25,14 @@ interface ImportConversationsModalProps {
 export function ImportConversationsModal({
   open,
   onClose,
-  defaultProjectId = null,
+  defaultWorkspaceId = null,
 }: ImportConversationsModalProps) {
   const qc = useQueryClient();
-  const { data: projects } = useChatProjects({ archived: false });
+  const { data: workspaces } = useWorkspaces({ archived: false });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [file, setFile] = useState<File | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(defaultProjectId);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(defaultWorkspaceId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportConversationsResponse | null>(
@@ -46,7 +46,7 @@ export function ImportConversationsModal({
     setError(null);
     setResult(null);
     setDragActive(false);
-    setProjectId(defaultProjectId);
+    setWorkspaceId(defaultWorkspaceId);
   };
 
   const handleClose = () => {
@@ -60,13 +60,13 @@ export function ImportConversationsModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await chatApi.importConversations(file, projectId);
+      const res = await chatApi.importConversations(file, workspaceId);
       setResult(res);
       // Imported chats need to show up in the sidebar + (if
-      // projectised) the project detail page. Invalidate both query
-      // trees — the individual queries handle their own refetch.
+      // assigned to a workspace) the workspace detail page. Invalidate
+      // both query trees — the individual queries handle their own refetch.
       qc.invalidateQueries({ queryKey: ["conversations"] });
-      qc.invalidateQueries({ queryKey: ["chat-projects"] });
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
     } catch (e) {
       const msg =
         (e as { response?: { data?: { detail?: string } }; message?: string })
@@ -175,16 +175,16 @@ export function ImportConversationsModal({
           <div>
             <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
               <FolderKanban className="h-3.5 w-3.5" />
-              Put imported chats into a project{" "}
+              Put imported chats into a workspace{" "}
               <span className="text-[var(--text-muted)]/70">(optional)</span>
             </label>
             <select
-              value={projectId ?? ""}
-              onChange={(e) => setProjectId(e.target.value || null)}
+              value={workspaceId ?? ""}
+              onChange={(e) => setWorkspaceId(e.target.value || null)}
               className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             >
               <option value="">None (top-level chats)</option>
-              {projects?.map((p) => (
+              {workspaces?.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.title}
                 </option>

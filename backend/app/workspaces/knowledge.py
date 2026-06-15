@@ -1,26 +1,26 @@
-"""Hybrid retrieval over a Chat Project's pinned files.
+"""Hybrid retrieval over a Workspace's pinned files.
 
-Small projects keep injecting their pinned files in full (today's
-behaviour — the model sees every byte). Once a project accumulates more
-pinned *text* than :data:`PROJECT_RETRIEVAL_TOKEN_BUDGET`, it flips to
+Small workspaces keep injecting their pinned files in full (today's
+behaviour — the model sees every byte). Once a workspace accumulates more
+pinned *text* than :data:`WORKSPACE_RETRIEVAL_TOKEN_BUDGET`, it flips to
 top-k semantic retrieval: only the chunks most relevant to the current
 turn are spliced into the system prompt, so a 200-page pinned spec no
 longer blows the context window on every message.
 
 This module owns three concerns:
 
-* **Ingestion** (:func:`index_file_for_project` /
-  :func:`delete_project_file_chunks`) — enqueued from the pin/unpin
+* **Ingestion** (:func:`index_file_for_workspace` /
+  :func:`delete_workspace_file_chunks`) — enqueued from the pin/unpin
   endpoints. Reuses the scope-agnostic chunk store + embed pipeline in
-  :mod:`app.custom_models.ingestion`; the only project-specific part is
-  the indexing-lifecycle bookkeeping on ``chat_project_files``.
+  :mod:`app.custom_models.ingestion`; the only workspace-specific part is
+  the indexing-lifecycle bookkeeping on ``workspace_files``.
 
-* **Injection** (:func:`build_project_injection`) — the per-send
+* **Injection** (:func:`build_workspace_injection`) — the per-send
   decision: full-dump vs. retrieve, and which files still need to ride
   the attachment/vision path (images always; text files that aren't
   indexed yet as a fallback).
 
-* **Budget stats** (:func:`project_context_stats`) — what the project
+* **Budget stats** (:func:`workspace_context_stats`) — what the workspace
   detail page shows so the user understands the per-turn context tax.
 
 Everything degrades gracefully when embeddings aren't configured: the
@@ -38,7 +38,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.chat.models import ChatProject, ChatProjectFile, Conversation, Message
+from app.chat.models import Workspace, WorkspaceFile, Conversation, Message
 from app.chat.semantic_search import get_embedding_config
 from app.models_config.models import ModelProvider
 from app.custom_models.embedding import (
@@ -53,22 +53,22 @@ from app.custom_models.ingestion import (
 from app.custom_models.models import KnowledgeChunk
 from app.custom_models.retrieval import (
     format_retrieved_block,
-    retrieve_project_context,
+    retrieve_workspace_context,
 )
 from app.database import SessionLocal
 from app.files.models import UserFile
 
-logger = logging.getLogger("promptly.chat.project_knowledge")
+logger = logging.getLogger("promptly.workspaces.knowledge")
 
-# Once a project's indexed text passes this many tokens, new chats in it
+# Once a workspace's indexed text passes this many tokens, new chats in it
 # switch from full-dump to top-k retrieval. ~6k tokens is roughly a
 # dozen pages — comfortably under any modern context window, so smaller
-# projects keep the simpler "model sees everything" behaviour.
-PROJECT_RETRIEVAL_TOKEN_BUDGET = 6000
+# workspaces keep the simpler "model sees everything" behaviour.
+WORKSPACE_RETRIEVAL_TOKEN_BUDGET = 6000
 
 # Chunks pulled per turn when retrieval is active. Matches the Custom
 # Models default; ~6 * 500-token chunks ≈ 3k tokens of grounded context.
-PROJECT_RETRIEVAL_TOP_K = 6
+WORKSPACE_RETRIEVAL_TOP_K = 6
 
 
 def _estimate_tokens(text: str | None) -> int:
@@ -83,16 +83,16 @@ def _estimate_tokens(text: str | None) -> int:
 # ---------------------------------------------------------------------
 
 
-async def _set_project_file_status(
+async def _set_workspace_file_status(
     db: AsyncSession,
     *,
-    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     file_id: uuid.UUID,
     status: str,
     error: str | None = None,
     indexed_hash: str | None = None,
 ) -> None:
-    pivot = await db.get(ChatProjectFile, (project_id, file_id))
+    pivot = await db.get(WorkspaceFile, (workspace_id, file_id))
     if pivot is None:
         return
     pivot.indexing_status = status
@@ -104,26 +104,26 @@ async def _set_project_file_status(
     await db.commit()
 
 
-async def index_file_for_project(
-    project_id: uuid.UUID,
+async def index_file_for_workspace(
+    workspace_id: uuid.UUID,
     file_id: uuid.UUID,
     *,
     force: bool = False,
 ) -> None:
-    """Embed (or re-embed) a single pinned project file.
+    """Embed (or re-embed) a single pinned workspace file.
 
     Owns its own DB session so it's safe on a ``BackgroundTasks``
     runner. No-op (status stays ``queued``, no error) when embeddings
-    aren't configured — the project just keeps full-dumping until an
+    aren't configured — the workspace just keeps full-dumping until an
     admin sets up an embedding provider, then a re-pin indexes it.
     """
     async with SessionLocal() as db:
         try:
             file = await db.get(UserFile, file_id)
             if file is None:
-                await _set_project_file_status(
+                await _set_workspace_file_status(
                     db,
-                    project_id=project_id,
+                    workspace_id=workspace_id,
                     file_id=file_id,
                     status="failed",
                     error="source file no longer exists",
@@ -143,7 +143,7 @@ async def index_file_for_project(
                 return
 
             current_hash = file_content_hash(file)
-            pivot = await db.get(ChatProjectFile, (project_id, file_id))
+            pivot = await db.get(WorkspaceFile, (workspace_id, file_id))
             if (
                 not force
                 and pivot is not None
@@ -152,8 +152,8 @@ async def index_file_for_project(
             ):
                 return
 
-            await _set_project_file_status(
-                db, project_id=project_id, file_id=file_id, status="embedding"
+            await _set_workspace_file_status(
+                db, workspace_id=workspace_id, file_id=file_id, status="embedding"
             )
 
             try:
@@ -164,9 +164,9 @@ async def index_file_for_project(
                     dim=cfg.dim,
                 )
             except ValueError as exc:
-                await _set_project_file_status(
+                await _set_workspace_file_status(
                     db,
-                    project_id=project_id,
+                    workspace_id=workspace_id,
                     file_id=file_id,
                     status="failed",
                     error=str(exc),
@@ -174,37 +174,37 @@ async def index_file_for_project(
                 return
 
             await delete_existing_chunks(
-                db, scope_kind="project", scope_id=project_id, user_file_id=file_id
+                db, scope_kind="workspace", scope_id=workspace_id, user_file_id=file_id
             )
             await insert_chunks(
                 db,
-                scope_kind="project",
-                scope_id=project_id,
+                scope_kind="workspace",
+                scope_id=workspace_id,
                 user_file_id=file_id,
                 chunks=chunks,
                 embeddings=embeddings,
                 embedding_model=cfg.model_id,
                 embedding_dim=cfg.dim,
             )
-            await _set_project_file_status(
+            await _set_workspace_file_status(
                 db,
-                project_id=project_id,
+                workspace_id=workspace_id,
                 file_id=file_id,
                 status="ready",
                 indexed_hash=current_hash,
             )
             logger.info(
-                "indexed %d chunks for project=%s file=%s",
+                "indexed %d chunks for workspace=%s file=%s",
                 len(chunks),
-                project_id,
+                workspace_id,
                 file_id,
             )
         except Exception as exc:  # noqa: BLE001 - last-line catch
-            logger.exception("index_file_for_project failed")
+            logger.exception("index_file_for_workspace failed")
             try:
-                await _set_project_file_status(
+                await _set_workspace_file_status(
                     db,
-                    project_id=project_id,
+                    workspace_id=workspace_id,
                     file_id=file_id,
                     status="failed",
                     error=f"{type(exc).__name__}: {exc}",
@@ -213,29 +213,29 @@ async def index_file_for_project(
                 pass
 
 
-async def delete_project_file_chunks(
-    project_id: uuid.UUID, file_id: uuid.UUID
+async def delete_workspace_file_chunks(
+    workspace_id: uuid.UUID, file_id: uuid.UUID
 ) -> None:
-    """Drop a file's project-scoped chunks (called on unpin). Owns its
+    """Drop a file's workspace-scoped chunks (called on unpin). Owns its
     own session so it's safe on a ``BackgroundTasks`` runner."""
     async with SessionLocal() as db:
         await delete_existing_chunks(
-            db, scope_kind="project", scope_id=project_id, user_file_id=file_id
+            db, scope_kind="workspace", scope_id=workspace_id, user_file_id=file_id
         )
 
 
-async def reindex_project(project_id: uuid.UUID) -> None:
-    """Re-index every text file pinned to a project. Used after the
+async def reindex_workspace(workspace_id: uuid.UUID) -> None:
+    """Re-index every text file pinned to a workspace. Used after the
     admin changes the workspace embedding provider (dims would mismatch)."""
     async with SessionLocal() as db:
         rows = await db.execute(
-            select(ChatProjectFile.file_id).where(
-                ChatProjectFile.project_id == project_id
+            select(WorkspaceFile.file_id).where(
+                WorkspaceFile.workspace_id == workspace_id
             )
         )
         file_ids = [r[0] for r in rows.all()]
     for fid in file_ids:
-        await index_file_for_project(project_id, fid, force=True)
+        await index_file_for_workspace(workspace_id, fid, force=True)
 
 
 # ---------------------------------------------------------------------
@@ -244,10 +244,10 @@ async def reindex_project(project_id: uuid.UUID) -> None:
 
 
 @dataclass
-class ProjectInjection:
-    """What the send path should do with a project's pinned files.
+class WorkspaceInjection:
+    """What the send path should do with a workspace's pinned files.
 
-    ``system_block`` — retrieved "Project knowledge" text to splice into
+    ``system_block`` — retrieved "Workspace knowledge" text to splice into
     the system prompt (``None`` in full-dump mode or when nothing
     matched). ``attach_file_ids`` — files to fold into the triggering
     turn's attachments (full-dump mode: everything; retrieval mode:
@@ -260,27 +260,27 @@ class ProjectInjection:
     retrieval_active: bool = False
 
 
-async def _indexed_token_total(db: AsyncSession, project_id: uuid.UUID) -> int:
+async def _indexed_token_total(db: AsyncSession, workspace_id: uuid.UUID) -> int:
     total = await db.scalar(
         select(func.coalesce(func.sum(KnowledgeChunk.tokens), 0)).where(
-            KnowledgeChunk.project_id == project_id
+            KnowledgeChunk.workspace_id == workspace_id
         )
     )
     return int(total or 0)
 
 
-async def build_project_injection(
+async def build_workspace_injection(
     db: AsyncSession,
     *,
-    project_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     query: str,
     excluded_file_ids: set[uuid.UUID] | None = None,
-) -> ProjectInjection:
+) -> WorkspaceInjection:
     """Decide full-dump vs. retrieval for this turn and return the plan.
 
     Hybrid rule: retrieval kicks in only when embeddings are configured
-    AND the project's indexed text exceeds
-    :data:`PROJECT_RETRIEVAL_TOKEN_BUDGET`. Otherwise we full-dump every
+    AND the workspace's indexed text exceeds
+    :data:`WORKSPACE_RETRIEVAL_TOKEN_BUDGET`. Otherwise we full-dump every
     pinned file, exactly as the pre-retrieval code did.
 
     ``excluded_file_ids`` — files the current chat has opted out of
@@ -290,27 +290,27 @@ async def build_project_injection(
     excluded = excluded_file_ids or set()
     rows = (
         await db.execute(
-            select(ChatProjectFile, UserFile)
-            .join(UserFile, UserFile.id == ChatProjectFile.file_id)
-            .where(ChatProjectFile.project_id == project_id)
-            .order_by(ChatProjectFile.pinned_at.asc())
+            select(WorkspaceFile, UserFile)
+            .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+            .where(WorkspaceFile.workspace_id == workspace_id)
+            .order_by(WorkspaceFile.pinned_at.asc())
         )
     ).all()
-    rows = [(cpf, uf) for cpf, uf in rows if uf.id not in excluded]
+    rows = [(wsf, uf) for wsf, uf in rows if uf.id not in excluded]
     if not rows:
-        return ProjectInjection()
+        return WorkspaceInjection()
 
     cfg = await get_embedding_config(db)
     indexed_tokens = (
-        await _indexed_token_total(db, project_id) if cfg is not None else 0
+        await _indexed_token_total(db, workspace_id) if cfg is not None else 0
     )
     retrieval_active = (
-        cfg is not None and indexed_tokens > PROJECT_RETRIEVAL_TOKEN_BUDGET
+        cfg is not None and indexed_tokens > WORKSPACE_RETRIEVAL_TOKEN_BUDGET
     )
 
     if not retrieval_active:
         # Full-dump: every pinned file rides the attachment path.
-        return ProjectInjection(
+        return WorkspaceInjection(
             attach_file_ids=[uf.id for _, uf in rows], retrieval_active=False
         )
 
@@ -320,33 +320,33 @@ async def build_project_injection(
     # dropped during the indexing window.
     attach_ids = [
         uf.id
-        for cpf, uf in rows
-        if not (is_text_extractable(uf) and cpf.indexing_status == "ready")
+        for wsf, uf in rows
+        if not (is_text_extractable(uf) and wsf.indexing_status == "ready")
     ]
-    chunks = await retrieve_project_context(
+    chunks = await retrieve_workspace_context(
         db,
-        project_id=project_id,
+        workspace_id=workspace_id,
         query=query,
         # Pull a few extra so post-filtering excluded files still leaves
         # a useful slate.
-        top_k=PROJECT_RETRIEVAL_TOP_K + len(excluded),
+        top_k=WORKSPACE_RETRIEVAL_TOP_K + len(excluded),
     )
     if excluded:
         chunks = [c for c in chunks if c.user_file_id not in excluded]
-    chunks = chunks[:PROJECT_RETRIEVAL_TOP_K]
+    chunks = chunks[:WORKSPACE_RETRIEVAL_TOP_K]
     block = format_retrieved_block(chunks) if chunks else None
-    return ProjectInjection(
+    return WorkspaceInjection(
         system_block=block, attach_file_ids=attach_ids, retrieval_active=True
     )
 
 
 # ---------------------------------------------------------------------
-# Budget stats (project detail page)
+# Budget stats (workspace detail page)
 # ---------------------------------------------------------------------
 
 
 @dataclass
-class ProjectContextStats:
+class WorkspaceContextStats:
     instruction_tokens: int
     pinned_file_tokens: int
     per_turn_tokens: int
@@ -358,9 +358,9 @@ class ProjectContextStats:
     embeddings_configured: bool = False
 
 
-async def project_context_stats(
-    db: AsyncSession, *, project_id: uuid.UUID, system_prompt: str | None
-) -> ProjectContextStats:
+async def workspace_context_stats(
+    db: AsyncSession, *, workspace_id: uuid.UUID, system_prompt: str | None
+) -> WorkspaceContextStats:
     """Compute the per-turn context baseline for the detail page.
 
     ``per_turn_tokens`` is the honest number: in retrieval mode it's the
@@ -368,20 +368,20 @@ async def project_context_stats(
     the instructions plus the entire pinned text.
     """
     instruction_tokens = _estimate_tokens(system_prompt)
-    pinned_file_tokens = await _indexed_token_total(db, project_id)
+    pinned_file_tokens = await _indexed_token_total(db, workspace_id)
     cfg = await get_embedding_config(db)
     embeddings_configured = cfg is not None
     retrieval_active = (
-        embeddings_configured and pinned_file_tokens > PROJECT_RETRIEVAL_TOKEN_BUDGET
+        embeddings_configured and pinned_file_tokens > WORKSPACE_RETRIEVAL_TOKEN_BUDGET
     )
     # Files still mid-index — surfaced so the UI can show "indexing N…".
     indexing_count = int(
         await db.scalar(
             select(func.count())
-            .select_from(ChatProjectFile)
+            .select_from(WorkspaceFile)
             .where(
-                ChatProjectFile.project_id == project_id,
-                ChatProjectFile.indexing_status.in_(("queued", "embedding")),
+                WorkspaceFile.workspace_id == workspace_id,
+                WorkspaceFile.indexing_status.in_(("queued", "embedding")),
             )
         )
         or 0
@@ -389,11 +389,11 @@ async def project_context_stats(
     if retrieval_active:
         # ~top_k chunks of ~500 tokens each, capped by what's indexed.
         per_turn = instruction_tokens + min(
-            pinned_file_tokens, PROJECT_RETRIEVAL_TOP_K * 500
+            pinned_file_tokens, WORKSPACE_RETRIEVAL_TOP_K * 500
         )
     else:
         per_turn = instruction_tokens + pinned_file_tokens
-    return ProjectContextStats(
+    return WorkspaceContextStats(
         instruction_tokens=instruction_tokens,
         pinned_file_tokens=pinned_file_tokens,
         per_turn_tokens=per_turn,
@@ -408,11 +408,11 @@ async def project_context_stats(
 # ---------------------------------------------------------------------
 
 # Source-kind marker for the single auto-maintained memory file per
-# project. Distinct from the manual "Save summary to project" files
+# workspace. Distinct from the manual "Save summary to workspace" files
 # (``chat_summary``) so we can find + replace exactly one of them.
-PROJECT_MEMORY_SOURCE_KIND = "project_memory"
+WORKSPACE_MEMORY_SOURCE_KIND = "workspace_memory"
 
-# Per-project cooldown so a burst of turns doesn't re-summarise on every
+# Per-workspace cooldown so a burst of turns doesn't re-summarise on every
 # message. In-memory + best-effort — resets on restart, which is fine
 # (worst case is one extra summary after a deploy).
 _MEMORY_COOLDOWN_SECONDS = 180.0
@@ -446,12 +446,12 @@ def _format_transcript_excerpt(
 
 
 _MERGE_SYSTEM_PROMPT = (
-    "You are maintaining a rolling 'Project Memory' document that "
-    "accumulates knowledge across all chats in a project.\n\n"
+    "You are maintaining a rolling 'Workspace Memory' document that "
+    "accumulates knowledge across all chats in a workspace.\n\n"
     "You will receive excerpts from several recent chats. Your job is "
     "to synthesise them into a single up-to-date memory document.\n\n"
     "Output format (Markdown only, no preamble):\n"
-    "- `## Project overview` — one or two sentences: what is this project about?\n"
+    "- `## Workspace overview` — one or two sentences: what is this workspace about?\n"
     "- `## Durable facts` — bulleted list of things that are always true: "
     "tech stack, constraints, preferences, names, versions.\n"
     "- `## Recent decisions` — bulleted: concrete choices made across "
@@ -468,9 +468,9 @@ _MERGE_SYSTEM_PROMPT = (
 )
 
 
-async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
-    """Refresh a project's rolling 'Project Memory' by merging the last
-    few conversations, when the project has ``auto_memory_enabled``.
+async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
+    """Refresh a workspace's rolling 'Workspace Memory' by merging the last
+    few conversations, when the workspace has ``auto_memory_enabled``.
 
     This is a multi-chat upgrade from the original single-chat approach:
     instead of summarising only the triggering chat, it pulls recent
@@ -480,20 +480,20 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
 
     Owns its own session (spawned via ``asyncio.create_task`` from the
     stream finalize). Entirely best-effort; every failure path is a
-    quiet return. Debounced per project.
+    quiet return. Debounced per workspace.
     """
     from app.files.generated import GeneratedFileError, persist_generated_file
     from app.models_config.provider import ChatMessage, ProviderError, model_router
 
     async with SessionLocal() as db:
         conv = await db.get(Conversation, conversation_id)
-        if conv is None or conv.project_id is None:
+        if conv is None or conv.workspace_id is None:
             return
-        proj = await db.get(ChatProject, conv.project_id)
-        if proj is None or not proj.auto_memory_enabled:
+        ws = await db.get(Workspace, conv.workspace_id)
+        if ws is None or not ws.auto_memory_enabled:
             return
 
-        key = str(proj.id)
+        key = str(ws.id)
         now = time.monotonic()
         if (now - _last_memory_run.get(key, 0.0)) < _MEMORY_COOLDOWN_SECONDS:
             return
@@ -506,14 +506,14 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
         if provider is None or not provider.enabled:
             return
 
-        # Pull the last N recently-active conversations in this project
+        # Pull the last N recently-active conversations in this workspace
         # (triggering conv always leads the list).
         recent_convs = list(
             (
                 await db.execute(
                     select(Conversation)
                     .where(
-                        Conversation.project_id == proj.id,
+                        Conversation.workspace_id == ws.id,
                         Conversation.temporary_mode.is_(None),
                     )
                     .order_by(Conversation.updated_at.desc())
@@ -565,21 +565,21 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
                 chunks.append(token)
             memo = "".join(chunks).strip()
         except Exception:  # noqa: BLE001 - ProviderError or any other failure
-            logger.debug("auto-memory: merge call failed for project %s", proj.id)
+            logger.debug("auto-memory: merge call failed for workspace %s", ws.id)
             return
 
         if not memo:
             return
 
-        owner = await db.get(User, proj.user_id)
+        owner = await db.get(User, ws.user_id)
         if owner is None:
             return
 
         conv_count = len(recent_convs)
         body = (
-            f"# Project Memory: {proj.title}\n\n"
+            f"# Workspace Memory: {ws.title}\n\n"
             f"_Auto-maintained from the last {conv_count} active chat"
-            f"{'s' if conv_count > 1 else ''} in this project. "
+            f"{'s' if conv_count > 1 else ''} in this workspace. "
             "Turn this off in Settings._\n\n"
             f"{memo}\n"
         )
@@ -587,10 +587,10 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
         existing = (
             await db.execute(
                 select(UserFile)
-                .join(ChatProjectFile, ChatProjectFile.file_id == UserFile.id)
+                .join(WorkspaceFile, WorkspaceFile.file_id == UserFile.id)
                 .where(
-                    ChatProjectFile.project_id == proj.id,
-                    UserFile.source_kind == PROJECT_MEMORY_SOURCE_KIND,
+                    WorkspaceFile.workspace_id == ws.id,
+                    UserFile.source_kind == WORKSPACE_MEMORY_SOURCE_KIND,
                 )
             )
         ).scalars().first()
@@ -599,31 +599,31 @@ async def maybe_refresh_project_memory(conversation_id: uuid.UUID) -> None:
             new_uf = await persist_generated_file(
                 db,
                 user=owner,
-                filename="Project Memory.md",
+                filename="Workspace Memory.md",
                 mime_type="text/markdown",
                 content=body.encode("utf-8"),
-                source_kind=PROJECT_MEMORY_SOURCE_KIND,
+                source_kind=WORKSPACE_MEMORY_SOURCE_KIND,
             )
         except GeneratedFileError:
             return
 
-        db.add(ChatProjectFile(project_id=proj.id, file_id=new_uf.id, pinned_by=owner.id))
+        db.add(WorkspaceFile(workspace_id=ws.id, file_id=new_uf.id, pinned_by=owner.id))
         if existing is not None:
             await db.execute(
-                delete(ChatProjectFile).where(
-                    ChatProjectFile.project_id == proj.id,
-                    ChatProjectFile.file_id == existing.id,
+                delete(WorkspaceFile).where(
+                    WorkspaceFile.workspace_id == ws.id,
+                    WorkspaceFile.file_id == existing.id,
                 )
             )
             await db.delete(existing)
-        proj.updated_at = datetime.now(timezone.utc)
+        ws.updated_at = datetime.now(timezone.utc)
         await db.commit()
         new_id = new_uf.id
 
     # Index the fresh memory file so it participates in retrieval.
-    await index_file_for_project(proj.id, new_id, force=True)
+    await index_file_for_workspace(ws.id, new_id, force=True)
     logger.info(
-        "auto-memory refreshed for project %s (merged %d chats)",
-        proj.id,
+        "auto-memory refreshed for workspace %s (merged %d chats)",
+        ws.id,
         len(recent_convs),
     )

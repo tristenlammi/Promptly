@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
-import { useChatProjects } from "@/hooks/useChatProjects";
+import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useUpdateConversation } from "@/hooks/useConversations";
 import { cn } from "@/utils/cn";
 
@@ -29,9 +29,9 @@ interface Position {
 
 interface Props {
   conversationId: string;
-  /** Project this chat currently belongs to (``null`` for a standalone
-   *  chat). Drives the checkmark + "Remove from project" affordance. */
-  currentProjectId: string | null;
+  /** Workspace this chat currently belongs to (``null`` for a standalone
+   *  chat). Drives the checkmark + "Remove from workspace" affordance. */
+  currentWorkspaceId: string | null;
   /** Current pinned state — drives the Pin/Unpin label. */
   pinned: boolean;
   /** Toggle the pin. The row owns the mutation; the menu just fires it. */
@@ -61,7 +61,7 @@ const MENU_MIN_WIDTH = 240;
  *  the scroll viewport. */
 export function ConversationRowContextMenu({
   conversationId,
-  currentProjectId,
+  currentWorkspaceId,
   pinned,
   onTogglePin,
   onArchive,
@@ -76,11 +76,11 @@ export function ConversationRowContextMenu({
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Phase 3.2 — "Move to project" is a second level inside this menu.
+  // Phase 3.2 — "Move to workspace" is a second level inside this menu.
   const [view, setView] = useState<"main" | "move">("main");
   // Busy target id during a move; ``"__remove__"`` while detaching.
   const [movingTo, setMovingTo] = useState<string | null>(null);
-  const projects = useChatProjects({ archived: false });
+  const workspaces = useWorkspaces({ archived: false });
   const updateConv = useUpdateConversation();
   const qc = useQueryClient();
 
@@ -91,10 +91,10 @@ export function ConversationRowContextMenu({
     try {
       await updateConv.mutateAsync({
         id: conversationId,
-        payload: { project_id: targetId },
+        payload: { workspace_id: targetId },
       });
-      // Refresh project membership counts / project conversation lists.
-      qc.invalidateQueries({ queryKey: ["chat-projects"] });
+      // Refresh workspace membership counts / workspace conversation lists.
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
       onClose();
     } catch (e) {
       setError(
@@ -255,7 +255,7 @@ export function ConversationRowContextMenu({
               >
                 <FolderKanban className="h-3 w-3" />
               </span>
-              <span className="flex-1 font-medium">Move to project…</span>
+              <span className="flex-1 font-medium">Move to workspace…</span>
               <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
             </button>
 
@@ -308,10 +308,10 @@ export function ConversationRowContextMenu({
               )}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
-              Move to project
+              Move to workspace
             </button>
 
-            {currentProjectId && (
+            {currentWorkspaceId && (
               <button
                 type="button"
                 role="menuitem"
@@ -330,23 +330,23 @@ export function ConversationRowContextMenu({
                     <FolderMinus className="h-3 w-3" />
                   )}
                 </span>
-                <span className="flex-1">Remove from project</span>
+                <span className="flex-1">Remove from workspace</span>
               </button>
             )}
 
             <div className="max-h-60 overflow-y-auto">
-              {projects.isLoading && (
+              {workspaces.isLoading && (
                 <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
-                  Loading projects…
+                  Loading workspaces…
                 </div>
               )}
-              {projects.data && projects.data.length === 0 && (
+              {workspaces.data && workspaces.data.length === 0 && (
                 <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
-                  No projects yet.
+                  No workspaces yet.
                 </div>
               )}
-              {projects.data?.map((p) => {
-                const isCurrent = p.id === currentProjectId;
+              {workspaces.data?.map((p) => {
+                const isCurrent = p.id === currentWorkspaceId;
                 return (
                   <button
                     key={p.id}
@@ -371,7 +371,7 @@ export function ConversationRowContextMenu({
                       )}
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium">
-                      {p.title || "Untitled project"}
+                      {p.title || "Untitled workspace"}
                     </span>
                   </button>
                 );

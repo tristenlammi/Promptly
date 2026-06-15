@@ -53,11 +53,11 @@ logger = logging.getLogger(__name__)
 EMBED_BATCH_SIZE = 16
 
 # ``knowledge_chunks`` is shared across three owners (Custom Models,
-# Chat Projects, and Study Projects). Each chunk sets exactly one of
+# Workspaces, and Study Projects). Each chunk sets exactly one of
 # these columns; the others stay NULL (CHECK constraint, migration 0080).
 _SCOPE_COLUMN = {
     "custom_model": "custom_model_id",
-    "project": "project_id",
+    "workspace": "workspace_id",
     "study_project": "study_project_id",
 }
 
@@ -96,7 +96,7 @@ async def delete_existing_chunks(
 ) -> None:
     """Drop any prior chunks for this (scope, file) pair before re-embedding.
 
-    ``scope_kind`` is ``"custom_model"`` or ``"project"`` — it selects
+    ``scope_kind`` is ``"custom_model"`` or ``"workspace"`` — it selects
     which owner column to filter on. Cheaper than a per-chunk MERGE, and
     the unique guards on ``(scope, user_file_id, chunk_index)`` would
     refuse a plain re-insert anyway.

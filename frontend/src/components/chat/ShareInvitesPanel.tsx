@@ -2,10 +2,10 @@ import { FolderKanban, Loader2 } from "lucide-react";
 
 import { Modal } from "@/components/shared/Modal";
 import {
-  useAcceptProjectInvite,
-  useDeclineProjectInvite,
-  useProjectInvites,
-} from "@/hooks/useChatProjects";
+  useAcceptWorkspaceInvite,
+  useDeclineWorkspaceInvite,
+  useWorkspaceInvites,
+} from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
 
 interface Props {
@@ -13,28 +13,28 @@ interface Props {
   onClose: () => void;
 }
 
-/** Project invites inbox.
+/** Workspace invites inbox.
  *
  *  Per-chat sharing was removed, so this panel now only surfaces
- *  project-level invites (0031): accepting one opens up every chat
- *  inside that project. The sidebar pill count reflects the number
- *  of pending project invites.
+ *  workspace-level invites (0031): accepting one opens up every chat
+ *  inside that workspace. The sidebar pill count reflects the number
+ *  of pending workspace invites.
  */
 export function ShareInvitesPanel({ open, onClose }: Props) {
-  const projInvitesQ = useProjectInvites();
-  const acceptProj = useAcceptProjectInvite();
-  const declineProj = useDeclineProjectInvite();
+  const wsInvitesQ = useWorkspaceInvites();
+  const acceptWs = useAcceptWorkspaceInvite();
+  const declineWs = useDeclineWorkspaceInvite();
 
-  const projInvites = projInvitesQ.data ?? [];
-  const isLoading = projInvitesQ.isLoading;
-  const empty = !isLoading && projInvites.length === 0;
+  const wsInvites = wsInvitesQ.data ?? [];
+  const isLoading = wsInvitesQ.isLoading;
+  const empty = !isLoading && wsInvites.length === 0;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Invites"
-      description="Teammates have invited you to collaborate. Accepting a project opens up every chat inside it."
+      description="Teammates have invited you to collaborate. Accepting a workspace opens up every chat inside it."
       widthClass="max-w-xl"
     >
       {isLoading ? (
@@ -48,40 +48,40 @@ export function ShareInvitesPanel({ open, onClose }: Props) {
           <section>
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
               <FolderKanban className="h-3 w-3" />
-              Project invites ({projInvites.length})
+              Workspace invites ({wsInvites.length})
             </h3>
             <ul className="divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">
-              {projInvites.map((row) => (
+              {wsInvites.map((row) => (
                 <li key={row.id} className="px-3 py-3 text-sm">
                   <div className="mb-1 truncate font-medium text-[var(--text)]">
-                    {row.project_title || "Untitled project"}
+                    {row.workspace_title || "Untitled workspace"}
                   </div>
                   <div className="mb-2 truncate text-xs text-[var(--text-muted)]">
                     Invited by{" "}
                     <span className="font-medium text-[var(--text)]">
                       {row.inviter.username}
                     </span>
-                    . You'll get full access to every chat in this project.
+                    . You'll get full access to every chat in this workspace.
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => acceptProj.mutate(row.id)}
-                      disabled={acceptProj.isPending}
+                      onClick={() => acceptWs.mutate(row.id)}
+                      disabled={acceptWs.isPending}
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium",
                         "bg-[var(--accent)] text-white transition hover:opacity-90 disabled:opacity-60"
                       )}
                     >
-                      {acceptProj.isPending && (
+                      {acceptWs.isPending && (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       )}
                       Accept
                     </button>
                     <button
                       type="button"
-                      onClick={() => declineProj.mutate(row.id)}
-                      disabled={declineProj.isPending}
+                      onClick={() => declineWs.mutate(row.id)}
+                      disabled={declineWs.isPending}
                       className={cn(
                         "rounded-md border px-3 py-1.5 text-xs font-medium",
                         "border-[var(--border)] text-[var(--text-muted)]",

@@ -39,20 +39,20 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.billing.usage import check_budget, maybe_alert_admins, record_usage
 from app.chat.models import (
-    ChatProject,
-    ChatProjectFile,
     CompareGroup,
     Conversation,
-    ConversationExcludedProjectFile,
+    ConversationExcludedWorkspaceFile,
     Message,
+    Workspace,
+    WorkspaceFile,
 )
-from app.chat.project_schemas import (
-    ConversationProjectFile,
-    ToggleProjectFileRequest,
+from app.workspaces.schemas import (
+    ConversationWorkspaceFile,
+    ToggleWorkspaceFileRequest,
 )
-from app.chat.project_shares import (
-    get_accessible_project,
-    require_project_write,
+from app.workspaces.shares import (
+    get_accessible_workspace,
+    require_workspace_write,
 )
 from app.chat.schemas import (
     BranchConversationRequest,
@@ -75,7 +75,7 @@ from app.chat.schemas import (
     RegenerateMessageRequest,
     SendMessageRequest,
     SendMessageResponse,
-    SummariseToProjectResponse,
+    SummariseToWorkspaceResponse,
 )
 from app.chat.compaction import CompactionError, compact_conversation
 from app.chat.mentions import (
@@ -200,7 +200,7 @@ def _to_websearch_query(raw: str) -> str:
 async def search_conversations(
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
-    project_id: uuid.UUID | None = Query(default=None),
+    workspace_id: uuid.UUID | None = Query(default=None),
     start: datetime | None = Query(default=None),
     end: datetime | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -216,9 +216,9 @@ async def search_conversations(
     renderer's allowlist).
 
     Searches the caller's own conversations plus any chat inside a
-    project shared with them. When ``project_id`` is given, results are
-    scoped to chats inside that project (intersected with the caller's
-    accessible set, so it never widens access — an inaccessible project
+    workspace shared with them. When ``workspace_id`` is given, results are
+    scoped to chats inside that workspace (intersected with the caller's
+    accessible set, so it never widens access — an inaccessible workspace
     just yields no results).
 
     The optional ``start`` / ``end`` instants bound matches by
@@ -234,26 +234,26 @@ async def search_conversations(
     if not cleaned and not has_date_filter:
         return []
 
-    # Search across owned chats *and* project-shared chats.
+    # Search across owned chats *and* workspace-shared chats.
     # Pre-resolving the id list keeps the FTS query simple and lets
     # Postgres reuse the GIN index without a wider join.
     accessible_ids = await list_accessible_conversation_ids(user, db)
     if not accessible_ids:
         return []
 
-    if project_id is not None:
-        proj_conv_ids = set(
+    if workspace_id is not None:
+        ws_conv_ids = set(
             (
                 await db.execute(
                     select(Conversation.id).where(
-                        Conversation.project_id == project_id
+                        Conversation.workspace_id == workspace_id
                     )
                 )
             )
             .scalars()
             .all()
         )
-        accessible_ids = [cid for cid in accessible_ids if cid in proj_conv_ids]
+        accessible_ids = [cid for cid in accessible_ids if cid in ws_conv_ids]
         if not accessible_ids:
             return []
 
@@ -352,37 +352,37 @@ async def search_conversations(
 
 
 # ---------------------------------------------------------------------
-# Per-chat project-file opt-out (Phase 4)
+# Per-chat workspace-file opt-out (Phase 4)
 # ---------------------------------------------------------------------
 
 
 @router.get(
-    "/conversations/{conversation_id}/project-files",
-    response_model=list[ConversationProjectFile],
+    "/conversations/{conversation_id}/workspace-files",
+    response_model=list[ConversationWorkspaceFile],
 )
-async def list_conversation_project_files(
+async def list_conversation_workspace_files(
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[ConversationProjectFile]:
-    """List the project's pinned files with each one's per-chat
-    excluded flag. Empty when the chat isn't in a project."""
+) -> list[ConversationWorkspaceFile]:
+    """List the workspace's pinned files with each one's per-chat
+    excluded flag. Empty when the chat isn't in a workspace."""
     conv, _role = await get_accessible_conversation(conversation_id, user, db)
-    if conv.project_id is None:
+    if conv.workspace_id is None:
         return []
     pins = (
         await db.execute(
-            select(ChatProjectFile, UserFile)
-            .join(UserFile, UserFile.id == ChatProjectFile.file_id)
-            .where(ChatProjectFile.project_id == conv.project_id)
-            .order_by(ChatProjectFile.pinned_at.asc())
+            select(WorkspaceFile, UserFile)
+            .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+            .where(WorkspaceFile.workspace_id == conv.workspace_id)
+            .order_by(WorkspaceFile.pinned_at.asc())
         )
     ).all()
     excluded = set(
         (
             await db.execute(
-                select(ConversationExcludedProjectFile.file_id).where(
-                    ConversationExcludedProjectFile.conversation_id == conv.id
+                select(ConversationExcludedWorkspaceFile.file_id).where(
+                    ConversationExcludedWorkspaceFile.conversation_id == conv.id
                 )
             )
         )
@@ -390,7 +390,7 @@ async def list_conversation_project_files(
         .all()
     )
     return [
-        ConversationProjectFile(
+        ConversationWorkspaceFile(
             file_id=uf.id,
             filename=uf.filename,
             mime_type=uf.mime_type,
@@ -401,17 +401,17 @@ async def list_conversation_project_files(
 
 
 @router.put(
-    "/conversations/{conversation_id}/project-files/{file_id}",
+    "/conversations/{conversation_id}/workspace-files/{file_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def toggle_conversation_project_file(
+async def toggle_conversation_workspace_file(
     conversation_id: uuid.UUID,
     file_id: uuid.UUID,
-    payload: ToggleProjectFileRequest,
+    payload: ToggleWorkspaceFileRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """Include / exclude one of the project's pinned files for *this*
+    """Include / exclude one of the workspace's pinned files for *this*
     chat. Only the chat's owner can change its context."""
     conv, _role = await get_accessible_conversation(conversation_id, user, db)
     if conv.user_id != user.id:
@@ -419,17 +419,17 @@ async def toggle_conversation_project_file(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the chat's owner can change which files it sees.",
         )
-    if conv.project_id is None:
+    if conv.workspace_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This chat isn't in a project.",
+            detail="This chat isn't in a workspace.",
         )
     existing = await db.get(
-        ConversationExcludedProjectFile, (conv.id, file_id)
+        ConversationExcludedWorkspaceFile, (conv.id, file_id)
     )
     if payload.excluded and existing is None:
         db.add(
-            ConversationExcludedProjectFile(
+            ConversationExcludedWorkspaceFile(
                 conversation_id=conv.id, file_id=file_id
             )
         )
@@ -601,7 +601,7 @@ def _fuse_search_hits(
 )
 async def list_mention_candidates(
     q: str = Query(default="", max_length=200),
-    project_id: uuid.UUID | None = Query(default=None),
+    workspace_id: uuid.UUID | None = Query(default=None),
     exclude_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=12, ge=1, le=30),
     db: AsyncSession = Depends(get_db),
@@ -611,12 +611,12 @@ async def list_mention_candidates(
 
     Returns two lists (both ordered by most-recently-updated first):
 
-    * ``project_candidates`` — sibling chats in the same project
+    * ``workspace_candidates`` — sibling chats in the same workspace
       as the conversation the user is composing from. Surfaced
-      first in the popover because references within a project
+      first in the popover because references within a workspace
       are the common case.
     * ``recent_candidates`` — the caller's most recently active
-      chats, project-agnostic.
+      chats, workspace-agnostic.
 
     When ``q`` is non-empty, titles are filtered by a case-
     insensitive substring match (fuzzy enough without touching the
@@ -668,57 +668,57 @@ async def list_mention_candidates(
             func.lower(Conversation.title).like(f"%{q_norm}%")
         )
 
-    project_rows: list[Conversation] = []
-    if project_id is not None:
-        # Verify the project belongs to the caller before including
+    workspace_rows: list[Conversation] = []
+    if workspace_id is not None:
+        # Verify the workspace belongs to the caller before including
         # its chats — a malicious client shouldn't be able to enumerate
-        # titles in someone else's project by guessing the id.
-        proj = await db.get(ChatProject, project_id)
-        if proj is not None and proj.user_id == user.id:
-            proj_result = await db.execute(
-                base_select.where(Conversation.project_id == project_id).limit(limit)
+        # titles in someone else's workspace by guessing the id.
+        ws = await db.get(Workspace, workspace_id)
+        if ws is not None and ws.user_id == user.id:
+            ws_result = await db.execute(
+                base_select.where(Conversation.workspace_id == workspace_id).limit(limit)
             )
-            project_rows = list(proj_result.scalars().all())
+            workspace_rows = list(ws_result.scalars().all())
 
     # Recents: the same base but *excluding* anything already in
-    # project_rows so the two lists don't duplicate the same chat.
-    already_ids = {c.id for c in project_rows}
+    # workspace_rows so the two lists don't duplicate the same chat.
+    already_ids = {c.id for c in workspace_rows}
     recent_select = base_select.limit(limit + len(already_ids))
     recent_result = await db.execute(recent_select)
     recent_rows: list[Conversation] = [
         c for c in recent_result.scalars().all() if c.id not in already_ids
     ][:limit]
 
-    # Resolve project titles in a single batch so the popover can
-    # render "In project: Acme SRE" next to each candidate.
-    project_ids = {
-        c.project_id
-        for c in (*project_rows, *recent_rows)
-        if c.project_id is not None
+    # Resolve workspace titles in a single batch so the popover can
+    # render "In workspace: Acme SRE" next to each candidate.
+    workspace_ids = {
+        c.workspace_id
+        for c in (*workspace_rows, *recent_rows)
+        if c.workspace_id is not None
     }
-    project_title_map: dict[uuid.UUID, str] = {}
-    if project_ids:
-        proj_title_result = await db.execute(
-            select(ChatProject.id, ChatProject.title).where(
-                ChatProject.id.in_(project_ids)
+    workspace_title_map: dict[uuid.UUID, str] = {}
+    if workspace_ids:
+        ws_title_result = await db.execute(
+            select(Workspace.id, Workspace.title).where(
+                Workspace.id.in_(workspace_ids)
             )
         )
-        project_title_map = {pid: title for pid, title in proj_title_result.all()}
+        workspace_title_map = {wid: title for wid, title in ws_title_result.all()}
 
     def to_candidate(c: Conversation) -> MentionCandidate:
         return MentionCandidate(
             id=c.id,
             title=(c.title or "Untitled chat").strip() or "Untitled chat",
-            project_id=c.project_id,
-            project_title=(
-                project_title_map.get(c.project_id) if c.project_id else None
+            workspace_id=c.workspace_id,
+            workspace_title=(
+                workspace_title_map.get(c.workspace_id) if c.workspace_id else None
             ),
             updated_at=c.updated_at,
         )
 
     return MentionCandidatesResponse(
-        project_context_id=project_id,
-        project_candidates=[to_candidate(c) for c in project_rows],
+        workspace_context_id=workspace_id,
+        workspace_candidates=[to_candidate(c) for c in workspace_rows],
         recent_candidates=[to_candidate(c) for c in recent_rows],
     )
 
@@ -843,34 +843,34 @@ async def create_conversation(
         # mid-stream) the sweeper still cleans up eventually.
         expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
 
-    # Phase P1 — validate the requested project (if any). Ownership
-    # is enforced here (not just on the projects endpoints) so a user
-    # can't drop a chat into someone else's project via the create
-    # payload; temporary + project is rejected because the sweeper
+    # Phase P1 — validate the requested workspace (if any). Ownership
+    # is enforced here (not just on the workspaces endpoints) so a user
+    # can't drop a chat into someone else's workspace via the create
+    # payload; temporary + workspace is rejected because the sweeper
     # would otherwise need to think about cascading behaviour.
-    project_id: uuid.UUID | None = None
-    if payload.project_id is not None:
+    workspace_id: uuid.UUID | None = None
+    if payload.workspace_id is not None:
         if payload.temporary_mode is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Temporary chats can't belong to a project.",
+                detail="Temporary chats can't belong to a workspace.",
             )
-        # Owner or editor may start chats in the project; viewers can't.
-        project, _prole = await get_accessible_project(
-            payload.project_id, user, db
+        # Owner or editor may start chats in the workspace; viewers can't.
+        workspace, _wrole = await get_accessible_workspace(
+            payload.workspace_id, user, db
         )
-        require_project_write(_prole)
-        project_id = project.id
+        require_workspace_write(_wrole)
+        workspace_id = workspace.id
         # If the conversation didn't pick a model explicitly, inherit
-        # the project's defaults — matches ChatGPT's behaviour where
-        # opening a project-new-chat uses the project-level model.
-        if payload.model_id is None and project.default_model_id:
+        # the workspace's defaults — matches ChatGPT's behaviour where
+        # opening a workspace-new-chat uses the workspace-level model.
+        if payload.model_id is None and workspace.default_model_id:
             payload = payload.model_copy(
-                update={"model_id": project.default_model_id}
+                update={"model_id": workspace.default_model_id}
             )
-        if payload.provider_id is None and project.default_provider_id:
+        if payload.provider_id is None and workspace.default_provider_id:
             payload = payload.model_copy(
-                update={"provider_id": project.default_provider_id}
+                update={"provider_id": workspace.default_provider_id}
             )
 
     # Workspace-wide default chat model — final defensive fallback for
@@ -879,15 +879,15 @@ async def create_conversation(
     # Precedence is:
     #
     #   1. payload.model_id / payload.provider_id  (already set above)
-    #   2. project defaults                        (handled in the
-    #                                               ``project_id`` block)
+    #   2. workspace defaults                      (handled in the
+    #                                               ``workspace_id`` block)
     #   3. app_settings.default_chat_*_id          (THIS block)
     #
     # The personal default lives client-side on ``users.settings`` and
     # is folded into the payload by the frontend before the POST, so
     # by the time it reaches here a non-NULL payload pair has *already*
     # honoured the personal default. This admin fallback only fires
-    # when both the personal default and the project defaults were
+    # when both the personal default and the workspace defaults were
     # empty — i.e. a fresh user starting a top-level chat with no
     # preferences set anywhere.
     if payload.model_id is None or payload.provider_id is None:
@@ -916,7 +916,7 @@ async def create_conversation(
         reasoning_effort=payload.reasoning_effort,
         temporary_mode=payload.temporary_mode,
         expires_at=expires_at,
-        project_id=project_id,
+        workspace_id=workspace_id,
     )
     db.add(conv)
     await db.commit()
@@ -1107,26 +1107,26 @@ async def update_conversation(
             )
         conv.temporary_mode = None
         conv.expires_at = None
-    # Phase P1 — project reassignment. Only honour the field when the
+    # Phase P1 — workspace reassignment. Only honour the field when the
     # client explicitly sent it (``model_fields_set`` check) so this
     # PATCH stays idempotent for the common "just toggle pinned"
-    # case. Temporary chats can't be projectised — same reasoning as
+    # case. Temporary chats can't be workspaced — same reasoning as
     # in :func:`create_conversation`.
-    if "project_id" in payload.model_fields_set:
-        if payload.project_id is None:
-            conv.project_id = None
+    if "workspace_id" in payload.model_fields_set:
+        if payload.workspace_id is None:
+            conv.workspace_id = None
         else:
             if conv.temporary_mode is not None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Temporary chats can't belong to a project.",
+                    detail="Temporary chats can't belong to a workspace.",
                 )
-            # Owner or editor may move a chat into the project.
-            project, _prole = await get_accessible_project(
-                payload.project_id, user, db
+            # Owner or editor may move a chat into the workspace.
+            workspace, _wrole = await get_accessible_workspace(
+                payload.workspace_id, user, db
             )
-            require_project_write(_prole)
-            conv.project_id = project.id
+            require_workspace_write(_wrole)
+            conv.workspace_id = workspace.id
 
     await db.commit()
     await db.refresh(conv)
@@ -2496,28 +2496,28 @@ async def compact_conversation_endpoint(
 
 
 @router.post(
-    "/conversations/{conversation_id}/summarise-to-project",
-    response_model=SummariseToProjectResponse,
+    "/conversations/{conversation_id}/summarise-to-workspace",
+    response_model=SummariseToWorkspaceResponse,
 )
-async def summarise_to_project_endpoint(
+async def summarise_to_workspace_endpoint(
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> SummariseToProjectResponse:
-    """Generate a Markdown summary of the chat and pin it to its project.
+) -> SummariseToWorkspaceResponse:
+    """Generate a Markdown summary of the chat and pin it to its workspace.
 
     Writes the summary as a new file in the user's Generated folder,
-    then pins it to the conversation's parent project so every other
-    chat in the project picks it up on the next turn (via the
-    existing project-file injection pipeline — no new wiring).
+    then pins it to the conversation's parent workspace so every other
+    chat in the workspace picks it up on the next turn (via the
+    existing workspace-file injection pipeline — no new wiring).
 
     Preconditions:
 
     * Caller must be the conversation owner. Collaborators can't
-      mutate the project's pinned-file set indirectly.
-    * Conversation must live inside a project (``project_id`` set).
+      mutate the workspace's pinned-file set indirectly.
+    * Conversation must live inside a workspace (``workspace_id`` set).
       If the user wants to pin the summary but the chat is
-      standalone, they first need to move it into a project.
+      standalone, they first need to move it into a workspace.
     * Conversation must have a provider + model configured
       (matches compaction — we need something to call).
     * At least 4 textual turns — see :mod:`app.chat.summariser`
@@ -2525,7 +2525,7 @@ async def summarise_to_project_endpoint(
 
     Errors:
 
-    * 400 for "not in a project", "chat too short", "no provider".
+    * 400 for "not in a workspace", "chat too short", "no provider".
     * 403 if the caller isn't the owner.
     * 502 if the LLM call fails (no file is written in that case).
     """
@@ -2533,27 +2533,27 @@ async def summarise_to_project_endpoint(
     if role != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the conversation owner can save a summary to the project.",
+            detail="Only the conversation owner can save a summary to the workspace.",
         )
 
-    if conv.project_id is None:
+    if conv.workspace_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "This chat isn't in a project yet. Move it into one "
+                "This chat isn't in a workspace yet. Move it into one "
                 "first — then the summary will be visible to every "
-                "other chat in that project."
+                "other chat in that workspace."
             ),
         )
 
-    project = await db.get(ChatProject, conv.project_id)
-    if project is None or project.user_id != user.id:
-        # Shouldn't normally happen — project_id is owner-scoped in
-        # the move-to-project path — but guard in case a race left
-        # the conversation pointing at a deleted project.
+    workspace = await db.get(Workspace, conv.workspace_id)
+    if workspace is None or workspace.user_id != user.id:
+        # Shouldn't normally happen — workspace_id is owner-scoped in
+        # the move-to-workspace path — but guard in case a race left
+        # the conversation pointing at a deleted workspace.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Parent project not found.",
+            detail="Parent workspace not found.",
         )
 
     if not conv.provider_id or not conv.model_id:
@@ -2590,7 +2590,7 @@ async def summarise_to_project_endpoint(
         )
 
     # Pretty filename built from the conversation title so it reads
-    # well in the project's file list. We don't have a rich title-
+    # well in the workspace's file list. We don't have a rich title-
     # sanitiser on the backend; a minimal strip here is enough for a
     # filesystem-friendly name (``persist_generated_file`` doesn't
     # touch the stored filename, it just uses the extension).
@@ -2623,33 +2623,33 @@ async def summarise_to_project_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
         )
 
-    # Auto-pin to the project. Idempotent: if we somehow ran twice
+    # Auto-pin to the workspace. Idempotent: if we somehow ran twice
     # with the same file id (we don't — persist_generated_file
-    # always mints a fresh UUID) the unique (project, file) row
+    # always mints a fresh UUID) the unique (workspace, file) row
     # would be swallowed by the existing_q check.
     existing_q = await db.execute(
-        select(ChatProjectFile).where(
-            ChatProjectFile.project_id == project.id,
-            ChatProjectFile.file_id == uf.id,
+        select(WorkspaceFile).where(
+            WorkspaceFile.workspace_id == workspace.id,
+            WorkspaceFile.file_id == uf.id,
         )
     )
     if existing_q.scalar_one_or_none() is None:
-        db.add(ChatProjectFile(project_id=project.id, file_id=uf.id))
-        project.updated_at = datetime.now(timezone.utc)
+        db.add(WorkspaceFile(workspace_id=workspace.id, file_id=uf.id))
+        workspace.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
     logger.info(
-        "Summarised conversation %s -> file %s, pinned to project %s",
+        "Summarised conversation %s -> file %s, pinned to workspace %s",
         conv.id,
         uf.id,
-        project.id,
+        workspace.id,
     )
 
-    return SummariseToProjectResponse(
+    return SummariseToWorkspaceResponse(
         file_id=uf.id,
         filename=uf.filename,
-        project_id=project.id,
-        project_title=project.title,
+        workspace_id=workspace.id,
+        workspace_title=workspace.title,
         chars=len(summary_md),
     )
 
@@ -3366,50 +3366,50 @@ async def _stream_generator(
             db, history_rows, user
         )
 
-        # Phase P1 — Chat Projects. When the conversation belongs to a
-        # project, fold its pinned files into the *triggering* turn's
+        # Phase P1 — Workspaces. When the conversation belongs to a
+        # workspace, fold its pinned files into the *triggering* turn's
         # attachment list so they flow through the existing
         # ``build_attachment_preamble`` / vision pipeline without any
-        # duplicate plumbing. The project's ``system_prompt`` is
-        # handled later (see ``project_system_prompt`` below) where it
+        # duplicate plumbing. The workspace's ``system_prompt`` is
+        # handled later (see ``workspace_system_prompt`` below) where it
         # slots in alongside the tools-aware and personal-context
         # prompts.
-        project_system_prompt: str | None = None
-        if conv.project_id is not None:
-            # Walk the project-share ACL so a collaborator's send
-            # still picks up the project's system prompt + pinned
+        workspace_system_prompt: str | None = None
+        if conv.workspace_id is not None:
+            # Walk the workspace-share ACL so a collaborator's send
+            # still picks up the workspace's system prompt + pinned
             # files. Owner check first (common path); fall back to
-            # :func:`_has_project_access` for accepted collaborators.
-            project_row = await db.get(ChatProject, conv.project_id)
-            caller_has_project = False
-            if project_row is not None:
-                if project_row.user_id == user.id:
-                    caller_has_project = True
+            # :func:`_has_workspace_access` for accepted collaborators.
+            workspace_row = await db.get(Workspace, conv.workspace_id)
+            caller_has_workspace = False
+            if workspace_row is not None:
+                if workspace_row.user_id == user.id:
+                    caller_has_workspace = True
                 else:
                     # Import locally to avoid a cycle — ``shares``
-                    # imports ``project_shares`` which imports this
+                    # imports ``workspaces.shares`` which imports this
                     # router indirectly.
-                    from app.chat.shares import _has_project_access
+                    from app.chat.shares import _has_workspace_access
 
-                    caller_has_project = await _has_project_access(
-                        project_row.id, user, db
+                    caller_has_workspace = await _has_workspace_access(
+                        workspace_row.id, user, db
                     )
-            if project_row is not None and caller_has_project:
-                project_system_prompt = (
-                    project_row.system_prompt.strip()
-                    if project_row.system_prompt
+            if workspace_row is not None and caller_has_workspace:
+                workspace_system_prompt = (
+                    workspace_row.system_prompt.strip()
+                    if workspace_row.system_prompt
                     else None
                 ) or None
 
-                # Phase P2 — hybrid retrieval. ``build_project_injection``
-                # decides full-dump (small projects: every pinned file
+                # Phase P2 — hybrid retrieval. ``build_workspace_injection``
+                # decides full-dump (small workspaces: every pinned file
                 # folded into the turn, as before) vs. top-k retrieval
-                # (large projects: only the relevant chunks spliced into
+                # (large workspaces: only the relevant chunks spliced into
                 # the system prompt; images + not-yet-indexed text still
                 # ride the attachment path). Local import mirrors the
-                # ``_has_project_access`` lazy import above — keeps the
+                # ``_has_workspace_access`` lazy import above — keeps the
                 # already-heavy router import graph narrow.
-                from app.chat.project_knowledge import build_project_injection
+                from app.workspaces.knowledge import build_workspace_injection
 
                 triggering_text = next(
                     (
@@ -3420,14 +3420,14 @@ async def _stream_generator(
                     "",
                 )
                 # Per-chat opt-outs: files this conversation has excluded
-                # from the project's shared set.
+                # from the workspace's shared set.
                 excluded_ids = set(
                     (
                         await db.execute(
                             select(
-                                ConversationExcludedProjectFile.file_id
+                                ConversationExcludedWorkspaceFile.file_id
                             ).where(
-                                ConversationExcludedProjectFile.conversation_id
+                                ConversationExcludedWorkspaceFile.conversation_id
                                 == conv.id
                             )
                         )
@@ -3435,26 +3435,26 @@ async def _stream_generator(
                     .scalars()
                     .all()
                 )
-                injection = await build_project_injection(
+                injection = await build_workspace_injection(
                     db,
-                    project_id=project_row.id,
+                    workspace_id=workspace_row.id,
                     query=triggering_text or "",
                     excluded_file_ids=excluded_ids,
                 )
                 if injection.system_block:
-                    # Project instructions stay first; the retrieved
-                    # "Project knowledge" block sits under them.
-                    project_system_prompt = (
+                    # Workspace instructions stay first; the retrieved
+                    # "Workspace knowledge" block sits under them.
+                    workspace_system_prompt = (
                         merge_system_prompt(
-                            project_system_prompt, injection.system_block
+                            workspace_system_prompt, injection.system_block
                         )
-                        if project_system_prompt
+                        if workspace_system_prompt
                         else injection.system_block
                     )
 
-                # ACL for pinned files in a (possibly shared) project:
-                # anyone with project access can *use* any file pinned
-                # there — the project itself is the access grant. Admin
+                # ACL for pinned files in a (possibly shared) workspace:
+                # anyone with workspace access can *use* any file pinned
+                # there — the workspace itself is the access grant. Admin
                 # pool files (``user_id IS NULL``) are always allowed.
                 if injection.attach_file_ids:
                     pin_rows = await db.execute(
@@ -3473,8 +3473,8 @@ async def _stream_generator(
                         triggering_user_msg_id, []
                     )
                     existing_ids = {f.id for f in existing}
-                    # Prepend so project pins render first in the
-                    # preamble ("Project files: ..." reads naturally
+                    # Prepend so workspace pins render first in the
+                    # preamble ("Workspace files: ..." reads naturally
                     # before "this turn's attachments: ..."). Skip
                     # any file the user *also* attached to this very
                     # turn to avoid duplicated text blobs.
@@ -3755,20 +3755,20 @@ async def _stream_generator(
             list_openai_tools(enabled_categories) if enabled_categories else None
         )
 
-        # Phase P1 — project-level instructions are the baseline
+        # Phase P1 — workspace-level instructions are the baseline
         # system prompt. Tool-aware + personal-context prompts are
         # merged on top below, each taking precedence (since
         # ``merge_system_prompt`` puts the first argument first).
-        # Promptly base guidelines (lowest priority — every user/project/tool
+        # Promptly base guidelines (lowest priority — every user/workspace/tool
         # layer stacked on top overrides these). Covers rendering capabilities
         # (KaTeX, markdown tables) and basic response quality steer.
         system_prompt: str | None = merge_system_prompt(
-            project_system_prompt or "", PROMPTLY_BASE_PROMPT
+            workspace_system_prompt or "", PROMPTLY_BASE_PROMPT
         )
         # Account-wide custom system prompt. A global persona / standing
         # instruction the user set in Chat defaults that seeds EVERY new
         # chat. It's the broadest steer, so it sits *under* both the
-        # project prompt and the per-chat instructions — we merge it as
+        # workspace prompt and the per-chat instructions — we merge it as
         # the base (second arg wins least) so anything more specific
         # overrides it. Empty / whitespace-only is treated as unset.
         account_prompt = (user.settings or {}).get("custom_system_prompt")
@@ -4720,14 +4720,14 @@ async def _stream_generator(
                 "Post-stream budget check failed for user=%s", user.id
             )
 
-        # Phase P4 — opt-in rolling project memory. Fire-and-forget: the
-        # task owns its own session, no-ops unless the project has
-        # auto-memory enabled, and is debounced per project. Gated on
-        # ``project_id`` so non-project chats spawn nothing.
-        if conv.project_id is not None:
-            from app.chat.project_knowledge import maybe_refresh_project_memory
+        # Phase P4 — opt-in rolling workspace memory. Fire-and-forget: the
+        # task owns its own session, no-ops unless the workspace has
+        # auto-memory enabled, and is debounced per workspace. Gated on
+        # ``workspace_id`` so non-workspace chats spawn nothing.
+        if conv.workspace_id is not None:
+            from app.workspaces.knowledge import maybe_refresh_workspace_memory
 
-            asyncio.create_task(maybe_refresh_project_memory(conv.id))
+            asyncio.create_task(maybe_refresh_workspace_memory(conv.id))
 
         # Phase 6 — cross-chat memory capture. Cheap regex pre-filter so
         # ordinary turns cost nothing; when the user states something
@@ -5109,7 +5109,7 @@ _IMPORT_MAX_MESSAGES_PER_CONV = 5000
 @router.post("/conversations/import", status_code=status.HTTP_201_CREATED)
 async def import_conversations(
     file: UploadFile = File(...),
-    project_id: uuid.UUID | None = Form(default=None),
+    workspace_id: uuid.UUID | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -5122,10 +5122,10 @@ async def import_conversations(
     the source provided them so imported chats land in the right
     history buckets on the sidebar.
 
-    Optional ``project_id`` form field drops every imported
-    conversation into the named project — a shortcut for "migrate
-    everything from ChatGPT into this one project". Rejected if the
-    project belongs to someone else or doesn't exist.
+    Optional ``workspace_id`` form field drops every imported
+    conversation into the named workspace — a shortcut for "migrate
+    everything from ChatGPT into this one workspace". Rejected if the
+    workspace belongs to someone else or doesn't exist.
     """
     from app.chat import import_ as importer
 
@@ -5144,14 +5144,14 @@ async def import_conversations(
             ),
         )
 
-    # Optional project target.
-    project_row: ChatProject | None = None
-    if project_id is not None:
-        project_row = await db.get(ChatProject, project_id)
-        if project_row is None or project_row.user_id != user.id:
+    # Optional workspace target.
+    workspace_row: Workspace | None = None
+    if workspace_id is not None:
+        workspace_row = await db.get(Workspace, workspace_id)
+        if workspace_row is None or workspace_row.user_id != user.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown project",
+                detail="Unknown workspace",
             )
 
     try:
@@ -5195,7 +5195,7 @@ async def import_conversations(
             model_id=None,
             provider_id=None,
             web_search_mode="off",
-            project_id=project_row.id if project_row else None,
+            workspace_id=workspace_row.id if workspace_row else None,
         )
         # Preserve original created_at when the parser surfaced one —
         # keeps date-group bucketing ("Last week", "April 2025", ...)
@@ -5267,7 +5267,7 @@ async def import_conversations(
                     "count": len(created),
                     "skipped": skipped,
                     "total_messages": total_messages,
-                    "project_id": str(project_row.id) if project_row else None,
+                    "workspace_id": str(workspace_row.id) if workspace_row else None,
                     "filename": file.filename,
                 }
             ),

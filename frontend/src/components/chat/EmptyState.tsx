@@ -1,6 +1,6 @@
 import { Sparkles } from "lucide-react";
 
-import { useChatProject } from "@/hooks/useChatProjects";
+import { useWorkspace } from "@/hooks/useWorkspaces";
 
 const GENERAL_SUGGESTIONS = [
   "Explain a hard concept simply",
@@ -9,11 +9,11 @@ const GENERAL_SUGGESTIONS = [
   "What's the latest news on…",
 ];
 
-const PROJECT_SUGGESTIONS = [
-  "Summarise the files in this project",
+const WORKSPACE_SUGGESTIONS = [
+  "Summarise the files in this workspace",
   "What have we covered so far?",
   "Draft the next step",
-  "Find an answer in the project docs",
+  "Find an answer in the workspace docs",
 ];
 
 interface EmptyStateProps {
@@ -22,20 +22,20 @@ interface EmptyStateProps {
   /** Active model's display name — surfaced so the user knows who
    *  they're about to talk to. */
   modelName?: string | null;
-  /** When this chat belongs to a project, the empty state greets with
-   *  the project name and offers project-flavoured starters. */
-  projectId?: string | null;
+  /** When this chat belongs to a workspace, the empty state greets with
+   *  the workspace name and offers workspace-flavoured starters. */
+  workspaceId?: string | null;
 }
 
 export function EmptyState({
   onSuggestion,
   hasModel,
   modelName,
-  projectId,
+  workspaceId,
 }: EmptyStateProps) {
-  const { data: project } = useChatProject(projectId ?? undefined);
-  const inProject = Boolean(projectId);
-  const suggestions = inProject ? PROJECT_SUGGESTIONS : GENERAL_SUGGESTIONS;
+  const { data: workspace } = useWorkspace(workspaceId ?? undefined);
+  const inWorkspace = Boolean(workspaceId);
+  const suggestions = inWorkspace ? WORKSPACE_SUGGESTIONS : GENERAL_SUGGESTIONS;
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 pb-10 text-center">
@@ -46,15 +46,15 @@ export function EmptyState({
         <Sparkles className="h-6 w-6 text-[var(--accent)]" />
       </div>
       <h2 className="text-2xl font-semibold tracking-tight">
-        {inProject && project
-          ? `New chat in ${project.title || "this project"}`
+        {inWorkspace && workspace
+          ? `New chat in ${workspace.title || "this workspace"}`
           : "What can I help you with?"}
       </h2>
       <p className="mt-2 max-w-md text-sm text-[var(--text-muted)]">
         {!hasModel
           ? "Add a model provider in the Models tab to get started."
-          : inProject
-            ? "This chat uses the project's instructions and files. Ask anything, or attach more — answers stream in as they're written."
+          : inWorkspace
+            ? "This chat uses the workspace's instructions and files. Ask anything, or attach more — answers stream in as they're written."
             : "Ask anything, attach a file, or turn on web search. Answers stream in as they're written."}
       </p>
 

@@ -34,8 +34,8 @@ import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
-import { ShareProjectDialog } from "@/components/chat/ShareProjectDialog";
-import { ProjectModelField } from "@/components/projects/ProjectModelField";
+import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
+import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { TopNav } from "@/components/layout/TopNav";
@@ -43,18 +43,18 @@ import { chatApi } from "@/api/chat";
 import type { ConversationSummary } from "@/api/types";
 import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
 import {
-  useArchiveChatProject,
-  useBulkRemoveConversationsFromProject,
-  useChatProject,
-  useChatProjectConversations,
-  useChatProjectUsage,
-  useDeleteChatProject,
-  usePinChatProjectFile,
-  useReindexProject,
-  useUnarchiveChatProject,
-  useUnpinChatProjectFile,
-  useUpdateChatProject,
-} from "@/hooks/useChatProjects";
+  useArchiveWorkspace,
+  useBulkRemoveConversationsFromWorkspace,
+  useWorkspace,
+  useWorkspaceConversations,
+  useWorkspaceUsage,
+  useDeleteWorkspace,
+  usePinWorkspaceFile,
+  useReindexWorkspace,
+  useUnarchiveWorkspace,
+  useUnpinWorkspaceFile,
+  useUpdateWorkspace,
+} from "@/hooks/useWorkspaces";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 import { estimateTokens, formatTokens } from "@/utils/tokenEstimate";
@@ -70,42 +70,42 @@ function humanSize(n: number): string {
 
 type Tab = "conversations" | "files" | "usage" | "settings";
 
-/** Project detail page — three tabs (Conversations, Files, Settings).
+/** Workspace detail page — three tabs (Conversations, Files, Settings).
  * Laid out to match Study's unit-list page at a glance: left-aligned
  * TopNav title, tabbed body, card list. */
-export function ProjectDetailPage() {
+export function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: project, isLoading } = useChatProject(id);
-  const { data: conversations } = useChatProjectConversations(id);
+  const { data: workspace, isLoading } = useWorkspace(id);
+  const { data: conversations } = useWorkspaceConversations(id);
 
   const [tab, setTab] = useState<Tab>("conversations");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
-  const archive = useArchiveChatProject();
-  const unarchive = useUnarchiveChatProject();
-  const remove = useDeleteChatProject();
-  const bulkRemoveConversations = useBulkRemoveConversationsFromProject(id ?? "");
+  const archive = useArchiveWorkspace();
+  const unarchive = useUnarchiveWorkspace();
+  const remove = useDeleteWorkspace();
+  const bulkRemoveConversations = useBulkRemoveConversationsFromWorkspace(id ?? "");
 
   if (!id) return null;
 
-  const isArchived = Boolean(project?.archived_at);
-  const isOwner = (project?.role ?? "owner") === "owner";
-  // Fine-grained: viewers get a read-only project page.
-  const canEdit = (project?.access_role ?? "owner") !== "viewer";
-  const collaboratorCount = project?.collaborators?.length ?? 0;
+  const isArchived = Boolean(workspace?.archived_at);
+  const isOwner = (workspace?.role ?? "owner") === "owner";
+  // Fine-grained: viewers get a read-only workspace page.
+  const canEdit = (workspace?.access_role ?? "owner") !== "viewer";
+  const collaboratorCount = workspace?.collaborators?.length ?? 0;
 
   return (
     <>
       <TopNav
-        title={project?.title ?? "Project"}
+        title={workspace?.title ?? "Workspace"}
         subtitle={
-          project?.description
-            ? project.description
-            : project?.role === "collaborator" && project?.shared_by
-              ? `Shared by ${project.shared_by.username}`
+          workspace?.description
+            ? workspace.description
+            : workspace?.role === "collaborator" && workspace?.shared_by
+              ? `Shared by ${workspace.shared_by.username}`
               : "Shared instructions, files, and conversations"
         }
         actions={
@@ -113,7 +113,7 @@ export function ProjectDetailPage() {
             <Button
               variant="ghost"
               leftIcon={<ArrowLeft className="h-4 w-4" />}
-              onClick={() => navigate("/projects")}
+              onClick={() => navigate("/workspaces")}
             >
               Back
             </Button>
@@ -122,7 +122,7 @@ export function ProjectDetailPage() {
                 variant="ghost"
                 leftIcon={<Share2 className="h-4 w-4" />}
                 onClick={() => setShareOpen(true)}
-                title="Share this project with a teammate"
+                title="Share this workspace with a teammate"
               >
                 {collaboratorCount > 0
                   ? `Share (${collaboratorCount})`
@@ -142,7 +142,7 @@ export function ProjectDetailPage() {
                   variant="primary"
                   leftIcon={<Plus className="h-4 w-4" />}
                   onClick={() =>
-                    project && handleNewChat(project, navigate)
+                    workspace && handleNewChat(workspace, navigate)
                   }
                 >
                   New chat
@@ -155,10 +155,10 @@ export function ProjectDetailPage() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-6 py-6">
-          {isLoading || !project ? (
+          {isLoading || !workspace ? (
             <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading project...
+              Loading workspace...
             </div>
           ) : (
             <>
@@ -166,7 +166,7 @@ export function ProjectDetailPage() {
                 <div className="mb-4 flex items-center justify-between gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
                   <span className="inline-flex items-center gap-2 text-[var(--text-muted)]">
                     <Archive className="h-3.5 w-3.5" />
-                    This project is archived. Unarchive to start new chats
+                    This workspace is archived. Unarchive to start new chats
                     under it.
                   </span>
                   {isOwner && (
@@ -187,7 +187,7 @@ export function ProjectDetailPage() {
                       <Button
                         variant="ghost"
                         leftIcon={<ArchiveRestore className="h-3.5 w-3.5" />}
-                        onClick={() => unarchive.mutate(project.id)}
+                        onClick={() => unarchive.mutate(workspace.id)}
                       >
                         Unarchive
                       </Button>
@@ -202,32 +202,32 @@ export function ProjectDetailPage() {
                   <span>
                     Shared with{" "}
                     <span className="font-medium text-[var(--text)]">
-                      {(project.collaborators ?? [])
+                      {(workspace.collaborators ?? [])
                         .map((c) => c.username)
                         .join(", ")}
                     </span>
-                    . They can see and edit every chat in this project.
+                    . They can see and edit every chat in this workspace.
                   </span>
                 </div>
               )}
 
-              {!isOwner && project.shared_by && (
+              {!isOwner && workspace.shared_by && (
                 <div className="mb-4 flex items-center gap-2 rounded-card border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3 text-xs text-[var(--text)]">
                   <Users className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
                   <span>
                     {canEdit ? (
                       <>
-                        You have collaborator access to this project, shared by{" "}
+                        You have collaborator access to this workspace, shared by{" "}
                         <span className="font-medium">
-                          {project.shared_by.username}
+                          {workspace.shared_by.username}
                         </span>
                         . You can see and edit every chat in it.
                       </>
                     ) : (
                       <>
-                        You have view-only access to this project, shared by{" "}
+                        You have view-only access to this workspace, shared by{" "}
                         <span className="font-medium">
-                          {project.shared_by.username}
+                          {workspace.shared_by.username}
                         </span>
                         . You can read its chats and files but not change them.
                       </>
@@ -240,26 +240,26 @@ export function ProjectDetailPage() {
                 tab={tab}
                 onChange={setTab}
                 conversationCount={conversations?.length ?? 0}
-                fileCount={project.files.length}
+                fileCount={workspace.files.length}
               />
 
               <div className="mt-6">
                 {tab === "conversations" && (
                   <ConversationsTab
-                    projectId={id}
+                    workspaceId={id}
                     conversations={conversations ?? []}
                     onOpen={(cid) => navigate(`/chat/${cid}`)}
                   />
                 )}
                 {tab === "files" && (
-                  <FilesTab project={project} canEdit={canEdit} />
+                  <FilesTab workspace={workspace} canEdit={canEdit} />
                 )}
-                {tab === "usage" && <UsageTab projectId={id} />}
+                {tab === "usage" && <UsageTab workspaceId={id} />}
                 {tab === "settings" && (
                   <SettingsTab
-                    project={project}
-                    onArchive={() => archive.mutate(project.id)}
-                    onUnarchive={() => unarchive.mutate(project.id)}
+                    workspace={workspace}
+                    onArchive={() => archive.mutate(workspace.id)}
+                    onUnarchive={() => unarchive.mutate(workspace.id)}
                     onDelete={() => setDeleteOpen(true)}
                     archivePending={archive.isPending}
                     unarchivePending={unarchive.isPending}
@@ -276,15 +276,15 @@ export function ProjectDetailPage() {
       <ImportConversationsModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        defaultProjectId={id}
+        defaultWorkspaceId={id}
       />
 
-      {project && isOwner && (
-        <ShareProjectDialog
+      {workspace && isOwner && (
+        <ShareWorkspaceDialog
           open={shareOpen}
           onClose={() => setShareOpen(false)}
-          projectId={project.id}
-          projectTitle={project.title}
+          workspaceId={workspace.id}
+          workspaceTitle={workspace.title}
         />
       )}
 
@@ -292,27 +292,27 @@ export function ProjectDetailPage() {
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onConfirm={async () => {
-          if (!project) return;
-          await remove.mutateAsync(project.id);
-          navigate("/projects");
+          if (!workspace) return;
+          await remove.mutateAsync(workspace.id);
+          navigate("/workspaces");
         }}
         destructive
         pending={remove.isPending}
-        firstTitle="Delete this project?"
+        firstTitle="Delete this workspace?"
         firstDescription={
-          project
-            ? `"${project.title}" will be deleted. Conversations inside it are preserved and will move back to your top-level chat list. Pinned files stay in your library.`
+          workspace
+            ? `"${workspace.title}" will be deleted. Conversations inside it are preserved and will move back to your top-level chat list. Pinned files stay in your library.`
             : ""
         }
         firstConfirmLabel="Continue"
         secondTitle="Delete permanently"
         secondDescription={
-          project
-            ? `Type the project title to confirm permanent deletion of "${project.title}".`
+          workspace
+            ? `Type the workspace title to confirm permanent deletion of "${workspace.title}".`
             : ""
         }
-        typeToConfirm={project?.title}
-        secondConfirmLabel="Delete project"
+        typeToConfirm={workspace?.title}
+        secondConfirmLabel="Delete workspace"
       />
     </>
   );
@@ -321,27 +321,27 @@ export function ProjectDetailPage() {
 // ---------------------------------------------------------------------
 
 async function handleNewChat(
-  project: { id: string; default_model_id: string | null; default_provider_id: string | null },
+  workspace: { id: string; default_model_id: string | null; default_provider_id: string | null },
   navigate: (path: string) => void
 ) {
-  // Creates an empty conversation under the project and navigates to
-  // it. The project's default model wins when set — sending it
+  // Creates an empty conversation under the workspace and navigates to
+  // it. The workspace's default model wins when set — sending it
   // explicitly keeps the chat header correct on first paint (rather
   // than relying solely on the backend's send-time fallback). When the
-  // project has no default we fall back to the user's current global
+  // workspace has no default we fall back to the user's current global
   // selection, matching the pre-default behaviour. System prompt +
   // pinned files are still applied by the backend on the first send.
   const { selectedModelId, selectedProviderId } = useModelStore.getState();
-  const modelId = project.default_model_id ?? selectedModelId ?? undefined;
+  const modelId = workspace.default_model_id ?? selectedModelId ?? undefined;
   const providerId =
-    project.default_provider_id ?? selectedProviderId ?? undefined;
+    workspace.default_provider_id ?? selectedProviderId ?? undefined;
   try {
     const conv = await chatApi.create({
       title: null,
       model_id: modelId,
       provider_id: providerId,
       web_search_mode: "off",
-      project_id: project.id,
+      workspace_id: workspace.id,
     });
     navigate(`/chat/${conv.id}`);
   } catch {
@@ -441,11 +441,11 @@ function TabButton({
 // ---------------------------------------------------------------------
 
 function ConversationsTab({
-  projectId,
+  workspaceId,
   conversations,
   onOpen,
 }: {
-  projectId: string;
+  workspaceId: string;
   conversations: ConversationSummary[];
   onOpen: (id: string) => void;
 }) {
@@ -460,8 +460,8 @@ function ConversationsTab({
   }, [rawQuery]);
 
   const { data: hits, isFetching } = useQuery({
-    queryKey: ["chat-project-search", projectId, query],
-    queryFn: () => chatApi.search(query, 20, { projectId }),
+    queryKey: ["chat-workspace-search", workspaceId, query],
+    queryFn: () => chatApi.search(query, 20, { workspaceId }),
     enabled: query.length > 0,
   });
 
@@ -472,7 +472,7 @@ function ConversationsTab({
         <input
           value={rawQuery}
           onChange={(e) => setRawQuery(e.target.value)}
-          placeholder="Search this project's chats…"
+          placeholder="Search this workspace's chats…"
           className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] py-2 pl-9 pr-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
         />
       </div>
@@ -486,7 +486,7 @@ function ConversationsTab({
       ) : conversations.length === 0 ? (
         <div className="rounded-card border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--text-muted)]">
           No conversations yet. Start a new chat — it will inherit this
-          project's instructions and pinned files.
+          workspace's instructions and pinned files.
         </div>
       ) : (
         <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
@@ -494,7 +494,7 @@ function ConversationsTab({
             <ConversationRow
               key={c.id}
               conv={c}
-              projectId={projectId}
+              workspaceId={workspaceId}
               onOpen={onOpen}
             />
           ))}
@@ -522,7 +522,7 @@ function SearchResults({
   if (!hits.length) {
     return (
       <div className="rounded-card border border-dashed border-[var(--border)] p-8 text-center text-sm text-[var(--text-muted)]">
-        {loading ? "Searching…" : "No matches in this project."}
+        {loading ? "Searching…" : "No matches in this workspace."}
       </div>
     );
   }
@@ -564,11 +564,11 @@ function SearchResults({
 
 function ConversationRow({
   conv,
-  projectId,
+  workspaceId,
   onOpen,
 }: {
   conv: ConversationSummary;
-  projectId: string;
+  workspaceId: string;
   onOpen: (id: string) => void;
 }) {
   const qc = useQueryClient();
@@ -587,13 +587,13 @@ function ConversationRow({
 
   const refresh = () =>
     qc.invalidateQueries({
-      queryKey: ["chat-projects", "conversations", projectId],
+      queryKey: ["workspaces", "conversations", workspaceId],
     });
 
   const mutate = async (patch: {
     title?: string;
     starred?: boolean;
-    project_id?: string | null;
+    workspace_id?: string | null;
   }) => {
     setBusy(true);
     try {
@@ -674,8 +674,8 @@ function ConversationRow({
             <Pencil className="h-3.5 w-3.5" />
           </RowAction>
           <RowAction
-            label="Remove from project"
-            onClick={() => mutate({ project_id: null })}
+            label="Remove from workspace"
+            onClick={() => mutate({ workspace_id: null })}
             disabled={busy}
           >
             <FolderMinus className="h-3.5 w-3.5" />
@@ -715,8 +715,8 @@ function RowAction({
 // Tab: Usage
 // ---------------------------------------------------------------------
 
-function UsageTab({ projectId }: { projectId: string }) {
-  const { data: usage, isLoading } = useChatProjectUsage(projectId);
+function UsageTab({ workspaceId }: { workspaceId: string }) {
+  const { data: usage, isLoading } = useWorkspaceUsage(workspaceId);
 
   if (isLoading || !usage) {
     return (
@@ -744,7 +744,7 @@ function UsageTab({ projectId }: { projectId: string }) {
         {usage.by_model.length === 0 ? (
           <div className="rounded-card border border-dashed border-[var(--border)] p-8 text-center text-sm text-[var(--text-muted)]">
             No usage recorded yet. Token + cost stats appear once chats in
-            this project have replies.
+            this workspace have replies.
           </div>
         ) : (
           <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
@@ -783,10 +783,10 @@ function StatCard({ label, value }: { label: string; value: string }) {
 // ---------------------------------------------------------------------
 
 function FilesTab({
-  project,
+  workspace,
   canEdit,
 }: {
-  project: ReturnType<typeof useChatProject>["data"] extends
+  workspace: ReturnType<typeof useWorkspace>["data"] extends
     | infer D
     | undefined
     ? Exclude<D, undefined>
@@ -794,9 +794,9 @@ function FilesTab({
   canEdit: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const pin = usePinChatProjectFile(project.id);
-  const unpin = useUnpinChatProjectFile(project.id);
-  const reindex = useReindexProject(project.id);
+  const pin = usePinWorkspaceFile(workspace.id);
+  const unpin = useUnpinWorkspaceFile(workspace.id);
+  const reindex = useReindexWorkspace(workspace.id);
 
   // Preview state. ``previewFile`` is the full ``FileItem`` returned
   // by ``filesApi.getFile`` — we lazy-fetch it on click so we have
@@ -810,7 +810,7 @@ function FilesTab({
   // Drive Documents jump straight into the editor on click — every
   // other pinned file type still falls back to the generic preview
   // modal. We have to lazy-fetch the row first because the pinned
-  // ``ChatProjectFilePin`` shape doesn't carry ``source_kind``.
+  // ``WorkspaceFilePin`` shape doesn't carry ``source_kind``.
   const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -838,37 +838,37 @@ function FilesTab({
 
   // Sibling list for Prev/Next inside the preview modal — same
   // affordance Drive's preview gives. We can't pass our minimal
-  // ``ChatProjectFilePin`` shape, so we only enable navigation
+  // ``WorkspaceFilePin`` shape, so we only enable navigation
   // between files we've already fetched and cache; for simplicity
   // we just hand the modal a single-element list (the open file).
-  // If the user wants to flip between project files they can close
+  // If the user wants to flip between workspace files they can close
   // and reopen — keeps this MVP focused.
   const siblings = previewFile ? [previewFile] : [];
 
-  // Project's existing files, reshaped into the ``AttachedFile`` shape
+  // Workspace's existing files, reshaped into the ``AttachedFile`` shape
   // the picker uses so it can show "already pinned" state correctly.
   const alreadyAttached = useMemo(
     () =>
-      project.files.map((f) => ({
+      workspace.files.map((f) => ({
         id: f.file_id,
         filename: f.filename,
         mime_type: f.mime_type,
         size_bytes: f.size_bytes,
       })),
-    [project.files]
+    [workspace.files]
   );
 
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs text-[var(--text-muted)]">
-          Pinned files are auto-attached to every new chat in this project.
+          Pinned files are auto-attached to every new chat in this workspace.
         </p>
         {canEdit && (
           <div className="flex items-center gap-2">
             {/* Reindex: owner-only, shown when files need indexing */}
-            {project.role === "owner" &&
-              project.files.some(
+            {workspace.role === "owner" &&
+              workspace.files.some(
                 (f) =>
                   f.indexing_status === "queued" ||
                   f.indexing_status === "failed"
@@ -884,7 +884,7 @@ function FilesTab({
                     />
                   }
                   onClick={() => reindex.mutate()}
-                  disabled={reindex.isPending || project.indexing_count > 0}
+                  disabled={reindex.isPending || workspace.indexing_count > 0}
                   title="Re-index all queued or failed files for semantic search"
                 >
                   {reindex.isPending ? "Indexing…" : "Reindex"}
@@ -901,7 +901,7 @@ function FilesTab({
         )}
       </div>
 
-      <ContextBudgetBar project={project} />
+      <ContextBudgetBar workspace={workspace} />
 
       {previewError && (
         <div
@@ -912,14 +912,14 @@ function FilesTab({
         </div>
       )}
 
-      {project.files.length === 0 ? (
+      {workspace.files.length === 0 ? (
         <div className="rounded-card border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--text-muted)]">
           No files pinned yet. Pin a PDF, image, or text file and every
-          chat in this project will have it in context.
+          chat in this workspace will have it in context.
         </div>
       ) : (
         <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
-          {project.files.map((f) => {
+          {workspace.files.map((f) => {
             const loading = previewLoadingId === f.file_id;
             return (
               <li
@@ -1027,9 +1027,9 @@ function FilesTab({
  *  embedding provider yet — so the user understands why files stay in
  *  full-dump mode even after pinning lots of content. */
 function ContextBudgetBar({
-  project,
+  workspace,
 }: {
-  project: NonNullable<ReturnType<typeof useChatProject>["data"]>;
+  workspace: NonNullable<ReturnType<typeof useWorkspace>["data"]>;
 }) {
   const {
     per_turn_tokens,
@@ -1037,14 +1037,14 @@ function ContextBudgetBar({
     indexing_count,
     embeddings_configured,
     files,
-  } = project;
+  } = workspace;
   // Mirror the instructions editor's green/amber/red tiers.
   let tone = "text-emerald-500";
   if (per_turn_tokens >= 8000) tone = "text-red-500";
   else if (per_turn_tokens >= 3000) tone = "text-amber-500";
 
   // Show the onboarding nudge when files are pinned but embeddings
-  // aren't configured — distinguishes "small project (full-dump is fine)"
+  // aren't configured — distinguishes "small workspace (full-dump is fine)"
   // from "admin hasn't set up semantic search yet".
   const showEmbeddingsNudge = !embeddings_configured && files.length > 0;
 
@@ -1056,7 +1056,7 @@ function ContextBudgetBar({
           <span>
             <span className="font-semibold">Semantic search not configured</span>
             {" — "}pinned files are injected in full on every turn. To enable
-            retrieval-based context (so large projects don't blow the context
+            retrieval-based context (so large workspaces don't blow the context
             window), ask your admin to set up an embedding provider in{" "}
             <span className="font-medium">Settings → Models → Defaults</span>.
           </span>
@@ -1132,7 +1132,7 @@ function IndexStatusChip({
 // ---------------------------------------------------------------------
 
 function SettingsTab({
-  project,
+  workspace,
   onArchive,
   onUnarchive,
   onDelete,
@@ -1141,7 +1141,7 @@ function SettingsTab({
   isOwner,
   canEdit,
 }: {
-  project: ReturnType<typeof useChatProject>["data"] extends
+  workspace: ReturnType<typeof useWorkspace>["data"] extends
     | infer D
     | undefined
     ? Exclude<D, undefined>
@@ -1154,21 +1154,21 @@ function SettingsTab({
   isOwner: boolean;
   canEdit: boolean;
 }) {
-  const [title, setTitle] = useState(project.title);
-  const [description, setDescription] = useState(project.description ?? "");
+  const [title, setTitle] = useState(workspace.title);
+  const [description, setDescription] = useState(workspace.description ?? "");
   const [systemPrompt, setSystemPrompt] = useState(
-    project.system_prompt ?? ""
+    workspace.system_prompt ?? ""
   );
-  const [modelId, setModelId] = useState(project.default_model_id);
-  const [providerId, setProviderId] = useState(project.default_provider_id);
-  const update = useUpdateChatProject(project.id);
+  const [modelId, setModelId] = useState(workspace.default_model_id);
+  const [providerId, setProviderId] = useState(workspace.default_provider_id);
+  const update = useUpdateWorkspace(workspace.id);
 
   const dirty =
-    title.trim() !== project.title ||
-    (description || "") !== (project.description || "") ||
-    (systemPrompt || "") !== (project.system_prompt || "") ||
-    (modelId || null) !== (project.default_model_id || null) ||
-    (providerId || null) !== (project.default_provider_id || null);
+    title.trim() !== workspace.title ||
+    (description || "") !== (workspace.description || "") ||
+    (systemPrompt || "") !== (workspace.system_prompt || "") ||
+    (modelId || null) !== (workspace.default_model_id || null) ||
+    (providerId || null) !== (workspace.default_provider_id || null);
 
   const handleSave = async () => {
     if (!dirty || !title.trim()) return;
@@ -1183,11 +1183,11 @@ function SettingsTab({
 
   const toggleAutoMemory = async () => {
     await update.mutateAsync({
-      auto_memory_enabled: !project.auto_memory_enabled,
+      auto_memory_enabled: !workspace.auto_memory_enabled,
     });
   };
 
-  const isArchived = Boolean(project.archived_at);
+  const isArchived = Boolean(workspace.archived_at);
 
   return (
     <div className="space-y-6">
@@ -1218,13 +1218,13 @@ function SettingsTab({
             maxLength={2000}
           />
         </div>
-        <ProjectInstructionsEditor
+        <WorkspaceInstructionsEditor
           value={systemPrompt}
           onChange={setSystemPrompt}
           disabled={!canEdit}
         />
         {canEdit && (
-          <ProjectModelField
+          <WorkspaceModelField
             modelId={modelId}
             providerId={providerId}
             onChange={(m, p) => {
@@ -1249,24 +1249,24 @@ function SettingsTab({
 
       {canEdit && (
         <section className="space-y-3 border-t border-[var(--border)] pt-6">
-          <h3 className="text-sm font-semibold">Project memory</h3>
+          <h3 className="text-sm font-semibold">Workspace memory</h3>
           <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"
-              checked={project.auto_memory_enabled}
+              checked={workspace.auto_memory_enabled}
               onChange={toggleAutoMemory}
               disabled={update.isPending}
               className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
             />
             <span>
               <span className="font-medium text-[var(--text)]">
-                Keep a rolling project memory
+                Keep a rolling workspace memory
               </span>
               <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
-                When on, a pinned <strong>Project Memory.md</strong> file is
-                auto-maintained from the project's most recently active chat,
+                When on, a pinned <strong>Workspace Memory.md</strong> file is
+                auto-maintained from the workspace's most recently active chat,
                 so other chats pick up the gist. Off by default — distinct
-                from the manual “Save summary to project”.
+                from the manual “Save summary to workspace”.
               </span>
             </span>
           </label>
@@ -1301,11 +1301,11 @@ function SettingsTab({
               leftIcon={<Trash2 className="h-3.5 w-3.5" />}
               onClick={onDelete}
             >
-              Delete project...
+              Delete workspace...
             </Button>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
-            Deleting a project preserves every conversation inside it — they
+            Deleting a workspace preserves every conversation inside it — they
             move back to your top-level chat list.
           </p>
         </section>
@@ -1315,12 +1315,12 @@ function SettingsTab({
 }
 
 // ---------------------------------------------------------------------
-// Project instructions editor
+// Workspace instructions editor
 //
 // Richer wrapper around the bare ``<textarea>`` we used to have for the
-// project's ``system_prompt`` field. Visually it's still a textarea — no
+// workspace's ``system_prompt`` field. Visually it's still a textarea — no
 // structured bullet CRUD — but the surrounding chrome nudges the user
-// toward treating it as a *project memory* surface rather than a
+// toward treating it as a *workspace memory* surface rather than a
 // generic instruction blob:
 //
 //   * Friendlier placeholder with example bullets so new users have a
@@ -1328,14 +1328,14 @@ function SettingsTab({
 //   * Live token counter (not just a raw character count) with a
 //     green / amber / red tint so the user can see when they're
 //     eating into the context budget shown by the chat-window pill.
-//   * A collapsible "Tips for writing good project instructions"
+//   * A collapsible "Tips for writing good workspace instructions"
 //     block so the guidance is one click away but not loud by default.
 //
 // Character cap stays the same; this is pure UI polish on top of the
-// existing ``chat_projects.system_prompt`` column — no schema change.
+// existing ``workspaces.system_prompt`` column — no schema change.
 // ---------------------------------------------------------------------
 
-const PROJECT_INSTRUCTIONS_PLACEHOLDER = `Durable facts about this project — they go into every chat in it.
+const WORKSPACE_INSTRUCTIONS_PLACEHOLDER = `Durable facts about this workspace — they go into every chat in it.
 
 Examples:
 - I'm writing this in Python 3.11 on Ubuntu; my database is Postgres 15.
@@ -1344,14 +1344,14 @@ Examples:
 - My team is 3 people — Sarah (PM), Raj (designer), me (engineer).
 - When I paste code, default to assuming it's production-ready, not a draft.`;
 
-const PROJECT_INSTRUCTIONS_TIPS: string[] = [
+const WORKSPACE_INSTRUCTIONS_TIPS: string[] = [
   "Write facts and conventions, not tasks. Good: \"I use metric units.\" Bad: \"Help me write my report.\"",
   "Bullet points beat paragraphs — each line is something the AI should treat as always-true.",
   "Include preferences the AI keeps getting wrong (tone, verbosity, formatting). They're why this field exists.",
   "Aim for under ~500 tokens. Larger prompts work, but every chat pays that cost on every turn.",
 ];
 
-function ProjectInstructionsEditor({
+function WorkspaceInstructionsEditor({
   value,
   onChange,
   disabled = false,
@@ -1380,9 +1380,9 @@ function ProjectInstructionsEditor({
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-        Project instructions{" "}
+        Workspace instructions{" "}
         <span className="text-[var(--text-muted)]/70">
-          (shared across every chat in this project)
+          (shared across every chat in this workspace)
         </span>
       </label>
       <textarea
@@ -1390,7 +1390,7 @@ function ProjectInstructionsEditor({
         onChange={(e) => onChange(e.target.value)}
         rows={10}
         disabled={disabled}
-        placeholder={PROJECT_INSTRUCTIONS_PLACEHOLDER}
+        placeholder={WORKSPACE_INSTRUCTIONS_PLACEHOLDER}
         className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
         maxLength={20000}
       />
@@ -1406,7 +1406,7 @@ function ProjectInstructionsEditor({
             <ChevronRight className="h-3 w-3" />
           )}
           <Lightbulb className="h-3 w-3" />
-          Tips for good project instructions
+          Tips for good workspace instructions
         </button>
         <span className="text-[var(--text-muted)]">
           <span className={cn("font-medium", toneClass)}>
@@ -1419,7 +1419,7 @@ function ProjectInstructionsEditor({
       {showTips && (
         <div className="mt-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--text-muted)]">
           <ul className="list-disc space-y-1 pl-4">
-            {PROJECT_INSTRUCTIONS_TIPS.map((tip) => (
+            {WORKSPACE_INSTRUCTIONS_TIPS.map((tip) => (
               <li key={tip}>{tip}</li>
             ))}
           </ul>

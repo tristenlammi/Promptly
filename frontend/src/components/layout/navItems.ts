@@ -29,12 +29,12 @@ export type NavSection = "chat" | "drive" | "study" | "admin";
 /** Stable identifiers for the *optional* nav surfaces a user can hide
  *  from their sidebar (Phase 2 — per-user feature visibility). Chat and
  *  Files are core and intentionally absent. */
-export type OptionalNavKey = "projects" | "study" | "tasks";
+export type OptionalNavKey = "workspaces" | "study" | "tasks";
 
 export const OPTIONAL_NAV_KEYS: { key: OptionalNavKey; label: string; description: string }[] = [
   {
-    key: "projects",
-    label: "Projects",
+    key: "workspaces",
+    label: "Workspaces",
     description: "Group chats, files, and context into shared workspaces.",
   },
   {
@@ -74,11 +74,11 @@ export const NAV_ITEMS: NavItem[] = [
     exact: true,
   },
   {
-    to: "/projects",
+    to: "/workspaces",
     icon: FolderKanban,
-    label: "Projects",
+    label: "Workspaces",
     section: "chat",
-    optionalKey: "projects",
+    optionalKey: "workspaces",
   },
   {
     to: "/tasks",

@@ -286,12 +286,12 @@ async def _load_readable_file(
         )
     if row.user_id is not None and row.user_id == user.id:
         return row
-    # Project-share side-door: a collaborator on a shared project
-    # can read any file pinned to that project (including files
-    # owned by the project creator or other collaborators). Without
+    # Workspace-share side-door: a collaborator on a shared workspace
+    # can read any file pinned to that workspace (including files
+    # owned by the workspace creator or other collaborators). Without
     # this path the chat-preamble download links inside a shared
-    # project 404 for anyone but the pin's original owner.
-    if await _file_is_accessible_via_project(db, row.id, user):
+    # workspace 404 for anyone but the pin's original owner.
+    if await _file_is_accessible_via_workspace(db, row.id, user):
         return row
     # Drive stage 5 — direct file grant or a grant on any ancestor
     # folder. Both paths route through the same helper which walks
@@ -304,12 +304,12 @@ async def _load_readable_file(
     )
 
 
-async def _file_is_accessible_via_project(
+async def _file_is_accessible_via_workspace(
     db: AsyncSession, file_id: uuid.UUID, user: User
 ) -> bool:
-    """Does ``user`` reach ``file_id`` through a shared project pin?
+    """Does ``user`` reach ``file_id`` through a shared workspace pin?
 
-    Returns True if the file is pinned to any project the caller
+    Returns True if the file is pinned to any workspace the caller
     can access (owns or has an accepted share on). Isolated as a
     helper so the fast path in :func:`_load_readable_file` stays
     synchronous-ish (one ``SELECT`` then done) and we only issue
@@ -318,19 +318,19 @@ async def _file_is_accessible_via_project(
     # Importing here keeps the files module free of a top-level
     # dependency on chat tables — the chat side already knows
     # everything about files, but not vice-versa.
-    from app.chat.models import ChatProjectFile
-    from app.chat.shares import list_accessible_project_ids
+    from app.chat.models import WorkspaceFile
+    from app.chat.shares import list_accessible_workspace_ids
     from sqlalchemy import select as _select
 
-    accessible_project_ids = await list_accessible_project_ids(user, db)
-    if not accessible_project_ids:
+    accessible_workspace_ids = await list_accessible_workspace_ids(user, db)
+    if not accessible_workspace_ids:
         return False
     row = (
         await db.execute(
-            _select(ChatProjectFile.file_id)
+            _select(WorkspaceFile.file_id)
             .where(
-                ChatProjectFile.file_id == file_id,
-                ChatProjectFile.project_id.in_(accessible_project_ids),
+                WorkspaceFile.file_id == file_id,
+                WorkspaceFile.workspace_id.in_(accessible_workspace_ids),
             )
             .limit(1)
         )

@@ -8,34 +8,34 @@ import {
   Users,
 } from "lucide-react";
 
-import type { ChatProjectSummary } from "@/api/chatProjects";
+import type { WorkspaceSummary } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 
-interface ChatProjectCardProps {
-  project: ChatProjectSummary;
+interface WorkspaceCardProps {
+  workspace: WorkspaceSummary;
   onOpen: () => void;
   onDelete: () => void;
   onArchive?: () => void;
   onUnarchive?: () => void;
 }
 
-/** Card for a single chat project — deliberately mirrors
+/** Card for a single workspace — deliberately mirrors
  * ``StudyTopicCard`` so the two features feel like siblings on the
  * sidebar. Shows title, description excerpt, conv/file counts, and
  * hover-only quick actions. */
-export function ChatProjectCard({
-  project,
+export function WorkspaceCard({
+  workspace,
   onOpen,
   onDelete,
   onArchive,
   onUnarchive,
-}: ChatProjectCardProps) {
-  const updated = new Date(project.updated_at);
-  const isArchived = Boolean(project.archived_at);
+}: WorkspaceCardProps) {
+  const updated = new Date(workspace.updated_at);
+  const isArchived = Boolean(workspace.archived_at);
   // ``role`` may be absent on older cached payloads — default to
   // owner so the card still renders while TanStack refetches the
   // enriched shape.
-  const isCollaborator = project.role === "collaborator";
+  const isCollaborator = workspace.role === "collaborator";
 
   return (
     <div
@@ -49,7 +49,7 @@ export function ChatProjectCard({
       <button
         onClick={onOpen}
         className="absolute inset-0 rounded-card"
-        aria-label={`Open ${project.title}`}
+        aria-label={`Open ${workspace.title}`}
       />
 
       <div className="pointer-events-none relative">
@@ -60,14 +60,14 @@ export function ChatProjectCard({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h3 className="truncate text-sm font-semibold text-[var(--text)]">
-                {project.title}
+                {workspace.title}
               </h3>
               {isCollaborator && (
                 <span
                   className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]"
                   title={
-                    project.shared_by
-                      ? `Shared by ${project.shared_by.username}`
+                    workspace.shared_by
+                      ? `Shared by ${workspace.shared_by.username}`
                       : "Shared with you"
                   }
                 >
@@ -76,15 +76,15 @@ export function ChatProjectCard({
                 </span>
               )}
             </div>
-            {project.description ? (
+            {workspace.description ? (
               <p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">
-                {project.description}
+                {workspace.description}
               </p>
-            ) : isCollaborator && project.shared_by ? (
+            ) : isCollaborator && workspace.shared_by ? (
               <p className="mt-1 text-xs text-[var(--text-muted)]">
                 Shared by{" "}
                 <span className="font-medium text-[var(--text)]">
-                  {project.shared_by.username}
+                  {workspace.shared_by.username}
                 </span>
               </p>
             ) : null}
@@ -94,13 +94,13 @@ export function ChatProjectCard({
         <div className="mt-3 flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-1">
             <MessageSquare className="h-3 w-3" />
-            {project.conversation_count} chat
-            {project.conversation_count === 1 ? "" : "s"}
+            {workspace.conversation_count} chat
+            {workspace.conversation_count === 1 ? "" : "s"}
           </span>
           <span className="inline-flex items-center gap-1">
             <FileText className="h-3 w-3" />
-            {project.file_count} file
-            {project.file_count === 1 ? "" : "s"}
+            {workspace.file_count} file
+            {workspace.file_count === 1 ? "" : "s"}
           </span>
         </div>
       </div>

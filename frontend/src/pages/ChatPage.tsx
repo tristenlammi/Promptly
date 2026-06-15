@@ -16,8 +16,8 @@ import { TopNav } from "@/components/layout/TopNav";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { ContextWarningBanner } from "@/components/chat/ContextWarningBanner";
 import { ContextWindowPill } from "@/components/chat/ContextWindowPill";
-import { SummariseToProjectButton } from "@/components/chat/SummariseToProjectButton";
-import { ProjectFilesToggle } from "@/components/chat/ProjectFilesToggle";
+import { SummariseToWorkspaceButton } from "@/components/chat/SummariseToWorkspaceButton";
+import { WorkspaceFilesToggle } from "@/components/chat/WorkspaceFilesToggle";
 import type { RegenerateOverride } from "@/components/chat/MessageBubble";
 import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
@@ -36,7 +36,7 @@ import {
 } from "@/hooks/useConversations";
 import type { AttachedFile } from "@/components/chat/AttachmentPickerModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useChatProject } from "@/hooks/useChatProjects";
+import { useWorkspace } from "@/hooks/useWorkspaces";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useResearch } from "@/hooks/useResearch";
 import { useResearchStore, isResearchActive } from "@/store/researchStore";
@@ -862,16 +862,16 @@ export function ChatPage() {
                 they weren't frequent enough to keep paying for header
                 real estate. Pin and delete remain on the sidebar
                 row's hover/quick-action cluster. */}
-            {/* Save-summary-to-project is only meaningful when the chat
-                already lives in a project. We also hide it for empty
+            {/* Save-summary-to-workspace is only meaningful when the chat
+                already lives in a workspace. We also hide it for empty
                 chats — there's nothing to summarise before the user
                 has exchanged a few turns with the model. */}
             {id &&
               isOwner &&
               !effectiveTemporaryMode &&
-              conversation?.project_id &&
+              conversation?.workspace_id &&
               hasMessages && (
-                <SummariseToProjectButton
+                <SummariseToWorkspaceButton
                   conversationId={id}
                   compact={isMobile}
                 />
@@ -879,8 +879,8 @@ export function ChatPage() {
             {id &&
               isOwner &&
               !effectiveTemporaryMode &&
-              conversation?.project_id && (
-                <ProjectFilesToggle conversationId={id} compact={isMobile} />
+              conversation?.workspace_id && (
+                <WorkspaceFilesToggle conversationId={id} compact={isMobile} />
               )}
             {id && isOwner && (
               <ConversationInstructionsButton
@@ -945,8 +945,8 @@ export function ChatPage() {
               parentMessageId={conversation.parent_message_id ?? null}
             />
           )}
-          {conversation?.project_id && (
-            <ProjectBreadcrumb projectId={conversation.project_id} />
+          {conversation?.workspace_id && (
+            <WorkspaceBreadcrumb workspaceId={conversation.workspace_id} />
           )}
           {/* Context-window UI (pill + warning banner) is desktop-only
               — the mobile header has no space for the pill and the
@@ -980,7 +980,7 @@ export function ChatPage() {
               <EmptyState
                 hasModel={Boolean(selectedModel)}
                 modelName={selectedModel?.display_name ?? null}
-                projectId={conversation?.project_id ?? null}
+                workspaceId={conversation?.workspace_id ?? null}
                 onSuggestion={(s) => handleSend(s)}
               />
             </div>
@@ -1015,7 +1015,7 @@ export function ChatPage() {
             footer={footerText}
             autoFocus
             currentConversationId={id ?? null}
-            projectId={conversation?.project_id ?? null}
+            workspaceId={conversation?.workspace_id ?? null}
             placeholder={
               selectedModel
                 ? "Message Promptly... (@ to reference a chat)"
@@ -1077,49 +1077,49 @@ interface BranchBannerProps {
 }
 
 /** Breadcrumb above the message list when this chat lives under a
- *  :class:`ChatProject`. Fetches the project title on demand so the
- *  bar actually reads as "Project: X" rather than just an ID link.
- *  Cheap single-query hit cached by TanStack — the project list /
+ *  :class:`Workspace`. Fetches the workspace title on demand so the
+ *  bar actually reads as "Workspace: X" rather than just an ID link.
+ *  Cheap single-query hit cached by TanStack — the workspace list /
  *  detail page queries share the cache key.
  *
- *  Also surfaces a "Retrieval on" badge when the project has flipped
+ *  Also surfaces a "Retrieval on" badge when the workspace has flipped
  *  to semantic retrieval mode (indexed text exceeds ~6k tokens) so
  *  users understand why they might not see every pinned file verbatim
  *  in the context. */
-function ProjectBreadcrumb({ projectId }: { projectId: string }) {
+function WorkspaceBreadcrumb({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate();
-  const { data: project } = useChatProject(projectId);
-  // Explicit "back to project" affordance rather than a subtle
-  // breadcrumb link. Chats inside a project now carry the project's
+  const { data: workspace } = useWorkspace(workspaceId);
+  // Explicit "back to workspace" affordance rather than a subtle
+  // breadcrumb link. Chats inside a workspace now carry the workspace's
   // shared context (system prompt, files, references, collaborators),
-  // so the round-trip back to the project detail page — where all
+  // so the round-trip back to the workspace detail page — where all
   // sibling chats live — is a core navigation step users expect to
   // find with no hunting.
   return (
     <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs">
       <button
         type="button"
-        onClick={() => navigate(`/projects/${projectId}`)}
+        onClick={() => navigate(`/workspaces/${workspaceId}`)}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition",
           "border-[var(--border)] text-[var(--text-muted)]",
           "hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
         )}
-        title="Back to project"
-        aria-label="Back to project"
+        title="Back to workspace"
+        aria-label="Back to workspace"
       >
         <ArrowLeft className="h-3 w-3" />
-        Back to project
+        Back to workspace
       </button>
       <span className="inline-flex items-center gap-1 text-[var(--text-muted)]">
         <FolderKanban className="h-3 w-3 text-[var(--accent)]" />
         <span className="truncate font-medium text-[var(--text)]">
-          {project?.title ?? "Project"}
+          {workspace?.title ?? "Workspace"}
         </span>
       </span>
-      {project?.retrieval_active && (
+      {workspace?.retrieval_active && (
         <span
-          title="This project uses semantic retrieval — only the most relevant chunks are included in context each turn"
+          title="This workspace uses semantic retrieval — only the most relevant chunks are included in context each turn"
           className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
         >
           <Zap className="h-2.5 w-2.5" />

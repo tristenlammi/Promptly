@@ -13,8 +13,8 @@ import { FilesPage, SharedWithMePage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
-import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
-import { ProjectsPage } from "@/pages/ProjectsPage";
+import { WorkspaceDetailPage } from "@/pages/WorkspaceDetailPage";
+import { WorkspacesPage } from "@/pages/WorkspacesPage";
 import { RecentFilesPage } from "@/pages/RecentFilesPage";
 import { SearchResultsPage } from "@/pages/SearchResultsPage";
 import { SetupPage } from "@/pages/SetupPage";
@@ -217,8 +217,8 @@ export default function App() {
         <Route path="/chat/compare/new" element={<ComparePage />} />
         <Route path="/chat/compare/:id" element={<ComparePage />} />
         <Route path="/chat/:id" element={<ChatPage />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/projects/:id" element={<ProjectDetailPage />} />
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         {/* Study home + topic detail are fully mobile-friendly. */}

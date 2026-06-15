@@ -10,23 +10,23 @@ import type {
   WebSearchMode,
 } from "./types";
 
-/** One of a project's pinned files, with whether the current chat has
+/** One of a workspace's pinned files, with whether the current chat has
  *  excluded it from its context (per-chat opt-out). */
-export interface ConversationProjectFile {
+export interface ConversationWorkspaceFile {
   file_id: string;
   filename: string;
   mime_type: string;
   excluded: boolean;
 }
 
-/** Response from ``POST /chat/conversations/{id}/summarise-to-project``.
- *  Returned to the SummariseToProjectButton modal so it can show the
- *  resulting filename + offer an "Open project" deep-link. */
-export interface SummariseToProjectResult {
+/** Response from ``POST /chat/conversations/{id}/summarise-to-workspace``.
+ *  Returned to the SummariseToWorkspaceButton modal so it can show the
+ *  resulting filename + offer an "Open workspace" deep-link. */
+export interface SummariseToWorkspaceResult {
   file_id: string;
   filename: string;
-  project_id: string;
-  project_title: string;
+  workspace_id: string;
+  workspace_title: string;
   chars: number;
 }
 
@@ -35,8 +35,8 @@ export interface SummariseToProjectResult {
 export interface MentionCandidate {
   id: string;
   title: string;
-  project_id: string | null;
-  project_title: string | null;
+  workspace_id: string | null;
+  workspace_title: string | null;
   updated_at: string;
 }
 
@@ -51,9 +51,9 @@ export interface CreateConversationPayload {
    *  a normal permanent chat. The server computes ``expires_at`` from
    *  the chosen mode; the client only picks the policy. */
   temporary_mode?: TemporaryMode | null;
-  /** Phase P1 — create under a chat project. Temporary chats can't
-   *  belong to a project (enforced server-side). */
-  project_id?: string | null;
+  /** Phase P1 — create under a workspace. Temporary chats can't
+   *  belong to a workspace (enforced server-side). */
+  workspace_id?: string | null;
 }
 
 export interface UpdateConversationPayload {
@@ -64,9 +64,9 @@ export interface UpdateConversationPayload {
   reasoning_effort?: ReasoningEffort;
   model_id?: string | null;
   provider_id?: string | null;
-  /** Phase P1 — move this chat into / out of a project. Pass a project
+  /** Phase P1 — move this chat into / out of a workspace. Pass a workspace
    *  id to move; pass ``null`` to detach. Omit to leave unchanged. */
-  project_id?: string | null;
+  workspace_id?: string | null;
   /** Phase 1 — per-conversation custom instructions. Pass a string to
    *  set (empty string clears it); omit to leave unchanged. */
   system_prompt?: string;
@@ -260,15 +260,15 @@ export const chatApi = {
   /** Upload one or more conversations parsed from a Promptly /
    *  ChatGPT / Claude / Markdown export. Bulk-capable: a ChatGPT
    *  ``conversations.json`` usually contains hundreds of chats at
-   *  once. Pass ``projectId`` to drop every imported chat into a
-   *  project in one go. */
+   *  once. Pass ``workspaceId`` to drop every imported chat into a
+   *  workspace in one go. */
   async importConversations(
     file: File,
-    projectId?: string | null
+    workspaceId?: string | null
   ): Promise<ImportConversationsResponse> {
     const body = new FormData();
     body.append("file", file);
-    if (projectId) body.append("project_id", projectId);
+    if (workspaceId) body.append("workspace_id", workspaceId);
     const { data } = await apiClient.post<ImportConversationsResponse>(
       "/chat/conversations/import",
       body,
@@ -331,9 +331,9 @@ export const chatApi = {
   async search(
     q: string,
     limit = 20,
-    opts: { projectId?: string; start?: string; end?: string } = {}
+    opts: { workspaceId?: string; start?: string; end?: string } = {}
   ): Promise<ConversationSearchHit[]> {
-    const { projectId, start, end } = opts;
+    const { workspaceId, start, end } = opts;
     const trimmed = q.trim();
     const { data } = await apiClient.get<ConversationSearchHit[]>(
       "/chat/conversations/search",
@@ -343,7 +343,7 @@ export const chatApi = {
           // into date-only browse mode rather than rejecting the request.
           ...(trimmed ? { q: trimmed } : {}),
           limit,
-          ...(projectId ? { project_id: projectId } : {}),
+          ...(workspaceId ? { workspace_id: workspaceId } : {}),
           ...(start ? { start } : {}),
           ...(end ? { end } : {}),
         },
@@ -352,51 +352,51 @@ export const chatApi = {
     return data;
   },
 
-  /** The project's pinned files with this chat's per-file excluded flag
-   *  (empty when the chat isn't in a project). */
-  async listConversationProjectFiles(
+  /** The workspace's pinned files with this chat's per-file excluded flag
+   *  (empty when the chat isn't in a workspace). */
+  async listConversationWorkspaceFiles(
     conversationId: string
-  ): Promise<ConversationProjectFile[]> {
-    const { data } = await apiClient.get<ConversationProjectFile[]>(
-      `/chat/conversations/${conversationId}/project-files`
+  ): Promise<ConversationWorkspaceFile[]> {
+    const { data } = await apiClient.get<ConversationWorkspaceFile[]>(
+      `/chat/conversations/${conversationId}/workspace-files`
     );
     return data;
   },
 
-  async toggleConversationProjectFile(
+  async toggleConversationWorkspaceFile(
     conversationId: string,
     fileId: string,
     excluded: boolean
   ): Promise<void> {
     await apiClient.put(
-      `/chat/conversations/${conversationId}/project-files/${fileId}`,
+      `/chat/conversations/${conversationId}/workspace-files/${fileId}`,
       { excluded }
     );
   },
 
   /** Fetch candidates for the ``@``-mention autocomplete. When a
-   *  ``project_id`` is provided, sibling chats in that project are
+   *  ``workspace_id`` is provided, sibling chats in that workspace are
    *  surfaced separately (UI groups them above the generic
    *  recents). Excludes the caller's current conversation so
    *  self-references never appear. */
   async mentionCandidates(params: {
     q?: string;
-    projectId?: string | null;
+    workspaceId?: string | null;
     excludeId?: string | null;
     limit?: number;
   }): Promise<{
-    project_context_id: string | null;
-    project_candidates: MentionCandidate[];
+    workspace_context_id: string | null;
+    workspace_candidates: MentionCandidate[];
     recent_candidates: MentionCandidate[];
   }> {
     const { data } = await apiClient.get<{
-      project_context_id: string | null;
-      project_candidates: MentionCandidate[];
+      workspace_context_id: string | null;
+      workspace_candidates: MentionCandidate[];
       recent_candidates: MentionCandidate[];
     }>("/chat/conversations/mention-candidates", {
       params: {
         q: params.q ?? "",
-        project_id: params.projectId ?? undefined,
+        workspace_id: params.workspaceId ?? undefined,
         exclude_id: params.excludeId ?? undefined,
         limit: params.limit ?? 12,
       },
@@ -418,15 +418,15 @@ export const chatApi = {
   },
 
   /** Generate a standalone Markdown summary of the whole chat and
-   *  pin it as a file to the conversation's parent project, so every
-   *  other chat in that project picks it up on the next turn. Only
+   *  pin it as a file to the conversation's parent workspace, so every
+   *  other chat in that workspace picks it up on the next turn. Only
    *  valid for owner-role conversations that already live inside a
-   *  project. */
-  async summariseToProject(
+   *  workspace. */
+  async summariseToWorkspace(
     conversationId: string
-  ): Promise<SummariseToProjectResult> {
-    const { data } = await apiClient.post<SummariseToProjectResult>(
-      `/chat/conversations/${conversationId}/summarise-to-project`
+  ): Promise<SummariseToWorkspaceResult> {
+    const { data } = await apiClient.post<SummariseToWorkspaceResult>(
+      `/chat/conversations/${conversationId}/summarise-to-workspace`
     );
     return data;
   },

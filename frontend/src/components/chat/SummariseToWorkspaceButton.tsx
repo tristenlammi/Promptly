@@ -9,11 +9,11 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { chatApi, type SummariseToProjectResult } from "@/api/chat";
+import { chatApi, type SummariseToWorkspaceResult } from "@/api/chat";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
 
-interface SummariseToProjectButtonProps {
+interface SummariseToWorkspaceButtonProps {
   conversationId: string;
   /** Rendered icon-only when true (mobile treatment matches the
    *  other TopNav action buttons). Desktop shows a label. */
@@ -21,15 +21,15 @@ interface SummariseToProjectButtonProps {
 }
 
 /** Header button that generates a Markdown memo of the whole chat
- *  and pins it to the conversation's parent project as a file.
+ *  and pins it to the conversation's parent workspace as a file.
  *
- *  Only shown when the conversation already lives inside a project
+ *  Only shown when the conversation already lives inside a workspace
  *  (the parent hides it otherwise). The summary is produced with
  *  the same pipeline the ``/compact`` endpoint uses but run over
  *  the full transcript, not just the middle — nothing inside the
  *  chat itself is mutated. The resulting file is auto-pinned so
- *  every other chat in the project picks it up on their next turn
- *  via the existing project-file injection path.
+ *  every other chat in the workspace picks it up on their next turn
+ *  via the existing workspace-file injection path.
  *
  *  Uses the shared :class:`Modal` shell rather than the browser's
  *  ``window.confirm`` / ``window.alert`` dialogs — those broke flow
@@ -38,13 +38,13 @@ interface SummariseToProjectButtonProps {
  *  inline (confirm / busy / done-or-error) so the user never sees
  *  a system pop-up.
  */
-export function SummariseToProjectButton({
+export function SummariseToWorkspaceButton({
   conversationId,
   compact = false,
-}: SummariseToProjectButtonProps) {
+}: SummariseToWorkspaceButtonProps) {
   const [open, setOpen] = useState(false);
 
-  const label = "Save summary to project";
+  const label = "Save summary to workspace";
 
   return (
     <>
@@ -59,9 +59,9 @@ export function SummariseToProjectButton({
         )}
       >
         <BookmarkPlus className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} />
-        {!compact && "Save to project"}
+        {!compact && "Save to workspace"}
       </button>
-      <SummariseToProjectModal
+      <SummariseToWorkspaceModal
         open={open}
         conversationId={conversationId}
         onClose={() => setOpen(false)}
@@ -73,10 +73,10 @@ export function SummariseToProjectButton({
 type Status =
   | { kind: "idle" }
   | { kind: "saving" }
-  | { kind: "success"; result: SummariseToProjectResult }
+  | { kind: "success"; result: SummariseToWorkspaceResult }
   | { kind: "error"; message: string };
 
-function SummariseToProjectModal({
+function SummariseToWorkspaceModal({
   open,
   conversationId,
   onClose,
@@ -108,15 +108,15 @@ function SummariseToProjectModal({
     if (status.kind === "saving") return;
     setStatus({ kind: "saving" });
     try {
-      const res = await chatApi.summariseToProject(conversationId);
-      // Refresh project file list + file tree so the new pinned
+      const res = await chatApi.summariseToWorkspace(conversationId);
+      // Refresh workspace file list + file tree so the new pinned
       // summary shows up without a hard reload.
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: ["chat-project", res.project_id],
+          queryKey: ["workspace", res.workspace_id],
         }),
         queryClient.invalidateQueries({
-          queryKey: ["chat-project-files", res.project_id],
+          queryKey: ["workspace-files", res.workspace_id],
         }),
         queryClient.invalidateQueries({ queryKey: ["files"] }),
       ]);
@@ -129,9 +129,9 @@ function SummariseToProjectModal({
     }
   };
 
-  const handleOpenProject = () => {
+  const handleOpenWorkspace = () => {
     if (status.kind !== "success") return;
-    navigate(`/projects/${status.result.project_id}`);
+    navigate(`/workspaces/${status.result.workspace_id}`);
     onClose();
   };
 
@@ -142,14 +142,14 @@ function SummariseToProjectModal({
       title={
         status.kind === "success"
           ? "Summary saved"
-          : "Save summary to project"
+          : "Save summary to workspace"
       }
       description={
         status.kind === "success"
-          ? "Pinned to the project — every chat in it will pick it up on the next turn."
+          ? "Pinned to the workspace — every chat in it will pick it up on the next turn."
           : status.kind === "error"
             ? undefined
-            : "We'll generate a one-page Markdown memo of this chat and pin it to the project as a file."
+            : "We'll generate a one-page Markdown memo of this chat and pin it to the workspace as a file."
       }
       widthClass="max-w-md"
       footer={<Footer
@@ -157,7 +157,7 @@ function SummariseToProjectModal({
         cancelRef={cancelRef}
         onClose={handleClose}
         onConfirm={handleConfirm}
-        onOpenProject={handleOpenProject}
+        onOpenWorkspace={handleOpenWorkspace}
       />}
     >
       {status.kind === "success" ? (
@@ -190,15 +190,15 @@ function ConfirmBody() {
         </p>
         <p className="text-[var(--text-muted)]">
           The file lands in your <strong>Generated</strong> folder and gets
-          auto-pinned to the project. You can unpin or delete it from the
-          project's settings any time. Nothing inside this chat is changed.
+          auto-pinned to the workspace. You can unpin or delete it from the
+          workspace's settings any time. Nothing inside this chat is changed.
         </p>
       </div>
     </div>
   );
 }
 
-function SuccessBody({ result }: { result: SummariseToProjectResult }) {
+function SuccessBody({ result }: { result: SummariseToWorkspaceResult }) {
   return (
     <div className="flex gap-3">
       <div
@@ -213,11 +213,11 @@ function SuccessBody({ result }: { result: SummariseToProjectResult }) {
       <div className="min-w-0 flex-1 text-sm text-[var(--text)]">
         <p>
           Saved <span className="font-semibold">&ldquo;{result.filename}&rdquo;</span>{" "}
-          to project{" "}
-          <span className="font-semibold">&ldquo;{result.project_title}&rdquo;</span>.
+          to workspace{" "}
+          <span className="font-semibold">&ldquo;{result.workspace_title}&rdquo;</span>.
         </p>
         <p className="mt-1 text-[var(--text-muted)]">
-          From the next turn, every chat in this project will see the summary
+          From the next turn, every chat in this workspace will see the summary
           alongside any other pinned files.
         </p>
       </div>
@@ -250,13 +250,13 @@ function Footer({
   cancelRef,
   onClose,
   onConfirm,
-  onOpenProject,
+  onOpenWorkspace,
 }: {
   status: Status;
   cancelRef: React.RefObject<HTMLButtonElement>;
   onClose: () => void;
   onConfirm: () => void;
-  onOpenProject: () => void;
+  onOpenWorkspace: () => void;
 }) {
   const ghostBtn = cn(
     "inline-flex items-center justify-center rounded-input border px-3.5 py-1.5 text-sm",
@@ -281,9 +281,9 @@ function Footer({
         >
           Close
         </button>
-        <button type="button" onClick={onOpenProject} className={primaryBtn}>
+        <button type="button" onClick={onOpenWorkspace} className={primaryBtn}>
           <ExternalLink className="h-3.5 w-3.5" />
-          Open project
+          Open workspace
         </button>
       </>
     );
@@ -334,7 +334,7 @@ function Footer({
         ) : (
           <>
             <BookmarkPlus className="h-3.5 w-3.5" />
-            Save to project
+            Save to workspace
           </>
         )}
       </button>

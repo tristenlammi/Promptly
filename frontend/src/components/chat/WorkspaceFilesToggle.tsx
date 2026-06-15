@@ -5,35 +5,35 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { chatApi } from "@/api/chat";
 import { cn } from "@/utils/cn";
 
-interface ProjectFilesToggleProps {
+interface WorkspaceFilesToggleProps {
   conversationId: string;
   /** Icon-only on mobile, matching the other header action buttons. */
   compact?: boolean;
 }
 
-/** Header control (only meaningful inside a project) that lets the
- *  chat's owner pick which of the project's pinned files *this*
+/** Header control (only meaningful inside a workspace) that lets the
+ *  chat's owner pick which of the workspace's pinned files *this*
  *  conversation sees. Excluding a file drops it from both the full-dump
  *  attachment set and the retrieval candidates for this chat only —
- *  siblings are unaffected. Renders nothing when the project has no
+ *  siblings are unaffected. Renders nothing when the workspace has no
  *  pinned files. */
-export function ProjectFilesToggle({
+export function WorkspaceFilesToggle({
   conversationId,
   compact = false,
-}: ProjectFilesToggleProps) {
+}: WorkspaceFilesToggleProps) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  const key = ["conversation-project-files", conversationId];
+  const key = ["conversation-workspace-files", conversationId];
   const { data: files } = useQuery({
     queryKey: key,
-    queryFn: () => chatApi.listConversationProjectFiles(conversationId),
+    queryFn: () => chatApi.listConversationWorkspaceFiles(conversationId),
   });
 
   const toggle = useMutation({
     mutationFn: ({ fileId, excluded }: { fileId: string; excluded: boolean }) =>
-      chatApi.toggleConversationProjectFile(conversationId, fileId, excluded),
+      chatApi.toggleConversationWorkspaceFile(conversationId, fileId, excluded),
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
   });
 
@@ -55,12 +55,12 @@ export function ProjectFilesToggle({
     };
   }, [open]);
 
-  // Nothing pinned → no control. (Empty array means "in a project but no
+  // Nothing pinned → no control. (Empty array means "in a workspace but no
   // files"; undefined while loading.)
   if (!files || files.length === 0) return null;
 
   const activeCount = files.filter((f) => !f.excluded).length;
-  const label = "Project files in this chat";
+  const label = "Workspace files in this chat";
 
   return (
     <div ref={wrapRef} className="relative">
@@ -91,7 +91,7 @@ export function ProjectFilesToggle({
           className="absolute right-0 z-20 mt-1 w-72 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] shadow-lg"
         >
           <div className="border-b border-[var(--border)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
-            Choose which of the project's pinned files this chat can see.
+            Choose which of the workspace's pinned files this chat can see.
           </div>
           <ul className="max-h-72 overflow-y-auto py-1">
             {files.map((f) => (

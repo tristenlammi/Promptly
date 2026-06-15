@@ -258,9 +258,9 @@ from app.app_settings.public_router import (  # noqa: E402
 )
 from app.auth.router import router as auth_router  # noqa: E402
 from app.chat.compare_router import router as chat_compare_router  # noqa: E402
-from app.chat.project_shares import invite_router as project_invite_router  # noqa: E402
-from app.chat.project_shares import router as project_shares_router  # noqa: E402
-from app.chat.projects_router import router as chat_projects_router  # noqa: E402
+from app.workspaces.shares import invite_router as workspace_invite_router  # noqa: E402
+from app.workspaces.shares import router as workspace_shares_router  # noqa: E402
+from app.workspaces.router import router as workspaces_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
@@ -298,20 +298,20 @@ app.include_router(
     saved_prompts_router, prefix="/api/saved-prompts", tags=["saved-prompts"]
 )
 app.include_router(
-    chat_projects_router, prefix="/api/chat/projects", tags=["chat-projects"]
+    workspaces_router, prefix="/api/workspaces", tags=["workspaces"]
 )
-# Project share management endpoints — separate router so it can
-# be version-bumped independently of the core projects CRUD.
+# Workspace share management endpoints — separate router so it can
+# be version-bumped independently of the core workspaces CRUD.
 app.include_router(
-    project_shares_router,
-    prefix="/api/chat/projects",
-    tags=["chat-projects"],
+    workspace_shares_router,
+    prefix="/api/workspaces",
+    tags=["workspaces"],
 )
-# Invitee-perspective endpoints (``/api/chat/project-share-invites``)
-# live on ``/api/chat`` so they sit next to the conversation
+# Invitee-perspective endpoints (``/api/workspace-share-invites``)
+# live on ``/api`` so they sit next to the conversation
 # equivalents.
 app.include_router(
-    project_invite_router, prefix="/api/chat", tags=["chat-projects"]
+    workspace_invite_router, prefix="/api", tags=["workspaces"]
 )
 # Compare router already defines its own ``/api/chat/compare`` prefix
 # so it slots in without a double-prefix here.
