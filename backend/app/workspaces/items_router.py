@@ -171,6 +171,7 @@ def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
                     icon=it.icon,
                     position=it.position,
                     indexing_status=it.indexing_status,
+                    context_enabled=it.context_enabled,
                     children=build(it.id),
                 )
             )
@@ -367,6 +368,10 @@ async def update_workspace_item(
                 uf.updated_at = datetime.now(timezone.utc)
     if "icon" in sent:
         item.icon = payload.icon
+    if "context_enabled" in sent and payload.context_enabled is not None:
+        # Only note/canvas items participate in RAG context; folders/chats
+        # carry the flag harmlessly but it's never consulted for them.
+        item.context_enabled = payload.context_enabled
 
     item.updated_at = datetime.now(timezone.utc)
     await db.commit()

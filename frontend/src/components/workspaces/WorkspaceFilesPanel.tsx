@@ -7,10 +7,12 @@ import {
   Trash2,
   Upload,
   Zap,
+  ZapOff,
 } from "lucide-react";
 
 import {
   usePinWorkspaceFile,
+  useSetFileContext,
   useUnpinWorkspaceFile,
   useWorkspace,
 } from "@/hooks/useWorkspaces";
@@ -44,6 +46,7 @@ export function WorkspaceFilesPanel({
   const { data: workspace } = useWorkspace(workspaceId);
   const pin = usePinWorkspaceFile(workspaceId);
   const unpin = useUnpinWorkspaceFile(workspaceId);
+  const setContext = useSetFileContext(workspaceId);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -51,6 +54,7 @@ export function WorkspaceFilesPanel({
   const [error, setError] = useState<string | null>(null);
 
   const files = workspace?.files ?? [];
+  const inContext = files.filter((f) => f.context_enabled !== false).length;
 
   const handleFiles = async (picked: FileList | File[]) => {
     const list = Array.from(picked);
@@ -98,8 +102,7 @@ export function WorkspaceFilesPanel({
         </h2>
         {files.length > 0 && (
           <span className="text-[11px] text-[var(--text-muted)]">
-            {files.length} file{files.length === 1 ? "" : "s"} · shared with
-            every chat
+            {inContext} of {files.length} in context
           </span>
         )}
       </div>
@@ -167,6 +170,12 @@ export function WorkspaceFilesPanel({
               canEdit={canEdit}
               onRemove={() => unpin.mutate(f.file_id)}
               removing={unpin.isPending}
+              onToggleContext={() =>
+                setContext.mutate({
+                  fileId: f.file_id,
+                  enabled: !f.context_enabled,
+                })
+              }
             />
           ))}
         </ul>
@@ -184,13 +193,16 @@ function FileRow({
   canEdit,
   onRemove,
   removing,
+  onToggleContext,
 }: {
   file: WorkspaceFilePin;
   canEdit: boolean;
   onRemove: () => void;
   removing: boolean;
+  onToggleContext: () => void;
 }) {
   const isImage = file.mime_type.startsWith("image/");
+  const contextOn = file.context_enabled !== false;
   return (
     <li className="flex items-center gap-2 px-3 py-2 text-sm">
       {isImage ? (
@@ -200,26 +212,60 @@ function FileRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-medium text-[var(--text)]">
+          <span
+            className={
+              "truncate font-medium " +
+              (contextOn ? "text-[var(--text)]" : "text-[var(--text-muted)]")
+            }
+          >
             {file.filename}
           </span>
           <FileStatus status={file.indexing_status} error={file.indexing_error} />
+          {!contextOn && (
+            <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
+              not in context
+            </span>
+          )}
         </div>
         <div className="text-xs text-[var(--text-muted)]">
           {humanSize(file.size_bytes)}
         </div>
       </div>
       {canEdit && (
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={removing}
-          title="Remove from workspace"
-          aria-label={`Remove ${file.filename}`}
-          className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={onToggleContext}
+            title={
+              contextOn
+                ? "Used as workspace context — click to exclude"
+                : "Not used as context — click to include"
+            }
+            aria-label="Toggle workspace context"
+            className={
+              "shrink-0 rounded p-1 transition hover:bg-[var(--hover)] " +
+              (contextOn
+                ? "text-[var(--accent)]"
+                : "text-[var(--text-muted)]")
+            }
+          >
+            {contextOn ? (
+              <Zap className="h-3.5 w-3.5" />
+            ) : (
+              <ZapOff className="h-3.5 w-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={removing}
+            title="Remove from workspace"
+            aria-label={`Remove ${file.filename}`}
+            className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </>
       )}
     </li>
   );

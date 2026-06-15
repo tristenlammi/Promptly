@@ -524,6 +524,53 @@ async def _indexed_token_total(db: AsyncSession, workspace_id: uuid.UUID) -> int
 _NOTES_FULLDUMP_CHAR_CAP = WORKSPACE_RETRIEVAL_TOKEN_BUDGET * 4
 
 
+async def context_disabled_file_ids(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """Backing file ids of items the user has flipped OFF for workspace
+    context ("Use as workspace context" toggle).
+
+    Covers disabled notes (``ref_id`` is the note's UserFile), disabled
+    canvases (mapped to their backing ``text_file_id``), and disabled
+    pinned files. The injection builder unions this into its excluded set
+    so a disabled item's embeddings are simply never retrieved — the
+    chunks stay put, so re-enabling is instant.
+    """
+    out: set[uuid.UUID] = set()
+
+    note_ids = await db.execute(
+        select(WorkspaceItem.ref_id).where(
+            WorkspaceItem.workspace_id == workspace_id,
+            WorkspaceItem.kind == "note",
+            WorkspaceItem.context_enabled.is_(False),
+            WorkspaceItem.ref_id.is_not(None),
+        )
+    )
+    out.update(r for (r,) in note_ids if r is not None)
+
+    canvas_ids = await db.execute(
+        select(WorkspaceCanvas.text_file_id)
+        .join(WorkspaceItem, WorkspaceItem.ref_id == WorkspaceCanvas.id)
+        .where(
+            WorkspaceItem.workspace_id == workspace_id,
+            WorkspaceItem.kind == "canvas",
+            WorkspaceItem.context_enabled.is_(False),
+            WorkspaceCanvas.text_file_id.is_not(None),
+        )
+    )
+    out.update(r for (r,) in canvas_ids if r is not None)
+
+    file_ids = await db.execute(
+        select(WorkspaceFile.file_id).where(
+            WorkspaceFile.workspace_id == workspace_id,
+            WorkspaceFile.context_enabled.is_(False),
+        )
+    )
+    out.update(r for (r,) in file_ids if r is not None)
+
+    return out
+
+
 async def _workspace_notes(
     db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
 ) -> list[tuple[WorkspaceItem, UserFile]]:
@@ -622,8 +669,12 @@ async def build_workspace_injection(
     ``excluded_file_ids`` — files / notes the current chat has opted out
     of (per-chat toggle); dropped from attachments, the notes block, and
     the retrieved chunks so this conversation never sees them.
+
+    On top of the per-chat exclusions we always drop items whose
+    workspace-level "Use as workspace context" toggle is OFF.
     """
-    excluded = excluded_file_ids or set()
+    excluded = set(excluded_file_ids or set())
+    excluded |= await context_disabled_file_ids(db, workspace_id)
     file_rows = (
         await db.execute(
             select(WorkspaceFile, UserFile)

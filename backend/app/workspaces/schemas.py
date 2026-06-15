@@ -33,6 +33,8 @@ class WorkspaceFilePin(BaseModel):
     # binaries stay queued and are simply ignored by retrieval).
     indexing_status: str = "queued"
     indexing_error: str | None = None
+    # "Use as workspace context" — feeds the shared RAG pool when True.
+    context_enabled: bool = True
 
 
 # ---------------------------------------------------------------------
@@ -171,6 +173,13 @@ class WorkspaceUpdate(BaseModel):
     auto_memory_enabled: bool | None = None
 
 
+class WorkspaceFileContext(BaseModel):
+    """Body for ``PATCH /workspaces/{wid}/files/{file_id}/context`` —
+    toggle whether a pinned file feeds the workspace RAG context."""
+
+    enabled: bool
+
+
 class WorkspacePinFile(BaseModel):
     """Body for ``POST /workspaces/{wid}/files`` — pin a user file
     to the workspace so new conversations auto-attach it."""
@@ -253,6 +262,9 @@ class WorkspaceItemNode(BaseModel):
     position: float = 0.0
     # RAG index status for note/canvas/file kinds; NULL for folders/chats.
     indexing_status: str | None = None
+    # "Use as workspace context" — note/canvas items feed the shared RAG
+    # pool when True (default). True/ignored for folders + chats.
+    context_enabled: bool = True
     children: list["WorkspaceItemNode"] = Field(default_factory=list)
 
 
@@ -275,6 +287,8 @@ class WorkspaceItemUpdate(BaseModel):
 
     title: str | None = Field(default=None, max_length=255)
     icon: str | None = Field(default=None, max_length=64)
+    # Toggle whether this note/canvas feeds the workspace RAG context.
+    context_enabled: bool | None = None
 
 
 class WorkspaceItemMove(BaseModel):
@@ -302,3 +316,4 @@ class WorkspaceItemResponse(BaseModel):
     icon: str | None
     position: float
     indexing_status: str | None = None
+    context_enabled: bool = True

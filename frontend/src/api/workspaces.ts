@@ -19,6 +19,8 @@ export interface WorkspaceFilePin {
    *  (images / binaries) — they stay queued and retrieval ignores them. */
   indexing_status: "queued" | "embedding" | "ready" | "failed";
   indexing_error: string | null;
+  /** "Use as workspace context" — feeds the shared RAG pool when true. */
+  context_enabled: boolean;
 }
 
 export interface WorkspaceParticipant {
@@ -101,6 +103,11 @@ export interface WorkspaceItemNode {
   icon: string | null;
   position: number;
   indexing_status: string | null;
+  /** "Use as workspace context" — note/canvas items feed the shared RAG
+   *  pool when true (default). Always present from the tree API; optional
+   *  here so synthesised chat nodes don't need to set it. Treat undefined
+   *  as enabled. */
+  context_enabled?: boolean;
   children: WorkspaceItemNode[];
 }
 
@@ -116,6 +123,7 @@ export interface WorkspaceItemResponse {
   icon: string | null;
   position: number;
   indexing_status: string | null;
+  context_enabled?: boolean;
 }
 
 /** A source citation returned by "ask this workspace". ``item_id`` is the
@@ -386,6 +394,32 @@ export const workspacesApi = {
 
   async deleteItem(id: string, itemId: string): Promise<void> {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
+  },
+
+  /** Toggle whether a note/canvas item feeds the workspace RAG context. */
+  async setItemContext(
+    id: string,
+    itemId: string,
+    enabled: boolean
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.patch<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}`,
+      { context_enabled: enabled }
+    );
+    return data;
+  },
+
+  /** Toggle whether a pinned file feeds the workspace RAG context. */
+  async setFileContext(
+    id: string,
+    fileId: string,
+    enabled: boolean
+  ): Promise<WorkspaceFilePin> {
+    const { data } = await apiClient.patch<WorkspaceFilePin>(
+      `/workspaces/${id}/files/${fileId}/context`,
+      { enabled }
+    );
+    return data;
   },
 
   /** Notes that wiki-link to this item (the backend scans note HTML for

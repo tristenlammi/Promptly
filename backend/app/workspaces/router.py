@@ -56,6 +56,7 @@ from app.chat.models import (
 from app.workspaces.schemas import (
     WorkspaceCreate,
     WorkspaceDetail,
+    WorkspaceFileContext,
     WorkspaceFilePin,
     WorkspaceParticipant,
     WorkspacePinFile,
@@ -326,6 +327,7 @@ async def get_workspace(
             pinned_at=pin.pinned_at,
             indexing_status=pin.indexing_status,
             indexing_error=pin.indexing_error,
+            context_enabled=pin.context_enabled,
         )
         for pin, uf in files_q.all()
     ]
@@ -732,6 +734,46 @@ async def pin_file(
         pinned_at=pin.pinned_at,
         indexing_status=pin.indexing_status,
         indexing_error=pin.indexing_error,
+        context_enabled=pin.context_enabled,
+    )
+
+
+@router.patch(
+    "/{workspace_id}/files/{file_id}/context",
+    response_model=WorkspaceFilePin,
+)
+async def set_file_context(
+    workspace_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: WorkspaceFileContext,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceFilePin:
+    """Toggle whether a pinned file feeds the workspace RAG context.
+
+    Off keeps the file attached to the workspace (and its embeddings) but
+    drops it from every chat's context until turned back on.
+    """
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    pin = await db.get(WorkspaceFile, (ws.id, file_id))
+    if pin is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not pinned"
+        )
+    pin.context_enabled = payload.enabled
+    await db.commit()
+    await db.refresh(pin)
+    uf = await db.get(UserFile, file_id)
+    return WorkspaceFilePin(
+        file_id=file_id,
+        filename=uf.filename if uf else "",
+        mime_type=uf.mime_type if uf else "",
+        size_bytes=uf.size_bytes if uf else 0,
+        pinned_at=pin.pinned_at,
+        indexing_status=pin.indexing_status,
+        indexing_error=pin.indexing_error,
+        context_enabled=pin.context_enabled,
     )
 
 
