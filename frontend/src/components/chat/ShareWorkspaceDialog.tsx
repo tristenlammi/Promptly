@@ -80,7 +80,7 @@ export function ShareWorkspaceDialog({
       open={open}
       onClose={onClose}
       title={`Share "${workspaceTitle}"`}
-      description="Teammates you invite get complete access to this workspace — every chat inside it (including yours), all pinned files, and the workspace's system prompt. Whoever sends each message pays for that turn."
+      description="Inviting a teammate shares the whole workspace — every chat (including yours), pinned files, notes, canvases, and the system prompt. Editors can create and edit everything; Viewers can read but not change anything. Whoever sends a message pays for that turn."
       widthClass="max-w-xl"
     >
       <form onSubmit={submit} className="flex items-start gap-2">

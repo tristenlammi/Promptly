@@ -13,6 +13,9 @@ interface WorkspaceModelFieldProps {
   providerId: string | null;
   /** Fires with the new pair, or (null, null) when cleared. */
   onChange: (modelId: string | null, providerId: string | null) => void;
+  /** Read-only: show the current default model but don't allow changing it
+   *  (viewers see what the workspace uses without being able to edit). */
+  disabled?: boolean;
 }
 
 /** Controlled model picker for the workspace's default model.
@@ -30,6 +33,7 @@ export function WorkspaceModelField({
   modelId,
   providerId,
   onChange,
+  disabled = false,
 }: WorkspaceModelFieldProps) {
   useAvailableModels(); // ensure the catalogue is loaded into the store
   const available = useModelStore((s) => s.available);
@@ -97,9 +101,11 @@ export function WorkspaceModelField({
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
+          disabled={disabled}
           className={cn(
             "flex w-full items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none transition focus:border-[var(--accent)]",
-            open && "border-[var(--accent)]"
+            open && "border-[var(--accent)]",
+            disabled && "cursor-default opacity-60"
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
