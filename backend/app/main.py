@@ -263,6 +263,7 @@ from app.workspaces.shares import router as workspace_shares_router  # noqa: E40
 from app.workspaces.router import router as workspaces_router  # noqa: E402
 from app.workspaces.items_router import router as workspace_items_router  # noqa: E402
 from app.workspaces.canvas_router import router as workspace_canvas_router  # noqa: E402
+from app.workspaces.ask_router import router as workspace_ask_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
@@ -310,6 +311,10 @@ app.include_router(
 # Canvas collab tokens + text sync (creation goes through the items router).
 app.include_router(
     workspace_canvas_router, prefix="/api/canvas", tags=["workspaces"]
+)
+# Ask-this-workspace grounded Q&A (POST /api/workspaces/{wid}/ask).
+app.include_router(
+    workspace_ask_router, prefix="/api/workspaces", tags=["workspaces"]
 )
 # Workspace share management endpoints — separate router so it can
 # be version-bumped independently of the core workspaces CRUD.
