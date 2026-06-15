@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
@@ -40,6 +40,7 @@ import {
   useArchiveWorkspace,
   useBulkRemoveConversationsFromWorkspace,
   useItemBacklinks,
+  useUpdateWorkspaceItem,
   useWorkspace,
   useWorkspaceConversations,
   useWorkspaceTree,
@@ -498,6 +499,24 @@ function WorkspaceNotePane({
 }) {
   const [file, setFile] = useState<FileItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const updateItem = useUpdateWorkspaceItem(workspaceId);
+  // Track the title we last reflected into the tree so repeated content
+  // saves (which also fire onFileUpdated) don't re-PATCH on every keystroke.
+  const syncedTitleRef = useRef(node.title);
+
+  // Renaming a note in the editor renames its Drive file but not the
+  // navigator item — keep the rail label in lockstep by syncing the item
+  // title (extension stripped) whenever the document's name changes.
+  const syncNoteTitle = useCallback(
+    (f: FileItem) => {
+      const name = stripDocExt(f.filename).trim();
+      if (name && name !== syncedTitleRef.current) {
+        syncedTitleRef.current = name;
+        updateItem.mutate({ itemId: node.id, payload: { title: name } });
+      }
+    },
+    [node.id, updateItem]
+  );
 
   // Workspace tree → flat list of linkable targets (notes / canvases /
   // chats) for both the ``[[`` autocomplete and click-to-open title
@@ -561,6 +580,7 @@ function WorkspaceNotePane({
     let cancelled = false;
     setError(null);
     setFile(null);
+    syncedTitleRef.current = node.title;
     if (!node.ref_id) {
       setError("This note has no underlying document.");
       return;
@@ -568,7 +588,11 @@ function WorkspaceNotePane({
     filesApi
       .getFile(node.ref_id)
       .then((f) => {
-        if (!cancelled) setFile(f);
+        if (cancelled) return;
+        setFile(f);
+        // Self-heal any note whose rail title drifted from its document
+        // name (e.g. renamed in the editor before this sync existed).
+        syncNoteTitle(f);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -615,7 +639,10 @@ function WorkspaceNotePane({
           file={file}
           inline
           onClose={onClose}
-          onFileUpdated={(f) => setFile(f)}
+          onFileUpdated={(f) => {
+            setFile(f);
+            syncNoteTitle(f);
+          }}
           wikiLink={wikiLink}
         />
       </div>
@@ -631,6 +658,12 @@ function WorkspaceNotePane({
 /** Flatten the workspace tree into the set of wiki-linkable items
  *  (everything but folders). Used for ``[[`` autocomplete + click-to-open
  *  title resolution. */
+/** A note's rail title is its Drive filename without the document
+ *  extension — matches how the backend derives the note title. */
+function stripDocExt(name: string): string {
+  return name.replace(/\.(html?|md)$/i, "");
+}
+
 function collectLinkables(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
   const out: WorkspaceItemNode[] = [];
   const walk = (list: WorkspaceItemNode[]) => {

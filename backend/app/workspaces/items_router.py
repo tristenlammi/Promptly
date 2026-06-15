@@ -64,6 +64,17 @@ _DEFAULT_FOLDER_TITLE = "New folder"
 _DEFAULT_CANVAS_TITLE = "Untitled canvas"
 
 
+def _strip_doc_ext(name: str) -> str:
+    """A note's display title is its Drive filename minus the document
+    extension. Used to compare a tree title against the backing file's
+    name so we don't re-rename the file when they already match."""
+    low = name.lower()
+    for ext in (".html", ".htm", ".md"):
+        if low.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
@@ -359,11 +370,14 @@ async def update_workspace_item(
             )
         item.title = new_title
         # Keep the backing note's Drive filename in sync so the file is
-        # recognisable in Drive / search. Best-effort: a missing/trashed
-        # file just leaves the item renamed.
+        # recognisable in Drive / search — but only when it actually
+        # differs. When the rename originated from the document editor the
+        # file is already named ``new_title``, so re-renaming would just
+        # ping-pong the extension. Best-effort: a missing/trashed file
+        # just leaves the item renamed.
         if item.kind == "note" and item.ref_id is not None:
             uf = await db.get(UserFile, item.ref_id)
-            if uf is not None:
+            if uf is not None and _strip_doc_ext(uf.filename) != new_title:
                 uf.filename = sanitize_filename(f"{new_title}.html")
                 uf.updated_at = datetime.now(timezone.utc)
     if "icon" in sent:
