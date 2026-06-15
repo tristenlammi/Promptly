@@ -28,8 +28,10 @@ import {
   useDeleteWorkspaceItem,
   useUnarchiveWorkspaceItem,
   useUpdateWorkspaceItem,
+  useWorkspace,
   useWorkspaceArchive,
 } from "@/hooks/useWorkspaces";
+import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
 /**
@@ -58,6 +60,9 @@ export function WorkspaceNavigatorTree({
   canEdit: boolean;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
+  const qc = useQueryClient();
+  const { data: workspace } = useWorkspace(workspaceId);
+  const [creatingChat, setCreatingChat] = useState(false);
 
   const handleCreate = async (
     kind: "folder" | "note" | "canvas",
@@ -81,6 +86,42 @@ export function WorkspaceNavigatorTree({
     }
   };
 
+  // Chats aren't ``workspace_items`` — they're conversations carrying this
+  // ``workspace_id`` synthesised into the tree at read time. So "New chat"
+  // creates a conversation directly, refreshes the tree, and opens it inline.
+  const handleNewChat = async () => {
+    if (creatingChat) return;
+    setCreatingChat(true);
+    const { selectedModelId, selectedProviderId } = useModelStore.getState();
+    try {
+      const conv = await chatApi.create({
+        title: null,
+        model_id: workspace?.default_model_id ?? selectedModelId ?? undefined,
+        provider_id:
+          workspace?.default_provider_id ?? selectedProviderId ?? undefined,
+        web_search_mode: "off",
+        workspace_id: workspaceId,
+      });
+      await qc.invalidateQueries({
+        queryKey: ["workspaces", "tree", workspaceId],
+      });
+      onSelect({
+        id: String(conv.id),
+        kind: "chat",
+        ref_id: String(conv.id),
+        title: conv.title ?? "New chat",
+        icon: null,
+        position: 0,
+        indexing_status: null,
+        children: [],
+      });
+    } catch {
+      // Best-effort; the axios interceptor surfaces failures as toasts.
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 px-3 py-2">
@@ -89,7 +130,8 @@ export function WorkspaceNavigatorTree({
         </span>
         {canEdit && (
           <NewMenu
-            disabled={create.isPending}
+            disabled={create.isPending || creatingChat}
+            onNewChat={handleNewChat}
             onNewFolder={() => handleCreate("folder", null)}
             onNewNote={() => handleCreate("note", null)}
             onNewCanvas={() => handleCreate("canvas", null)}
@@ -662,11 +704,14 @@ function MenuItem({
 }
 
 function NewMenu({
+  onNewChat,
   onNewFolder,
   onNewNote,
   onNewCanvas,
   disabled,
 }: {
+  /** Top-level only — chats live at the workspace root, not in folders. */
+  onNewChat?: () => void;
   onNewFolder: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
@@ -703,6 +748,16 @@ function NewMenu({
             role="menu"
             className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-lg"
           >
+            {onNewChat && (
+              <MenuItem
+                icon={<MessageSquare className="h-3.5 w-3.5" />}
+                label="New chat"
+                onClick={() => {
+                  setOpen(false);
+                  onNewChat();
+                }}
+              />
+            )}
             <MenuItem
               icon={<FilePlus2 className="h-3.5 w-3.5" />}
               label="New note"

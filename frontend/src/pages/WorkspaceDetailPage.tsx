@@ -10,7 +10,6 @@ import {
   Link2,
   Loader2,
   Network,
-  Plus,
   Search,
   Settings,
   Share2,
@@ -34,9 +33,7 @@ import { WorkspaceGraphPane } from "@/components/workspaces/WorkspaceGraphPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
-import { useQueryClient } from "@tanstack/react-query";
 import { ChatPage } from "./ChatPage";
-import { chatApi } from "@/api/chat";
 import { filesApi, type FileItem } from "@/api/files";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
@@ -49,7 +46,6 @@ import {
   useDeleteWorkspace,
   useUnarchiveWorkspace,
 } from "@/hooks/useWorkspaces";
-import { useModelStore } from "@/store/modelStore";
 
 /**
  * Workspace detail page (Phase 1c) — rail + main-pane navigator.
@@ -63,7 +59,6 @@ import { useModelStore } from "@/store/modelStore";
 export function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const { data: workspace, isLoading } = useWorkspace(id);
   const { data: conversations } = useWorkspaceConversations(id);
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
@@ -130,17 +125,6 @@ export function WorkspaceDetailPage() {
               Back
             </Button>
             <Button
-              variant={!selected && !graphOpen ? "primary" : "ghost"}
-              leftIcon={<Home className="h-4 w-4" />}
-              onClick={() => {
-                setGraphOpen(false);
-                setSelected(null);
-              }}
-              title="Workspace home — overview, tasks, and recent items"
-            >
-              <span className="hidden sm:inline">Home</span>
-            </Button>
-            <Button
               variant="ghost"
               leftIcon={<Search className="h-4 w-4" />}
               onClick={() => setPaletteOpen(true)}
@@ -180,34 +164,17 @@ export function WorkspaceDetailPage() {
                 Import
               </Button>
             )}
-            {!isArchived && canEdit && (
-              <Button
-                variant="primary"
-                leftIcon={<Plus className="h-4 w-4" />}
-                onClick={() =>
-                  workspace &&
-                  handleNewChat(workspace, (conv) => {
-                    // Open the new chat inline + refresh the tree so it
-                    // appears in the rail.
-                    setSelected({
-                      id: conv.id,
-                      kind: "chat",
-                      ref_id: conv.id,
-                      title: conv.title ?? "New chat",
-                      icon: null,
-                      position: 0,
-                      indexing_status: null,
-                      children: [],
-                    });
-                    void qc.invalidateQueries({
-                      queryKey: ["workspaces", "tree", id],
-                    });
-                  })
-                }
-              >
-                New chat
-              </Button>
-            )}
+            <Button
+              variant={!selected && !graphOpen ? "primary" : "ghost"}
+              leftIcon={<Home className="h-4 w-4" />}
+              onClick={() => {
+                setGraphOpen(false);
+                setSelected(null);
+              }}
+              title="Workspace home — overview, tasks, and recent items"
+            >
+              <span className="hidden sm:inline">Home</span>
+            </Button>
             {workspace && (
               <Button
                 variant="ghost"
@@ -755,30 +722,3 @@ function WorkspaceCanvasPaneFrame({
   );
 }
 
-// ---------------------------------------------------------------------
-
-async function handleNewChat(
-  workspace: {
-    id: string;
-    default_model_id: string | null;
-    default_provider_id: string | null;
-  },
-  onCreated: (conv: { id: string; title: string | null }) => void
-) {
-  const { selectedModelId, selectedProviderId } = useModelStore.getState();
-  const modelId = workspace.default_model_id ?? selectedModelId ?? undefined;
-  const providerId =
-    workspace.default_provider_id ?? selectedProviderId ?? undefined;
-  try {
-    const conv = await chatApi.create({
-      title: null,
-      model_id: modelId,
-      provider_id: providerId,
-      web_search_mode: "off",
-      workspace_id: workspace.id,
-    });
-    onCreated({ id: String(conv.id), title: conv.title ?? null });
-  } catch {
-    // Best-effort; failures already raise toasts via the axios interceptor.
-  }
-}
