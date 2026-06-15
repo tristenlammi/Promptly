@@ -144,7 +144,7 @@ export function WorkspaceNavigatorTree({
           <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
             Nothing here yet. Use{" "}
             <span className="font-medium text-[var(--text)]">+ New</span> to add
-            a note or folder.
+            a chat, note, canvas, or folder.
           </div>
         ) : (
           <ul>

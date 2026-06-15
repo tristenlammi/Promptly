@@ -384,7 +384,11 @@ function WorkspaceMainPane({
     // cleanly and resets the chat store's active conversation.
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <ChatPage embedded embeddedConversationId={node.ref_id} />
+        <ChatPage
+          embedded
+          embeddedConversationId={node.ref_id}
+          onExitToWorkspace={onCloseNote}
+        />
       </div>
     );
   }
@@ -398,7 +402,7 @@ function WorkspaceMainPane({
         <div className="mb-4 flex items-center justify-between gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
           <span className="inline-flex items-center gap-2 text-[var(--text-muted)]">
             <Archive className="h-3.5 w-3.5" />
-            This workspace is archived. Unarchive to start new chats under it.
+            This workspace is archived. Unarchive to add new chats and items.
           </span>
           {isOwner && (
             <div className="flex shrink-0 items-center gap-2">

@@ -75,9 +75,13 @@ export function WorkspaceOverviewPane({
       {/* Secondary: checkboxes found inside notes (rollup) */}
       {tasks.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
             From your notes
           </h2>
+          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+            Checklist items found inside this workspace's notes — separate from
+            the task list above. Click one to open its note.
+          </p>
           <div className="space-y-1">
             {[...openTasks, ...doneTasks].map((t, i) => (
               <button
