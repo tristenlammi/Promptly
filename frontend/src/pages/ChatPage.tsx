@@ -66,6 +66,7 @@ const DEFAULT_WEB_SEARCH_MODE: WebSearchMode = "auto";
 export function ChatPage({
   embeddedConversationId,
   embedded = false,
+  onExitToWorkspace,
 }: {
   /** When set, drive the page off this conversation id instead of the
    *  route param — lets the Workspace navigator render a chat inline in
@@ -73,6 +74,11 @@ export function ChatPage({
   embeddedConversationId?: string;
   /** Hide the page chrome (TopNav) when rendered inside another shell. */
   embedded?: boolean;
+  /** When embedded in the workspace shell, the "Back to workspace"
+   *  breadcrumb calls this to return to the workspace home instead of
+   *  navigating (the route is already ``/workspaces/:id``, so a navigate
+   *  would be a no-op). */
+  onExitToWorkspace?: () => void;
 } = {}) {
   const { id: routeId } = useParams<{ id?: string }>();
   const id = embeddedConversationId ?? routeId;
@@ -959,7 +965,10 @@ export function ChatPage({
             />
           )}
           {conversation?.workspace_id && (
-            <WorkspaceBreadcrumb workspaceId={conversation.workspace_id} />
+            <WorkspaceBreadcrumb
+              workspaceId={conversation.workspace_id}
+              onBack={onExitToWorkspace}
+            />
           )}
           {/* Context-window UI (pill + warning banner) is desktop-only
               — the mobile header has no space for the pill and the
@@ -1099,7 +1108,15 @@ interface BranchBannerProps {
  *  to semantic retrieval mode (indexed text exceeds ~6k tokens) so
  *  users understand why they might not see every pinned file verbatim
  *  in the context. */
-function WorkspaceBreadcrumb({ workspaceId }: { workspaceId: string }) {
+function WorkspaceBreadcrumb({
+  workspaceId,
+  onBack,
+}: {
+  workspaceId: string;
+  /** When embedded in the workspace shell, return to the workspace home
+   *  in-place instead of navigating to the (already-current) route. */
+  onBack?: () => void;
+}) {
   const navigate = useNavigate();
   const { data: workspace } = useWorkspace(workspaceId);
   // Explicit "back to workspace" affordance rather than a subtle
@@ -1112,14 +1129,16 @@ function WorkspaceBreadcrumb({ workspaceId }: { workspaceId: string }) {
     <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs">
       <button
         type="button"
-        onClick={() => navigate(`/workspaces/${workspaceId}`)}
+        onClick={() =>
+          onBack ? onBack() : navigate(`/workspaces/${workspaceId}`)
+        }
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition",
           "border-[var(--border)] text-[var(--text-muted)]",
           "hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
         )}
-        title="Back to workspace"
-        aria-label="Back to workspace"
+        title="Back to workspace home"
+        aria-label="Back to workspace home"
       >
         <ArrowLeft className="h-3 w-3" />
         Back to workspace

@@ -285,8 +285,8 @@ function ChatCardBody({ convId, live }: { convId: string; live: boolean }) {
       <MessageSquare className="h-6 w-6 text-[var(--text-muted)]" />
       <p className="text-xs font-medium text-[var(--text)]">Live chat</p>
       <p className="text-[11px] leading-snug text-[var(--text-muted)]">
-        Click the card to open the conversation and chat right here on the
-        board.
+        Click to select this card, then chat right here on the board. One chat
+        card is live at a time.
       </p>
     </div>
   );

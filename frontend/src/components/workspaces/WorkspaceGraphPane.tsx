@@ -143,8 +143,9 @@ export function WorkspaceGraphPane({
           Not much to graph yet
         </p>
         <p className="mt-1 max-w-sm text-xs text-[var(--text-muted)]">
-          Add a few notes, canvases, or chats — then `[[`-link them or let
-          semantic similarity connect them automatically.
+          Add a few notes, canvases, or chats. Link them by typing{" "}
+          <span className="font-mono text-[var(--text)]">[[</span> inside a note,
+          or let related items connect automatically once they're indexed.
         </p>
       </div>
     );
