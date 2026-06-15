@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { Tldraw, type Editor } from "tldraw";
+import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
 import "tldraw/tldraw.css";
 
 import { canvasApi } from "@/api/canvas";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useYjsCanvasStore } from "./useYjsCanvasStore";
+
+// Bundle tldraw's icons / fonts / translations through Vite so they load
+// from our own origin. Promptly's CSP is ``default-src 'self'`` with no
+// tldraw CDN allowance, so the default (CDN-hosted) assets are blocked —
+// which is why the toolbar/style-panel render as empty squares without
+// this. Computed once at module load (it only wires up import URLs).
+const tldrawAssetUrls = getAssetUrlsByImport();
 
 /**
  * Live, multiplayer tldraw board for a workspace canvas item.
@@ -132,7 +140,11 @@ export function WorkspaceCanvasPane({
 
   return (
     <div className="relative h-full min-h-0 flex-1">
-      <Tldraw store={storeWithStatus} onMount={handleMount} />
+      <Tldraw
+        store={storeWithStatus}
+        assetUrls={tldrawAssetUrls}
+        onMount={handleMount}
+      />
     </div>
   );
 }

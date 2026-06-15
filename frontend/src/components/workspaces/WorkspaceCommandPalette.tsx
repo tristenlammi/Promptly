@@ -1,0 +1,313 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CornerDownLeft,
+  FileText,
+  Folder,
+  Loader2,
+  MessageSquare,
+  Search,
+  Shapes,
+  Sparkles,
+} from "lucide-react";
+
+import {
+  workspacesApi,
+  type WorkspaceAskResponse,
+  type WorkspaceItemNode,
+} from "@/api/workspaces";
+import { cn } from "@/utils/cn";
+
+/**
+ * ⌘K command palette for a workspace (Phase 3).
+ *
+ * Two things in one bar:
+ *  - **Quick-switcher** — fuzzy-jump to any note / canvas / chat in the
+ *    workspace (Obsidian's most-loved feature).
+ *  - **Ask this workspace** — the top row runs a grounded Q&A across the
+ *    whole workspace pool and renders a cited answer; clicking a citation
+ *    jumps to the source item.
+ */
+interface FlatItem {
+  node: WorkspaceItemNode;
+  /** Breadcrumb of ancestor folder titles, for disambiguation. */
+  path: string;
+}
+
+function flatten(
+  nodes: WorkspaceItemNode[],
+  trail: string[] = []
+): FlatItem[] {
+  const out: FlatItem[] = [];
+  for (const node of nodes) {
+    if (node.kind === "folder") {
+      out.push(...flatten(node.children, [...trail, node.title]));
+    } else {
+      out.push({ node, path: trail.join(" / ") });
+    }
+  }
+  return out;
+}
+
+function KindIcon({ kind }: { kind: WorkspaceItemNode["kind"] }) {
+  const cls = "h-4 w-4 shrink-0 text-[var(--text-muted)]";
+  if (kind === "canvas") return <Shapes className={cls} />;
+  if (kind === "chat") return <MessageSquare className={cls} />;
+  if (kind === "folder") return <Folder className={cls} />;
+  return <FileText className={cls} />;
+}
+
+export function WorkspaceCommandPalette({
+  workspaceId,
+  tree,
+  open,
+  onClose,
+  onSelectNode,
+}: {
+  workspaceId: string;
+  tree: WorkspaceItemNode[];
+  open: boolean;
+  onClose: () => void;
+  onSelectNode: (node: WorkspaceItemNode) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const [asking, setAsking] = useState(false);
+  const [answer, setAnswer] = useState<WorkspaceAskResponse | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const flat = useMemo(() => flatten(tree), [tree]);
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return flat.slice(0, 50);
+    return flat
+      .filter(
+        (f) =>
+          f.node.title.toLowerCase().includes(q) ||
+          f.path.toLowerCase().includes(q)
+      )
+      .slice(0, 50);
+  }, [flat, query]);
+
+  // Reset everything each time the palette opens.
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      setCursor(0);
+      setAnswer(null);
+      setAskError(null);
+      setAsking(false);
+      // Focus after the element is painted.
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [open]);
+
+  useEffect(() => setCursor(0), [query]);
+
+  if (!open) return null;
+
+  const canAsk = query.trim().length > 0;
+  // Row 0 is the "Ask" action when there's a query; items follow.
+  const rowCount = (canAsk ? 1 : 0) + results.length;
+
+  const runAsk = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setAsking(true);
+    setAskError(null);
+    setAnswer(null);
+    try {
+      const res = await workspacesApi.ask(workspaceId, q);
+      setAnswer(res);
+    } catch {
+      setAskError("Couldn't get an answer. Try again in a moment.");
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  const activate = (row: number) => {
+    if (canAsk && row === 0) {
+      void runAsk();
+      return;
+    }
+    const item = results[row - (canAsk ? 1 : 0)];
+    if (item) {
+      onSelectNode(item.node);
+      onClose();
+    }
+  };
+
+  const jumpToCitation = (itemId: string | null) => {
+    if (!itemId) return;
+    const match = flat.find((f) => f.node.id === itemId);
+    if (match) {
+      onSelectNode(match.node);
+      onClose();
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCursor((c) => Math.min(c + 1, Math.max(0, rowCount - 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCursor((c) => Math.max(c - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      activate(cursor);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-xl overflow-hidden rounded-card border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Search input */}
+        <div className="flex items-center gap-2 border-b border-[var(--border)] px-3">
+          <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Jump to an item, or ask this workspace…"
+            className="flex-1 bg-transparent py-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+        </div>
+
+        {/* Answer view takes over once an ask is in flight / done. */}
+        {asking || answer || askError ? (
+          <div className="max-h-[50vh] overflow-y-auto px-4 py-3">
+            {asking && (
+              <div className="flex items-center gap-2 py-6 text-sm text-[var(--text-muted)]">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Asking this workspace…
+              </div>
+            )}
+            {askError && (
+              <div className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+                {askError}
+              </div>
+            )}
+            {answer && (
+              <div>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text)]">
+                  {answer.answer}
+                </p>
+                {answer.citations.length > 0 && (
+                  <div className="mt-3 border-t border-[var(--border)] pt-2">
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                      Sources
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {answer.citations.map((c) => (
+                        <button
+                          key={c.index}
+                          type="button"
+                          disabled={!c.item_id}
+                          onClick={() => jumpToCitation(c.item_id)}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5 text-xs",
+                            c.item_id
+                              ? "text-[var(--text)] hover:bg-[var(--hover)]"
+                              : "cursor-default text-[var(--text-muted)]"
+                          )}
+                          title={c.item_id ? `Open ${c.title}` : c.title}
+                        >
+                          <span className="text-[var(--text-muted)]">
+                            [{c.index}]
+                          </span>
+                          <span className="max-w-[12rem] truncate">
+                            {c.title}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAnswer(null);
+                    setAskError(null);
+                    requestAnimationFrame(() => inputRef.current?.focus());
+                  }}
+                  className="mt-3 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+                >
+                  ← Back to search
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Result list */
+          <ul className="max-h-[50vh] overflow-y-auto py-1.5">
+            {canAsk && (
+              <li>
+                <button
+                  type="button"
+                  onMouseEnter={() => setCursor(0)}
+                  onClick={() => activate(0)}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
+                    cursor === 0 ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]"
+                  )}
+                >
+                  <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+                  <span className="flex-1 truncate text-[var(--text)]">
+                    Ask this workspace:{" "}
+                    <span className="text-[var(--text-muted)]">“{query.trim()}”</span>
+                  </span>
+                  <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                </button>
+              </li>
+            )}
+            {results.length === 0 && !canAsk && (
+              <li className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
+                No items yet.
+              </li>
+            )}
+            {results.map((f, i) => {
+              const row = i + (canAsk ? 1 : 0);
+              return (
+                <li key={f.node.id}>
+                  <button
+                    type="button"
+                    onMouseEnter={() => setCursor(row)}
+                    onClick={() => activate(row)}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
+                      cursor === row
+                        ? "bg-[var(--accent)]/10"
+                        : "hover:bg-[var(--hover)]"
+                    )}
+                  >
+                    <KindIcon kind={f.node.kind} />
+                    <span className="flex-1 truncate text-[var(--text)]">
+                      {f.node.title || "Untitled"}
+                    </span>
+                    {f.path && (
+                      <span className="max-w-[10rem] shrink-0 truncate text-xs text-[var(--text-muted)]">
+                        {f.path}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}

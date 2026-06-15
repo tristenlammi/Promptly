@@ -113,6 +113,22 @@ export interface WorkspaceItemResponse {
   indexing_status: string | null;
 }
 
+/** A source citation returned by "ask this workspace". ``item_id`` is the
+ *  navigator item to jump to (null for a pinned file); ``ref_id`` is what
+ *  it opens by (doc id for a note, canvas id for a canvas). */
+export interface WorkspaceAskCitation {
+  index: number;
+  item_id: string | null;
+  ref_id: string | null;
+  kind: string;
+  title: string;
+}
+
+export interface WorkspaceAskResponse {
+  answer: string;
+  citations: WorkspaceAskCitation[];
+}
+
 export interface CreateWorkspaceItemPayload {
   kind: "folder" | "note" | "canvas";
   parent_id?: string | null;
@@ -316,6 +332,16 @@ export const workspacesApi = {
 
   async deleteItem(id: string, itemId: string): Promise<void> {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
+  },
+
+  /** Ask a grounded question across the whole workspace. Returns a cited
+   *  answer; citations link back to the source note/canvas/file. */
+  async ask(id: string, question: string): Promise<WorkspaceAskResponse> {
+    const { data } = await apiClient.post<WorkspaceAskResponse>(
+      `/workspaces/${id}/ask`,
+      { question }
+    );
+    return data;
   },
 
   async pinFile(id: string, fileId: string): Promise<WorkspaceFilePin> {

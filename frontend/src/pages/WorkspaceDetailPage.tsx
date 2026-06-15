@@ -8,6 +8,7 @@ import {
   FolderX,
   Loader2,
   Plus,
+  Search,
   Settings,
   Share2,
   Upload,
@@ -21,6 +22,7 @@ import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
+import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { chatApi } from "@/api/chat";
@@ -58,6 +60,19 @@ export function WorkspaceDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // ⌘K / Ctrl+K opens the workspace command palette (jump / ask).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const archive = useArchiveWorkspace();
   const unarchive = useUnarchiveWorkspace();
@@ -101,6 +116,19 @@ export function WorkspaceDetailPage() {
               onClick={() => navigate("/workspaces")}
             >
               Back
+            </Button>
+            <Button
+              variant="ghost"
+              leftIcon={<Search className="h-4 w-4" />}
+              onClick={() => setPaletteOpen(true)}
+              title="Search items or ask this workspace (⌘K)"
+            >
+              <span className="hidden items-center gap-1 sm:inline-flex">
+                Ask
+                <kbd className="rounded border border-[var(--border)] px-1 text-[10px] text-[var(--text-muted)]">
+                  ⌘K
+                </kbd>
+              </span>
             </Button>
             {!isArchived && isOwner && (
               <Button
@@ -250,6 +278,14 @@ export function WorkspaceDetailPage() {
         }
         typeToConfirm={workspace?.title}
         secondConfirmLabel="Delete workspace"
+      />
+
+      <WorkspaceCommandPalette
+        workspaceId={id}
+        tree={tree ?? []}
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onSelectNode={handleSelect}
       />
     </>
   );
