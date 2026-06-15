@@ -478,8 +478,20 @@ function WorkspaceMainPane({
       )}
 
       {sharedByName && (
-        <div className="mb-4 flex items-center gap-2 rounded-card border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3 text-xs text-[var(--text)]">
-          <Users className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+        <div
+          className={
+            "mb-4 flex items-center gap-2 rounded-card border p-3 text-xs " +
+            (canEdit
+              ? "border-[var(--accent)]/30 bg-[var(--accent)]/5 text-[var(--text)]"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200")
+          }
+        >
+          <Users
+            className={
+              "h-3.5 w-3.5 shrink-0 " +
+              (canEdit ? "text-[var(--accent)]" : "text-amber-500")
+            }
+          />
           <span>
             {canEdit ? (
               <>
@@ -489,9 +501,9 @@ function WorkspaceMainPane({
               </>
             ) : (
               <>
-                You have view-only access to this workspace, shared by{" "}
-                <span className="font-medium">{sharedByName}</span>. You can read
-                its chats and files but not change them.
+                <span className="font-semibold">View-only access</span> — shared
+                by <span className="font-medium">{sharedByName}</span>. You can
+                read its chats, notes, and files but not change them.
               </>
             )}
           </span>
