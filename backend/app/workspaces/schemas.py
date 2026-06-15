@@ -128,6 +128,12 @@ class WorkspaceDetail(WorkspaceSummary):
     # semantic retrieval can actually run. Shown in the Files tab so
     # users understand why pinned files stay in full-dump mode.
     embeddings_configured: bool = False
+    # Drive folder id of the workspace's ``Files`` subfolder (owned by the
+    # owner). The home-screen uploader drops files straight in here so the
+    # owner's Drive stays tidy. Null if the tree isn't seeded; the frontend
+    # falls back to the caller's Drive root (and only uses this when the
+    # caller owns the workspace — collaborators can't write to it).
+    files_folder_id: uuid.UUID | None = None
 
 
 # ---------------------------------------------------------------------

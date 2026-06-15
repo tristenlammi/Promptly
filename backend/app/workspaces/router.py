@@ -80,7 +80,7 @@ from app.workspaces.knowledge import (
 from app.chat.shares import list_accessible_workspace_ids
 from app.custom_models.resolver import is_custom_model_id
 from app.database import get_db
-from app.files.models import UserFile
+from app.files.models import FileFolder, UserFile
 from app.files.system_folders import create_workspace_folder_tree
 from app.models_config.models import ModelProvider
 
@@ -334,6 +334,20 @@ async def get_workspace(
         db, workspace_id=ws.id, system_prompt=ws.system_prompt
     )
     participants = await load_workspace_participants(ws, db)
+    # The workspace's ``Files`` Drive subfolder (owned by the owner). Read-only
+    # lookup — never creates here, so a GET stays side-effect free; it's seeded
+    # at workspace creation. The owner uploads workspace files straight into it
+    # so their Drive stays tidy; collaborators can't write to the owner's
+    # folder, so the frontend only uses this when the caller is the owner.
+    files_folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        files_folder_id = await db.scalar(
+            select(FileFolder.id).where(
+                FileFolder.user_id == ws.user_id,
+                FileFolder.parent_id == ws.root_folder_id,
+                FileFolder.name == "Files",
+            )
+        )
     # ``WorkspaceDetail`` extends ``WorkspaceSummary`` — merge the
     # two payloads into one validated object so the HTTP shape stays
     # flat (no nested "summary" object the frontend has to unwrap).
@@ -360,6 +374,7 @@ async def get_workspace(
         access_role=access_role,
         auto_memory_enabled=ws.auto_memory_enabled,
         embeddings_configured=stats.embeddings_configured,
+        files_folder_id=files_folder_id,
     )
 
 
