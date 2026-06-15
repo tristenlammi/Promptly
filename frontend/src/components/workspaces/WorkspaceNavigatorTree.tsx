@@ -136,7 +136,7 @@ export function WorkspaceNavigatorTree({
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-          Items
+          Content
         </span>
         {canEdit && (
           <NewMenu
