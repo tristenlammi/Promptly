@@ -26,6 +26,7 @@ printed PDFs in the share-view.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -55,6 +56,18 @@ def _iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+_THINKING_BLOCK_RE = re.compile(
+    r"^\s*<think(?:ing)?>.*?</think(?:ing)?>\s*", re.IGNORECASE | re.DOTALL
+)
+
+
+def _strip_thinking(content: str) -> str:
+    """Drop a leading guided-effort ``<thinking>…</thinking>`` block from a
+    human-readable transcript so exports show the clean answer (the block is
+    collapsed in the UI; JSON exports keep it raw for round-trip fidelity)."""
+    return _THINKING_BLOCK_RE.sub("", content, count=1)
 
 
 def _role_label(role: str) -> str:
@@ -125,7 +138,7 @@ def render_conversation_markdown(
             continue
         lines.append(f"## {_role_label(msg.role)}")
         lines.append("")
-        body = (msg.content or "").rstrip()
+        body = _strip_thinking(msg.content or "").rstrip()
         if body:
             lines.append(body)
             lines.append("")

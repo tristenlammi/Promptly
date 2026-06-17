@@ -884,9 +884,10 @@ function MessageBubbleImpl({
     try {
       // Copy what the user actually sees. Assistant replies get the
       // bracketed [1]/[2] inline citation markers stripped (we hide
-      // them from the rendered prose); user messages copy verbatim.
+      // them from the rendered prose) and the collapsed guided-reasoning
+      // <thinking> block removed (``answer``); user messages copy verbatim.
       await navigator.clipboard.writeText(
-        isUser ? content : stripInlineCitations(content),
+        isUser ? content : stripInlineCitations(answer),
       );
       setCopyClicked(true);
       setCopiedFlash(true);
@@ -934,7 +935,9 @@ function MessageBubbleImpl({
       setSpeaking(false);
       return;
     }
-    const plain = markdownToSpeech(stripInlineCitations(content || ""));
+    // Read the clean answer aloud — skip the collapsed guided-reasoning
+    // <thinking> block (``answer``) and inline citation markers.
+    const plain = markdownToSpeech(stripInlineCitations(answer || ""));
     if (!plain) return;
     // Cancel anything another bubble might be reading so only one
     // narration plays at a time.
