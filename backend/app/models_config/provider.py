@@ -546,17 +546,27 @@ def _detect_reasoning_by_id(provider_type: str, model_id: str) -> bool:
 # chain-of-thought directive appended to the system prompt, increasing in
 # strength. A genuine nudge (CoT prompting measurably helps non-reasoning
 # models) — NOT a compute increase, which is why the UI labels it "guided".
+#
+# The reasoning is wrapped in a leading ``<thinking>…</thinking>`` block so
+# the client can collapse it (Phase 3) and keep the final answer clean.
+_THINKING_FORMAT = (
+    " Put that reasoning inside a single <thinking>…</thinking> block at the "
+    "very start of your reply, then write your final answer after the closing "
+    "</thinking> tag. Do not mention the block itself."
+)
 _EFFORT_INSTRUCTIONS: dict[str, str] = {
-    "low": "Before answering, take a moment to think the problem through.",
+    "low": (
+        "Before answering, briefly think the problem through." + _THINKING_FORMAT
+    ),
     "medium": (
-        "Work through this step by step, showing your reasoning, then give "
-        "your final answer."
+        "Work through this step by step, showing your reasoning."
+        + _THINKING_FORMAT
     ),
     "high": (
         "This is a challenging problem — treat it with care. Reason "
         "thoroughly and methodically: break it into parts, consider edge "
-        "cases and alternative approaches, and verify your logic before "
-        "committing to a final answer."
+        "cases and alternative approaches, and verify your logic."
+        + _THINKING_FORMAT
     ),
 }
 
