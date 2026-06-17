@@ -135,6 +135,11 @@ class AvailableModel(BaseModel):
     context_window: int | None = None
     supports_vision: bool = False
     supports_image_output: bool = False
+    # True when the model has a native reasoning/effort knob (handled with
+    # the provider's own param). False → the "Effort" control falls back to
+    # a chain-of-thought directive in the prompt. Drives the UI's
+    # native-vs-guided hint.
+    supports_native_reasoning: bool = False
     # ----- Custom Models discriminator (Phase RAG-1) -----
     # ``True`` for synthetic rows that wrap a CustomModel row. The
     # frontend ModelSelector groups these under a "Custom Models"

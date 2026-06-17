@@ -491,6 +491,76 @@ def _detect_image_output(raw_model: dict[str, Any]) -> bool:
     return False
 
 
+def _detect_reasoning(raw_model: dict[str, Any]) -> bool:
+    """Decide whether an OpenRouter catalog row has *native* reasoning.
+
+    OpenRouter exposes ``supported_parameters`` per model; reasoning models
+    advertise ``reasoning`` / ``include_reasoning`` there. Falls back to a
+    tag scan and then the id heuristic so a model with neither still gets a
+    reasonable verdict.
+    """
+    sp = raw_model.get("supported_parameters")
+    if isinstance(sp, list) and any(
+        isinstance(p, str) and p in {"reasoning", "include_reasoning"} for p in sp
+    ):
+        return True
+    tags = raw_model.get("tags")
+    if isinstance(tags, list) and any(
+        isinstance(t, str) and t.lower() in {"reasoning", "thinking"} for t in tags
+    ):
+        return True
+    return _detect_reasoning_by_id("openrouter", str(raw_model.get("id", "")))
+
+
+def _detect_reasoning_by_id(provider_type: str, model_id: str) -> bool:
+    """Best-effort "does this model reason natively?" from the id alone.
+
+    Used at send time (where we only have provider + model id, not the
+    catalog row) to decide native-knob vs prompt-fallback. OpenRouter ids
+    carry the vendor prefix (``openai/o3``), so stripping it first lets the
+    same heuristics serve both direct providers and OpenRouter.
+    """
+    if provider_type == "deepseek":
+        # The hosted DeepSeek API exposes thinking / reasoning_effort for
+        # its chat models (handled via ``extra_body``).
+        return True
+    mid = model_id.split("/")[-1].lower()
+    # OpenAI reasoning families (o-series, gpt-5 thinking).
+    if any(p in mid for p in ("o1", "o3", "o4", "gpt-5")):
+        return True
+    # Anthropic extended thinking (Claude 3.7+ / 4).
+    if "claude" in mid and any(
+        t in mid for t in ("3.7", "3-7", "-4", "opus-4", "sonnet-4", "haiku-4")
+    ):
+        return True
+    # Google Gemini thinking.
+    if "gemini" in mid and any(t in mid for t in ("2.5", "2-5", "-3", "thinking")):
+        return True
+    # Explicit reasoning markers in the id.
+    if any(t in mid for t in ("reasoner", "reasoning", "thinking", "r1", "deepseek-v4")):
+        return True
+    return False
+
+
+# Prompt-fallback for models WITHOUT a native reasoning knob: a short
+# chain-of-thought directive appended to the system prompt, increasing in
+# strength. A genuine nudge (CoT prompting measurably helps non-reasoning
+# models) — NOT a compute increase, which is why the UI labels it "guided".
+_EFFORT_INSTRUCTIONS: dict[str, str] = {
+    "low": "Before answering, take a moment to think the problem through.",
+    "medium": (
+        "Work through this step by step, showing your reasoning, then give "
+        "your final answer."
+    ),
+    "high": (
+        "This is a challenging problem — treat it with care. Reason "
+        "thoroughly and methodically: break it into parts, consider edge "
+        "cases and alternative approaches, and verify your logic before "
+        "committing to a final answer."
+    ),
+}
+
+
 def _known_context_window(provider_type: str, model_id: str) -> int | None:
     """Best-effort context-window lookup for providers that don't
     return ``context_length`` on their ``/models`` endpoint.
@@ -798,6 +868,17 @@ class ModelRouter:
         """
         client = _client_for(provider)
 
+        # Resolve the unified "Effort" control. A model with a native
+        # reasoning knob gets the provider param (below); everything else
+        # gets a chain-of-thought directive folded into the system prompt.
+        native_reasoning = _detect_reasoning_by_id(provider.type, model_id)
+        if (
+            reasoning_effort in _EFFORT_INSTRUCTIONS
+            and not native_reasoning
+        ):
+            instr = _EFFORT_INSTRUCTIONS[reasoning_effort]
+            system = f"{system.rstrip()}\n\n{instr}" if system else instr
+
         payload_messages: list[dict[str, Any]] = []
         if system:
             payload_messages.append({"role": "system", "content": system})
@@ -864,6 +945,31 @@ class ModelRouter:
             # this code shipped, say) is treated as "no override" and
             # silently dropped — better to fall back to the provider
             # default than to fail the stream on a typo.
+        elif (
+            native_reasoning
+            and provider.type == "openrouter"
+            and reasoning_effort is not None
+        ):
+            # OpenRouter's unified ``reasoning`` param spans every reasoning
+            # model it routes (OpenAI/Anthropic/Gemini/DeepSeek), so one
+            # mapping covers them all. ``off`` disables the thinking pass.
+            if reasoning_effort == "off":
+                create_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+            elif reasoning_effort in {"low", "medium", "high"}:
+                create_kwargs["extra_body"] = {
+                    "reasoning": {"effort": reasoning_effort}
+                }
+        elif (
+            native_reasoning
+            and provider.type == "openai"
+            and reasoning_effort in {"low", "medium", "high"}
+        ):
+            # Direct OpenAI reasoning models take a first-class
+            # ``reasoning_effort`` param (o-series / gpt-5 thinking).
+            create_kwargs["reasoning_effort"] = reasoning_effort
+        # Native reasoning models on providers we don't have a param for
+        # just use their built-in default; non-native models were already
+        # handled via the system-prompt directive above.
 
         try:
             stream = await client.chat.completions.create(**create_kwargs)
@@ -1213,6 +1319,7 @@ class ModelRouter:
                 "description": m.get("description"),
                 "supports_vision": _detect_vision(m),
                 "supports_image_output": _detect_image_output(m),
+                "supports_native_reasoning": _detect_reasoning(m),
             }
             # Only include the privacy key when we actually fetched
             # endpoint data — an explicit ``null`` would look like
@@ -1278,6 +1385,9 @@ class ModelRouter:
                     ),
                     # Image *output* only wires up via OpenRouter today.
                     "supports_image_output": False,
+                    "supports_native_reasoning": _detect_reasoning_by_id(
+                        provider.type, model_id
+                    ),
                 }
             )
         # Ollama hasn't historically sorted its catalog; sort by id for
@@ -1340,6 +1450,9 @@ class ModelRouter:
                         "anthropic", model_id
                     ),
                     "supports_image_output": False,
+                    "supports_native_reasoning": _detect_reasoning_by_id(
+                        "anthropic", model_id
+                    ),
                 }
             )
         return out
