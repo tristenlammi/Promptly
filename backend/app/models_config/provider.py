@@ -542,35 +542,6 @@ def _detect_reasoning_by_id(provider_type: str, model_id: str) -> bool:
     return False
 
 
-# Prompt-fallback for models WITHOUT a native reasoning knob: a short
-# chain-of-thought directive appended to the system prompt, increasing in
-# strength. A genuine nudge (CoT prompting measurably helps non-reasoning
-# models) — NOT a compute increase, which is why the UI labels it "guided".
-#
-# The reasoning is wrapped in a leading ``<thinking>…</thinking>`` block so
-# the client can collapse it (Phase 3) and keep the final answer clean.
-_THINKING_FORMAT = (
-    " Put that reasoning inside a single <thinking>…</thinking> block at the "
-    "very start of your reply, then write your final answer after the closing "
-    "</thinking> tag. Do not mention the block itself."
-)
-_EFFORT_INSTRUCTIONS: dict[str, str] = {
-    "low": (
-        "Before answering, briefly think the problem through." + _THINKING_FORMAT
-    ),
-    "medium": (
-        "Work through this step by step, showing your reasoning."
-        + _THINKING_FORMAT
-    ),
-    "high": (
-        "This is a challenging problem — treat it with care. Reason "
-        "thoroughly and methodically: break it into parts, consider edge "
-        "cases and alternative approaches, and verify your logic."
-        + _THINKING_FORMAT
-    ),
-}
-
-
 def _known_context_window(provider_type: str, model_id: str) -> int | None:
     """Best-effort context-window lookup for providers that don't
     return ``context_length`` on their ``/models`` endpoint.
@@ -878,16 +849,12 @@ class ModelRouter:
         """
         client = _client_for(provider)
 
-        # Resolve the unified "Effort" control. A model with a native
-        # reasoning knob gets the provider param (below); everything else
-        # gets a chain-of-thought directive folded into the system prompt.
+        # Effort is applied only via the provider's native reasoning knob
+        # (below). Models without a native knob never reach here with an
+        # effort set — the UI only offers the Effort control on
+        # reasoning-capable models — but we still gate the native branches
+        # on this flag as defence-in-depth against a stale request.
         native_reasoning = _detect_reasoning_by_id(provider.type, model_id)
-        if (
-            reasoning_effort in _EFFORT_INSTRUCTIONS
-            and not native_reasoning
-        ):
-            instr = _EFFORT_INSTRUCTIONS[reasoning_effort]
-            system = f"{system.rstrip()}\n\n{instr}" if system else instr
 
         payload_messages: list[dict[str, Any]] = []
         if system:

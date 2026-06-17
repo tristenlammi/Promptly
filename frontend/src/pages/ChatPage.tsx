@@ -315,12 +315,10 @@ export function ChatPage({
     setMemoryCapturePaused(conversation?.memory_capture_paused ?? false);
   }, [id, conversation?.memory_capture_paused]);
 
-  // The unified "Effort" control is available for any selected model: a
-  // model with a native reasoning knob gets the provider param, everything
-  // else falls back to a guided chain-of-thought prompt (resolved
-  // server-side). Hidden only until a model is picked.
-  const reasoningSupported = Boolean(selectedModel);
-  const reasoningNative = Boolean(selectedModel?.supports_native_reasoning);
+  // The Effort control is shown only for models that natively support a
+  // reasoning/effort knob — for everything else it would be a no-op dressed
+  // as a feature, so we hide it entirely.
+  const reasoningSupported = Boolean(selectedModel?.supports_native_reasoning);
 
   // Phase 9 — show the memory header control when memory isn't globally off.
   // Resolves the memory_mode / legacy memory_enabled setting consistently.
@@ -1054,11 +1052,8 @@ export function ChatPage({
             webSearchMode={webSearchMode}
             onWebSearchModeChange={handleWebSearchModeChange}
             reasoningEffort={reasoningEffort}
-            // The Effort picker is available for any selected model; the
-            // backend uses the native knob where the model supports it and
-            // a guided prompt otherwise. ``reasoningNative`` drives the
-            // native-vs-guided hint in the picker.
-            reasoningNative={reasoningNative}
+            // Shown only for models with a native reasoning knob (gated by
+            // ``reasoningSupported`` → supports_native_reasoning).
             onReasoningEffortChange={
               reasoningSupported ? handleReasoningEffortChange : undefined
             }

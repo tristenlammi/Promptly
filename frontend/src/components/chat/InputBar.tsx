@@ -70,9 +70,6 @@ interface InputBarProps {
    *  picker to render — surfaces hide it for non-DeepSeek models so it
    *  doesn't take up composer real estate where it would no-op. */
   reasoningEffort?: ReasoningEffort | null;
-  /** True when the active model has a native reasoning knob (vs the guided
-   *  prompt fallback). Drives the picker's hint copy. */
-  reasoningNative?: boolean;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   toolsEnabled?: boolean;
   onToolsChange?: (enabled: boolean) => void;
@@ -127,7 +124,6 @@ export function InputBar({
   webSearchMode = "off",
   onWebSearchModeChange,
   reasoningEffort = null,
-  reasoningNative = false,
   onReasoningEffortChange,
   toolsEnabled = false,
   onToolsChange,
@@ -986,7 +982,6 @@ export function InputBar({
               )}
               <ComposerMoreMenu
                 reasoningEffort={reasoningEffort}
-                reasoningNative={reasoningNative}
                 onReasoningEffortChange={onReasoningEffortChange}
                 webSearchMode={webSearchMode}
                 onWebSearchModeChange={onWebSearchModeChange}
@@ -1103,7 +1098,6 @@ const WEB_ORDER: WebSearchMode[] = ["off", "auto", "always"];
 // Phase 11 — Deep Research action added at the bottom.
 function ComposerMoreMenu({
   reasoningEffort,
-  reasoningNative,
   onReasoningEffortChange,
   webSearchMode,
   onWebSearchModeChange,
@@ -1114,7 +1108,6 @@ function ComposerMoreMenu({
   disabled,
 }: {
   reasoningEffort: ReasoningEffort | null;
-  reasoningNative?: boolean;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   webSearchMode: WebSearchMode;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
@@ -1315,8 +1308,8 @@ function ComposerMoreMenu({
             </>
           )}
 
-          {/* Effort — native reasoning knob where supported, else a guided
-              chain-of-thought prompt (resolved server-side). */}
+          {/* Effort — the model's native reasoning knob (only shown for
+              models that actually support one). */}
           {hasReasoningSection && (
             <>
               {(hasWebSection || hasToolsSection) && (
@@ -1327,9 +1320,7 @@ function ComposerMoreMenu({
                 Effort
               </div>
               <div className="px-2.5 pb-1 text-[10px] leading-tight text-[var(--text-muted)]">
-                {reasoningNative
-                  ? "This model thinks natively — effort tunes how deeply."
-                  : "Guided: asks the model to reason more carefully (not extra compute)."}
+                Tunes how deeply this model thinks before answering.
               </div>
               {EFFORT_ORDER.map((value) => {
                 const m = EFFORT_META[value];
