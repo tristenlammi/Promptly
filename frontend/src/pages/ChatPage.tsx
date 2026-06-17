@@ -315,11 +315,12 @@ export function ChatPage({
     setMemoryCapturePaused(conversation?.memory_capture_paused ?? false);
   }, [id, conversation?.memory_capture_paused]);
 
-  // Show the reasoning chip only when the active model lives on a
-  // DeepSeek provider — for every other provider the request fields
-  // would be silently dropped (or worse, 400 the call). Falls back to
-  // hidden when no model is selected yet.
-  const reasoningSupported = selectedModel?.provider_type === "deepseek";
+  // The unified "Effort" control is available for any selected model: a
+  // model with a native reasoning knob gets the provider param, everything
+  // else falls back to a guided chain-of-thought prompt (resolved
+  // server-side). Hidden only until a model is picked.
+  const reasoningSupported = Boolean(selectedModel);
+  const reasoningNative = Boolean(selectedModel?.supports_native_reasoning);
 
   // Phase 9 — show the memory header control when memory isn't globally off.
   // Resolves the memory_mode / legacy memory_enabled setting consistently.
@@ -1053,9 +1054,11 @@ export function ChatPage({
             webSearchMode={webSearchMode}
             onWebSearchModeChange={handleWebSearchModeChange}
             reasoningEffort={reasoningEffort}
-            // Wire the reasoning picker only for DeepSeek models — for
-            // every other provider the picker stays hidden so it can't
-            // mislead the user about which knobs apply.
+            // The Effort picker is available for any selected model; the
+            // backend uses the native knob where the model supports it and
+            // a guided prompt otherwise. ``reasoningNative`` drives the
+            // native-vs-guided hint in the picker.
+            reasoningNative={reasoningNative}
             onReasoningEffortChange={
               reasoningSupported ? handleReasoningEffortChange : undefined
             }

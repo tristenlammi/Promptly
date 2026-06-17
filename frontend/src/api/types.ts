@@ -510,6 +510,9 @@ export interface AvailableModel {
   display_name: string;
   context_window?: number | null;
   supports_vision?: boolean;
+  /** True when the model has a native reasoning/effort knob; false → the
+   *  Effort control falls back to a guided chain-of-thought prompt. */
+  supports_native_reasoning?: boolean;
   /** True when this entry represents a Custom Model (admin-curated
    *  assistant with a personality + knowledge library). Custom-model
    *  rows carry a synthetic ``model_id`` of the form ``custom:<uuid>``;

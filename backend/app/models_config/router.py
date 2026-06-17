@@ -314,6 +314,9 @@ async def list_available_models_for(
                     supports_image_output=bool(
                         m.get("supports_image_output", False)
                     ),
+                    supports_native_reasoning=bool(
+                        m.get("supports_native_reasoning", False)
+                    ),
                 )
             )
 
@@ -388,6 +391,9 @@ async def list_available_models_for(
                 supports_vision=bool((base_entry or {}).get("supports_vision", False)),
                 supports_image_output=bool(
                     (base_entry or {}).get("supports_image_output", False)
+                ),
+                supports_native_reasoning=bool(
+                    (base_entry or {}).get("supports_native_reasoning", False)
                 ),
                 is_custom=True,
                 custom_model_id=cm.id,
