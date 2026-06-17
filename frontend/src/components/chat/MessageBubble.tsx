@@ -726,11 +726,11 @@ export function consolidateToolInvocations(
   return invocations.filter((t) => keep.has(t.id));
 }
 
-// Guided-effort (Phase 3): non-reasoning models are asked to wrap their
-// chain-of-thought in a leading <thinking>…</thinking> block so we can
-// collapse it and keep the final answer clean. Splits the accumulated
-// content into the reasoning + the answer; tolerant of the still-streaming
-// case where the closing tag hasn't arrived yet.
+// Some reasoning models (e.g. DeepSeek-R1 / QwQ via Ollama) emit their
+// chain-of-thought inline as a leading <think>…</think> block in the
+// content stream. Peel it off so the answer renders clean and the reasoning
+// collapses into a disclosure. Tolerant of the still-streaming case where
+// the closing tag hasn't arrived yet. No-op for content without the block.
 const _THINK_OPEN = /^\s*<think(?:ing)?>/i;
 const _THINK_CLOSE = /<\/think(?:ing)?>/i;
 

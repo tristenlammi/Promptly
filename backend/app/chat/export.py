@@ -64,9 +64,10 @@ _THINKING_BLOCK_RE = re.compile(
 
 
 def _strip_thinking(content: str) -> str:
-    """Drop a leading guided-effort ``<thinking>…</thinking>`` block from a
-    human-readable transcript so exports show the clean answer (the block is
-    collapsed in the UI; JSON exports keep it raw for round-trip fidelity)."""
+    """Drop a leading inline ``<think>…</think>`` reasoning block (emitted by
+    some reasoning models, e.g. R1 / QwQ) from a human-readable transcript so
+    exports show the clean answer (the block is collapsed in the UI; JSON
+    exports keep it raw for round-trip fidelity)."""
     return _THINKING_BLOCK_RE.sub("", content, count=1)
 
 
