@@ -726,6 +726,34 @@ export function consolidateToolInvocations(
   return invocations.filter((t) => keep.has(t.id));
 }
 
+// Guided-effort (Phase 3): non-reasoning models are asked to wrap their
+// chain-of-thought in a leading <thinking>…</thinking> block so we can
+// collapse it and keep the final answer clean. Splits the accumulated
+// content into the reasoning + the answer; tolerant of the still-streaming
+// case where the closing tag hasn't arrived yet.
+const _THINK_OPEN = /^\s*<think(?:ing)?>/i;
+const _THINK_CLOSE = /<\/think(?:ing)?>/i;
+
+function splitThinking(content: string): {
+  thinking: string | null;
+  answer: string;
+  thinkingStreaming: boolean;
+} {
+  const open = content.match(_THINK_OPEN);
+  if (!open) return { thinking: null, answer: content, thinkingStreaming: false };
+  const afterOpen = content.slice(open[0].length);
+  const close = afterOpen.match(_THINK_CLOSE);
+  if (!close || close.index === undefined) {
+    // Reasoning still streaming — no answer yet.
+    return { thinking: afterOpen, answer: "", thinkingStreaming: true };
+  }
+  const thinking = afterOpen.slice(0, close.index).trim();
+  const answer = afterOpen
+    .slice(close.index + close[0].length)
+    .replace(/^\s+/, "");
+  return { thinking, answer, thinkingStreaming: false };
+}
+
 function MessageBubbleImpl({
   role,
   content,
@@ -775,14 +803,22 @@ function MessageBubbleImpl({
   // every render. During streaming ``content`` changes ~60×/sec (post
   // batching), so keeping these string passes out of the hot render
   // path matters. Only the assistant prose path uses it.
+  // Split off any leading guided-reasoning block so the answer renders
+  // clean and the reasoning collapses into a disclosure. ``thinking`` is
+  // null for normal messages (no <thinking> block), so this is a no-op
+  // for every model that doesn't use the guided-effort fallback.
+  const { thinking, answer, thinkingStreaming } = useMemo(
+    () => splitThinking(content || ""),
+    [content],
+  );
   const processedMarkdown = useMemo(
     () =>
       protectCurrencyDollars(
         rewriteMentionsForMarkdown(
-          stripInlineCitations(stripResearchArtifacts(content || "")),
+          stripInlineCitations(stripResearchArtifacts(answer || "")),
         ),
       ),
-    [content],
+    [answer],
   );
   // Memoise the rendered markdown *element* on [content, streaming].
   // ``MessageBubble``'s ``memo`` is routinely defeated by the inline
@@ -1080,6 +1116,12 @@ function MessageBubbleImpl({
               renderMentionText(content)
             ) : (
               <>
+                {thinking != null && (
+                  <ReasoningDisclosure
+                    text={thinking}
+                    streaming={!!streaming && thinkingStreaming}
+                  />
+                )}
                 {markdownEl}
                 {streaming && (
                   <span
@@ -1823,6 +1865,45 @@ function ImageAttachmentTile({
         {attachment.filename}
       </div>
     </div>
+  );
+}
+
+/** Collapsible "Reasoning" trace for guided-effort replies. Open while the
+ *  reasoning streams, auto-collapses once the answer starts; the user can
+ *  toggle it freely after that. */
+function ReasoningDisclosure({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
+  const [open, setOpen] = useState(streaming);
+  // Open while thinking; collapse the moment the answer begins.
+  useEffect(() => {
+    setOpen(streaming);
+  }, [streaming]);
+  return (
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      className="mb-3 rounded-card border border-[var(--border)] bg-black/[0.02] dark:bg-white/[0.03]"
+    >
+      <summary
+        className={cn(
+          "flex cursor-pointer list-none items-center gap-2 rounded-card px-3 py-2 text-xs",
+          "text-[var(--text-muted)] hover:text-[var(--text)]",
+        )}
+      >
+        <Brain className="h-3 w-3" />
+        <span className="font-medium">
+          {streaming ? "Thinking…" : "Reasoning"}
+        </span>
+      </summary>
+      <div className="whitespace-pre-wrap px-3 pb-3 pt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+        {text}
+      </div>
+    </details>
   );
 }
 
