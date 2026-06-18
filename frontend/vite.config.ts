@@ -84,10 +84,12 @@ export default defineConfig({
       // precache list the SW consumes via ``self.__WB_MANIFEST``.
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        // Don't precache Excalidraw's self-hosted fonts/locales — they're
-        // fetched lazily on demand (and the full font set is large), so
-        // baking them into the SW precache would bloat first install.
-        globIgnores: ["**/excalidraw-assets/**"],
+        // Keep Excalidraw out of the SW precache: the lazy editor chunk
+        // (~4.5 MB) and its self-hosted fonts/locales are only needed when
+        // a canvas is opened (which requires the network for collab
+        // anyway), so precaching them would bloat first install and negate
+        // the lazy-load. They're fetched on demand instead.
+        globIgnores: ["**/excalidraw-assets/**", "**/excalidraw-*.js"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
 

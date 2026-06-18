@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
@@ -28,7 +36,13 @@ import {
   parseWikiHref,
   type WikiTarget,
 } from "@/components/files/documents/WikiLinkExtension";
-import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
+// Lazy so the (large) Excalidraw editor chunk only downloads when a
+// canvas is actually opened, not on every workspace visit.
+const WorkspaceCanvasPane = lazy(() =>
+  import("@/components/workspaces/WorkspaceCanvasPane").then((m) => ({
+    default: m.WorkspaceCanvasPane,
+  }))
+);
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceGraphPane } from "@/components/workspaces/WorkspaceGraphPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -578,12 +592,7 @@ function WorkspaceItemView({
   }
   if (node.kind === "canvas") {
     return (
-      <WorkspaceCanvasPaneFrame
-        node={node}
-        canEdit={canEdit}
-        workspaceId={workspaceId}
-        onOpenItem={onOpenItem}
-      />
+      <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />
     );
   }
   if (node.kind === "chat" && node.ref_id) {
@@ -844,7 +853,7 @@ function BacklinksPanel({
 /**
  * Inline frame for a selected canvas item. Unlike the note pane (which
  * pops the document editor as a modal), the canvas renders a real inline
- * editor — tldraw fills this positioned, full-height container.
+ * editor — Excalidraw fills this positioned, full-height container.
  *
  * The canvas item's ``ref_id`` is the canvas id the collab room + token
  * endpoints key off. Viewers (no edit access) get a read-only board.
@@ -852,13 +861,9 @@ function BacklinksPanel({
 function WorkspaceCanvasPaneFrame({
   node,
   canEdit,
-  workspaceId,
-  onOpenItem,
 }: {
   node: WorkspaceItemNode;
   canEdit: boolean;
-  workspaceId: string;
-  onOpenItem: (node: WorkspaceItemNode) => void;
 }) {
   if (!node.ref_id) {
     return (
@@ -871,14 +876,17 @@ function WorkspaceCanvasPaneFrame({
   }
   return (
     // ``min-h-0`` lets this flex child shrink so the absolutely-positioned
-    // tldraw surface gets a real height inside the scrolling main pane.
+    // Excalidraw surface gets a real height inside the scrolling main pane.
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <WorkspaceCanvasPane
-        canvasId={node.ref_id}
-        readOnly={!canEdit}
-        workspaceId={workspaceId}
-        onOpenItem={onOpenItem}
-      />
+      <Suspense
+        fallback={
+          <div className="flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
+            Loading canvas…
+          </div>
+        }
+      >
+        <WorkspaceCanvasPane canvasId={node.ref_id} readOnly={!canEdit} />
+      </Suspense>
     </div>
   );
 }
