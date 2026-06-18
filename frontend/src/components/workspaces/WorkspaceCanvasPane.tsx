@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Excalidraw, getTextFromElements } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
@@ -8,6 +8,7 @@ import { canvasApi } from "@/api/canvas";
 import { useThemeStore } from "@/store/themeStore";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
+import { buildBundledLibraryItems } from "./canvas/libraries";
 
 // The onChange element list type, derived from the component so we don't
 // reach into Excalidraw's internal element type-paths.
@@ -45,6 +46,10 @@ export function WorkspaceCanvasPane({
   // Resolved app theme ("light" | "dark") maps straight onto Excalidraw's
   // ``theme`` prop so the board follows the rest of the UI.
   const theme = useThemeStore((s) => s.resolved());
+
+  // Curated network + electrical stencils, seeded into the board's library
+  // panel. Built once (the builder memoises internally too).
+  const libraryItems = useMemo(() => buildBundledLibraryItems(), []);
 
   const binding = useExcalidrawCanvas({
     excalidrawAPI,
@@ -128,6 +133,7 @@ export function WorkspaceCanvasPane({
         onPointerUpdate={binding.onPointerUpdate}
         viewModeEnabled={readOnly}
         theme={theme}
+        initialData={{ libraryItems }}
       />
     </div>
   );
