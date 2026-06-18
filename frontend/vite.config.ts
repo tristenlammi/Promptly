@@ -84,6 +84,10 @@ export default defineConfig({
       // precache list the SW consumes via ``self.__WB_MANIFEST``.
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // Don't precache Excalidraw's self-hosted fonts/locales — they're
+        // fetched lazily on demand (and the full font set is large), so
+        // baking them into the SW precache would bloat first install.
+        globIgnores: ["**/excalidraw-assets/**"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
 
@@ -117,6 +121,12 @@ export default defineConfig({
         // dependency paths (Vite hands us absolute module IDs).
         manualChunks(id: string): string | undefined {
           if (!id.includes("node_modules")) return undefined;
+          // The whiteboard editor is large and only loaded on the
+          // (lazily mounted) workspace canvas — keep it out of the main
+          // chunk. ``roughjs`` is its hand-drawn renderer.
+          if (id.includes("@excalidraw") || id.includes("roughjs")) {
+            return "excalidraw";
+          }
           if (id.includes("@tiptap") || id.includes("prosemirror")) {
             return "tiptap";
           }
