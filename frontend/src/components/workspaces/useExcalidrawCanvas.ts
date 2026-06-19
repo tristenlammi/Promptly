@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
-import {
-  reconcileElements,
-  getSceneVersion,
-  CaptureUpdateAction,
-} from "@excalidraw/excalidraw";
+import { reconcileElements, CaptureUpdateAction } from "@excalidraw/excalidraw";
 import type {
   ExcalidrawImperativeAPI,
   BinaryFileData,
@@ -20,38 +16,42 @@ import type { CollabTokenResponse } from "@/api/documents";
  * Binds an Excalidraw scene to a shared ``Y.Doc`` from a Hocuspocus
  * provider — the Excalidraw twin of the old tldraw ``useYjsCanvasStore``.
  *
- * Unlike tldraw (which takes a pre-built store), Excalidraw is driven
- * imperatively through its ``excalidrawAPI``: we seed nothing up front,
- * forward local edits via ``onChange``, and push remote edits in with
- * ``updateScene``. The collab provider, token auth, and Postgres
- * persistence are unchanged — only the editor-specific binding differs.
- *
  * Document sync (two-way, loop-free):
  *  - Elements live in a ``Y.Map<element>`` keyed by element id; image
  *    blobs in a ``Y.Map<BinaryFileData>`` keyed by file id.
- *  - Local ``onChange`` diffs by element ``version`` and writes changed
- *    elements inside a ``ydoc.transact(..., LOCAL_ORIGIN)``.
+ *  - **Change detection is value-based, never identity-based.** Excalidraw
+ *    freezes/replaces element objects as you edit, so we must NOT compare
+ *    live objects to what's in the Y.Map (that compares an object to
+ *    itself). Instead we keep a ``syncedSnapshot`` of each element's
+ *    ``version:versionNonce`` and, on change, write a **deep clone** of
+ *    any element whose signature moved. (The earlier reference-based
+ *    binding wrote each element only once — at creation, when a rectangle
+ *    is genuinely 0×0 — so peers/reloads saw "tiny dots".)
  *  - Remote Y.Map changes (``origin !== LOCAL_ORIGIN``) are merged with
  *    ``reconcileElements`` and applied via ``updateScene`` with
- *    ``CaptureUpdateAction.NEVER`` so they don't pollute the local user's
- *    undo stack.
- *  - ``getSceneVersion`` gates the local path: Excalidraw fires
- *    ``onChange`` on pure pointer/selection churn too, and we must not
- *    re-broadcast (or echo back) what didn't actually change.
+ *    ``CaptureUpdateAction.NEVER`` (kept out of the local undo stack). The
+ *    snapshot is refreshed from the applied elements so the resulting
+ *    ``onChange`` is recognised as a no-op and doesn't echo.
  *
- * Presence (live cursors) rides the provider's ``awareness``: the local
- * pointer + identity are published on ``onPointerUpdate``; remote states
- * are mirrored into the scene as Excalidraw ``collaborators``.
+ * Presence (live cursors) rides the provider's ``awareness``.
  */
 
-// Element type, derived from the API so we don't depend on Excalidraw's
-// internal element type-paths (which move between releases).
 type SceneElement = ReturnType<
   ExcalidrawImperativeAPI["getSceneElementsIncludingDeleted"]
 >[number];
 
 // Tags our own Yjs writes so the observer can skip them (no echo loop).
 const LOCAL_ORIGIN = "excalidraw-local";
+
+// Per-element change signature. Excalidraw guarantees a fresh
+// ``versionNonce`` on every mutation, so this moves whenever an element
+// actually changes — independent of object identity.
+const sig = (el: SceneElement): string => `${el.version}:${el.versionNonce}`;
+
+// Deep, unfrozen copy so Excalidraw's later in-place edits can't mutate
+// what we've handed to Yjs. Elements are JSON by design (that's how
+// Excalidraw serialises scenes), so a JSON round-trip is safe.
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 export interface ExcalidrawCanvasBinding {
   /** Wire to ``<Excalidraw onChange>``. */
@@ -65,8 +65,9 @@ export interface ExcalidrawCanvasBinding {
     pointer: { x: number; y: number; tool: "pointer" | "laser" };
     button: "down" | "up";
   }) => void;
-  /** True once the binding is live (editor interactive; remote state
-   *  streams in via the observer as it arrives). */
+  /** Clear our shared cursor (e.g. when the pointer leaves the board). */
+  clearPointer: () => void;
+  /** True once the binding is live. */
   ready: boolean;
 }
 
@@ -85,9 +86,6 @@ export function useExcalidrawCanvas({
 }): ExcalidrawCanvasBinding {
   const [ready, setReady] = useState(false);
 
-  // The stable ``onChange`` / ``onPointerUpdate`` handlers read the live
-  // binding internals through refs (the handlers are created once but the
-  // Yjs/awareness targets are recreated per effect run).
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const yElementsRef = useRef<Y.Map<SceneElement> | null>(null);
   const yFilesRef = useRef<Y.Map<BinaryFileData> | null>(null);
@@ -95,9 +93,10 @@ export function useExcalidrawCanvas({
   const awarenessRef = useRef<HocuspocusProvider["awareness"] | null>(null);
   const readyRef = useRef(false);
   const readOnlyRef = useRef(readOnly);
-  // Last scene version we've already reconciled — both the local-edit gate
-  // and the remote-apply path keep this current so neither echoes.
-  const lastSceneVersionRef = useRef<number>(-1);
+  // id -> last-synced ``version:versionNonce``. The source of truth for
+  // "did this element change", kept current by BOTH the local-write path
+  // and the remote-apply path so neither echoes the other.
+  const snapshotRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     readOnlyRef.current = readOnly;
@@ -113,6 +112,7 @@ export function useExcalidrawCanvas({
     const yElements = ydoc.getMap<SceneElement>("elements");
     const yFiles = ydoc.getMap<BinaryFileData>("files");
     const awareness = provider.awareness;
+    const snapshot = snapshotRef.current;
 
     apiRef.current = excalidrawAPI;
     yElementsRef.current = yElements;
@@ -131,7 +131,6 @@ export function useExcalidrawCanvas({
       const local = api.getSceneElementsIncludingDeleted();
       const reconciled = reconcileElements(
         local,
-        // reconcileElements brands remote elements internally — cast through.
         remote as unknown as Parameters<typeof reconcileElements>[1],
         api.getAppState()
       );
@@ -139,11 +138,9 @@ export function useExcalidrawCanvas({
         elements: reconciled,
         captureUpdate: CaptureUpdateAction.NEVER,
       });
-      // Keep the gate current so the onChange this updateScene triggers
-      // doesn't re-broadcast what we just applied.
-      lastSceneVersionRef.current = getSceneVersion(
-        api.getSceneElementsIncludingDeleted()
-      );
+      // Mark everything we just applied as already-synced so the onChange
+      // this updateScene fires doesn't re-broadcast it.
+      for (const el of reconciled) snapshot.set(el.id, sig(el));
     };
 
     const elementsObserver = (
@@ -191,9 +188,13 @@ export function useExcalidrawCanvas({
           const u = state.user as
             | { name?: string; color?: string; id?: string }
             | undefined;
+          const pointer = state.pointer as Collaborator["pointer"] | undefined;
+          // Only surface peers with a live pointer — avoids ghost cursors
+          // for idle / half-torn-down states.
+          if (!pointer) return;
           const color = u?.color;
           collaborators.set(String(clientId) as SocketId, {
-            pointer: state.pointer as Collaborator["pointer"] | undefined,
+            pointer,
             button: state.button as "up" | "down" | undefined,
             username: u?.name ?? "Anonymous",
             color: color ? { background: color, stroke: color } : undefined,
@@ -227,8 +228,6 @@ export function useExcalidrawCanvas({
       };
       provider.on("synced", onSynced);
       unsubs.push(() => provider.off("synced", onSynced));
-      // Mark ready immediately so the board is interactive while the first
-      // sync lands; remote elements stream in through the observer.
       readyRef.current = true;
       setReady(true);
     }
@@ -241,7 +240,6 @@ export function useExcalidrawCanvas({
           /* best-effort teardown */
         }
       });
-      // Drop our awareness footprint so our cursor disappears for peers.
       try {
         awareness?.setLocalState(null);
       } catch {
@@ -253,39 +251,39 @@ export function useExcalidrawCanvas({
       ydocRef.current = null;
       awarenessRef.current = null;
       readyRef.current = false;
-      lastSceneVersionRef.current = -1;
+      snapshot.clear();
       setReady(false);
     };
   }, [excalidrawAPI, ydoc, provider, user?.id, user?.name, user?.color]);
 
   // ----- scene -> Yjs (stable handler) ---------------------------------
   const onChange = useCallback(
-    (elements: readonly SceneElement[], _appState: unknown, files: BinaryFiles) => {
+    (_elements: readonly SceneElement[], _appState: unknown, files: BinaryFiles) => {
       if (!readyRef.current || readOnlyRef.current) return;
+      const api = apiRef.current;
       const yElements = yElementsRef.current;
       const yFiles = yFilesRef.current;
       const ydoc = ydocRef.current;
-      if (!yElements || !ydoc) return;
+      if (!api || !yElements || !ydoc) return;
 
-      // Gate on a real element change — onChange also fires on selection /
-      // pointer churn that never touches the synced element set.
-      const version = getSceneVersion(elements);
-      if (version === lastSceneVersionRef.current) return;
-      lastSceneVersionRef.current = version;
+      const snapshot = snapshotRef.current;
+      // Including-deleted so deletions (isDeleted=true) propagate too.
+      const all = api.getSceneElementsIncludingDeleted();
+      const changed = all.filter((el) => snapshot.get(el.id) !== sig(el));
+
+      const newFileIds = yFiles
+        ? Object.keys(files).filter((id) => !yFiles.get(id))
+        : [];
+
+      if (changed.length === 0 && newFileIds.length === 0) return;
 
       ydoc.transact(() => {
-        for (const el of elements) {
-          const existing = yElements.get(el.id);
-          if (!existing || existing.version !== el.version) {
-            yElements.set(el.id, el);
-          }
+        for (const el of changed) {
+          yElements.set(el.id, clone(el));
+          snapshot.set(el.id, sig(el));
         }
-        // New image blobs (paste/drop) ride alongside the element that
-        // references them — the element version bump got us here.
-        if (yFiles && files) {
-          for (const [id, file] of Object.entries(files)) {
-            if (!yFiles.get(id)) yFiles.set(id, file);
-          }
+        if (yFiles) {
+          for (const id of newFileIds) yFiles.set(id, clone(files[id]));
         }
       }, LOCAL_ORIGIN);
     },
@@ -298,12 +296,20 @@ export function useExcalidrawCanvas({
       button: "down" | "up";
     }) => {
       const awareness = awarenessRef.current;
-      if (!awareness) return;
+      if (!awareness || readOnlyRef.current) return;
       awareness.setLocalStateField("pointer", payload.pointer);
       awareness.setLocalStateField("button", payload.button);
     },
     []
   );
 
-  return { onChange, onPointerUpdate, ready };
+  const clearPointer = useCallback(() => {
+    const awareness = awarenessRef.current;
+    if (!awareness) return;
+    // Drop just the pointer so peers stop rendering our cursor; keep our
+    // ``user`` so we still appear in the collaborator list.
+    awareness.setLocalStateField("pointer", null);
+  }, []);
+
+  return { onChange, onPointerUpdate, clearPointer, ready };
 }
