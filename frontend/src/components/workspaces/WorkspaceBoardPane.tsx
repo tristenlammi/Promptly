@@ -34,6 +34,7 @@ import type {
   WorkspaceItemNode,
   WorkspaceTask,
 } from "@/api/workspaces";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/utils/cn";
 import { WorkspaceBoardCalendar } from "./WorkspaceBoardCalendar";
 import { WorkspaceBoardCardDetail } from "./WorkspaceBoardCardDetail";
@@ -297,6 +298,25 @@ export function WorkspaceBoardPane({
         },
       }
     );
+  };
+
+  /** Delete a card behind a confirm modal; closes its detail panel if open. */
+  const confirmDeleteTask = async (task: WorkspaceTask) => {
+    const ok = await confirm({
+      title: "Delete card",
+      message: (
+        <>
+          Delete <span className="font-medium">“{task.title || "Untitled"}”</span>?
+          This permanently removes the card and its comments, links, and
+          attachments. This can’t be undone.
+        </>
+      ),
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    remove.mutate(task.id);
+    setOpenTaskId((cur) => (cur === task.id ? null : cur));
   };
 
   /** Drop a card into a column, optionally before ``beforeTaskId`` (manual
@@ -640,7 +660,7 @@ export function WorkspaceBoardPane({
                               },
                             })
                           }
-                          onDelete={() => remove.mutate(task.id)}
+                          onDelete={() => void confirmDeleteTask(task)}
                           onOpen={() => setOpenTaskId(task.id)}
                           labels={(task.labels ?? [])
                             .map((id) => labelMap[id])
@@ -680,7 +700,7 @@ export function WorkspaceBoardPane({
           onUpdate={(payload) =>
             update.mutate({ taskId: openTask.id, payload })
           }
-          onDelete={() => remove.mutate(openTask.id)}
+          onDelete={() => void confirmDeleteTask(openTask)}
         />
       )}
     </section>

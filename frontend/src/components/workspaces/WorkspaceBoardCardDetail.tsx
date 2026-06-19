@@ -400,10 +400,7 @@ export function WorkspaceBoardCardDetail({
           <div className="flex justify-end border-t border-[var(--border)] p-3">
             <button
               type="button"
-              onClick={() => {
-                onDelete();
-                onClose();
-              }}
+              onClick={onDelete}
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500"
             >
               <Trash2 className="h-4 w-4" />
