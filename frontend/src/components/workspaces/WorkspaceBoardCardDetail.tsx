@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   FileText,
@@ -81,6 +81,7 @@ export function WorkspaceBoardCardDetail({
   columns,
   linkables,
   onOpenItem,
+  autoFocusTitle,
   onClose,
   onUpdate,
   onDelete,
@@ -97,11 +98,23 @@ export function WorkspaceBoardCardDetail({
   linkables: WorkspaceItemNode[];
   /** Open a linked item inline (closes this modal first). */
   onOpenItem?: (node: WorkspaceItemNode) => void;
+  /** Focus + select the title on mount — set when the card was just created
+   *  via the column "+" so the placeholder title is ready to overwrite. */
+  autoFocusTitle?: boolean;
   onClose: () => void;
   onUpdate: (payload: WorkspaceTaskUpdatePayload) => void;
   onDelete: () => void;
 }) {
   const [title, setTitle] = useState(task.title);
+  const titleRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (autoFocusTitle) {
+      titleRef.current?.focus();
+      titleRef.current?.select();
+    }
+    // Run once on mount for a freshly-created card.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [description, setDescription] = useState(task.description ?? "");
   const subtasks: Subtask[] = task.subtasks ?? [];
   const [newSub, setNewSub] = useState("");
@@ -139,6 +152,7 @@ export function WorkspaceBoardCardDetail({
         {/* Header */}
         <div className="flex items-start gap-2 border-b border-[var(--border)] p-4">
           <input
+            ref={titleRef}
             value={title}
             disabled={!canEdit}
             onChange={(e) => setTitle(e.target.value)}

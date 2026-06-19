@@ -152,13 +152,12 @@ export function WorkspaceBoardPane({
 
   const [view, setView] = useState<"board" | "calendar">("board");
   const [sortKey, setSortKey] = useState<SortKey>("manual");
-  // Inline new-card composer — which column id is currently composing (null
-  // when closed) and the in-progress title.
-  const [addingCol, setAddingCol] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // Set to a card's id right after the "+" creates it so the detail panel
+  // can focus + select the placeholder title for immediate renaming.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [managingCols, setManagingCols] = useState(false);
 
   // Filters (client-side over the loaded task list).
@@ -283,14 +282,18 @@ export function WorkspaceBoardPane({
     boardItem?.config?.columns,
   ]);
 
-  /** Create a card in ``colId`` from the inline composer. Keeps the composer
-   *  open + cleared for rapid entry. */
+  /** Create a placeholder card in ``colId`` and open its detail panel so the
+   *  user edits it in full (title pre-selected for renaming). */
   const addTask = (colId: string) => {
-    const title = draft.trim();
-    if (!title || create.isPending) return;
+    if (create.isPending) return;
     create.mutate(
-      { title, status: colId, board_item_id: boardItemId },
-      { onSuccess: () => setDraft("") }
+      { title: "Untitled", status: colId, board_item_id: boardItemId },
+      {
+        onSuccess: (newTask) => {
+          setJustCreatedId(newTask.id);
+          setOpenTaskId(newTask.id);
+        },
+      }
     );
   };
 
@@ -574,61 +577,24 @@ export function WorkspaceBoardPane({
                       <button
                         type="button"
                         title="New item"
-                        onClick={() => {
-                          setDraft("");
-                          setAddingCol(col.id);
-                        }}
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-orange-500 text-white transition hover:bg-orange-600"
+                        disabled={create.isPending}
+                        onClick={() => addTask(col.id)}
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-[var(--accent)] text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
                       >
-                        <Plus className="h-3.5 w-3.5" />
+                        {create.isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Plus className="h-3.5 w-3.5" />
+                        )}
                       </button>
                     )}
                   </div>
                 </div>
                 <div className="flex min-h-[56px] flex-1 flex-col gap-2 px-2 pb-3">
-                  {canEdit && addingCol === col.id && (
-                    <div className="flex items-center gap-2 rounded-md border border-[var(--accent)] bg-[var(--bg)] px-2 py-1.5">
-                      <input
-                        autoFocus
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addTask(col.id);
-                          } else if (e.key === "Escape") {
-                            setAddingCol(null);
-                            setDraft("");
-                          }
-                        }}
-                        onBlur={() => {
-                          if (!draft.trim()) setAddingCol(null);
-                        }}
-                        placeholder="Card title — Enter to add…"
-                        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
-                      />
-                      {create.isPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-[var(--text-muted)]" />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAddingCol(null);
-                            setDraft("");
-                          }}
-                          className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  )}
                   {colTasks.length === 0 ? (
-                    addingCol === col.id ? null : (
-                      <p className="px-1 py-2 text-xs text-[var(--text-muted)]">
-                        No tasks
-                      </p>
-                    )
+                    <p className="px-1 py-2 text-xs text-[var(--text-muted)]">
+                      No tasks
+                    </p>
                   ) : (
                     colTasks.map((task) => (
                       <div
@@ -704,7 +670,11 @@ export function WorkspaceBoardPane({
           columns={boardColumns}
           linkables={linkables}
           onOpenItem={onOpenItem}
-          onClose={() => setOpenTaskId(null)}
+          autoFocusTitle={openTask.id === justCreatedId}
+          onClose={() => {
+            setOpenTaskId(null);
+            setJustCreatedId(null);
+          }}
           onUpdate={(payload) =>
             update.mutate({ taskId: openTask.id, payload })
           }
