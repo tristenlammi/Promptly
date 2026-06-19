@@ -35,6 +35,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -160,7 +161,7 @@ async def index_file_for_workspace(
             # retrieval simply ignores them.
             vision_candidate = not is_text_extractable(file)
 
-            current_hash = file_content_hash(file)
+            current_hash = await run_in_threadpool(file_content_hash, file)
             pivot = await db.get(WorkspaceFile, (workspace_id, file_id))
             if (
                 not force
@@ -365,7 +366,7 @@ async def index_note_for_workspace(
             if not (file.content_text or "").strip():
                 return
 
-            current_hash = file_content_hash(file)
+            current_hash = await run_in_threadpool(file_content_hash, file)
             if (
                 not force
                 and item.indexed_content_hash == current_hash
@@ -478,7 +479,7 @@ async def index_canvas_for_workspace(
                 )
                 return
 
-            current_hash = file_content_hash(file)
+            current_hash = await run_in_threadpool(file_content_hash, file)
             if (
                 not force
                 and item.indexed_content_hash == current_hash

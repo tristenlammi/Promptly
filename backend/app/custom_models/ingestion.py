@@ -24,6 +24,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -192,7 +193,10 @@ async def embed_file_to_chunks(
     unsupported / empty files and ``RuntimeError`` when the provider
     returns the wrong vector count or dimension.
     """
-    raw_text = extract_text_for_embedding(file)  # raises ValueError
+    # PDF parsing / large file reads are CPU- and I/O-bound; run them in a
+    # worker thread so a big document doesn't freeze the event loop (and
+    # stall every other request, including chat streaming).
+    raw_text = await run_in_threadpool(extract_text_for_embedding, file)
     return await embed_text_to_chunks(
         raw_text, provider=provider, model_id=model_id, dim=dim
     )
@@ -319,7 +323,7 @@ async def index_file_for_custom_model(
             # Hash short-circuit: skip the embed work entirely when
             # the file bytes haven't changed since the last successful
             # index. Saves a non-trivial cost on re-attaches.
-            current_hash = file_content_hash(file)
+            current_hash = await run_in_threadpool(file_content_hash, file)
             pivot = await db.get(CustomModelFile, (custom_model_id, user_file_id))
             if (
                 not force
