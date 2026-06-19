@@ -3,6 +3,7 @@ import {
   Check,
   Download,
   FileText,
+  Globe,
   Layers,
   LayoutGrid,
   Link2,
@@ -718,14 +719,32 @@ function kindMeta(kind: string): { Icon: typeof FileText; label: string } {
       return { Icon: MessageSquare, label: "Chat" };
     case "board":
       return { Icon: LayoutGrid, label: "Board" };
+    case "url":
+      return { Icon: Globe, label: "URL" };
     default:
       return { Icon: FileText, label: "Item" };
   }
 }
 
+/** Loose URL sniff for the link composer — true for http(s) and bare
+ *  ``example.com/x`` style inputs. */
+function looksLikeUrl(s: string): boolean {
+  const t = s.trim();
+  if (/^https?:\/\/\S+$/i.test(t)) return true;
+  return /^[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(t);
+}
+
+/** Normalise a typed URL to an absolute href (adds https:// if missing). */
+function normalizeUrl(s: string): string {
+  const t = s.trim();
+  return /^https?:\/\//i.test(t) ? t : `https://${t}`;
+}
+
+const genUrlId = () => "url_" + Math.random().toString(36).slice(2, 10);
+
 /** Reconstruct a navigator node from a stored link so click-through works
  *  even if the live tree hasn't loaded (mirrors the note wiki-link fallback). */
-function linkToNode(link: TaskLink): WorkspaceItemNode {
+export function linkToNode(link: TaskLink): WorkspaceItemNode {
   return {
     id: link.item_id,
     kind: link.kind as WorkspaceItemNode["kind"],
@@ -736,6 +755,19 @@ function linkToNode(link: TaskLink): WorkspaceItemNode {
     indexing_status: null,
     children: [],
   };
+}
+
+/** Open a card link: external URLs in a new tab, navigator items inline
+ *  via ``onOpenItem``. Shared by the detail panel and the board card face. */
+export function openTaskLink(
+  link: TaskLink,
+  onOpenItem?: (node: WorkspaceItemNode) => void
+): void {
+  if (link.kind === "url" && link.url) {
+    window.open(link.url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  onOpenItem?.(linkToNode(link));
 }
 
 /**
@@ -774,7 +806,17 @@ function LinksSection({
         kind: node.kind,
         ref_id: node.ref_id,
         title: node.title,
+        url: null,
       },
+    ]);
+    setQuery("");
+    setAdding(false);
+  };
+  const addUrl = () => {
+    const url = normalizeUrl(query);
+    onChange([
+      ...links,
+      { item_id: genUrlId(), kind: "url", ref_id: null, title: url, url },
     ]);
     setQuery("");
     setAdding(false);
@@ -802,7 +844,7 @@ function LinksSection({
 
       {links.length === 0 && !adding && (
         <span className="text-xs text-[var(--text-muted)]">
-          No links yet{canEdit ? " — link a note, chat, canvas or board." : "."}
+          No links yet{canEdit ? " — link a note, chat, board, or a URL." : "."}
         </span>
       )}
 
@@ -810,13 +852,19 @@ function LinksSection({
         {links.map((l) => {
           const { Icon } = kindMeta(l.kind);
           const fresh = linkables.find((n) => n.id === l.item_id);
-          const title = fresh?.title || l.title || "Untitled";
+          const isUrl = l.kind === "url";
+          const title =
+            fresh?.title || l.title || (isUrl ? l.url : "") || "Untitled";
           return (
             <div key={l.item_id} className="group flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => onOpen(fresh ?? linkToNode(l))}
-                title={`Open ${title}`}
+                onClick={() => {
+                  if (isUrl && l.url)
+                    window.open(l.url, "_blank", "noopener,noreferrer");
+                  else onOpen(fresh ?? linkToNode(l));
+                }}
+                title={isUrl ? l.url ?? title : `Open ${title}`}
                 className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-left text-sm text-[var(--text)] transition hover:border-[var(--accent)]"
               >
                 <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
@@ -846,8 +894,12 @@ function LinksSection({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setAdding(false);
+                else if (e.key === "Enter" && looksLikeUrl(query)) {
+                  e.preventDefault();
+                  addUrl();
+                }
               }}
-              placeholder="Search items to link…"
+              placeholder="Search items, or paste a URL…"
               className="min-w-0 flex-1 bg-transparent px-1 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
             />
             <button
@@ -862,11 +914,26 @@ function LinksSection({
             </button>
           </div>
           <div className="max-h-48 overflow-y-auto">
-            {options.length === 0 ? (
+            {looksLikeUrl(query) && (
+              <button
+                type="button"
+                onClick={addUrl}
+                className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]"
+              >
+                <Globe className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                <span className="min-w-0 flex-1 truncate">
+                  Link to {normalizeUrl(query)}
+                </span>
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                  URL
+                </span>
+              </button>
+            )}
+            {options.length === 0 && !looksLikeUrl(query) ? (
               <p className="px-1 py-1.5 text-xs text-[var(--text-muted)]">
                 {linkables.length === 0
-                  ? "Nothing to link yet."
-                  : "No matches."}
+                  ? "Nothing to link yet — or paste a URL."
+                  : "No matches — paste a URL to link it."}
               </p>
             ) : (
               options.map((n) => {

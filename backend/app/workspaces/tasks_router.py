@@ -94,6 +94,9 @@ class TaskLink(BaseModel):
     kind: str = Field(min_length=1, max_length=32)
     ref_id: str | None = Field(default=None, max_length=64)
     title: str = Field(default="", max_length=500)
+    # External URL links carry ``kind="url"`` and the href here; navigator
+    # links leave it null.
+    url: str | None = Field(default=None, max_length=2000)
 
 
 class TaskAttachment(BaseModel):

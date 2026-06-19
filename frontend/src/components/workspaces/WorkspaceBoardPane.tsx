@@ -5,12 +5,14 @@ import {
   Check,
   Clock,
   Columns3,
+  Globe,
   LayoutGrid,
   Link2,
   Loader2,
   Paperclip,
   Plus,
   Search,
+  Settings,
   Square,
   Trash2,
   X,
@@ -26,10 +28,12 @@ import {
   useWorkspaceTasks,
   useWorkspaceTree,
 } from "@/hooks/useWorkspaces";
+import { filesApi } from "@/api/files";
 import type {
   BoardColumn,
   BoardLabel,
   BoardMember,
+  TaskLink,
   TaskPriority,
   WorkspaceItemNode,
   WorkspaceTask,
@@ -37,7 +41,10 @@ import type {
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/utils/cn";
 import { WorkspaceBoardCalendar } from "./WorkspaceBoardCalendar";
-import { WorkspaceBoardCardDetail } from "./WorkspaceBoardCardDetail";
+import {
+  WorkspaceBoardCardDetail,
+  openTaskLink,
+} from "./WorkspaceBoardCardDetail";
 import { WorkspaceFileImage } from "./WorkspaceFileImage";
 
 /**
@@ -693,6 +700,7 @@ export function WorkspaceBoardPane({
                           canEdit={canEdit}
                           density={density}
                           dragging={dragId === task.id}
+                          onOpenItem={onOpenItem}
                           onToggleSubtask={(subId) => {
                             const next = (task.subtasks ?? []).map((s) =>
                               s.id === subId ? { ...s, done: !s.done } : s
@@ -915,6 +923,7 @@ function BoardCard({
   dragging,
   labels,
   assignee,
+  onOpenItem,
   onToggleSubtask,
   onDragStart,
   onDragEnd,
@@ -928,11 +937,13 @@ function BoardCard({
   dragging: boolean;
   labels: BoardLabel[];
   assignee?: BoardMember;
+  onOpenItem?: (node: WorkspaceItemNode) => void;
   onToggleSubtask: (subId: string) => void;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
   onCyclePriority: () => void;
   onDelete: () => void;
+  /** Open the full edit panel (now via the cog, not a card-body click). */
   onOpen: () => void;
 }) {
   const prio = PRIORITY_META[task.priority];
@@ -952,9 +963,9 @@ function BoardCard({
       draggable={canEdit}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      onClick={onOpen}
       className={cn(
-        "group cursor-pointer overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-sm transition hover:border-[var(--accent)]",
+        "group overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-sm transition hover:border-[var(--accent)]",
+        canEdit && "cursor-grab active:cursor-grabbing",
         dragging && "opacity-40"
       )}
     >
@@ -1101,33 +1112,66 @@ function BoardCard({
 
         {full && links.length > 0 && (
           <div className="mt-2 flex flex-col gap-0.5 pl-[18px]">
-            {links.map((l) => (
-              <span
-                key={l.item_id}
-                className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]"
-              >
-                <Link2 className="h-3 w-3 shrink-0" />
-                <span className="min-w-0 truncate">
-                  {l.title || "Untitled"}
-                </span>
-              </span>
-            ))}
+            {links.map((l) => {
+              const isUrl = l.kind === "url";
+              const LinkIcon = isUrl ? Globe : Link2;
+              return (
+                <button
+                  key={l.item_id}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openTaskLink(l as TaskLink, onOpenItem);
+                  }}
+                  title={isUrl ? l.url ?? l.title : `Open ${l.title}`}
+                  className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--text-muted)] transition hover:text-[var(--accent)]"
+                >
+                  <LinkIcon className="h-3 w-3 shrink-0" />
+                  <span className="min-w-0 truncate underline-offset-2 hover:underline">
+                    {l.title || l.url || "Untitled"}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
 
         {full && attachments.length > 0 && (
           <div className="mt-2 flex flex-col gap-0.5 pl-[18px]">
             {attachments.map((a) => (
-              <span
+              <a
                 key={a.file_id}
-                className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]"
+                href={filesApi.downloadUrl(a.file_id)}
+                target="_blank"
+                rel="noreferrer"
+                draggable={false}
+                onClick={(e) => e.stopPropagation()}
+                title={`Open ${a.filename || "file"}`}
+                className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] transition hover:text-[var(--accent)]"
               >
                 <Paperclip className="h-3 w-3 shrink-0" />
-                <span className="min-w-0 truncate">{a.filename || "File"}</span>
-              </span>
+                <span className="min-w-0 truncate underline-offset-2 hover:underline">
+                  {a.filename || "File"}
+                </span>
+              </a>
             ))}
           </div>
         )}
+
+        {/* Edit cog — opens the full detail panel (card body is inert). */}
+        <div className="mt-1.5 flex justify-end">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+            title="Edit card"
+            className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );

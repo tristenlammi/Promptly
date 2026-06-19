@@ -216,6 +216,9 @@ export interface TaskLink {
   kind: string;
   ref_id: string | null;
   title: string;
+  /** External URL links carry ``kind === "url"`` and the href here;
+   *  navigator-item links leave it null. */
+  url?: string | null;
 }
 
 /** A file attached to a card. ``file_id`` references a ``UserFile``; an image
