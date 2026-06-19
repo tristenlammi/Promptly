@@ -1,0 +1,12 @@
+Bundled Excalidraw library packs — attributions
+================================================
+
+These .excalidrawlib files are from the community catalogue
+(https://github.com/excalidraw/excalidraw-libraries), MIT License,
+Copyright (c) 2020 Excalidraw and the individual library authors.
+
+- basic-shapes.excalidrawlib   "Basic shapes"                 by Pablo Gil Fernández (pgilfernandez)
+- sticky-notes.excalidrawlib   "Sticky Notes"                 by ferminrp
+- uml-er.excalidrawlib         "Shapes for UML & ER Diagrams" by BjoernKW
+
+Source: https://libraries.excalidraw.com
