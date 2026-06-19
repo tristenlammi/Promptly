@@ -388,18 +388,28 @@ async def embed_texts(
     if not cleaned:
         return []
     client: AsyncOpenAI = _client_for(provider)
-    # The OpenAI SDK accepts ``input`` as a list and returns an
-    # ordered ``data`` list. We don't bother reordering by ``index``
-    # because all current providers return them in submission order;
-    # the ``[d.embedding for d in resp.data]`` comprehension just
-    # mirrors the input ordering.
-    resp = await client.embeddings.create(
-        model=model_id,
-        input=cleaned,
-        # ``dimensions`` is omitted entirely when None so providers
-        # that don't accept the field don't receive an unexpected key.
-        **({"dimensions": dimensions} if dimensions is not None else {}),
-    )
+    # Fairness gate: interactive query embeds (retrieval) take priority so a
+    # bulk background re-index can't make a workspace chat hang waiting for
+    # its query embedding. Background (indexing) calls tag themselves via
+    # ``embedding_gate.mark_background()`` and yield here.
+    from app.custom_models import embedding_gate
+
+    lease = await embedding_gate.acquire()
+    try:
+        # The OpenAI SDK accepts ``input`` as a list and returns an
+        # ordered ``data`` list. We don't bother reordering by ``index``
+        # because all current providers return them in submission order;
+        # the ``[d.embedding for d in resp.data]`` comprehension just
+        # mirrors the input ordering.
+        resp = await client.embeddings.create(
+            model=model_id,
+            input=cleaned,
+            # ``dimensions`` is omitted entirely when None so providers
+            # that don't accept the field don't receive an unexpected key.
+            **({"dimensions": dimensions} if dimensions is not None else {}),
+        )
+    finally:
+        await embedding_gate.release(lease)
     return [list(d.embedding) for d in resp.data]
 
 

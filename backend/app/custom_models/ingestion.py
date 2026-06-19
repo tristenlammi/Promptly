@@ -217,6 +217,13 @@ async def embed_text_to_chunks(
     transcript). Same contract: raises ``ValueError`` for empty input and
     ``RuntimeError`` on a provider dim/count mismatch.
     """
+    # Every indexing embed funnels through here (retrieval's query embed
+    # calls ``embed_texts`` directly), so tag this task as background so
+    # the fairness gate yields the embedder to interactive query embeds.
+    from app.custom_models import embedding_gate
+
+    embedding_gate.mark_background()
+
     normalised = normalise_for_embedding(raw_text)
     if not normalised:
         raise ValueError("no extractable text content")

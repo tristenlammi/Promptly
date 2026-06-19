@@ -253,6 +253,14 @@ services:
       # start. Mirrored from the backend env so a single env var
       # controls both sides.
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
+      # Serve more than one request at a time. Without this Ollama
+      # serialises requests to a model, so a bulk background re-index
+      # monopolises the embedder and an interactive workspace chat —
+      # which embeds its query here for RAG retrieval before calling
+      # the (possibly cloud) chat model — queues behind it and appears
+      # to hang. With 2+ lanes the tiny query embed runs alongside the
+      # index batch and returns immediately.
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
     ports:
       # Only this port is published; the backend reaches Ollama
       # over the internal docker network on the unmapped 11434.
@@ -308,6 +316,9 @@ services:
       - OLLAMA_HOST=0.0.0.0:11434
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
+      # See the CPU service above — keep interactive query embeds from
+      # queuing behind a bulk background re-index.
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
     ports:
       - "${OLLAMA_HOST_PORT:-11435}:11434"
     volumes:
