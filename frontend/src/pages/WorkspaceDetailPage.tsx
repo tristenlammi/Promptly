@@ -14,7 +14,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  Columns3,
   FileText,
   FolderX,
   Home,
@@ -47,7 +46,6 @@ const WorkspaceCanvasPane = lazy(() =>
   }))
 );
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
-import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -90,7 +88,6 @@ export function WorkspaceDetailPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [boardOpen, setBoardOpen] = useState(false);
 
   // Persist the open item(s) in the URL so a refresh restores the view
   // instead of dropping back to the workspace home. ``item`` is the primary
@@ -168,7 +165,6 @@ export function WorkspaceDetailPage() {
   // Everything — chats included — opens inline in the main pane so the
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
-    setBoardOpen(false);
     // Avoid the same item on both sides of a split.
     if (secondary && secondary.id === node.id) setSecondary(null);
     setSelected(node);
@@ -179,7 +175,6 @@ export function WorkspaceDetailPage() {
   // normally on the left.
   const handleOpenToSide = (node: WorkspaceItemNode) => {
     if (node.kind === "folder") return;
-    setBoardOpen(false);
     if (!selected) {
       setSelected(node);
       return;
@@ -251,26 +246,13 @@ export function WorkspaceDetailPage() {
               </Button>
             )}
             <Button
-              variant={boardOpen ? "primary" : "ghost"}
-              leftIcon={<Columns3 className="h-4 w-4" />}
-              onClick={() => {
-                setBoardOpen(true);
-                setSelected(null);
-                setSecondary(null);
-              }}
-              title="Board — the workspace's task board"
-            >
-              <span className="hidden sm:inline">Board</span>
-            </Button>
-            <Button
-              variant={!selected && !boardOpen ? "primary" : "ghost"}
+              variant={!selected ? "primary" : "ghost"}
               leftIcon={<Home className="h-4 w-4" />}
               onClick={() => {
-                setBoardOpen(false);
                 setSelected(null);
                 setSecondary(null);
               }}
-              title="Workspace home — overview, tasks, and recent items"
+              title="Workspace home — overview, board, and recent items"
             >
               <span className="hidden sm:inline">Home</span>
             </Button>
@@ -317,15 +299,10 @@ export function WorkspaceDetailPage() {
           <main
             className={
               "flex min-w-0 flex-1 flex-col " +
-              (secondary || boardOpen ? "overflow-hidden" : "overflow-y-auto")
+              (secondary ? "overflow-hidden" : "overflow-y-auto")
             }
           >
-            {boardOpen ? (
-              <WorkspaceBoardPane
-                workspaceId={id}
-                canEdit={canEdit && !isArchived}
-              />
-            ) : secondary && selected ? (
+            {secondary && selected ? (
               // Split screen — primary on the left, secondary on the right,
               // with a draggable gutter. The chat side defaults narrower
               // (chats cap their own width, so a full half wastes space);
@@ -387,11 +364,6 @@ export function WorkspaceDetailPage() {
                 workspaceId={id}
                 workspaceTitle={workspace.title}
                 onOpenItem={handleSelect}
-                onOpenBoard={() => {
-                  setBoardOpen(true);
-                  setSelected(null);
-                  setSecondary(null);
-                }}
                 onCloseNote={() => setSelected(null)}
                 isArchived={isArchived}
                 isOwner={isOwner}
@@ -501,7 +473,6 @@ function WorkspaceMainPane({
   workspaceId,
   workspaceTitle,
   onOpenItem,
-  onOpenBoard,
   onCloseNote,
   isArchived,
   isOwner,
@@ -517,7 +488,6 @@ function WorkspaceMainPane({
   workspaceId: string;
   workspaceTitle: string;
   onOpenItem: (node: WorkspaceItemNode) => void;
-  onOpenBoard: () => void;
   onCloseNote: () => void;
   isArchived: boolean;
   isOwner: boolean;
@@ -545,7 +515,7 @@ function WorkspaceMainPane({
   // recent), preceded by any archive/share banners.
   return (
     <div className="w-full">
-      <div className="mx-auto w-full max-w-3xl px-6 pt-6 empty:hidden">
+      <div className="mx-auto w-full max-w-4xl px-6 pt-6 empty:hidden">
       {isArchived && (
         <div className="mb-4 flex items-center justify-between gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3 text-xs">
           <span className="inline-flex items-center gap-2 text-[var(--text-muted)]">
@@ -629,7 +599,6 @@ function WorkspaceMainPane({
         workspaceId={workspaceId}
         title={workspaceTitle}
         onOpenItem={onOpenItem}
-        onOpenBoard={onOpenBoard}
         canEdit={canEdit && !isArchived}
       />
     </div>
