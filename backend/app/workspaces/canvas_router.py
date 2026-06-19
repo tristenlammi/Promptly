@@ -294,13 +294,13 @@ async def update_canvas_text(
 # ---------------------------------------------------------------------
 _MAX_BG_IMAGE_BYTES = 25 * 1024 * 1024  # 25 MB upload guard
 
-# Which rembg model to use. Defaults to ``birefnet-general`` — the
-# highest-quality model (best on fine / complex edges), ~1 GB, pre-baked
-# into the image so first use is offline. Override with the ``REMBG_MODEL``
-# env var for a lighter/faster model on constrained hardware, e.g.
-# ``isnet-general-use`` (~176 MB) or ``u2netp`` (~5 MB). CPU-only by design
-# so it runs anywhere; a few seconds per image.
-_MODEL_NAME = os.environ.get("REMBG_MODEL", "birefnet-general")
+# Which rembg model to use. Defaults to ``isnet-general-use`` — crisp edges,
+# ~176 MB, fast on CPU, pre-baked so first use is offline and there's no
+# slow model-load on the first request. Override with the ``REMBG_MODEL``
+# env var, e.g. ``birefnet-general`` for top quality on capable hardware
+# (~1 GB, slower, downloads on first use) or ``u2netp`` (~5 MB) for a
+# minimal footprint. CPU-only by design so it runs anywhere.
+_MODEL_NAME = os.environ.get("REMBG_MODEL", "isnet-general-use")
 
 # Built once on first request (loads the model into memory), then reused.
 _rembg_session = None

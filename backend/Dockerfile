@@ -26,11 +26,11 @@ RUN pip install -r requirements.txt
 # "Remove background" request doesn't reach out to the network (keeps the
 # feature self-contained / offline). U2NET_HOME is rembg's model cache dir
 # (all models, despite the name). REMBG_MODEL selects the model and
-# persists to runtime; default is birefnet-general (top quality, ~1 GB —
-# the bulk of this image's size). Override (env/build-arg) with a lighter
-# model (e.g. isnet-general-use, u2netp) for smaller/faster deployments.
+# persists to runtime; default is isnet-general-use (~176 MB, crisp edges,
+# fast on CPU). Override (env/build-arg) with birefnet-general for top
+# quality (~1 GB, slower) or u2netp (~5 MB) for a minimal image.
 ENV U2NET_HOME=/app/.u2net \
-    REMBG_MODEL=birefnet-general
+    REMBG_MODEL=isnet-general-use
 RUN python -c "import os; from rembg import new_session; new_session(os.environ['REMBG_MODEL'])"
 
 # ---- Development target (hot reload via volume mount) ----
