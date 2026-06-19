@@ -846,6 +846,15 @@ def _flatten_board(
         desc = (t.description or "").strip()
         if desc:
             line += f" Description: {desc[:1000]}"
+        links = t.links or []
+        if links:
+            names = [
+                str(lk.get("title")).strip()
+                for lk in links
+                if isinstance(lk, dict) and str(lk.get("title") or "").strip()
+            ]
+            if names:
+                line += " Linked: " + ", ".join(names)
         subs = t.subtasks or []
         if subs:
             done_n = sum(1 for s in subs if s.get("done"))

@@ -208,6 +208,16 @@ export interface Subtask {
   done: boolean;
 }
 
+/** A card → navigator-item reference. ``item_id`` is the tree node id;
+ *  ``ref_id`` is what it opens by (doc id for a note, conversation id for a
+ *  chat). ``title`` is denormalised for display. */
+export interface TaskLink {
+  item_id: string;
+  kind: string;
+  ref_id: string | null;
+  title: string;
+}
+
 /** A workspace member that can be assigned to a card. */
 export interface BoardMember {
   id: string;
@@ -234,6 +244,7 @@ export interface WorkspaceTask {
   description: string | null;
   subtasks: Subtask[] | null;
   labels: string[] | null;
+  links: TaskLink[] | null;
   assignee_user_id: string | null;
   done: boolean;
   status: TaskStatus;
@@ -263,6 +274,7 @@ export interface WorkspaceTaskUpdatePayload {
   description?: string | null;
   subtasks?: Subtask[] | null;
   labels?: string[] | null;
+  links?: TaskLink[] | null;
   assignee_user_id?: string | null;
 }
 

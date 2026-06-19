@@ -7,6 +7,7 @@ import {
   Clock,
   Columns3,
   LayoutGrid,
+  Link2,
   Loader2,
   Plus,
   Search,
@@ -22,12 +23,14 @@ import {
   useWorkspace,
   useWorkspaceItem,
   useWorkspaceTasks,
+  useWorkspaceTree,
 } from "@/hooks/useWorkspaces";
 import type {
   BoardColumn,
   BoardLabel,
   BoardMember,
   TaskPriority,
+  WorkspaceItemNode,
   WorkspaceTask,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
@@ -130,14 +133,18 @@ export function WorkspaceBoardPane({
   workspaceId,
   boardItemId,
   canEdit,
+  onOpenItem,
 }: {
   workspaceId: string;
   boardItemId: string;
   canEdit: boolean;
+  /** Open another navigator item inline (used by card links). */
+  onOpenItem?: (node: WorkspaceItemNode) => void;
 }) {
   const { data: tasks, isLoading } = useWorkspaceTasks(workspaceId, boardItemId);
   const { data: boardItem } = useWorkspaceItem(workspaceId, boardItemId);
   const { data: workspace } = useWorkspace(workspaceId);
+  const { data: tree } = useWorkspaceTree(workspaceId);
   const create = useCreateWorkspaceTask(workspaceId);
   const update = useUpdateWorkspaceTask(workspaceId);
   const remove = useDeleteWorkspaceTask(workspaceId);
@@ -145,6 +152,9 @@ export function WorkspaceBoardPane({
 
   const [view, setView] = useState<"board" | "calendar">("board");
   const [sortKey, setSortKey] = useState<SortKey>("manual");
+  // Inline new-card composer — which column id is currently composing (null
+  // when closed) and the in-progress title.
+  const [addingCol, setAddingCol] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<string | null>(null);
@@ -177,6 +187,24 @@ export function WorkspaceBoardPane({
     () => Object.fromEntries(members.map((m) => [m.id, m])),
     [members]
   );
+
+  // Flatten the tree into linkable targets (everything but folders, and not
+  // this board itself) for the card detail's link picker.
+  const linkables = useMemo(() => {
+    const out: WorkspaceItemNode[] = [];
+    const walk = (nodes: WorkspaceItemNode[]) => {
+      for (const n of nodes) {
+        if (n.kind === "folder") {
+          walk(n.children);
+        } else {
+          if (n.id !== boardItemId) out.push(n);
+          if (n.children.length) walk(n.children);
+        }
+      }
+    };
+    walk(tree ?? []);
+    return out;
+  }, [tree, boardItemId]);
 
   const labels: BoardLabel[] = boardItem?.config?.labels ?? [];
   const labelMap = useMemo(
@@ -255,11 +283,13 @@ export function WorkspaceBoardPane({
     boardItem?.config?.columns,
   ]);
 
-  const addTask = () => {
+  /** Create a card in ``colId`` from the inline composer. Keeps the composer
+   *  open + cleared for rapid entry. */
+  const addTask = (colId: string) => {
     const title = draft.trim();
     if (!title || create.isPending) return;
     create.mutate(
-      { title, status: firstColId, board_item_id: boardItemId },
+      { title, status: colId, board_item_id: boardItemId },
       { onSuccess: () => setDraft("") }
     );
   };
@@ -366,28 +396,6 @@ export function WorkspaceBoardPane({
           )}
         </div>
       </div>
-
-      {/* Add row */}
-      {canEdit && (
-        <div className="mb-3 flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5">
-          <Plus className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addTask();
-              }
-            }}
-            placeholder="Add a task and press Enter…"
-            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
-          />
-          {create.isPending && (
-            <Loader2 className="h-4 w-4 animate-spin text-[var(--text-muted)]" />
-          )}
-        </div>
-      )}
 
       {/* Filter bar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -544,29 +552,83 @@ export function WorkspaceBoardPane({
                     : "border-[var(--border)]"
                 )}
               >
-                <div className="flex items-center justify-between px-3 py-2">
+                <div className="flex items-center justify-between gap-2 px-3 py-2">
                   <span className="truncate text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                     {col.name}
                   </span>
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 text-[11px]",
-                      overWip
-                        ? "bg-red-500/15 text-red-500"
-                        : "bg-[var(--hover)] text-[var(--text-muted)]"
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 text-[11px]",
+                        overWip
+                          ? "bg-red-500/15 text-red-500"
+                          : "bg-[var(--hover)] text-[var(--text-muted)]"
+                      )}
+                    >
+                      {colTasks.length}
+                      {typeof col.wip === "number" && col.wip > 0
+                        ? `/${col.wip}`
+                        : ""}
+                    </span>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        title="New item"
+                        onClick={() => {
+                          setDraft("");
+                          setAddingCol(col.id);
+                        }}
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-orange-500 text-white transition hover:bg-orange-600"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
                     )}
-                  >
-                    {colTasks.length}
-                    {typeof col.wip === "number" && col.wip > 0
-                      ? `/${col.wip}`
-                      : ""}
-                  </span>
+                  </div>
                 </div>
                 <div className="flex min-h-[56px] flex-1 flex-col gap-2 px-2 pb-3">
+                  {canEdit && addingCol === col.id && (
+                    <div className="flex items-center gap-2 rounded-md border border-[var(--accent)] bg-[var(--bg)] px-2 py-1.5">
+                      <input
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addTask(col.id);
+                          } else if (e.key === "Escape") {
+                            setAddingCol(null);
+                            setDraft("");
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!draft.trim()) setAddingCol(null);
+                        }}
+                        placeholder="Card title — Enter to add…"
+                        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+                      />
+                      {create.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-[var(--text-muted)]" />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddingCol(null);
+                            setDraft("");
+                          }}
+                          className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {colTasks.length === 0 ? (
-                    <p className="px-1 py-2 text-xs text-[var(--text-muted)]">
-                      No tasks
-                    </p>
+                    addingCol === col.id ? null : (
+                      <p className="px-1 py-2 text-xs text-[var(--text-muted)]">
+                        No tasks
+                      </p>
+                    )
                   ) : (
                     colTasks.map((task) => (
                       <div
@@ -640,6 +702,8 @@ export function WorkspaceBoardPane({
           onLabelsChange={onLabelsChange}
           members={members}
           columns={boardColumns}
+          linkables={linkables}
+          onOpenItem={onOpenItem}
           onClose={() => setOpenTaskId(null)}
           onUpdate={(payload) =>
             update.mutate({ taskId: openTask.id, payload })
@@ -821,7 +885,9 @@ function BoardCard({
   const subs = task.subtasks ?? [];
   const subDone = subs.filter((s) => s.done).length;
   const hasDesc = Boolean((task.description ?? "").trim());
-  const hasMeta = Boolean(task.due_at) || subs.length > 0 || hasDesc;
+  const linkCount = task.links?.length ?? 0;
+  const hasMeta =
+    Boolean(task.due_at) || subs.length > 0 || hasDesc || linkCount > 0;
 
   return (
     <div
@@ -919,6 +985,12 @@ function BoardCard({
             <span className="inline-flex items-center gap-1">
               <CheckSquare className="h-3 w-3" />
               {subDone}/{subs.length}
+            </span>
+          )}
+          {linkCount > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Link2 className="h-3 w-3" />
+              {linkCount}
             </span>
           )}
           {hasDesc && (

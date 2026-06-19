@@ -778,6 +778,7 @@ function WorkspaceItemView({
             workspaceId={workspaceId}
             boardItemId={node.id}
             canEdit={canEdit}
+            onOpenItem={onOpenItem}
           />
         </div>
       </div>

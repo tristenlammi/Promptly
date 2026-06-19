@@ -1,7 +1,12 @@
 import { useState } from "react";
 import {
   Check,
+  FileText,
+  Layers,
+  LayoutGrid,
+  Link2,
   Loader2,
+  MessageSquare,
   Pencil,
   Plus,
   Send,
@@ -16,7 +21,9 @@ import type {
   BoardLabel,
   BoardMember,
   Subtask,
+  TaskLink,
   TaskPriority,
+  WorkspaceItemNode,
   WorkspaceTask,
   WorkspaceTaskUpdatePayload,
 } from "@/api/workspaces";
@@ -72,6 +79,8 @@ export function WorkspaceBoardCardDetail({
   onLabelsChange,
   members,
   columns,
+  linkables,
+  onOpenItem,
   onClose,
   onUpdate,
   onDelete,
@@ -83,6 +92,11 @@ export function WorkspaceBoardCardDetail({
   onLabelsChange: (labels: BoardLabel[]) => void;
   members: BoardMember[];
   columns: BoardColumn[];
+  /** Navigator items this card can link to (notes / canvases / chats /
+   *  boards). Empty when the tree hasn't loaded. */
+  linkables: WorkspaceItemNode[];
+  /** Open a linked item inline (closes this modal first). */
+  onOpenItem?: (node: WorkspaceItemNode) => void;
   onClose: () => void;
   onUpdate: (payload: WorkspaceTaskUpdatePayload) => void;
   onDelete: () => void;
@@ -243,6 +257,18 @@ export function WorkspaceBoardCardDetail({
             canEdit={canEdit}
             onToggle={toggleLabel}
             onLabelsChange={onLabelsChange}
+          />
+
+          {/* Linked items */}
+          <LinksSection
+            links={task.links ?? []}
+            canEdit={canEdit}
+            linkables={linkables}
+            onChange={(next) => onUpdate({ links: next.length ? next : null })}
+            onOpen={(node) => {
+              onClose();
+              onOpenItem?.(node);
+            }}
           />
 
           {/* Subtasks */}
@@ -631,6 +657,195 @@ function ActivitySection({
               <Send className="h-4 w-4" />
             )}
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Icon + readable label for a linkable item kind. */
+function kindMeta(kind: string): { Icon: typeof FileText; label: string } {
+  switch (kind) {
+    case "note":
+      return { Icon: FileText, label: "Note" };
+    case "canvas":
+      return { Icon: Layers, label: "Canvas" };
+    case "chat":
+      return { Icon: MessageSquare, label: "Chat" };
+    case "board":
+      return { Icon: LayoutGrid, label: "Board" };
+    default:
+      return { Icon: FileText, label: "Item" };
+  }
+}
+
+/** Reconstruct a navigator node from a stored link so click-through works
+ *  even if the live tree hasn't loaded (mirrors the note wiki-link fallback). */
+function linkToNode(link: TaskLink): WorkspaceItemNode {
+  return {
+    id: link.item_id,
+    kind: link.kind as WorkspaceItemNode["kind"],
+    ref_id: link.ref_id,
+    title: link.title,
+    icon: null,
+    position: 0,
+    indexing_status: null,
+    children: [],
+  };
+}
+
+/**
+ * "Linked items" section — references from this card to notes, canvases,
+ * chats or boards elsewhere in the workspace. Each chip opens its target
+ * inline; the add-picker lists tree items not already linked.
+ */
+function LinksSection({
+  links,
+  canEdit,
+  linkables,
+  onChange,
+  onOpen,
+}: {
+  links: TaskLink[];
+  canEdit: boolean;
+  linkables: WorkspaceItemNode[];
+  onChange: (links: TaskLink[]) => void;
+  onOpen: (node: WorkspaceItemNode) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const linkedIds = new Set(links.map((l) => l.item_id));
+  const q = query.trim().toLowerCase();
+  const options = linkables
+    .filter((n) => !linkedIds.has(n.id))
+    .filter((n) => !q || (n.title || "").toLowerCase().includes(q))
+    .slice(0, 8);
+
+  const add = (node: WorkspaceItemNode) => {
+    onChange([
+      ...links,
+      {
+        item_id: node.id,
+        kind: node.kind,
+        ref_id: node.ref_id,
+        title: node.title,
+      },
+    ]);
+    setQuery("");
+    setAdding(false);
+  };
+  const remove = (itemId: string) =>
+    onChange(links.filter((l) => l.item_id !== itemId));
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1">
+          <Link2 className="h-3 w-3" /> Links
+        </span>
+        {canEdit && !adding && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-1 normal-case text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            <Plus className="h-3 w-3" />
+            Add
+          </button>
+        )}
+      </div>
+
+      {links.length === 0 && !adding && (
+        <span className="text-xs text-[var(--text-muted)]">
+          No links yet{canEdit ? " — link a note, chat, canvas or board." : "."}
+        </span>
+      )}
+
+      <div className="flex flex-col gap-1">
+        {links.map((l) => {
+          const { Icon } = kindMeta(l.kind);
+          const fresh = linkables.find((n) => n.id === l.item_id);
+          const title = fresh?.title || l.title || "Untitled";
+          return (
+            <div key={l.item_id} className="group flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onOpen(fresh ?? linkToNode(l))}
+                title={`Open ${title}`}
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-left text-sm text-[var(--text)] transition hover:border-[var(--accent)]"
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                <span className="truncate">{title}</span>
+              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => remove(l.item_id)}
+                  title="Remove link"
+                  className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {adding && canEdit && (
+        <div className="mt-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] p-1.5">
+          <div className="mb-1 flex items-center gap-1.5">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setAdding(false);
+              }}
+              placeholder="Search items to link…"
+              className="min-w-0 flex-1 bg-transparent px-1 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(false);
+                setQuery("");
+              }}
+              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {options.length === 0 ? (
+              <p className="px-1 py-1.5 text-xs text-[var(--text-muted)]">
+                {linkables.length === 0
+                  ? "Nothing to link yet."
+                  : "No matches."}
+              </p>
+            ) : (
+              options.map((n) => {
+                const { Icon, label } = kindMeta(n.kind);
+                return (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => add(n)}
+                    className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]"
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {n.title || "Untitled"}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                      {label}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
     </div>

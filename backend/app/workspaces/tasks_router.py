@@ -82,6 +82,19 @@ class Subtask(BaseModel):
     done: bool = False
 
 
+class TaskLink(BaseModel):
+    """A reference from a card to another navigator item.
+
+    ``item_id`` is the workspace tree node id; ``ref_id`` is what it opens by
+    (doc id for a note, conversation id for a chat). ``title`` is denormalised
+    for display + RAG."""
+
+    item_id: str = Field(min_length=1, max_length=64)
+    kind: str = Field(min_length=1, max_length=32)
+    ref_id: str | None = Field(default=None, max_length=64)
+    title: str = Field(default="", max_length=500)
+
+
 class WorkspaceTaskCommentResponse(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
@@ -106,6 +119,7 @@ class WorkspaceTaskResponse(BaseModel):
     description: str | None = None
     subtasks: list[Subtask] | None = None
     labels: list[str] | None = None
+    links: list[TaskLink] | None = None
     assignee_user_id: uuid.UUID | None = None
     done: bool
     status: TaskStatus
@@ -143,6 +157,7 @@ class WorkspaceTaskUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=20_000)
     subtasks: list[Subtask] | None = None
     labels: list[str] | None = None
+    links: list[TaskLink] | None = None
     assignee_user_id: uuid.UUID | None = None
 
 
@@ -328,6 +343,12 @@ async def update_task(
         )
     if "labels" in sent:
         task.labels = list(payload.labels) if payload.labels else None
+    if "links" in sent:
+        task.links = (
+            [link.model_dump() for link in payload.links]
+            if payload.links
+            else None
+        )
     if "assignee_user_id" in sent:
         task.assignee_user_id = payload.assignee_user_id  # None clears it
 

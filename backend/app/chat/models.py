@@ -450,6 +450,12 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     )
     # Label ids (0094) referencing the board item's ``config.labels`` registry.
     labels: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    # Links to other navigator items (0097) — a JSON list of
+    # ``{item_id, kind, ref_id, title}``. ``title`` is denormalised so the
+    # board's RAG text and a freshly-loaded card render without a tree lookup.
+    links: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     # Assignee (0095) — a workspace member. ``SET NULL`` so removing a user
     # doesn't drop the task.
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
