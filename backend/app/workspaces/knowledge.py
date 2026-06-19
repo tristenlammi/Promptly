@@ -285,6 +285,87 @@ async def delete_workspace_file_chunks(
         )
 
 
+async def index_task_attachment_for_workspace(
+    workspace_id: uuid.UUID, file_id: uuid.UUID
+) -> None:
+    """Embed a card attachment into the workspace RAG pool.
+
+    Mirrors :func:`index_file_for_workspace` but without a ``WorkspaceFile``
+    pivot — attachments aren't pinned files, they hang off a card. Chunks
+    share the same ``(workspace_id, user_file_id)`` scope so retrieval picks
+    them up next to everything else. Best-effort + silent: images with no
+    Vision relay (and any failure) simply produce no chunks. Owns its own
+    session so it's safe on a ``BackgroundTasks`` runner."""
+    async with SessionLocal() as db:
+        try:
+            file = await db.get(UserFile, file_id)
+            if file is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            text_override: str | None = None
+            if not is_text_extractable(file):
+                text_override = await extract_text_via_vision(db, file)
+                if not text_override:
+                    return  # image with no relay → nothing to index
+
+            try:
+                if text_override is not None:
+                    chunks, embeddings = await embed_text_to_chunks(
+                        text_override,
+                        provider=cfg.provider,
+                        model_id=cfg.model_id,
+                        dim=cfg.dim,
+                    )
+                else:
+                    try:
+                        chunks, embeddings = await embed_file_to_chunks(
+                            file,
+                            provider=cfg.provider,
+                            model_id=cfg.model_id,
+                            dim=cfg.dim,
+                        )
+                    except ValueError:
+                        ocr_text = await extract_text_via_vision(db, file)
+                        if not ocr_text:
+                            return
+                        chunks, embeddings = await embed_text_to_chunks(
+                            ocr_text,
+                            provider=cfg.provider,
+                            model_id=cfg.model_id,
+                            dim=cfg.dim,
+                        )
+            except ValueError:
+                return  # unembeddable content — leave it as a plain attachment
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file_id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file_id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            logger.info(
+                "indexed %d chunks for workspace=%s attachment=%s",
+                len(chunks),
+                workspace_id,
+                file_id,
+            )
+        except Exception:  # noqa: BLE001 - best-effort background indexer
+            logger.exception("index_task_attachment_for_workspace failed")
+
+
 async def reindex_workspace(workspace_id: uuid.UUID) -> None:
     """Re-index every text file pinned to a workspace. Used after the
     admin changes the workspace embedding provider (dims would mismatch)."""
@@ -855,6 +936,15 @@ def _flatten_board(
             ]
             if names:
                 line += " Linked: " + ", ".join(names)
+        atts = t.attachments or []
+        if atts:
+            fnames = [
+                str(a.get("filename")).strip()
+                for a in atts
+                if isinstance(a, dict) and str(a.get("filename") or "").strip()
+            ]
+            if fnames:
+                line += " Attachments: " + ", ".join(fnames)
         subs = t.subtasks or []
         if subs:
             done_n = sum(1 for s in subs if s.get("done"))

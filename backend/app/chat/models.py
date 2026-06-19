@@ -456,6 +456,13 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     links: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSONB, nullable=True
     )
+    # File attachments (0098) — a JSON list of
+    # ``{file_id, filename, mime_type, size_bytes, is_cover}``. Each points at
+    # a ``UserFile``; an image flagged ``is_cover`` renders on the card face.
+    # Attachment text is embedded into the workspace RAG pool on attach.
+    attachments: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     # Assignee (0095) — a workspace member. ``SET NULL`` so removing a user
     # doesn't drop the task.
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(

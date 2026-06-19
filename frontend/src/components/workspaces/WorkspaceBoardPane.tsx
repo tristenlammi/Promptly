@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   Link2,
   Loader2,
+  Paperclip,
   Plus,
   Search,
   Trash2,
@@ -36,6 +37,7 @@ import type {
 import { cn } from "@/utils/cn";
 import { WorkspaceBoardCalendar } from "./WorkspaceBoardCalendar";
 import { WorkspaceBoardCardDetail } from "./WorkspaceBoardCardDetail";
+import { WorkspaceFileImage } from "./WorkspaceFileImage";
 
 /**
  * The workspace task board — a 3-column Kanban (To Do / In Progress / Done)
@@ -856,8 +858,15 @@ function BoardCard({
   const subDone = subs.filter((s) => s.done).length;
   const hasDesc = Boolean((task.description ?? "").trim());
   const linkCount = task.links?.length ?? 0;
+  const attachments = task.attachments ?? [];
+  const attCount = attachments.length;
+  const cover = attachments.find((a) => a.is_cover);
   const hasMeta =
-    Boolean(task.due_at) || subs.length > 0 || hasDesc || linkCount > 0;
+    Boolean(task.due_at) ||
+    subs.length > 0 ||
+    hasDesc ||
+    linkCount > 0 ||
+    attCount > 0;
 
   return (
     <div
@@ -866,10 +875,17 @@ function BoardCard({
       onDragEnd={onDragEnd}
       onClick={onOpen}
       className={cn(
-        "group cursor-pointer rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-sm transition hover:border-[var(--accent)]",
+        "group cursor-pointer overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-sm transition hover:border-[var(--accent)]",
         dragging && "opacity-40"
       )}
     >
+      {cover && (
+        <WorkspaceFileImage
+          fileId={cover.file_id}
+          className="h-24 w-full object-cover"
+        />
+      )}
+      <div className="p-2">
       {labels.length > 0 && (
         <div className="mb-1.5 flex flex-wrap gap-1">
           {labels.map((l) => (
@@ -963,11 +979,18 @@ function BoardCard({
               {linkCount}
             </span>
           )}
+          {attCount > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Paperclip className="h-3 w-3" />
+              {attCount}
+            </span>
+          )}
           {hasDesc && (
             <AlignLeft className="h-3 w-3" aria-label="Has description" />
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

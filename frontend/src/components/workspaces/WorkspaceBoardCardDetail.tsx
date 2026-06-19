@@ -1,26 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Download,
   FileText,
   Layers,
   LayoutGrid,
   Link2,
   Loader2,
   MessageSquare,
+  Paperclip,
   Pencil,
   Plus,
   Send,
   Square,
+  Star,
   Tag,
   Trash2,
   X,
 } from "lucide-react";
 
+import { filesApi } from "@/api/files";
 import type {
   BoardColumn,
   BoardLabel,
   BoardMember,
   Subtask,
+  TaskAttachment,
   TaskLink,
   TaskPriority,
   WorkspaceItemNode,
@@ -28,12 +33,16 @@ import type {
   WorkspaceTaskUpdatePayload,
 } from "@/api/workspaces";
 import {
+  useAddTaskAttachment,
   useAddTaskComment,
+  useDeleteTaskAttachment,
   useDeleteTaskComment,
+  useSetTaskAttachmentCover,
   useTaskComments,
 } from "@/hooks/useWorkspaces";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
+import { WorkspaceFileImage } from "./WorkspaceFileImage";
 
 /** Preset palette for board labels (hex; rendered via inline style). */
 export const LABEL_COLORS = [
@@ -283,6 +292,14 @@ export function WorkspaceBoardCardDetail({
               onClose();
               onOpenItem?.(node);
             }}
+          />
+
+          {/* Attachments + cover */}
+          <AttachmentsSection
+            workspaceId={workspaceId}
+            taskId={task.id}
+            canEdit={canEdit}
+            attachments={task.attachments ?? []}
           />
 
           {/* Subtasks */}
@@ -860,6 +877,182 @@ function LinksSection({
               })
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const isImage = (mime: string) => (mime || "").toLowerCase().startsWith("image/");
+
+/**
+ * File attachments on a card. Upload drops the file into the user's Drive
+ * (Chat Uploads), attaches it, and kicks off RAG indexing server-side.
+ * Image attachments can be starred as the card's cover; each row downloads
+ * or detaches. Detaching keeps the underlying Drive file.
+ */
+function AttachmentsSection({
+  workspaceId,
+  taskId,
+  canEdit,
+  attachments,
+}: {
+  workspaceId: string;
+  taskId: string;
+  canEdit: boolean;
+  attachments: TaskAttachment[];
+}) {
+  const add = useAddTaskAttachment(workspaceId, taskId);
+  const setCover = useSetTaskAttachmentCover(workspaceId, taskId);
+  const remove = useDeleteTaskAttachment(workspaceId, taskId);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const onPick = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setError(null);
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const uploaded = await filesApi.upload("mine", file, null, "chat");
+        await add.mutateAsync(uploaded.id);
+      }
+    } catch {
+      setError("Upload failed — try a smaller file.");
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1">
+          <Paperclip className="h-3 w-3" /> Attachments
+        </span>
+        {canEdit && (
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center gap-1 normal-case text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-50"
+          >
+            {uploading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Plus className="h-3 w-3" />
+            )}
+            Add file
+          </button>
+        )}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => void onPick(e.target.files)}
+      />
+
+      {error && <p className="mb-1 text-xs text-red-500">{error}</p>}
+
+      {attachments.length === 0 && !uploading ? (
+        <span className="text-xs text-[var(--text-muted)]">
+          No attachments{canEdit ? " — add files for reference + context." : "."}
+        </span>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {attachments.map((a) => {
+            const image = isImage(a.mime_type);
+            return (
+              <div
+                key={a.file_id}
+                className="group flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-1.5"
+              >
+                <div className="h-9 w-9 shrink-0 overflow-hidden rounded">
+                  {image ? (
+                    <WorkspaceFileImage
+                      fileId={a.file_id}
+                      className="h-9 w-9 object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-9 w-9 items-center justify-center bg-[var(--hover)]">
+                      <FileText className="h-4 w-4 text-[var(--text-muted)]" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm text-[var(--text)]">
+                      {a.filename || "File"}
+                    </span>
+                    {a.is_cover && (
+                      <span className="shrink-0 rounded bg-[var(--accent)]/15 px-1 text-[10px] font-medium text-[var(--accent)]">
+                        Cover
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-[var(--text-muted)]">
+                    {fmtBytes(a.size_bytes)}
+                  </span>
+                </div>
+
+                {/* Cover toggle (images only) */}
+                {canEdit && image && (
+                  <button
+                    type="button"
+                    title={a.is_cover ? "Remove cover" : "Set as cover"}
+                    onClick={() =>
+                      setCover.mutate({
+                        fileId: a.file_id,
+                        cover: !a.is_cover,
+                      })
+                    }
+                    className={cn(
+                      "shrink-0 rounded p-1 transition",
+                      a.is_cover
+                        ? "text-[var(--accent)]"
+                        : "text-[var(--text-muted)] opacity-0 hover:text-[var(--text)] group-hover:opacity-100"
+                    )}
+                  >
+                    <Star
+                      className="h-3.5 w-3.5"
+                      fill={a.is_cover ? "currentColor" : "none"}
+                    />
+                  </button>
+                )}
+
+                <a
+                  href={filesApi.downloadUrl(a.file_id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Download"
+                  className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--text)] group-hover:opacity-100"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </a>
+
+                {canEdit && (
+                  <button
+                    type="button"
+                    title="Remove attachment"
+                    onClick={() => remove.mutate(a.file_id)}
+                    className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -36,6 +36,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.chat.models import WorkspaceItem, WorkspaceTask, WorkspaceTaskComment
 from app.database import get_db
+from app.files.models import UserFile
 from app.workspaces.shares import (
     get_accessible_workspace,
     require_workspace_write,
@@ -95,6 +96,25 @@ class TaskLink(BaseModel):
     title: str = Field(default="", max_length=500)
 
 
+class TaskAttachment(BaseModel):
+    """A file attached to a card. ``is_cover`` (an image) renders on the
+    card face. ``file_id`` references a ``UserFile``."""
+
+    file_id: str = Field(min_length=1, max_length=64)
+    filename: str = Field(default="", max_length=512)
+    mime_type: str = Field(default="", max_length=255)
+    size_bytes: int = 0
+    is_cover: bool = False
+
+
+class TaskAttachmentCreate(BaseModel):
+    file_id: uuid.UUID
+
+
+class TaskAttachmentCover(BaseModel):
+    cover: bool = True
+
+
 class WorkspaceTaskCommentResponse(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
@@ -120,6 +140,7 @@ class WorkspaceTaskResponse(BaseModel):
     subtasks: list[Subtask] | None = None
     labels: list[str] | None = None
     links: list[TaskLink] | None = None
+    attachments: list[TaskAttachment] | None = None
     assignee_user_id: uuid.UUID | None = None
     done: bool
     status: TaskStatus
@@ -418,6 +439,15 @@ async def delete_task(
     require_workspace_write(access_role)
     task = await _load_task(db, ws.id, task_id)
     board_item_id = task.board_item_id
+    # Drop any attachment chunks so deleted cards don't leave RAG residue.
+    from app.workspaces.knowledge import delete_workspace_file_chunks
+
+    for att in task.attachments or []:
+        fid = att.get("file_id") if isinstance(att, dict) else None
+        if fid:
+            background.add_task(
+                delete_workspace_file_chunks, ws.id, uuid.UUID(str(fid))
+            )
     await db.delete(task)
     await db.commit()
     _reindex_board(background, ws.id, board_item_id)
@@ -538,6 +568,129 @@ async def delete_comment(
     await db.commit()
     _reindex_board(background, ws.id, task.board_item_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# Attachments + cover
+# ---------------------------------------------------------------------
+def _index_attachment(
+    background: BackgroundTasks, workspace_id: uuid.UUID, file_id: uuid.UUID
+) -> None:
+    from app.workspaces.knowledge import index_task_attachment_for_workspace
+
+    background.add_task(
+        index_task_attachment_for_workspace, workspace_id, file_id
+    )
+
+
+@router.post(
+    "/{workspace_id}/tasks/{task_id}/attachments",
+    response_model=WorkspaceTaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_attachment(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    payload: TaskAttachmentCreate,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceTask:
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    task = await _load_task(db, ws.id, task_id)
+
+    file = await db.get(UserFile, payload.file_id)
+    if file is None or file.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+
+    atts = list(task.attachments or [])
+    fid = str(file.id)
+    if any(a.get("file_id") == fid for a in atts):
+        return task  # already attached — idempotent
+    is_image = (file.mime_type or "").lower().startswith("image/")
+    # First image becomes the cover automatically.
+    auto_cover = is_image and not any(a.get("is_cover") for a in atts)
+    atts.append(
+        {
+            "file_id": fid,
+            "filename": file.filename,
+            "mime_type": file.mime_type,
+            "size_bytes": file.size_bytes,
+            "is_cover": auto_cover,
+        }
+    )
+    task.attachments = atts
+    await db.commit()
+    await db.refresh(task)
+    _index_attachment(background, ws.id, file.id)
+    _reindex_board(background, ws.id, task.board_item_id)
+    return task
+
+
+@router.post(
+    "/{workspace_id}/tasks/{task_id}/attachments/{file_id}/cover",
+    response_model=WorkspaceTaskResponse,
+)
+async def set_attachment_cover(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    file_id: uuid.UUID,
+    payload: TaskAttachmentCover,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceTask:
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    task = await _load_task(db, ws.id, task_id)
+    fid = str(file_id)
+    atts = list(task.attachments or [])
+    if not any(a.get("file_id") == fid for a in atts):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+    # Exactly one cover at a time: set the target, clear the rest.
+    task.attachments = [
+        {**a, "is_cover": payload.cover and a.get("file_id") == fid}
+        for a in atts
+    ]
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
+@router.delete(
+    "/{workspace_id}/tasks/{task_id}/attachments/{file_id}",
+    response_model=WorkspaceTaskResponse,
+)
+async def delete_attachment(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    file_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceTask:
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    task = await _load_task(db, ws.id, task_id)
+    fid = str(file_id)
+    atts = list(task.attachments or [])
+    if not any(a.get("file_id") == fid for a in atts):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+    task.attachments = [a for a in atts if a.get("file_id") != fid] or None
+    await db.commit()
+    await db.refresh(task)
+    # Drop the attachment's RAG chunks; keep the underlying Drive file.
+    from app.workspaces.knowledge import delete_workspace_file_chunks
+
+    background.add_task(delete_workspace_file_chunks, ws.id, file_id)
+    _reindex_board(background, ws.id, task.board_item_id)
+    return task
 
 
 __all__ = ["router"]

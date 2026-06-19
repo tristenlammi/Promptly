@@ -218,6 +218,16 @@ export interface TaskLink {
   title: string;
 }
 
+/** A file attached to a card. ``file_id`` references a ``UserFile``; an image
+ *  flagged ``is_cover`` renders on the card face. */
+export interface TaskAttachment {
+  file_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  is_cover: boolean;
+}
+
 /** A workspace member that can be assigned to a card. */
 export interface BoardMember {
   id: string;
@@ -245,6 +255,7 @@ export interface WorkspaceTask {
   subtasks: Subtask[] | null;
   labels: string[] | null;
   links: TaskLink[] | null;
+  attachments: TaskAttachment[] | null;
   assignee_user_id: string | null;
   done: boolean;
   status: TaskStatus;
@@ -683,6 +694,43 @@ export const workspacesApi = {
     await apiClient.delete(
       `/workspaces/${id}/tasks/${taskId}/comments/${commentId}`
     );
+  },
+
+  // ---- card attachments + cover ------------------------------------
+  async addTaskAttachment(
+    id: string,
+    taskId: string,
+    fileId: string
+  ): Promise<WorkspaceTask> {
+    const { data } = await apiClient.post<WorkspaceTask>(
+      `/workspaces/${id}/tasks/${taskId}/attachments`,
+      { file_id: fileId }
+    );
+    return data;
+  },
+
+  async setTaskAttachmentCover(
+    id: string,
+    taskId: string,
+    fileId: string,
+    cover: boolean
+  ): Promise<WorkspaceTask> {
+    const { data } = await apiClient.post<WorkspaceTask>(
+      `/workspaces/${id}/tasks/${taskId}/attachments/${fileId}/cover`,
+      { cover }
+    );
+    return data;
+  },
+
+  async deleteTaskAttachment(
+    id: string,
+    taskId: string,
+    fileId: string
+  ): Promise<WorkspaceTask> {
+    const { data } = await apiClient.delete<WorkspaceTask>(
+      `/workspaces/${id}/tasks/${taskId}/attachments/${fileId}`
+    );
+    return data;
   },
 
   async pinFile(id: string, fileId: string): Promise<WorkspaceFilePin> {

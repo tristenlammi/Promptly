@@ -237,6 +237,41 @@ export function useDeleteTaskComment(workspaceId: string, taskId: string) {
   });
 }
 
+export function useAddTaskAttachment(workspaceId: string, taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fileId: string) =>
+      workspacesApi.addTaskAttachment(workspaceId, taskId, fileId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) }),
+  });
+}
+
+export function useSetTaskAttachmentCover(
+  workspaceId: string,
+  taskId: string
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { fileId: string; cover: boolean }) =>
+      workspacesApi.setTaskAttachmentCover(
+        workspaceId,
+        taskId,
+        vars.fileId,
+        vars.cover
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) }),
+  });
+}
+
+export function useDeleteTaskAttachment(workspaceId: string, taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fileId: string) =>
+      workspacesApi.deleteTaskAttachment(workspaceId, taskId, fileId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) }),
+  });
+}
+
 export function useWorkspaceItem(
   workspaceId: string,
   itemId: string | undefined
