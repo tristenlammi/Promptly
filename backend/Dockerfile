@@ -22,11 +22,15 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-# Pre-download the rembg U^2-Net model into the image so the first
+# Pre-download the background-removal model into the image so the first
 # "Remove background" request doesn't reach out to the network (keeps the
-# feature self-contained / offline). U2NET_HOME persists for runtime too.
-ENV U2NET_HOME=/app/.u2net
-RUN python -c "from rembg import new_session; new_session('u2net')"
+# feature self-contained / offline). U2NET_HOME is rembg's model cache dir
+# (all models, despite the name). REMBG_MODEL selects the model and
+# persists to runtime; override it (env/build-arg) to e.g. birefnet-general
+# for top quality — that variant then downloads on first use.
+ENV U2NET_HOME=/app/.u2net \
+    REMBG_MODEL=isnet-general-use
+RUN python -c "import os; from rembg import new_session; new_session(os.environ['REMBG_MODEL'])"
 
 # ---- Development target (hot reload via volume mount) ----
 FROM base AS dev

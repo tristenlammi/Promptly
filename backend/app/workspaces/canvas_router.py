@@ -20,6 +20,7 @@ decode the Excalidraw Yjs schema.
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -293,6 +294,13 @@ async def update_canvas_text(
 # ---------------------------------------------------------------------
 _MAX_BG_IMAGE_BYTES = 25 * 1024 * 1024  # 25 MB upload guard
 
+# Which rembg model to use. Defaults to ``isnet-general-use`` (better edges
+# than u2net at the same CPU cost) and is pre-baked into the image. Override
+# with the ``REMBG_MODEL`` env var for higher quality on capable hardware,
+# e.g. ``birefnet-general`` (SOTA, ~1 GB, slower; downloads on first use if
+# it isn't the baked-in default). CPU-only by design so it runs anywhere.
+_MODEL_NAME = os.environ.get("REMBG_MODEL", "isnet-general-use")
+
 # Built once on first request (loads the model into memory), then reused.
 _rembg_session = None
 
@@ -302,7 +310,7 @@ def _run_rembg(data: bytes) -> bytes:
     from rembg import new_session, remove
 
     if _rembg_session is None:
-        _rembg_session = new_session("u2net")
+        _rembg_session = new_session(_MODEL_NAME)
     return remove(data, session=_rembg_session)
 
 
