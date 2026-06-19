@@ -573,6 +573,14 @@ function TreeNode({
               <Loader2 className="h-3 w-3 animate-spin" />
             </span>
           )}
+          {isContextItem && contextOn && !renaming && (
+            <span
+              title="Used as workspace context"
+              className="inline-flex shrink-0 items-center text-emerald-500"
+            >
+              <Zap className="h-3 w-3" />
+            </span>
+          )}
           {isContextItem && !contextOn && !renaming && (
             <span
               title="Not used as workspace context"
