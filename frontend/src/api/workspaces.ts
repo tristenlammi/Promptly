@@ -178,21 +178,6 @@ export interface WorkspaceTask {
   updated_at: string;
 }
 
-export interface WorkspaceGraphNode {
-  id: string;
-  kind: string;
-  ref_id: string | null;
-  title: string;
-}
-export interface WorkspaceGraphEdge {
-  source: string;
-  target: string;
-  kind: string; // 'link' | 'similar'
-}
-export interface WorkspaceGraph {
-  nodes: WorkspaceGraphNode[];
-  edges: WorkspaceGraphEdge[];
-}
 
 export interface CreateWorkspaceItemPayload {
   kind: "folder" | "note" | "canvas";
@@ -494,15 +479,6 @@ export const workspacesApi = {
   async overview(id: string): Promise<WorkspaceOverview> {
     const { data } = await apiClient.get<WorkspaceOverview>(
       `/workspaces/${id}/overview`
-    );
-    return data;
-  },
-
-  /** Graph of the workspace: items as nodes, wiki-links + semantic
-   *  similarity as edges. */
-  async graph(id: string): Promise<WorkspaceGraph> {
-    const { data } = await apiClient.get<WorkspaceGraph>(
-      `/workspaces/${id}/graph`
     );
     return data;
   },

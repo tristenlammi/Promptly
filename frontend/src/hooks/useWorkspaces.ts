@@ -38,7 +38,6 @@ const KEYS = {
   tree: (id: string) => ["workspaces", "tree", id] as const,
   archive: (id: string) => ["workspaces", "archive", id] as const,
   overview: (id: string) => ["workspaces", "overview", id] as const,
-  graph: (id: string) => ["workspaces", "graph", id] as const,
   tasks: (id: string) => ["workspaces", "tasks", id] as const,
   backlinks: (workspaceId: string, itemId: string) =>
     ["workspaces", "backlinks", workspaceId, itemId] as const,
@@ -196,13 +195,6 @@ export function useWorkspaceOverview(id: string | undefined) {
   });
 }
 
-export function useWorkspaceGraph(id: string | undefined, enabled = true) {
-  return useQuery({
-    queryKey: id ? KEYS.graph(id) : ["workspaces", "graph", "_"],
-    queryFn: () => workspacesApi.graph(id as string),
-    enabled: Boolean(id) && enabled,
-  });
-}
 
 // ---------------------------------------------------------------------
 // Task list — first-class, project-level to-dos

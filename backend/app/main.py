@@ -265,7 +265,6 @@ from app.workspaces.items_router import router as workspace_items_router  # noqa
 from app.workspaces.canvas_router import router as workspace_canvas_router  # noqa: E402
 from app.workspaces.ask_router import router as workspace_ask_router  # noqa: E402
 from app.workspaces.overview_router import router as workspace_overview_router  # noqa: E402
-from app.workspaces.graph_router import router as workspace_graph_router  # noqa: E402
 from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
@@ -322,10 +321,6 @@ app.include_router(
 # Workspace overview home (counts + tasks rollup + recent).
 app.include_router(
     workspace_overview_router, prefix="/api/workspaces", tags=["workspaces"]
-)
-# Workspace graph view (nodes + explicit/semantic edges).
-app.include_router(
-    workspace_graph_router, prefix="/api/workspaces", tags=["workspaces"]
 )
 # Workspace task list (first-class, project-level to-dos).
 app.include_router(

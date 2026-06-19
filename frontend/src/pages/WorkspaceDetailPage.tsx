@@ -19,7 +19,6 @@ import {
   Home,
   Link2,
   Loader2,
-  Network,
   Search,
   Settings,
   Share2,
@@ -47,7 +46,6 @@ const WorkspaceCanvasPane = lazy(() =>
   }))
 );
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
-import { WorkspaceGraphPane } from "@/components/workspaces/WorkspaceGraphPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -90,7 +88,6 @@ export function WorkspaceDetailPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [graphOpen, setGraphOpen] = useState(false);
 
   // Persist the open item(s) in the URL so a refresh restores the view
   // instead of dropping back to the workspace home. ``item`` is the primary
@@ -168,7 +165,6 @@ export function WorkspaceDetailPage() {
   // Everything — chats included — opens inline in the main pane so the
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
-    setGraphOpen(false);
     // Avoid the same item on both sides of a split.
     if (secondary && secondary.id === node.id) setSecondary(null);
     setSelected(node);
@@ -179,7 +175,6 @@ export function WorkspaceDetailPage() {
   // normally on the left.
   const handleOpenToSide = (node: WorkspaceItemNode) => {
     if (node.kind === "folder") return;
-    setGraphOpen(false);
     if (!selected) {
       setSelected(node);
       return;
@@ -231,14 +226,6 @@ export function WorkspaceDetailPage() {
                 </kbd>
               </span>
             </Button>
-            <Button
-              variant={graphOpen ? "primary" : "ghost"}
-              leftIcon={<Network className="h-4 w-4" />}
-              onClick={() => setGraphOpen((g) => !g)}
-              title="Graph view — see how items connect"
-            >
-              <span className="hidden sm:inline">Graph</span>
-            </Button>
             {!isArchived && isOwner && (
               <Button
                 variant="ghost"
@@ -259,10 +246,9 @@ export function WorkspaceDetailPage() {
               </Button>
             )}
             <Button
-              variant={!selected && !graphOpen ? "primary" : "ghost"}
+              variant={!selected ? "primary" : "ghost"}
               leftIcon={<Home className="h-4 w-4" />}
               onClick={() => {
-                setGraphOpen(false);
                 setSelected(null);
                 setSecondary(null);
               }}
@@ -313,12 +299,10 @@ export function WorkspaceDetailPage() {
           <main
             className={
               "flex min-w-0 flex-1 flex-col " +
-              (graphOpen || secondary ? "overflow-hidden" : "overflow-y-auto")
+              (secondary ? "overflow-hidden" : "overflow-y-auto")
             }
           >
-            {graphOpen ? (
-              <WorkspaceGraphPane workspaceId={id} onOpenItem={handleSelect} />
-            ) : secondary && selected ? (
+            {secondary && selected ? (
               // Split screen — primary on the left, secondary on the right,
               // with a draggable gutter. The chat side defaults narrower
               // (chats cap their own width, so a full half wastes space);
