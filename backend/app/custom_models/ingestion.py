@@ -193,12 +193,32 @@ async def embed_file_to_chunks(
     returns the wrong vector count or dimension.
     """
     raw_text = extract_text_for_embedding(file)  # raises ValueError
+    return await embed_text_to_chunks(
+        raw_text, provider=provider, model_id=model_id, dim=dim
+    )
+
+
+async def embed_text_to_chunks(
+    raw_text: str,
+    *,
+    provider: ModelProvider,
+    model_id: str,
+    dim: int,
+) -> tuple[list[Chunk], list[list[float]]]:
+    """Normalise → chunk → embed an already-extracted string.
+
+    The text-source variant of :func:`embed_file_to_chunks` — used when
+    the text didn't come straight off disk (e.g. a vision-model
+    description of an image, OCR of a scanned PDF, or a flattened chat
+    transcript). Same contract: raises ``ValueError`` for empty input and
+    ``RuntimeError`` on a provider dim/count mismatch.
+    """
     normalised = normalise_for_embedding(raw_text)
     if not normalised:
-        raise ValueError("no extractable text content in this file")
+        raise ValueError("no extractable text content")
     chunks = chunk_text(normalised)
     if not chunks:
-        raise ValueError("file produced no chunks (empty after normalisation)")
+        raise ValueError("text produced no chunks (empty after normalisation)")
 
     embeddings: list[list[float]] = []
     for start in range(0, len(chunks), EMBED_BATCH_SIZE):

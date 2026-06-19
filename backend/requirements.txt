@@ -50,6 +50,13 @@ anthropic==0.34.2
 
 # ---- Document parsing (attachments) ----
 pypdf==6.10.2
+# Rasterises PDF pages to images so a scan-only PDF (no embedded text
+# layer) can be OCR'd through the Vision relay for workspace indexing.
+# pypdfium2 is a permissively-licensed (Apache-2.0 / BSD-3) pure-wheel
+# binding for Google's PDFium — no system libraries, no AGPL strings
+# (unlike PyMuPDF), so it slots into the slim image and keeps the app
+# cleanly shareable. Only imported on the OCR fallback path.
+pypdfium2==4.30.0
 # Markdown -> HTML for the ``generate_pdf`` chat tool. Stdlib-only at
 # runtime; the ``extra``/``tables``/``fenced_code`` extensions are part
 # of the package itself, no extra wheels required.

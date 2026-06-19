@@ -55,6 +55,7 @@ from app.custom_models.embedding import (
 from app.custom_models.ingestion import (
     delete_existing_chunks,
     embed_file_to_chunks,
+    embed_text_to_chunks,
     insert_chunks,
 )
 from app.custom_models.models import KnowledgeChunk
@@ -64,6 +65,7 @@ from app.custom_models.retrieval import (
 )
 from app.database import SessionLocal
 from app.files.models import UserFile
+from app.files.vision_extract import extract_text_via_vision
 
 logger = logging.getLogger("promptly.workspaces.knowledge")
 
@@ -137,17 +139,18 @@ async def index_file_for_workspace(
                 )
                 return
 
-            # Images / binaries are not RAG candidates — they ride the
-            # attachment/vision path. Leave them ``queued`` so they're
-            # simply ignored by retrieval (and never marked failed).
-            if not is_text_extractable(file):
-                return
-
             cfg = await get_embedding_config(db)
             if cfg is None:
                 # No embedding provider yet — leave queued so a later
                 # re-pin (after setup) picks it up. Not an error.
                 return
+
+            # Images and binaries have no machine-extractable text. They're
+            # only RAG candidates when a Vision relay is configured to
+            # describe them (images) or OCR them (scanned PDFs); otherwise
+            # they ride the attachment/vision path and stay ``queued`` so
+            # retrieval simply ignores them.
+            vision_candidate = not is_text_extractable(file)
 
             current_hash = file_content_hash(file)
             pivot = await db.get(WorkspaceFile, (workspace_id, file_id))
@@ -163,13 +166,53 @@ async def index_file_for_workspace(
                 db, workspace_id=workspace_id, file_id=file_id, status="embedding"
             )
 
+            # Resolve the text to embed. Text/PDF flows through the normal
+            # extractor; images go straight to the vision describer; a PDF
+            # with no embedded text layer falls back to vision OCR.
+            text_override: str | None = None
+            if vision_candidate:
+                text_override = await extract_text_via_vision(db, file)
+                if not text_override:
+                    # No relay (or it produced nothing) → not indexable.
+                    # Leave queued (not failed) so configuring a relay and
+                    # re-pinning indexes it cleanly later.
+                    await _set_workspace_file_status(
+                        db,
+                        workspace_id=workspace_id,
+                        file_id=file_id,
+                        status="queued",
+                    )
+                    return
+
             try:
-                chunks, embeddings = await embed_file_to_chunks(
-                    file,
-                    provider=cfg.provider,
-                    model_id=cfg.model_id,
-                    dim=cfg.dim,
-                )
+                if text_override is not None:
+                    chunks, embeddings = await embed_text_to_chunks(
+                        text_override,
+                        provider=cfg.provider,
+                        model_id=cfg.model_id,
+                        dim=cfg.dim,
+                    )
+                else:
+                    try:
+                        chunks, embeddings = await embed_file_to_chunks(
+                            file,
+                            provider=cfg.provider,
+                            model_id=cfg.model_id,
+                            dim=cfg.dim,
+                        )
+                    except ValueError:
+                        # Text-extractable on paper but yielded nothing —
+                        # almost always a scan-only PDF. Try vision OCR
+                        # before giving up.
+                        ocr_text = await extract_text_via_vision(db, file)
+                        if not ocr_text:
+                            raise
+                        chunks, embeddings = await embed_text_to_chunks(
+                            ocr_text,
+                            provider=cfg.provider,
+                            model_id=cfg.model_id,
+                            dim=cfg.dim,
+                        )
             except ValueError as exc:
                 await _set_workspace_file_status(
                     db,

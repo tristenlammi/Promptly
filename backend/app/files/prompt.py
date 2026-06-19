@@ -512,8 +512,29 @@ def build_image_parts(
     return parts, warnings
 
 
+def build_image_part_from_bytes(
+    raw: bytes, mime: str = "image/png"
+) -> ImagePart | None:
+    """Convert in-memory image bytes to an :class:`ImagePart`.
+
+    The bytes-source twin of :func:`build_image_parts` (which reads
+    ``UserFile``s off disk). Used by the vision-indexing path to caption
+    rasterised PDF pages that never exist as files. Returns ``None`` when
+    the bytes aren't a decodable image or can't be made vision-friendly.
+    """
+    if len(raw) < _MIN_IMAGE_BYTES or not _image_payload_is_valid(raw):
+        return None
+    prepared = _prepare_image_for_vision(raw, (mime or "image/png").lower())
+    if prepared is None:
+        return None
+    payload, out_mime = prepared
+    encoded = base64.b64encode(payload).decode("ascii")
+    return ImagePart(url=f"data:{out_mime};base64,{encoded}", detail="auto")
+
+
 __all__ = [
     "build_attachment_preamble",
     "build_image_parts",
+    "build_image_part_from_bytes",
     "looks_image",
 ]
