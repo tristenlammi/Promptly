@@ -10,8 +10,8 @@ import {
   FileDown,
   FileText,
   Loader2,
+  MoveHorizontal,
   Save,
-  StretchHorizontal,
   X,
 } from "lucide-react";
 
@@ -769,7 +769,7 @@ export function DocumentEditorModal({
               : "text-[var(--accent)]"
           )}
         >
-          <StretchHorizontal className="h-5 w-5" />
+          <MoveHorizontal className="h-5 w-5" />
         </button>
 
         <button
