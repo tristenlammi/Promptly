@@ -214,6 +214,17 @@ export interface BoardMember {
   username: string;
 }
 
+/** A comment ("comment") or auto-logged change ("activity") on a card. */
+export interface WorkspaceTaskComment {
+  id: string;
+  task_id: string;
+  author_user_id: string | null;
+  author_username: string | null;
+  kind: "comment" | "activity";
+  text: string;
+  created_at: string;
+}
+
 /** A first-class workspace task (the dedicated project to-do list — not
  *  the checkbox rollup parsed out of notes). */
 export interface WorkspaceTask {
@@ -627,6 +638,39 @@ export const workspacesApi = {
 
   async deleteTask(id: string, taskId: string): Promise<void> {
     await apiClient.delete(`/workspaces/${id}/tasks/${taskId}`);
+  },
+
+  // ---- card comments + activity ------------------------------------
+  async taskComments(
+    id: string,
+    taskId: string
+  ): Promise<WorkspaceTaskComment[]> {
+    const { data } = await apiClient.get<WorkspaceTaskComment[]>(
+      `/workspaces/${id}/tasks/${taskId}/comments`
+    );
+    return data;
+  },
+
+  async addTaskComment(
+    id: string,
+    taskId: string,
+    text: string
+  ): Promise<WorkspaceTaskComment> {
+    const { data } = await apiClient.post<WorkspaceTaskComment>(
+      `/workspaces/${id}/tasks/${taskId}/comments`,
+      { text }
+    );
+    return data;
+  },
+
+  async deleteTaskComment(
+    id: string,
+    taskId: string,
+    commentId: string
+  ): Promise<void> {
+    await apiClient.delete(
+      `/workspaces/${id}/tasks/${taskId}/comments/${commentId}`
+    );
   },
 
   async pinFile(id: string, fileId: string): Promise<WorkspaceFilePin> {

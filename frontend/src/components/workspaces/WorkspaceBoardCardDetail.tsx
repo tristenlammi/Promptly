@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { Check, Pencil, Plus, Square, Tag, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Loader2,
+  Pencil,
+  Plus,
+  Send,
+  Square,
+  Tag,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import type {
   BoardColumn,
@@ -10,6 +20,12 @@ import type {
   WorkspaceTask,
   WorkspaceTaskUpdatePayload,
 } from "@/api/workspaces";
+import {
+  useAddTaskComment,
+  useDeleteTaskComment,
+  useTaskComments,
+} from "@/hooks/useWorkspaces";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 /** Preset palette for board labels (hex; rendered via inline style). */
@@ -50,6 +66,7 @@ const genId = () => Math.random().toString(36).slice(2, 10);
 
 export function WorkspaceBoardCardDetail({
   task,
+  workspaceId,
   canEdit,
   labels,
   onLabelsChange,
@@ -60,6 +77,7 @@ export function WorkspaceBoardCardDetail({
   onDelete,
 }: {
   task: WorkspaceTask;
+  workspaceId: string;
   canEdit: boolean;
   labels: BoardLabel[];
   onLabelsChange: (labels: BoardLabel[]) => void;
@@ -311,6 +329,13 @@ export function WorkspaceBoardCardDetail({
               </div>
             )}
           </div>
+
+          {/* Comments + activity */}
+          <ActivitySection
+            workspaceId={workspaceId}
+            taskId={task.id}
+            canEdit={canEdit}
+          />
         </div>
 
         {/* Footer */}
@@ -457,6 +482,155 @@ function LabelsSection({
               Add
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact relative-time string ("just now", "5m", "3h", "2d", "Mar 4"). */
+function rel(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diff = Date.now() - then;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d`;
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function Initials({ name }: { name: string }) {
+  const txt = (name || "?").trim().slice(0, 2).toUpperCase();
+  return (
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-[10px] font-semibold text-white">
+      {txt}
+    </span>
+  );
+}
+
+/**
+ * Comments + activity thread for a task. Renders a chronological feed where
+ * ``activity`` rows (status moves, due-date changes, assignment) are muted
+ * one-liners and ``comment`` rows show an author avatar, name, relative time
+ * and the message. A composer at the bottom posts new comments.
+ */
+function ActivitySection({
+  workspaceId,
+  taskId,
+  canEdit,
+}: {
+  workspaceId: string;
+  taskId: string;
+  canEdit: boolean;
+}) {
+  const me = useAuthStore((s) => s.user);
+  const { data: entries, isLoading } = useTaskComments(workspaceId, taskId);
+  const add = useAddTaskComment(workspaceId, taskId);
+  const del = useDeleteTaskComment(workspaceId, taskId);
+  const [draft, setDraft] = useState("");
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || add.isPending) return;
+    add.mutate(text, { onSuccess: () => setDraft("") });
+  };
+
+  return (
+    <div>
+      <div className="mb-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+        Activity
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading…
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {(entries ?? []).map((e) =>
+            e.kind === "activity" ? (
+              <div
+                key={e.id}
+                className="flex items-center gap-1.5 text-xs italic text-[var(--text-muted)]"
+              >
+                <span className="font-medium not-italic">
+                  {e.author_username ?? "Someone"}
+                </span>
+                <span>{e.text}</span>
+                <span aria-hidden>·</span>
+                <span>{rel(e.created_at)}</span>
+              </div>
+            ) : (
+              <div key={e.id} className="group flex items-start gap-2">
+                <Initials name={e.author_username ?? "?"} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="font-medium text-[var(--text)]">
+                      {e.author_username ?? "Someone"}
+                    </span>
+                    <span className="text-[var(--text-muted)]">
+                      {rel(e.created_at)}
+                    </span>
+                  </div>
+                  <div className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">
+                    {e.text}
+                  </div>
+                </div>
+                {me?.id === e.author_user_id && (
+                  <button
+                    type="button"
+                    onClick={() => del.mutate(e.id)}
+                    className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                    title="Delete comment"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )
+          )}
+          {(entries ?? []).length === 0 && (
+            <div className="text-xs text-[var(--text-muted)]">
+              No activity yet.
+            </div>
+          )}
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="mt-3 flex items-end gap-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            rows={1}
+            placeholder="Write a comment…"
+            className="min-w-0 flex-1 resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
+          />
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!draft.trim() || add.isPending}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {add.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </button>
         </div>
       )}
     </div>

@@ -48,6 +48,7 @@ from app.chat.models import (
     WorkspaceFile,
     WorkspaceItem,
     WorkspaceTask,
+    WorkspaceTaskComment,
 )
 from app.chat.semantic_search import get_embedding_config
 from app.models_config.models import ModelProvider
@@ -799,9 +800,11 @@ def _flatten_board(
     item: WorkspaceItem,
     tasks: list[WorkspaceTask],
     assignee_names: dict[str, str] | None = None,
+    comments_by_task: dict[str, list[str]] | None = None,
 ) -> str:
     """Render a board's tasks as natural-language text for embedding."""
     assignee_names = assignee_names or {}
+    comments_by_task = comments_by_task or {}
     rows = [t for t in tasks if (t.title or "").strip()]
     if not rows:
         return ""
@@ -837,6 +840,9 @@ def _flatten_board(
             if who:
                 bits.append(f"assigned to {who}")
         line = f'- Task "{t.title.strip()}": ' + ", ".join(bits) + "."
+        comments = comments_by_task.get(str(t.id)) or []
+        if comments:
+            line += " Comments: " + " | ".join(comments)
         desc = (t.description or "").strip()
         if desc:
             line += f" Description: {desc[:1000]}"
@@ -959,7 +965,27 @@ async def index_board_for_workspace(
                     )
                 ).scalars().all()
                 assignee_names = {str(u.id): u.username for u in users}
-            text = _flatten_board(item, tasks, assignee_names)
+            # Load user comments (not activity) so discussion is searchable.
+            comments_by_task: dict[str, list[str]] = {}
+            task_ids = [t.id for t in tasks]
+            if task_ids:
+                crows = (
+                    await db.execute(
+                        select(WorkspaceTaskComment)
+                        .where(
+                            WorkspaceTaskComment.task_id.in_(task_ids),
+                            WorkspaceTaskComment.kind == "comment",
+                        )
+                        .order_by(WorkspaceTaskComment.created_at.asc())
+                    )
+                ).scalars().all()
+                for c in crows:
+                    comments_by_task.setdefault(str(c.task_id), []).append(
+                        c.text
+                    )
+            text = _flatten_board(
+                item, tasks, assignee_names, comments_by_task
+            )
             if not text.strip():
                 # Empty board: drop its chunks AND blank the backing file so
                 # full-dump injection doesn't keep inlining stale tasks.

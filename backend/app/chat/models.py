@@ -493,6 +493,38 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
         )
 
 
+class WorkspaceTaskComment(UUIDPKMixin, Base):
+    """A comment or activity entry on a Kanban card (0096).
+
+    One chronological thread per task mixes user **comments**
+    (``kind='comment'``) and auto-logged **activity** (``kind='activity'``
+    — "moved to In Progress", "assigned to Jane"). ``author_user_id`` is the
+    comment author / change actor.
+    """
+
+    __tablename__ = "workspace_task_comments"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # ``comment`` (user text) | ``activity`` (system-logged change).
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="comment", server_default="comment"
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkspaceTaskComment id={self.id} kind={self.kind}>"
+
+
 class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
     """An Excalidraw canvas in a workspace (Phase 2).
 

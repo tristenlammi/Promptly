@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import WorkspaceItem, WorkspaceTask
+from app.chat.models import WorkspaceItem, WorkspaceTask, WorkspaceTaskComment
 from app.database import get_db
 from app.workspaces.shares import (
     get_accessible_workspace,
@@ -80,6 +80,23 @@ class Subtask(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=500)
     done: bool = False
+
+
+class WorkspaceTaskCommentResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    author_user_id: uuid.UUID | None = None
+    author_username: str | None = None
+    kind: str
+    text: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WorkspaceTaskCommentCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
 
 
 class WorkspaceTaskResponse(BaseModel):
@@ -160,6 +177,42 @@ def _reindex_board(
 
 
 # ---------------------------------------------------------------------
+# Activity log helpers
+# ---------------------------------------------------------------------
+def _log_activity(
+    db: AsyncSession, task_id: uuid.UUID, actor_id: uuid.UUID, text: str
+) -> None:
+    """Append a system activity entry to a card's thread (no commit)."""
+    db.add(
+        WorkspaceTaskComment(
+            task_id=task_id, author_user_id=actor_id, kind="activity", text=text
+        )
+    )
+
+
+async def _column_label(
+    db: AsyncSession, board_item_id: uuid.UUID | None, status_id: str
+) -> str:
+    """Human label for a column id (custom config name, or default labels)."""
+    if board_item_id is not None:
+        item = await db.get(WorkspaceItem, board_item_id)
+        if item is not None and isinstance(item.config, dict):
+            for c in item.config.get("columns") or []:
+                if isinstance(c, dict) and c.get("id") == status_id:
+                    return str(c.get("name") or status_id)
+    return {"todo": "To Do", "doing": "In Progress", "done": "Done"}.get(
+        status_id, status_id
+    )
+
+
+async def _username(db: AsyncSession, uid: uuid.UUID | None) -> str | None:
+    if uid is None:
+        return None
+    u = await db.get(User, uid)
+    return u.username if u else None
+
+
+# ---------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------
 @router.get("/{workspace_id}/tasks", response_model=list[WorkspaceTaskResponse])
@@ -226,6 +279,8 @@ async def create_task(
         created_by=user.id,
     )
     db.add(task)
+    await db.flush()
+    _log_activity(db, task.id, user.id, "created this card")
     await db.commit()
     await db.refresh(task)
     _reindex_board(background, ws.id, task.board_item_id)
@@ -247,6 +302,12 @@ async def update_task(
     require_workspace_write(access_role)
     task = await _load_task(db, ws.id, task_id)
     sent = payload.model_fields_set
+
+    # Snapshot fields that drive activity entries before we mutate them.
+    old_status = task.status
+    old_due = task.due_at
+    old_assignee = task.assignee_user_id
+    old_priority = task.priority
 
     if payload.title is not None:
         task.title = payload.title.strip()
@@ -288,6 +349,32 @@ async def update_task(
             datetime.now(timezone.utc) if payload.done else None
         )
 
+    # Log meaningful changes to the activity thread.
+    if task.status != old_status:
+        label = await _column_label(db, task.board_item_id, task.status)
+        _log_activity(db, task.id, user.id, f"moved to {label}")
+    if "due_at" in sent and task.due_at != old_due:
+        _log_activity(
+            db,
+            task.id,
+            user.id,
+            "cleared the due date"
+            if task.due_at is None
+            else f"set the due date to {task.due_at.date().isoformat()}",
+        )
+    if "assignee_user_id" in sent and task.assignee_user_id != old_assignee:
+        who = await _username(db, task.assignee_user_id)
+        _log_activity(
+            db,
+            task.id,
+            user.id,
+            f"assigned to {who}" if who else "unassigned the card",
+        )
+    if payload.priority is not None and task.priority != old_priority:
+        _log_activity(
+            db, task.id, user.id, f"set priority to {task.priority}"
+        )
+
     await db.commit()
     await db.refresh(task)
     _reindex_board(background, ws.id, task.board_item_id)
@@ -313,6 +400,122 @@ async def delete_task(
     await db.delete(task)
     await db.commit()
     _reindex_board(background, ws.id, board_item_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# Comments + activity thread
+# ---------------------------------------------------------------------
+@router.get(
+    "/{workspace_id}/tasks/{task_id}/comments",
+    response_model=list[WorkspaceTaskCommentResponse],
+)
+async def list_comments(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[WorkspaceTaskCommentResponse]:
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    task = await _load_task(db, ws.id, task_id)
+    rows = list(
+        (
+            await db.execute(
+                select(WorkspaceTaskComment)
+                .where(WorkspaceTaskComment.task_id == task.id)
+                .order_by(WorkspaceTaskComment.created_at.asc())
+            )
+        ).scalars()
+    )
+    ids = {c.author_user_id for c in rows if c.author_user_id}
+    names: dict[uuid.UUID, str] = {}
+    if ids:
+        users = (
+            await db.execute(select(User).where(User.id.in_(ids)))
+        ).scalars().all()
+        names = {u.id: u.username for u in users}
+    return [
+        WorkspaceTaskCommentResponse(
+            id=c.id,
+            task_id=c.task_id,
+            author_user_id=c.author_user_id,
+            author_username=names.get(c.author_user_id) if c.author_user_id else None,
+            kind=c.kind,
+            text=c.text,
+            created_at=c.created_at,
+        )
+        for c in rows
+    ]
+
+
+@router.post(
+    "/{workspace_id}/tasks/{task_id}/comments",
+    response_model=WorkspaceTaskCommentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_comment(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    payload: WorkspaceTaskCommentCreate,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceTaskCommentResponse:
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    task = await _load_task(db, ws.id, task_id)
+    comment = WorkspaceTaskComment(
+        task_id=task.id,
+        author_user_id=user.id,
+        kind="comment",
+        text=payload.text.strip(),
+    )
+    db.add(comment)
+    await db.commit()
+    await db.refresh(comment)
+    # Comments are real content — keep the board's RAG text fresh.
+    _reindex_board(background, ws.id, task.board_item_id)
+    return WorkspaceTaskCommentResponse(
+        id=comment.id,
+        task_id=comment.task_id,
+        author_user_id=comment.author_user_id,
+        author_username=user.username,
+        kind=comment.kind,
+        text=comment.text,
+        created_at=comment.created_at,
+    )
+
+
+@router.delete(
+    "/{workspace_id}/tasks/{task_id}/comments/{comment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_comment(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    task = await _load_task(db, ws.id, task_id)
+    comment = await db.get(WorkspaceTaskComment, comment_id)
+    if comment is None or comment.task_id != task.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
+        )
+    # Only the author or the workspace owner can delete a comment.
+    if comment.author_user_id != user.id and ws.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to delete this comment",
+        )
+    await db.delete(comment)
+    await db.commit()
+    _reindex_board(background, ws.id, task.board_item_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

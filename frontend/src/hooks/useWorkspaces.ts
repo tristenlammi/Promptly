@@ -202,6 +202,41 @@ export function useWorkspaceOverview(id: string | undefined) {
 // ---------------------------------------------------------------------
 // Task list — first-class, project-level to-dos
 // ---------------------------------------------------------------------
+export function useTaskComments(
+  workspaceId: string,
+  taskId: string | undefined
+) {
+  return useQuery({
+    queryKey: ["workspaces", "task-comments", workspaceId, taskId],
+    queryFn: () => workspacesApi.taskComments(workspaceId, taskId as string),
+    enabled: Boolean(taskId),
+  });
+}
+
+export function useAddTaskComment(workspaceId: string, taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) =>
+      workspacesApi.addTaskComment(workspaceId, taskId, text),
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: ["workspaces", "task-comments", workspaceId, taskId],
+      }),
+  });
+}
+
+export function useDeleteTaskComment(workspaceId: string, taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: string) =>
+      workspacesApi.deleteTaskComment(workspaceId, taskId, commentId),
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: ["workspaces", "task-comments", workspaceId, taskId],
+      }),
+  });
+}
+
 export function useWorkspaceItem(
   workspaceId: string,
   itemId: string | undefined

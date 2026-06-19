@@ -587,6 +587,7 @@ export function WorkspaceBoardPane({
       {openTask && (
         <WorkspaceBoardCardDetail
           task={openTask}
+          workspaceId={workspaceId}
           canEdit={canEdit}
           labels={labels}
           onLabelsChange={onLabelsChange}
