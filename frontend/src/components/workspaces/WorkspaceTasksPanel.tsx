@@ -35,7 +35,7 @@ export function WorkspaceTasksPanel({
   const submit = () => {
     const title = draft.trim();
     if (!title || create.isPending) return;
-    create.mutate(title, { onSuccess: () => setDraft("") });
+    create.mutate({ title }, { onSuccess: () => setDraft("") });
   };
 
   return (

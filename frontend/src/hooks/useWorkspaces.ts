@@ -24,6 +24,8 @@ import {
   type CreateWorkspaceItemPayload,
   type UpdateWorkspaceItemPayload,
   type MoveWorkspaceItemPayload,
+  type WorkspaceTaskCreatePayload,
+  type WorkspaceTaskUpdatePayload,
 } from "@/api/workspaces";
 
 const KEYS = {
@@ -210,7 +212,8 @@ export function useWorkspaceTasks(id: string | undefined) {
 export function useCreateWorkspaceTask(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (title: string) => workspacesApi.createTask(workspaceId, title),
+    mutationFn: (payload: WorkspaceTaskCreatePayload) =>
+      workspacesApi.createTask(workspaceId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
       qc.invalidateQueries({ queryKey: KEYS.overview(workspaceId) });
@@ -223,7 +226,7 @@ export function useUpdateWorkspaceTask(workspaceId: string) {
   return useMutation({
     mutationFn: (vars: {
       taskId: string;
-      payload: { title?: string; done?: boolean; position?: number };
+      payload: WorkspaceTaskUpdatePayload;
     }) => workspacesApi.updateTask(workspaceId, vars.taskId, vars.payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });

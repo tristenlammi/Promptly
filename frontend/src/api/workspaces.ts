@@ -166,16 +166,38 @@ export interface WorkspaceOverview {
   }[];
 }
 
+export type TaskStatus = "todo" | "doing" | "done";
+export type TaskPriority = "low" | "medium" | "high";
+
 /** A first-class workspace task (the dedicated project to-do list — not
  *  the checkbox rollup parsed out of notes). */
 export interface WorkspaceTask {
   id: string;
   title: string;
   done: boolean;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_at: string | null;
   position: number;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WorkspaceTaskCreatePayload {
+  title: string;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  due_at?: string | null;
+}
+
+export interface WorkspaceTaskUpdatePayload {
+  title?: string;
+  done?: boolean;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  due_at?: string | null;
+  position?: number;
 }
 
 
@@ -503,10 +525,13 @@ export const workspacesApi = {
     return data;
   },
 
-  async createTask(id: string, title: string): Promise<WorkspaceTask> {
+  async createTask(
+    id: string,
+    payload: WorkspaceTaskCreatePayload
+  ): Promise<WorkspaceTask> {
     const { data } = await apiClient.post<WorkspaceTask>(
       `/workspaces/${id}/tasks`,
-      { title }
+      payload
     );
     return data;
   },
@@ -514,7 +539,7 @@ export const workspacesApi = {
   async updateTask(
     id: string,
     taskId: string,
-    payload: { title?: string; done?: boolean; position?: number }
+    payload: WorkspaceTaskUpdatePayload
   ): Promise<WorkspaceTask> {
     const { data } = await apiClient.patch<WorkspaceTask>(
       `/workspaces/${id}/tasks/${taskId}`,
