@@ -138,6 +138,13 @@ export function WorkspaceBoardCardDetail({
     if ((description ?? "") !== (task.description ?? ""))
       onUpdate({ description: description.trim() || null });
   };
+  // Edits already auto-save on blur; Save flushes any field still focused
+  // (title / description) and closes the panel.
+  const handleSave = () => {
+    commitTitle();
+    commitDescription();
+    onClose();
+  };
   const setSubtasks = (next: Subtask[]) =>
     onUpdate({ subtasks: next.length ? next : null });
   const toggleLabel = (id: string) =>
@@ -397,7 +404,7 @@ export function WorkspaceBoardCardDetail({
 
         {/* Footer */}
         {canEdit && (
-          <div className="flex justify-end border-t border-[var(--border)] p-3">
+          <div className="flex items-center justify-between border-t border-[var(--border)] p-3">
             <button
               type="button"
               onClick={onDelete}
@@ -405,6 +412,15 @@ export function WorkspaceBoardCardDetail({
             >
               <Trash2 className="h-4 w-4" />
               Delete task
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              style={{ backgroundColor: "var(--success)" }}
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium text-white transition hover:opacity-90"
+            >
+              <Check className="h-4 w-4" />
+              Save
             </button>
           </div>
         )}

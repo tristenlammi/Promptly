@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import {
-  AlignLeft,
   ArrowUpDown,
   CalendarDays,
-  CheckSquare,
+  Check,
   Clock,
   Columns3,
   LayoutGrid,
@@ -12,6 +11,7 @@ import {
   Paperclip,
   Plus,
   Search,
+  Square,
   Trash2,
   X,
 } from "lucide-react";
@@ -79,6 +79,22 @@ const PRIORITY_NEXT: Record<TaskPriority, TaskPriority> = {
   medium: "high",
   high: "low",
 };
+
+/** How much detail each card shows on the board.
+ *  ``compact`` = title + due; ``detailed`` adds the description; ``full``
+ *  adds labels, links, attachments (incl. cover) and the checklist. */
+type Density = "compact" | "detailed" | "full";
+const DENSITY_KEY = "promptly:board-density";
+const DENSITIES: { key: Density; label: string }[] = [
+  { key: "compact", label: "Compact" },
+  { key: "detailed", label: "Detailed" },
+  { key: "full", label: "Full" },
+];
+function loadDensity(): Density {
+  const v = (typeof localStorage !== "undefined" &&
+    localStorage.getItem(DENSITY_KEY)) as Density | null;
+  return v === "compact" || v === "detailed" || v === "full" ? v : "detailed";
+}
 
 type SortKey = "manual" | "created" | "due" | "priority";
 const SORTS: { key: SortKey; label: string }[] = [
@@ -154,7 +170,17 @@ export function WorkspaceBoardPane({
   const setConfig = useSetBoardConfig(workspaceId, boardItemId);
 
   const [view, setView] = useState<"board" | "calendar">("board");
+  const [density, setDensity] = useState<Density>(loadDensity);
   const [sortKey, setSortKey] = useState<SortKey>("manual");
+
+  const changeDensity = (d: Density) => {
+    setDensity(d);
+    try {
+      localStorage.setItem(DENSITY_KEY, d);
+    } catch {
+      /* ignore quota / unavailable storage */
+    }
+  };
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -393,6 +419,27 @@ export function WorkspaceBoardPane({
               Calendar
             </button>
           </div>
+          {/* Card density */}
+          {view === "board" && (
+            <div className="inline-flex overflow-hidden rounded-md border border-[var(--border)]">
+              {DENSITIES.map((d) => (
+                <button
+                  key={d.key}
+                  type="button"
+                  onClick={() => changeDensity(d.key)}
+                  title={`${d.label} cards`}
+                  className={cn(
+                    "px-2 py-1 text-xs transition",
+                    density === d.key
+                      ? "bg-[var(--accent)] text-white"
+                      : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                  )}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          )}
           {view === "board" && canEdit && (
             <button
               type="button"
@@ -642,7 +689,17 @@ export function WorkspaceBoardPane({
                         <BoardCard
                           task={task}
                           canEdit={canEdit}
+                          density={density}
                           dragging={dragId === task.id}
+                          onToggleSubtask={(subId) => {
+                            const next = (task.subtasks ?? []).map((s) =>
+                              s.id === subId ? { ...s, done: !s.done } : s
+                            );
+                            update.mutate({
+                              taskId: task.id,
+                              payload: { subtasks: next.length ? next : null },
+                            });
+                          }}
                           onDragStart={(e) => {
                             setDragId(task.id);
                             e.dataTransfer.setData("text/plain", task.id);
@@ -852,9 +909,11 @@ export function MemberAvatar({
 function BoardCard({
   task,
   canEdit,
+  density,
   dragging,
   labels,
   assignee,
+  onToggleSubtask,
   onDragStart,
   onDragEnd,
   onCyclePriority,
@@ -863,9 +922,11 @@ function BoardCard({
 }: {
   task: WorkspaceTask;
   canEdit: boolean;
+  density: Density;
   dragging: boolean;
   labels: BoardLabel[];
   assignee?: BoardMember;
+  onToggleSubtask: (subId: string) => void;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
   onCyclePriority: () => void;
@@ -877,16 +938,12 @@ function BoardCard({
   const subs = task.subtasks ?? [];
   const subDone = subs.filter((s) => s.done).length;
   const hasDesc = Boolean((task.description ?? "").trim());
-  const linkCount = task.links?.length ?? 0;
+  const links = task.links ?? [];
   const attachments = task.attachments ?? [];
-  const attCount = attachments.length;
   const cover = attachments.find((a) => a.is_cover);
-  const hasMeta =
-    Boolean(task.due_at) ||
-    subs.length > 0 ||
-    hasDesc ||
-    linkCount > 0 ||
-    attCount > 0;
+
+  const showDesc = density !== "compact";
+  const full = density === "full";
 
   return (
     <div
@@ -899,79 +956,91 @@ function BoardCard({
         dragging && "opacity-40"
       )}
     >
-      {cover && (
+      {full && cover && (
         <WorkspaceFileImage
           fileId={cover.file_id}
           className="h-24 w-full object-cover"
         />
       )}
       <div className="p-2">
-      {labels.length > 0 && (
-        <div className="mb-1.5 flex flex-wrap gap-1">
-          {labels.map((l) => (
-            <span
-              key={l.id}
-              style={{ backgroundColor: l.color }}
-              className="rounded-full px-1.5 py-px text-[10px] font-medium text-white"
-            >
-              {l.name}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="flex items-start gap-2">
-        {/* Priority dot — click cycles low → medium → high */}
-        <button
-          type="button"
-          disabled={!canEdit}
-          onClick={(e) => {
-            e.stopPropagation();
-            onCyclePriority();
-          }}
-          title={`${prio.label} — click to change`}
-          className={cn(
-            "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
-            prio.dot,
-            !canEdit && "cursor-default"
-          )}
-        />
-
-        <span
-          className={cn(
-            "min-w-0 flex-1 break-words text-sm",
-            task.done
-              ? "text-[var(--text-muted)] line-through"
-              : "text-[var(--text)]"
-          )}
-        >
-          {task.title}
-        </span>
-
-        {assignee && (
-          <span className="mt-0.5 shrink-0">
-            <MemberAvatar member={assignee} />
-          </span>
+        {full && labels.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {labels.map((l) => (
+              <span
+                key={l.id}
+                style={{ backgroundColor: l.color }}
+                className="rounded-full px-1.5 py-px text-[10px] font-medium text-white"
+              >
+                {l.name}
+              </span>
+            ))}
+          </div>
         )}
 
-        {canEdit && (
+        <div className="flex items-start gap-2">
+          {/* Priority dot — click cycles low → medium → high */}
           <button
             type="button"
+            disabled={!canEdit}
             onClick={(e) => {
               e.stopPropagation();
-              onDelete();
+              onCyclePriority();
             }}
-            title="Delete task"
-            className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
+            title={`${prio.label} — click to change`}
+            className={cn(
+              "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
+              prio.dot,
+              !canEdit && "cursor-default"
+            )}
+          />
 
-      {/* Meta row: due + checklist + description indicator */}
-      {hasMeta && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-[18px] text-[11px] text-[var(--text-muted)]">
-          {task.due_at && (
+          <span
+            className={cn(
+              "min-w-0 flex-1 break-words text-sm",
+              task.done
+                ? "text-[var(--text-muted)] line-through"
+                : "text-[var(--text)]"
+            )}
+          >
+            {task.title}
+          </span>
+
+          {assignee && (
+            <span className="mt-0.5 shrink-0">
+              <MemberAvatar member={assignee} />
+            </span>
+          )}
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              title="Delete task"
+              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Description (detailed + full) */}
+        {showDesc && hasDesc && (
+          <p
+            className={cn(
+              "mt-1.5 whitespace-pre-wrap break-words pl-[18px] text-xs text-[var(--text-muted)]",
+              full ? "line-clamp-6" : "line-clamp-2"
+            )}
+          >
+            {task.description}
+          </p>
+        )}
+
+        {/* Due date (all densities) */}
+        {task.due_at && (
+          <div className="mt-1.5 pl-[18px] text-[11px]">
             <span
               className={cn(
                 "inline-flex items-center gap-1",
@@ -986,30 +1055,77 @@ function BoardCard({
               {formatDue(task.due_at)}
               {urgency === "overdue" && !task.done && " · overdue"}
             </span>
-          )}
-          {subs.length > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <CheckSquare className="h-3 w-3" />
-              {subDone}/{subs.length}
-            </span>
-          )}
-          {linkCount > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <Link2 className="h-3 w-3" />
-              {linkCount}
-            </span>
-          )}
-          {attCount > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <Paperclip className="h-3 w-3" />
-              {attCount}
-            </span>
-          )}
-          {hasDesc && (
-            <AlignLeft className="h-3 w-3" aria-label="Has description" />
-          )}
-        </div>
-      )}
+          </div>
+        )}
+
+        {/* Checklist, links, attachments (full only) */}
+        {full && subs.length > 0 && (
+          <div className="mt-2 pl-[18px]">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Checklist · {subDone}/{subs.length}
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {subs.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSubtask(s.id);
+                  }}
+                  className="flex items-center gap-1.5 text-left text-xs text-[var(--text-muted)] disabled:cursor-default"
+                >
+                  {s.done ? (
+                    <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                  ) : (
+                    <Square className="h-3 w-3 shrink-0" />
+                  )}
+                  <span
+                    className={cn(
+                      "min-w-0 truncate",
+                      s.done
+                        ? "text-[var(--text-muted)] line-through"
+                        : "text-[var(--text)]"
+                    )}
+                  >
+                    {s.text}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {full && links.length > 0 && (
+          <div className="mt-2 flex flex-col gap-0.5 pl-[18px]">
+            {links.map((l) => (
+              <span
+                key={l.item_id}
+                className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]"
+              >
+                <Link2 className="h-3 w-3 shrink-0" />
+                <span className="min-w-0 truncate">
+                  {l.title || "Untitled"}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {full && attachments.length > 0 && (
+          <div className="mt-2 flex flex-col gap-0.5 pl-[18px]">
+            {attachments.map((a) => (
+              <span
+                key={a.file_id}
+                className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]"
+              >
+                <Paperclip className="h-3 w-3 shrink-0" />
+                <span className="min-w-0 truncate">{a.filename || "File"}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
