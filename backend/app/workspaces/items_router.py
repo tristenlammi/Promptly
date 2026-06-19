@@ -273,8 +273,8 @@ async def create_workspace_item(
 ) -> WorkspaceItemResponse:
     """Create a folder, note, or canvas in the workspace tree.
 
-    A note lays down a blank Drive Document in ``Notes/``; a canvas a
-    tldraw board + backing text file in ``Canvases/``. The backing rows
+    A note lays down a blank Drive Document in ``Notes/``; a canvas an
+    Excalidraw board + backing text file in ``Canvases/``. The backing rows
     and the item row commit together so we never leave a dangling item
     or an orphan document/canvas."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)

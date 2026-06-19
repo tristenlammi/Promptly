@@ -62,7 +62,7 @@ const jwtSecretBytes = new TextEncoder().encode(SECRET_KEY);
 // --- Room name parsing ------------------------------------------------
 //
 // A room name is either a bare document UUID (a Drive document — the
-// original behaviour) or ``canvas:<uuid>`` (a workspace tldraw canvas,
+// original behaviour) or ``canvas:<uuid>`` (a workspace Excalidraw canvas,
 // Phase 2). Parsing routes persistence to the right table and the auth
 // check to the right JWT claim. We reject anything that doesn't look
 // like a UUID so a typo can't touch an unintended row.

@@ -429,9 +429,9 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
 
 
 class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
-    """A tldraw canvas in a workspace (Phase 2).
+    """An Excalidraw canvas in a workspace (Phase 2).
 
-    Multiplayer from day one: the tldraw store syncs over the **same
+    Multiplayer from day one: the Excalidraw scene syncs over the **same
     Yjs/Hocuspocus substrate as documents**, persisted here as a CRDT
     update (``yjs_update``) keyed by the ``canvas:<id>`` collab room. The
     columns mirror :class:`app.files.models.DocumentState` (``yjs_update``
@@ -440,7 +440,7 @@ class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
 
     ``content_text`` holds the flattened text of the canvas's shapes,
     pushed by the client on a debounce (``POST /api/canvas/{id}/text``) —
-    the backend can't cheaply decode the tldraw Yjs schema, so the client
+    the backend can't cheaply decode the Excalidraw Yjs schema, so the client
     extracts it. It's mirrored onto a backing Drive text file
     (``text_file_id``) so the canvas participates in workspace retrieval
     through the existing ``knowledge_chunks`` pipeline (which keys on a
@@ -457,7 +457,7 @@ class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(
         String(255), nullable=False, default="Untitled canvas"
     )
-    # Full merged Y.Doc state (tldraw store). Seeded empty at creation so
+    # Full merged Y.Doc state (Excalidraw scene). Seeded empty at creation so
     # the collab Database extension has a row to upsert; the first session
     # starts from a fresh Y.Doc when this is empty (same as documents).
     yjs_update: Mapped[bytes] = mapped_column(

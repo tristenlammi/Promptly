@@ -6,7 +6,7 @@ import { canvasApi } from "@/api/canvas";
 import type { CollabTokenResponse } from "@/api/documents";
 
 /**
- * Subscribes a tldraw board to the Hocuspocus collab room for a canvas.
+ * Subscribes an Excalidraw board to the Hocuspocus collab room for a canvas.
  *
  * This is the canvas twin of ``useCollabProvider`` (documents). Same
  * lifecycle, same token-refresh dance — the only differences are the
@@ -24,7 +24,7 @@ import type { CollabTokenResponse } from "@/api/documents";
  *     the CRDT can be GC'd.
  *
  * Returns the Y.Doc, provider, connection status, and presence identity
- * (name + colour) for tldraw's awareness-based cursors.
+ * (name + colour) for Excalidraw's awareness-based cursors.
  */
 export type CanvasCollabStatus = "connecting" | "connected" | "disconnected";
 
@@ -57,7 +57,7 @@ export function useCanvasCollabProvider(
   const [error, setError] = useState<string | null>(null);
 
   // ``ydoc`` + ``provider`` are mirrored into state so the binding hook /
-  // <Tldraw> re-render once they exist. Both are created *inside* the
+  // <Excalidraw> re-render once they exist. Both are created *inside* the
   // effect (not via a lazy ref during render) so teardown can null them
   // without risking the next effect run reading a destroyed doc.
   const [ydoc, setYdoc] = useState<Y.Doc | null>(null);

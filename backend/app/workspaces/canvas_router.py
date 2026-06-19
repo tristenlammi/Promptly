@@ -1,6 +1,6 @@
 """Workspace canvases API — collab tokens + text sync (Phase 2).
 
-A workspace canvas is a tldraw board synced over the same
+A workspace canvas is an Excalidraw board synced over the same
 Yjs/Hocuspocus substrate as Drive documents. This router owns the
 non-websocket side:
 
@@ -13,10 +13,10 @@ with ``kind='canvas'``) via :func:`create_canvas_with_item` below, so a
 canvas always arrives as a tree node.
 
 There is deliberately **no snapshot endpoint** (unlike documents): the
-collab server persists the tldraw Y.Doc straight to ``workspace_canvas``
+collab server persists the Excalidraw Y.Doc straight to ``workspace_canvas``
 and skips the HTML-render callback for canvas rooms. Text for retrieval
 comes from the client via ``/text`` because the backend can't cheaply
-decode the tldraw Yjs schema.
+decode the Excalidraw Yjs schema.
 """
 from __future__ import annotations
 

@@ -275,7 +275,7 @@ class WorkspaceItemCreate(BaseModel):
 
     ``kind='folder'`` makes a tree-only organisation node. ``kind='note'``
     creates a blank Drive Document in the workspace's ``Notes`` folder;
-    ``kind='canvas'`` creates a tldraw board (+ backing text file in
+    ``kind='canvas'`` creates an Excalidraw board (+ backing text file in
     ``Canvases``). ``title`` is optional (kind-specific default)."""
 
     kind: Literal["folder", "note", "canvas"]
