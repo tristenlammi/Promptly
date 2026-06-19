@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Archive,
   ArchiveRestore,
@@ -28,7 +38,13 @@ import {
   parseWikiHref,
   type WikiTarget,
 } from "@/components/files/documents/WikiLinkExtension";
-import { WorkspaceCanvasPane } from "@/components/workspaces/WorkspaceCanvasPane";
+// Lazy so the (large) Excalidraw editor chunk only downloads when a
+// canvas is actually opened, not on every workspace visit.
+const WorkspaceCanvasPane = lazy(() =>
+  import("@/components/workspaces/WorkspaceCanvasPane").then((m) => ({
+    default: m.WorkspaceCanvasPane,
+  }))
+);
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceGraphPane } from "@/components/workspaces/WorkspaceGraphPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -64,6 +80,7 @@ export function WorkspaceDetailPage() {
   const { data: workspace, isLoading } = useWorkspace(id);
   const { data: conversations } = useWorkspaceConversations(id);
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<WorkspaceItemNode | null>(null);
   const [secondary, setSecondary] = useState<WorkspaceItemNode | null>(null);
@@ -73,6 +90,53 @@ export function WorkspaceDetailPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
+
+  // Persist the open item(s) in the URL so a refresh restores the view
+  // instead of dropping back to the workspace home. ``item`` is the primary
+  // pane; ``item2`` the split-screen secondary.
+  const findNode = useCallback(
+    (
+      nodes: WorkspaceItemNode[] | undefined,
+      target: string | null
+    ): WorkspaceItemNode | null => {
+      if (!nodes || !target) return null;
+      for (const n of nodes) {
+        if (n.id === target) return n;
+        const found = findNode(n.children, target);
+        if (found) return found;
+      }
+      return null;
+    },
+    []
+  );
+
+  // Restore selection from the URL once the tree is available — once per
+  // workspace id, so closing an item later doesn't re-open it, and a
+  // workspace switch re-reads (and clears stale state).
+  const restoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tree || !id || restoredForRef.current === id) return;
+    restoredForRef.current = id;
+    const primary = findNode(tree, searchParams.get("item"));
+    setSelected(primary);
+    const split = findNode(tree, searchParams.get("item2"));
+    setSecondary(split && split.id !== primary?.id ? split : null);
+  }, [tree, id, searchParams, findNode]);
+
+  // Mirror the current selection back into the URL (replace, so selecting
+  // items doesn't pile up browser history). Guarded until restore has run
+  // for this id so we never clobber the param before reading it.
+  useEffect(() => {
+    if (restoredForRef.current !== id) return;
+    const next = new URLSearchParams(searchParams);
+    if (selected) next.set("item", selected.id);
+    else next.delete("item");
+    if (secondary) next.set("item2", secondary.id);
+    else next.delete("item2");
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [selected, secondary, id, searchParams, setSearchParams]);
 
   // ⌘K / Ctrl+K opens the workspace command palette (jump / ask).
   useEffect(() => {
@@ -254,34 +318,60 @@ export function WorkspaceDetailPage() {
             {graphOpen ? (
               <WorkspaceGraphPane workspaceId={id} onOpenItem={handleSelect} />
             ) : secondary && selected ? (
-              // Split screen — primary on the left, secondary on the right.
-              <div className="flex min-h-0 flex-1">
-                <div className="flex min-w-0 flex-1 flex-col overflow-hidden border-r border-[var(--border)]">
-                  <SplitPaneHeader title={selected.title} onClose={closePrimary} />
-                  <WorkspaceItemView
-                    key={selected.id}
-                    node={selected}
-                    workspaceId={id}
-                    onOpenItem={handleSelect}
-                    onClose={closePrimary}
-                    canEdit={canEdit}
+              // Split screen — primary on the left, secondary on the right,
+              // with a draggable gutter. The chat side defaults narrower
+              // (chats cap their own width, so a full half wastes space);
+              // ``key`` remounts the split when which-side-is-chat changes
+              // so it re-reads the right saved width.
+              (() => {
+                const chatSide =
+                  selected.kind === "chat" && secondary.kind !== "chat"
+                    ? "left"
+                    : secondary.kind === "chat" && selected.kind !== "chat"
+                      ? "right"
+                      : "even";
+                const defaultLeftFraction =
+                  chatSide === "left" ? 0.4 : chatSide === "right" ? 0.6 : 0.5;
+                return (
+                  <ResizableSplit
+                    key={chatSide}
+                    storageKey={`promptly.workspaceSplit.${chatSide}`}
+                    defaultLeftFraction={defaultLeftFraction}
+                    left={
+                      <>
+                        <SplitPaneHeader
+                          title={selected.title}
+                          onClose={closePrimary}
+                        />
+                        <WorkspaceItemView
+                          key={selected.id}
+                          node={selected}
+                          workspaceId={id}
+                          onOpenItem={handleSelect}
+                          onClose={closePrimary}
+                          canEdit={canEdit}
+                        />
+                      </>
+                    }
+                    right={
+                      <>
+                        <SplitPaneHeader
+                          title={secondary.title}
+                          onClose={() => setSecondary(null)}
+                        />
+                        <WorkspaceItemView
+                          key={secondary.id}
+                          node={secondary}
+                          workspaceId={id}
+                          onOpenItem={handleSelect}
+                          onClose={() => setSecondary(null)}
+                          canEdit={canEdit}
+                        />
+                      </>
+                    }
                   />
-                </div>
-                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                  <SplitPaneHeader
-                    title={secondary.title}
-                    onClose={() => setSecondary(null)}
-                  />
-                  <WorkspaceItemView
-                    key={secondary.id}
-                    node={secondary}
-                    workspaceId={id}
-                    onOpenItem={handleSelect}
-                    onClose={() => setSecondary(null)}
-                    canEdit={canEdit}
-                  />
-                </div>
-              </div>
+                );
+              })()
             ) : (
               <WorkspaceMainPane
                 key={selected?.id ?? "empty"}
@@ -522,6 +612,94 @@ function WorkspaceMainPane({
   );
 }
 
+/**
+ * Two panes side by side with a draggable gutter between them. ``left``
+ * gets ``leftFraction`` of the width (clamped 20–80%); the gutter drag
+ * updates and persists it under ``storageKey``. ``defaultLeftFraction``
+ * seeds the first-ever layout (we narrow the chat side — chats cap their
+ * own content width, so a full half is wasted space).
+ */
+function ResizableSplit({
+  storageKey,
+  defaultLeftFraction,
+  left,
+  right,
+}: {
+  storageKey: string;
+  defaultLeftFraction: number;
+  left: ReactNode;
+  right: ReactNode;
+}) {
+  const MIN = 0.2;
+  const MAX = 0.8;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const fractionRef = useRef(defaultLeftFraction);
+  const [fraction, setFraction] = useState<number>(() => {
+    const stored = Number(localStorage.getItem(storageKey));
+    const f =
+      Number.isFinite(stored) && stored >= MIN && stored <= MAX
+        ? stored
+        : defaultLeftFraction;
+    fractionRef.current = f;
+    return f;
+  });
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!draggingRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const next = Math.min(
+        MAX,
+        Math.max(MIN, (e.clientX - rect.left) / rect.width)
+      );
+      fractionRef.current = next;
+      setFraction(next);
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem(storageKey, String(fractionRef.current));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [storageKey]);
+
+  const startDrag = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  return (
+    <div ref={containerRef} className="flex min-h-0 flex-1">
+      <div
+        className="flex min-w-0 flex-col overflow-hidden"
+        style={{ width: `${fraction * 100}%` }}
+      >
+        {left}
+      </div>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        onPointerDown={startDrag}
+        className="relative w-px shrink-0 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent,#D97757)]"
+      >
+        {/* Wider invisible hit area so the 1px gutter is easy to grab. */}
+        <div className="absolute inset-y-0 -left-2 -right-2" />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{right}</div>
+    </div>
+  );
+}
+
 /** Thin title bar above each pane in split-screen mode, with a close. */
 function SplitPaneHeader({
   title,
@@ -578,12 +756,7 @@ function WorkspaceItemView({
   }
   if (node.kind === "canvas") {
     return (
-      <WorkspaceCanvasPaneFrame
-        node={node}
-        canEdit={canEdit}
-        workspaceId={workspaceId}
-        onOpenItem={onOpenItem}
-      />
+      <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />
     );
   }
   if (node.kind === "chat" && node.ref_id) {
@@ -844,7 +1017,7 @@ function BacklinksPanel({
 /**
  * Inline frame for a selected canvas item. Unlike the note pane (which
  * pops the document editor as a modal), the canvas renders a real inline
- * editor — tldraw fills this positioned, full-height container.
+ * editor — Excalidraw fills this positioned, full-height container.
  *
  * The canvas item's ``ref_id`` is the canvas id the collab room + token
  * endpoints key off. Viewers (no edit access) get a read-only board.
@@ -852,13 +1025,9 @@ function BacklinksPanel({
 function WorkspaceCanvasPaneFrame({
   node,
   canEdit,
-  workspaceId,
-  onOpenItem,
 }: {
   node: WorkspaceItemNode;
   canEdit: boolean;
-  workspaceId: string;
-  onOpenItem: (node: WorkspaceItemNode) => void;
 }) {
   if (!node.ref_id) {
     return (
@@ -871,14 +1040,17 @@ function WorkspaceCanvasPaneFrame({
   }
   return (
     // ``min-h-0`` lets this flex child shrink so the absolutely-positioned
-    // tldraw surface gets a real height inside the scrolling main pane.
+    // Excalidraw surface gets a real height inside the scrolling main pane.
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <WorkspaceCanvasPane
-        canvasId={node.ref_id}
-        readOnly={!canEdit}
-        workspaceId={workspaceId}
-        onOpenItem={onOpenItem}
-      />
+      <Suspense
+        fallback={
+          <div className="flex flex-1 items-center justify-center text-sm text-[var(--text-muted)]">
+            Loading canvas…
+          </div>
+        }
+      >
+        <WorkspaceCanvasPane canvasId={node.ref_id} readOnly={!canEdit} />
+      </Suspense>
     </div>
   );
 }

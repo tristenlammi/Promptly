@@ -4,7 +4,7 @@ import type { CollabTokenResponse } from "./documents";
 /**
  * Client for the multiplayer Canvas API (``/api/canvas/*``).
  *
- * A canvas is a tldraw board whose state lives in a Yjs CRDT, synced over
+ * A canvas is an Excalidraw board whose state lives in a Yjs CRDT, synced over
  * the same Hocuspocus stack as Drive Documents. The board's flattened text
  * is pushed back to the backend on a debounce so workspace RAG stays
  * grounded in what the canvas says.

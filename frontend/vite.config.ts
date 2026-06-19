@@ -84,6 +84,12 @@ export default defineConfig({
       // precache list the SW consumes via ``self.__WB_MANIFEST``.
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // Keep Excalidraw out of the SW precache: the lazy editor chunk
+        // (~4.5 MB) and its self-hosted fonts/locales are only needed when
+        // a canvas is opened (which requires the network for collab
+        // anyway), so precaching them would bloat first install and negate
+        // the lazy-load. They're fetched on demand instead.
+        globIgnores: ["**/excalidraw-assets/**", "**/excalidraw-*.js"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
 
@@ -117,6 +123,12 @@ export default defineConfig({
         // dependency paths (Vite hands us absolute module IDs).
         manualChunks(id: string): string | undefined {
           if (!id.includes("node_modules")) return undefined;
+          // The whiteboard editor is large and only loaded on the
+          // (lazily mounted) workspace canvas — keep it out of the main
+          // chunk. ``roughjs`` is its hand-drawn renderer.
+          if (id.includes("@excalidraw") || id.includes("roughjs")) {
+            return "excalidraw";
+          }
           if (id.includes("@tiptap") || id.includes("prosemirror")) {
             return "tiptap";
           }

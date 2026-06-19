@@ -1,39 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Loader2,
-  Plus,
-  FileText,
-  MessageSquare,
-  PenLine,
-} from "lucide-react";
-import { Tldraw, createShapeId, type Editor } from "tldraw";
-import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
-import "tldraw/tldraw.css";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { Excalidraw, getTextFromElements } from "@excalidraw/excalidraw";
+import "@excalidraw/excalidraw/index.css";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { canvasApi } from "@/api/canvas";
-import { useWorkspaceTree } from "@/hooks/useWorkspaces";
-import type { WorkspaceItemNode } from "@/api/workspaces";
+import { useCanvasThemeStore } from "@/store/canvasThemeStore";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
-import { useYjsCanvasStore } from "./useYjsCanvasStore";
-import { customShapeUtils } from "./canvas/customShapes";
-import { CanvasCardProvider, type ItemCardShape } from "./canvas/ItemCardShape";
+import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
+import { buildBundledLibraryItems } from "./canvas/libraries";
 
-// Bundle tldraw's icons / fonts / translations through Vite so they load
-// from our own origin. Promptly's CSP is ``default-src 'self'`` with no
-// tldraw CDN allowance, so the default (CDN-hosted) assets are blocked —
-// which is why the toolbar/style-panel render as empty squares without
-// this. Computed once at module load (it only wires up import URLs).
-const tldrawAssetUrls = getAssetUrlsByImport();
+// The onChange element list type, derived from the component so we don't
+// reach into Excalidraw's internal element type-paths.
+type OnChange = NonNullable<
+  React.ComponentProps<typeof Excalidraw>["onChange"]
+>;
+type ChangeElements = Parameters<OnChange>[0];
 
 /**
- * Live, multiplayer tldraw board for a workspace canvas item.
+ * Live, multiplayer Excalidraw board for a workspace canvas item.
  *
  * Mirrors the document collab path: a Hocuspocus provider feeds a shared
- * ``Y.Doc``; ``useYjsCanvasStore`` binds a tldraw ``TLStore`` to it (shapes
- * + presence). The board's flattened text is pushed back to the backend on
- * a 1.5s debounce so workspace RAG stays grounded in the canvas.
+ * ``Y.Doc``; ``useExcalidrawCanvas`` binds the Excalidraw scene to it
+ * (elements + image files + presence). The board's flattened text is
+ * pushed back to the backend on a 1.5s debounce so workspace RAG stays
+ * grounded in what's on the canvas.
  *
- * The container is ``h-full`` + ``relative`` because tldraw fills its
+ * The container is ``h-full`` + ``relative`` because Excalidraw fills its
  * positioned parent — without an explicitly sized parent it collapses to
  * zero height.
  */
@@ -42,50 +35,51 @@ const TEXT_DEBOUNCE_MS = 1500;
 export function WorkspaceCanvasPane({
   canvasId,
   readOnly = false,
-  workspaceId,
-  onOpenItem,
 }: {
   canvasId: string;
   /** Viewer-role access → board opens read-only. */
   readOnly?: boolean;
-  /** Owning workspace — enables the "Insert card" picker + lets live
-   *  cards resolve their workspace context. */
-  workspaceId?: string;
-  /** Open a card's underlying item in the workspace main pane. */
-  onOpenItem?: (node: WorkspaceItemNode) => void;
 }) {
   const { ydoc, provider, user, error } = useCanvasCollabProvider(canvasId);
-  const storeWithStatus = useYjsCanvasStore({ ydoc, provider, user });
+  const [excalidrawAPI, setExcalidrawAPI] =
+    useState<ExcalidrawImperativeAPI | null>(null);
 
-  const editorRef = useRef<Editor | null>(null);
+  // Initial scene data, built once at mount. The canvas theme is seeded
+  // from the (per-user, light-by-default) canvas theme store and from then
+  // on is owned by Excalidraw's own toggle — we persist the user's choice
+  // back to the store in ``handleChange`` below. ``getState()`` (not the
+  // hook) reads the persisted value without making theme a reactive dep.
+  const initialData = useMemo(
+    () => ({
+      libraryItems: buildBundledLibraryItems(),
+      appState: { theme: useCanvasThemeStore.getState().theme },
+    }),
+    []
+  );
+
+  const binding = useExcalidrawCanvas({
+    excalidrawAPI,
+    ydoc,
+    provider,
+    user,
+    readOnly,
+  });
+
+  // --- RAG text push (debounced) --------------------------------------
   const debounceRef = useRef<number | null>(null);
-  // Keep the last text we pushed so we skip no-op POSTs on cosmetic edits
-  // (moving a shape doesn't change its text).
+  // Keep the last text we pushed so cosmetic edits (moving a shape) don't
+  // trigger no-op POSTs.
   const lastTextRef = useRef<string>("");
 
-  // Flatten every text-bearing shape on the current page into one blob.
-  // tldraw text / note / geo shapes carry their label under ``props.text``.
-  const extractText = useCallback((editor: Editor): string => {
-    const shapes = editor.getCurrentPageShapes();
-    const parts: string[] = [];
-    for (const shape of shapes) {
-      const props = shape.props as { text?: unknown };
-      if (typeof props.text === "string" && props.text.trim()) {
-        parts.push(props.text.trim());
-      }
-    }
-    return parts.join("\n");
-  }, []);
-
   const schedulePush = useCallback(
-    (editor: Editor) => {
+    (elements: ChangeElements) => {
       if (readOnly) return;
       if (debounceRef.current !== null) {
         window.clearTimeout(debounceRef.current);
       }
       debounceRef.current = window.setTimeout(() => {
         debounceRef.current = null;
-        const text = extractText(editor);
+        const text = getTextFromElements(elements, "\n").trim();
         if (text === lastTextRef.current) return;
         lastTextRef.current = text;
         void canvasApi.updateText(canvasId, text).catch(() => {
@@ -93,29 +87,22 @@ export function WorkspaceCanvasPane({
         });
       }, TEXT_DEBOUNCE_MS);
     },
-    [canvasId, extractText, readOnly]
+    [canvasId, readOnly]
   );
 
-  const handleMount = useCallback(
-    (editor: Editor) => {
-      editorRef.current = editor;
-      editor.updateInstanceState({ isReadonly: readOnly });
-
-      // Push text whenever the document changes (debounced). We listen on
-      // ``document`` scope so presence/cursor churn doesn't trip the push.
-      const unlisten = editor.store.listen(
-        () => schedulePush(editor),
-        { scope: "document" }
-      );
-      // Seed an initial push so a freshly-opened board with prior content
-      // re-grounds RAG even if nothing is edited this session.
-      schedulePush(editor);
-
-      return () => {
-        unlisten();
-      };
+  // One onChange feeds the collab binding, the RAG text push, and
+  // persistence of the user's light/dark choice (Excalidraw owns the theme
+  // toggle; we mirror it into the store so it sticks across sessions).
+  const handleChange = useCallback<OnChange>(
+    (elements, appState, files) => {
+      binding.onChange(elements, appState, files);
+      schedulePush(elements);
+      const nextTheme = (appState as { theme?: "light" | "dark" }).theme;
+      if (nextTheme && nextTheme !== useCanvasThemeStore.getState().theme) {
+        useCanvasThemeStore.getState().setTheme(nextTheme);
+      }
     },
-    [readOnly, schedulePush]
+    [binding.onChange, schedulePush]
   );
 
   // Clear any pending debounce on unmount / canvas swap.
@@ -139,146 +126,31 @@ export function WorkspaceCanvasPane({
     );
   }
 
-  // Gate on the store being bound, not the live socket: once tldraw is up
-  // we keep it mounted across transient disconnects (Yjs buffers + resyncs
-  // on reconnect), so a blip doesn't blow away the user's view/selection.
-  const ready = storeWithStatus.status === "synced-remote";
-
-  if (!ready) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
-        <span className="inline-flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Connecting canvas…
-        </span>
-      </div>
-    );
-  }
-
-  // Drop a live card for a workspace item onto the board at the current
-  // viewport centre, then select it (so a chat card immediately goes live).
-  const insertCard = (node: WorkspaceItemNode) => {
-    const editor = editorRef.current;
-    if (!editor || !node.ref_id) return;
-    const center = editor.getViewportPageBounds().center;
-    const id = createShapeId();
-    editor.createShape<ItemCardShape>({
-      id,
-      type: "item-card",
-      x: center.x - 170,
-      y: center.y - 210,
-      props: {
-        w: 340,
-        h: 420,
-        itemId: node.id,
-        kind: node.kind,
-        refId: node.ref_id,
-        title: node.title,
-      },
-    });
-    editor.select(id);
-  };
-
   return (
-    <CanvasCardProvider value={{ workspaceId: workspaceId ?? "", onOpenItem }}>
-      <div className="relative h-full min-h-0 flex-1">
-        <Tldraw
-          store={storeWithStatus}
-          shapeUtils={customShapeUtils}
-          assetUrls={tldrawAssetUrls}
-          onMount={handleMount}
-        />
-        {!readOnly && workspaceId && (
-          <InsertCardMenu workspaceId={workspaceId} onInsert={insertCard} />
-        )}
-      </div>
-    </CanvasCardProvider>
-  );
-}
-
-// --------------------------------------------------------------------------
-// Insert-card picker — a floating control listing the workspace's notes,
-// chats, and canvases. Selecting one drops a live card on the board.
-// --------------------------------------------------------------------------
-
-const INSERTABLE_ICON: Record<string, typeof FileText> = {
-  note: FileText,
-  chat: MessageSquare,
-  canvas: PenLine,
-};
-
-function flattenInsertable(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
-  const out: WorkspaceItemNode[] = [];
-  const walk = (list: WorkspaceItemNode[]) => {
-    for (const n of list) {
-      if (
-        n.ref_id &&
-        (n.kind === "note" || n.kind === "chat" || n.kind === "canvas")
-      ) {
-        out.push(n);
-      }
-      if (n.children?.length) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return out;
-}
-
-function InsertCardMenu({
-  workspaceId,
-  onInsert,
-}: {
-  workspaceId: string;
-  onInsert: (node: WorkspaceItemNode) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const { data: tree } = useWorkspaceTree(workspaceId);
-  const items = tree ? flattenInsertable(tree) : [];
-
-  return (
-    <div className="absolute left-3 top-3 z-10">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 rounded-card border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] shadow-sm hover:bg-[var(--hover)]"
-        title="Drop a live note, chat, or canvas card on the board"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Insert card
-      </button>
-      {open && (
-        <div className="mt-1 max-h-80 w-64 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
-          {items.length === 0 ? (
-            <p className="px-2 py-3 text-center text-[11px] text-[var(--text-muted)]">
-              No notes, chats, or canvases yet. Create some in the rail, then
-              drop them here.
-            </p>
-          ) : (
-            items.map((n) => {
-              const Icon = INSERTABLE_ICON[n.kind] ?? FileText;
-              return (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => {
-                    onInsert(n);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--text)] hover:bg-[var(--hover)]"
-                >
-                  <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {n.title || "Untitled"}
-                  </span>
-                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                    {n.kind}
-                  </span>
-                </button>
-              );
-            })
-          )}
+    <div
+      className="relative h-full min-h-0 w-full flex-1"
+      // Stop publishing our cursor once the pointer leaves the board, so
+      // peers don't see a stranded cursor sitting where we last were.
+      onPointerLeave={binding.clearPointer}
+    >
+      {/* Gate interaction until the binding is live so early strokes can't
+       *  land before the Yjs doc is wired (they'd be dropped). Excalidraw
+       *  mounts underneath; remote content streams in once synced. */}
+      {!binding.ready && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 text-sm text-[var(--text-muted)]">
+          <span className="inline-flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Connecting canvas…
+          </span>
         </div>
       )}
+      <Excalidraw
+        excalidrawAPI={setExcalidrawAPI}
+        onChange={handleChange}
+        onPointerUpdate={binding.onPointerUpdate}
+        viewModeEnabled={readOnly}
+        initialData={initialData}
+      />
     </div>
   );
 }

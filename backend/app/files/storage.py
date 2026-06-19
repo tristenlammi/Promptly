@@ -23,10 +23,11 @@ from pathlib import Path
 # around so tests can point elsewhere without touching docker-compose.
 UPLOAD_ROOT = Path(os.environ.get("PROMPTLY_UPLOAD_ROOT", "/app/uploads")).resolve()
 
-# Per-file ceiling. Matches nginx's client_max_body_size (50M) with a small
-# margin for multipart framing overhead. Nginx rejects larger requests first,
-# but we double-check here for direct-to-backend calls.
-MAX_FILE_BYTES = 40 * 1024 * 1024
+# Per-file ceiling. Matches nginx's client_max_body_size (100M). Nginx
+# rejects larger requests first, but we double-check here for direct-to-
+# backend calls. 100 MB is also Cloudflare's free-plan request-body cap,
+# so this is the practical wall unless the deployment is on a paid CF plan.
+MAX_FILE_BYTES = 100 * 1024 * 1024
 
 
 def _bucket_dir(user_id: uuid.UUID | None) -> Path:
