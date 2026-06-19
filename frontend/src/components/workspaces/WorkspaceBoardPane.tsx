@@ -2,9 +2,11 @@ import { useMemo, useState } from "react";
 import {
   AlignLeft,
   ArrowUpDown,
+  CalendarDays,
   CheckSquare,
   Clock,
   Columns3,
+  LayoutGrid,
   Loader2,
   Plus,
   Search,
@@ -29,6 +31,7 @@ import type {
   WorkspaceTask,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { WorkspaceBoardCalendar } from "./WorkspaceBoardCalendar";
 import { WorkspaceBoardCardDetail } from "./WorkspaceBoardCardDetail";
 
 /**
@@ -140,6 +143,7 @@ export function WorkspaceBoardPane({
   const remove = useDeleteWorkspaceTask(workspaceId);
   const setConfig = useSetBoardConfig(workspaceId, boardItemId);
 
+  const [view, setView] = useState<"board" | "calendar">("board");
   const [sortKey, setSortKey] = useState<SortKey>("manual");
   const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
@@ -305,7 +309,36 @@ export function WorkspaceBoardPane({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {canEdit && (
+          {/* Board / Calendar view toggle */}
+          <div className="inline-flex overflow-hidden rounded-md border border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setView("board")}
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-1 text-xs transition",
+                view === "board"
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Board
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("calendar")}
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-1 text-xs transition",
+                view === "calendar"
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
+              )}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              Calendar
+            </button>
+          </div>
+          {view === "board" && canEdit && (
             <button
               type="button"
               onClick={() => setManagingCols((m) => !m)}
@@ -315,20 +348,22 @@ export function WorkspaceBoardPane({
               Columns
             </button>
           )}
-          <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-            <ArrowUpDown className="h-3.5 w-3.5" />
-            <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
-            >
-              {SORTS.map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {view === "board" && (
+            <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+              >
+                {SORTS.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
 
@@ -453,7 +488,7 @@ export function WorkspaceBoardPane({
       </div>
 
       {/* Column manager */}
-      {managingCols && canEdit && (
+      {view === "board" && managingCols && canEdit && (
         <ColumnsManager
           columns={boardColumns}
           onChange={onColumnsChange}
@@ -461,10 +496,22 @@ export function WorkspaceBoardPane({
         />
       )}
 
+      {/* Calendar view */}
+      {!isLoading && view === "calendar" && (
+        <WorkspaceBoardCalendar
+          tasks={list.filter(matches)}
+          canEdit={canEdit}
+          onOpen={(id) => setOpenTaskId(id)}
+          onReschedule={(taskId, dueIso) =>
+            update.mutate({ taskId, payload: { due_at: dueIso } })
+          }
+        />
+      )}
+
       {/* Columns */}
       {isLoading ? (
         <p className="py-4 text-sm text-[var(--text-muted)]">Loading…</p>
-      ) : (
+      ) : view === "board" ? (
         <div className="flex gap-3 overflow-x-auto pb-1">
           {columns.map(({ col, tasks: colTasks }) => {
             const overWip =
@@ -582,7 +629,7 @@ export function WorkspaceBoardPane({
             );
           })}
         </div>
-      )}
+      ) : null}
 
       {openTask && (
         <WorkspaceBoardCardDetail
