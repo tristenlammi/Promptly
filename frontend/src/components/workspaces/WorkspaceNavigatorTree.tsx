@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Columns2,
+  Columns3,
   FilePlus2,
   FileText,
   Folder,
@@ -80,7 +81,7 @@ export function WorkspaceNavigatorTree({
   const mainTree = removePinned(tree);
 
   const handleCreate = async (
-    kind: "folder" | "note" | "canvas",
+    kind: "folder" | "note" | "canvas" | "board",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
@@ -149,6 +150,7 @@ export function WorkspaceNavigatorTree({
             onNewChat={handleNewChat}
             onNewNote={() => handleCreate("note", null)}
             onNewCanvas={() => handleCreate("canvas", null)}
+            onNewBoard={() => handleCreate("board", null)}
           />
         )}
       </div>
@@ -370,7 +372,7 @@ function TreeNode({
   onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
   onCreateInFolder: (
-    kind: "folder" | "note" | "canvas",
+    kind: "folder" | "note" | "canvas" | "board",
     parentId: string
   ) => void;
 }) {
@@ -602,6 +604,7 @@ function TreeNode({
             onDelete={handleDelete}
             onNewNote={() => onCreateInFolder("note", node.id)}
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
+            onNewBoard={() => onCreateInFolder("board", node.id)}
             pinned={isPinned}
             onTogglePin={handleTogglePin}
             onOpenToSide={
@@ -660,6 +663,8 @@ function NodeIcon({
       return <MessageSquare className={cls} />;
     case "canvas":
       return <Shapes className={cls} />;
+    case "board":
+      return <Columns3 className={cls} />;
     case "note":
     default:
       return <FileText className={cls} />;
@@ -680,6 +685,7 @@ function NodeActions({
   onDelete,
   onNewNote,
   onNewCanvas,
+  onNewBoard,
   pinned,
   onTogglePin,
   onOpenToSide,
@@ -694,6 +700,7 @@ function NodeActions({
   onDelete: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
+  onNewBoard: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
@@ -804,6 +811,14 @@ function NodeActions({
                       onNewCanvas();
                     }}
                   />
+                  <MenuItem
+                    icon={<Columns3 className="h-3.5 w-3.5" />}
+                    label="New board"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNewBoard();
+                    }}
+                  />
                 </>
               )}
               {contextState && onToggleContext && (
@@ -900,12 +915,14 @@ function NewMenu({
   onNewChat,
   onNewNote,
   onNewCanvas,
+  onNewBoard,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
   onNewChat?: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
+  onNewBoard: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -963,6 +980,14 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewCanvas();
+              }}
+            />
+            <MenuItem
+              icon={<Columns3 className="h-3.5 w-3.5" />}
+              label="New board"
+              onClick={() => {
+                setOpen(false);
+                onNewBoard();
               }}
             />
           </div>

@@ -89,7 +89,13 @@ export interface WorkspaceDetail extends WorkspaceSummary {
  *  ``workspace_items`` rows; ``chat`` rows are synthesised at the root
  *  from the workspace's conversations; ``canvas``/``file`` are reserved
  *  for later phases but typed here so the tree renderer stays exhaustive. */
-export type WorkspaceItemKind = "folder" | "note" | "canvas" | "file" | "chat";
+export type WorkspaceItemKind =
+  | "folder"
+  | "note"
+  | "canvas"
+  | "board"
+  | "file"
+  | "chat";
 
 /** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
  *  ``children``; chats are appended flat at the root. */
@@ -173,6 +179,7 @@ export type TaskPriority = "low" | "medium" | "high";
  *  the checkbox rollup parsed out of notes). */
 export interface WorkspaceTask {
   id: string;
+  board_item_id: string | null;
   title: string;
   done: boolean;
   status: TaskStatus;
@@ -186,6 +193,7 @@ export interface WorkspaceTask {
 
 export interface WorkspaceTaskCreatePayload {
   title: string;
+  board_item_id?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
   due_at?: string | null;
@@ -202,7 +210,7 @@ export interface WorkspaceTaskUpdatePayload {
 
 
 export interface CreateWorkspaceItemPayload {
-  kind: "folder" | "note" | "canvas";
+  kind: "folder" | "note" | "canvas" | "board";
   parent_id?: string | null;
   title?: string;
 }
@@ -518,9 +526,10 @@ export const workspacesApi = {
   // ------------------------------------------------------------------
   // Task list — a first-class, project-level to-do list
   // ------------------------------------------------------------------
-  async tasks(id: string): Promise<WorkspaceTask[]> {
+  async tasks(id: string, boardItemId?: string): Promise<WorkspaceTask[]> {
     const { data } = await apiClient.get<WorkspaceTask[]>(
-      `/workspaces/${id}/tasks`
+      `/workspaces/${id}/tasks`,
+      boardItemId ? { params: { board_item_id: boardItemId } } : undefined
     );
     return data;
   },

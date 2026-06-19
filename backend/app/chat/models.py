@@ -427,6 +427,14 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    # Which board (a ``kind='board'`` workspace item) this task belongs to
+    # (0092). Boards are addable navigator items; deleting a board cascades
+    # its tasks. NULL only on legacy rows the 0092 backfill missed.
+    board_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"

@@ -201,10 +201,15 @@ export function useWorkspaceOverview(id: string | undefined) {
 // ---------------------------------------------------------------------
 // Task list — first-class, project-level to-dos
 // ---------------------------------------------------------------------
-export function useWorkspaceTasks(id: string | undefined) {
+export function useWorkspaceTasks(
+  id: string | undefined,
+  boardItemId?: string
+) {
   return useQuery({
-    queryKey: id ? KEYS.tasks(id) : ["workspaces", "tasks", "_"],
-    queryFn: () => workspacesApi.tasks(id as string),
+    queryKey: id
+      ? [...KEYS.tasks(id), boardItemId ?? "all"]
+      : ["workspaces", "tasks", "_"],
+    queryFn: () => workspacesApi.tasks(id as string, boardItemId),
     enabled: Boolean(id),
   });
 }

@@ -276,9 +276,10 @@ class WorkspaceItemCreate(BaseModel):
     ``kind='folder'`` makes a tree-only organisation node. ``kind='note'``
     creates a blank Drive Document in the workspace's ``Notes`` folder;
     ``kind='canvas'`` creates an Excalidraw board (+ backing text file in
-    ``Canvases``). ``title`` is optional (kind-specific default)."""
+    ``Canvases``). ``kind='board'`` creates a Kanban board (tree-only; its
+    tasks reference it). ``title`` is optional (kind-specific default)."""
 
-    kind: Literal["folder", "note", "canvas"]
+    kind: Literal["folder", "note", "canvas", "board"]
     parent_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)
 

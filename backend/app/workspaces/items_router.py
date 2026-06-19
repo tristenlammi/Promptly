@@ -70,6 +70,7 @@ router = APIRouter()
 _DEFAULT_NOTE_TITLE = "Untitled note"
 _DEFAULT_FOLDER_TITLE = "New folder"
 _DEFAULT_CANVAS_TITLE = "Untitled canvas"
+_DEFAULT_BOARD_TITLE = "Board"
 
 
 def _strip_doc_ext(name: str) -> str:
@@ -296,13 +297,21 @@ async def create_workspace_item(
     position = await _next_position(db, ws.id, payload.parent_id)
     title = (payload.title or "").strip()
 
-    if payload.kind == "folder":
+    if payload.kind in ("folder", "board"):
+        # Both are tree-only nodes with no backing Drive entity. A board's
+        # tasks reference it via ``workspace_tasks.board_item_id``; deleting
+        # the item cascades them.
         item = WorkspaceItem(
             workspace_id=ws.id,
             parent_id=payload.parent_id,
-            kind="folder",
+            kind=payload.kind,
             ref_id=None,
-            title=title or _DEFAULT_FOLDER_TITLE,
+            title=title
+            or (
+                _DEFAULT_FOLDER_TITLE
+                if payload.kind == "folder"
+                else _DEFAULT_BOARD_TITLE
+            ),
             position=position,
         )
         db.add(item)

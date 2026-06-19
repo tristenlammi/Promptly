@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +46,7 @@ TaskPriority = Literal["low", "medium", "high"]
 # ---------------------------------------------------------------------
 class WorkspaceTaskResponse(BaseModel):
     id: uuid.UUID
+    board_item_id: uuid.UUID | None = None
     title: str
     done: bool
     status: TaskStatus
@@ -62,6 +63,7 @@ class WorkspaceTaskResponse(BaseModel):
 
 class WorkspaceTaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=_MAX_TITLE)
+    board_item_id: uuid.UUID | None = None
     status: TaskStatus = "todo"
     priority: TaskPriority = "medium"
     due_at: datetime | None = None
@@ -99,17 +101,22 @@ async def _load_task(
 @router.get("/{workspace_id}/tasks", response_model=list[WorkspaceTaskResponse])
 async def list_tasks(
     workspace_id: uuid.UUID,
+    board_item_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[WorkspaceTask]:
+    """List a workspace's tasks. Scope to a single board with
+    ``?board_item_id=``; omit it to count/list across all boards (the
+    overview's open-task glance)."""
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    stmt = select(WorkspaceTask).where(WorkspaceTask.workspace_id == ws.id)
+    if board_item_id is not None:
+        stmt = stmt.where(WorkspaceTask.board_item_id == board_item_id)
     rows = list(
         (
             await db.execute(
-                select(WorkspaceTask)
-                .where(WorkspaceTask.workspace_id == ws.id)
                 # Open tasks first (the actionable ones), then by hand order.
-                .order_by(
+                stmt.order_by(
                     WorkspaceTask.done.asc(),
                     WorkspaceTask.position.asc(),
                     WorkspaceTask.created_at.asc(),
@@ -143,6 +150,7 @@ async def create_task(
     is_done = payload.status == "done"
     task = WorkspaceTask(
         workspace_id=ws.id,
+        board_item_id=payload.board_item_id,
         title=payload.title.strip(),
         status=payload.status,
         priority=payload.priority,

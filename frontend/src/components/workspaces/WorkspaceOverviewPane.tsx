@@ -12,7 +12,6 @@ import {
   useWorkspaceOverview,
   useWorkspaceTasks,
 } from "@/hooks/useWorkspaces";
-import { WorkspaceBoardPane } from "./WorkspaceBoardPane";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 /**
@@ -88,11 +87,6 @@ export function WorkspaceOverviewPane({
         <StatCard label="Canvases" value={counts?.canvases ?? 0} />
         <StatCard label="Chats" value={counts?.chats ?? 0} />
         <StatCard label="Open tasks" value={openTaskCount} accent />
-      </div>
-
-      {/* The workspace task board, embedded on the home */}
-      <div className="mt-8">
-        <WorkspaceBoardPane workspaceId={workspaceId} canEdit={canEdit} />
       </div>
 
       {/* Workspace drive — upload photos/documents, RAG-indexed on add */}

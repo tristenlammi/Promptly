@@ -116,12 +116,14 @@ function toLocalInput(iso: string): string {
 
 export function WorkspaceBoardPane({
   workspaceId,
+  boardItemId,
   canEdit,
 }: {
   workspaceId: string;
+  boardItemId: string;
   canEdit: boolean;
 }) {
-  const { data: tasks, isLoading } = useWorkspaceTasks(workspaceId);
+  const { data: tasks, isLoading } = useWorkspaceTasks(workspaceId, boardItemId);
   const create = useCreateWorkspaceTask(workspaceId);
   const update = useUpdateWorkspaceTask(workspaceId);
   const remove = useDeleteWorkspaceTask(workspaceId);
@@ -145,7 +147,10 @@ export function WorkspaceBoardPane({
   const addTask = () => {
     const title = draft.trim();
     if (!title || create.isPending) return;
-    create.mutate({ title, status: "todo" }, { onSuccess: () => setDraft("") });
+    create.mutate(
+      { title, status: "todo", board_item_id: boardItemId },
+      { onSuccess: () => setDraft("") }
+    );
   };
 
   const moveTo = (task: WorkspaceTask, status: TaskStatus) => {

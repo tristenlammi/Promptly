@@ -46,6 +46,7 @@ const WorkspaceCanvasPane = lazy(() =>
   }))
 );
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
+import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -499,7 +500,13 @@ function WorkspaceMainPane({
   sharedByName: string | null;
   canEdit: boolean;
 }) {
-  if (node && (node.kind === "note" || node.kind === "canvas" || node.kind === "chat")) {
+  if (
+    node &&
+    (node.kind === "note" ||
+      node.kind === "canvas" ||
+      node.kind === "chat" ||
+      node.kind === "board")
+  ) {
     return (
       <WorkspaceItemView
         node={node}
@@ -760,6 +767,19 @@ function WorkspaceItemView({
           embeddedConversationId={node.ref_id}
           onExitToWorkspace={onClose}
         />
+      </div>
+    );
+  }
+  if (node.kind === "board") {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-5xl px-6 py-6">
+          <WorkspaceBoardPane
+            workspaceId={workspaceId}
+            boardItemId={node.id}
+            canEdit={canEdit}
+          />
+        </div>
       </div>
     );
   }
