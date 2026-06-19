@@ -795,8 +795,13 @@ async def remove_chat_context(
 _BOARD_STATUS_LABEL = {"todo": "To Do", "doing": "In Progress", "done": "Done"}
 
 
-def _flatten_board(item: WorkspaceItem, tasks: list[WorkspaceTask]) -> str:
+def _flatten_board(
+    item: WorkspaceItem,
+    tasks: list[WorkspaceTask],
+    assignee_names: dict[str, str] | None = None,
+) -> str:
     """Render a board's tasks as natural-language text for embedding."""
+    assignee_names = assignee_names or {}
     rows = [t for t in tasks if (t.title or "").strip()]
     if not rows:
         return ""
@@ -822,6 +827,10 @@ def _flatten_board(item: WorkspaceItem, tasks: list[WorkspaceTask]) -> str:
         ]
         if names:
             bits.append("labels " + ", ".join(names))
+        if t.assignee_user_id is not None:
+            who = assignee_names.get(str(t.assignee_user_id))
+            if who:
+                bits.append(f"assigned to {who}")
         line = f'- Task "{t.title.strip()}": ' + ", ".join(bits) + "."
         desc = (t.description or "").strip()
         if desc:
@@ -933,7 +942,19 @@ async def index_board_for_workspace(
                 .scalars()
                 .all()
             )
-            text = _flatten_board(item, tasks)
+            # Resolve assignee user ids → usernames for the RAG text.
+            assignee_ids = {
+                t.assignee_user_id for t in tasks if t.assignee_user_id
+            }
+            assignee_names: dict[str, str] = {}
+            if assignee_ids:
+                users = (
+                    await db.execute(
+                        select(User).where(User.id.in_(assignee_ids))
+                    )
+                ).scalars().all()
+                assignee_names = {str(u.id): u.username for u in users}
+            text = _flatten_board(item, tasks, assignee_names)
             if not text.strip():
                 # Empty board: drop its chunks AND blank the backing file so
                 # full-dump injection doesn't keep inlining stale tasks.

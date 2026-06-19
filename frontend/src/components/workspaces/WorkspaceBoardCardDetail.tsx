@@ -3,6 +3,7 @@ import { Check, Pencil, Plus, Square, Tag, Trash2, X } from "lucide-react";
 
 import type {
   BoardLabel,
+  BoardMember,
   Subtask,
   TaskPriority,
   TaskStatus,
@@ -57,6 +58,7 @@ export function WorkspaceBoardCardDetail({
   canEdit,
   labels,
   onLabelsChange,
+  members,
   onClose,
   onUpdate,
   onDelete,
@@ -65,6 +67,7 @@ export function WorkspaceBoardCardDetail({
   canEdit: boolean;
   labels: BoardLabel[];
   onLabelsChange: (labels: BoardLabel[]) => void;
+  members: BoardMember[];
   onClose: () => void;
   onUpdate: (payload: WorkspaceTaskUpdatePayload) => void;
   onDelete: () => void;
@@ -178,6 +181,26 @@ export function WorkspaceBoardCardDetail({
                 className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none"
               />
             </label>
+            {members.length > 0 && (
+              <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+                Assignee
+                <select
+                  disabled={!canEdit}
+                  value={task.assignee_user_id ?? ""}
+                  onChange={(e) =>
+                    onUpdate({ assignee_user_id: e.target.value || null })
+                  }
+                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none"
+                >
+                  <option value="">Unassigned</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.username}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           {/* Description */}

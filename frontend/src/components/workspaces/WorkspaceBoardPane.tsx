@@ -16,11 +16,13 @@ import {
   useDeleteWorkspaceTask,
   useSetBoardConfig,
   useUpdateWorkspaceTask,
+  useWorkspace,
   useWorkspaceItem,
   useWorkspaceTasks,
 } from "@/hooks/useWorkspaces";
 import type {
   BoardLabel,
+  BoardMember,
   TaskPriority,
   TaskStatus,
   WorkspaceTask,
@@ -124,6 +126,7 @@ export function WorkspaceBoardPane({
 }) {
   const { data: tasks, isLoading } = useWorkspaceTasks(workspaceId, boardItemId);
   const { data: boardItem } = useWorkspaceItem(workspaceId, boardItemId);
+  const { data: workspace } = useWorkspace(workspaceId);
   const create = useCreateWorkspaceTask(workspaceId);
   const update = useUpdateWorkspaceTask(workspaceId);
   const remove = useDeleteWorkspaceTask(workspaceId);
@@ -144,6 +147,23 @@ export function WorkspaceBoardPane({
     "all" | "overdue" | "soon" | "has" | "none"
   >("all");
   const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
+
+  const members = useMemo(() => {
+    const out: BoardMember[] = [];
+    if (workspace?.owner)
+      out.push({
+        id: workspace.owner.user_id,
+        username: workspace.owner.username,
+      });
+    for (const c of workspace?.collaborators ?? [])
+      out.push({ id: c.user_id, username: c.username });
+    return out;
+  }, [workspace]);
+  const memberMap = useMemo(
+    () => Object.fromEntries(members.map((m) => [m.id, m])),
+    [members]
+  );
 
   const labels: BoardLabel[] = boardItem?.config?.labels ?? [];
   const labelMap = useMemo(
@@ -157,7 +177,8 @@ export function WorkspaceBoardPane({
     Boolean(search.trim()) ||
     priorityFilter !== "all" ||
     dueFilter !== "all" ||
-    labelFilter.length > 0;
+    labelFilter.length > 0 ||
+    assigneeFilter !== "all";
 
   const matches = (t: WorkspaceTask): boolean => {
     if (search.trim()) {
@@ -169,6 +190,11 @@ export function WorkspaceBoardPane({
     if (labelFilter.length) {
       const tl = t.labels ?? [];
       if (!labelFilter.some((id) => tl.includes(id))) return false;
+    }
+    if (assigneeFilter !== "all") {
+      if (assigneeFilter === "none" && t.assignee_user_id) return false;
+      if (assigneeFilter !== "none" && t.assignee_user_id !== assigneeFilter)
+        return false;
     }
     if (dueFilter !== "all") {
       const u = t.due_at ? dueUrgency(t.due_at, t.done) : null;
@@ -192,7 +218,15 @@ export function WorkspaceBoardPane({
       ),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, sortKey, search, priorityFilter, dueFilter, labelFilter]);
+  }, [
+    list,
+    sortKey,
+    search,
+    priorityFilter,
+    dueFilter,
+    labelFilter,
+    assigneeFilter,
+  ]);
 
   const addTask = () => {
     const title = draft.trim();
@@ -295,6 +329,21 @@ export function WorkspaceBoardPane({
           <option value="has">Has due date</option>
           <option value="none">No due date</option>
         </select>
+        {members.length > 0 && (
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+          >
+            <option value="all">Anyone</option>
+            <option value="none">Unassigned</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.username}
+              </option>
+            ))}
+          </select>
+        )}
         {labels.map((l) => {
           const on = labelFilter.includes(l.id);
           return (
@@ -330,6 +379,7 @@ export function WorkspaceBoardPane({
               setPriorityFilter("all");
               setDueFilter("all");
               setLabelFilter([]);
+              setAssigneeFilter("all");
             }}
             className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
           >
@@ -408,6 +458,11 @@ export function WorkspaceBoardPane({
                       labels={(task.labels ?? [])
                         .map((id) => labelMap[id])
                         .filter(Boolean)}
+                      assignee={
+                        task.assignee_user_id
+                          ? memberMap[task.assignee_user_id]
+                          : undefined
+                      }
                     />
                   ))
                 )}
@@ -423,6 +478,7 @@ export function WorkspaceBoardPane({
           canEdit={canEdit}
           labels={labels}
           onLabelsChange={onLabelsChange}
+          members={members}
           onClose={() => setOpenTaskId(null)}
           onUpdate={(payload) =>
             update.mutate({ taskId: openTask.id, payload })
@@ -434,11 +490,38 @@ export function WorkspaceBoardPane({
   );
 }
 
+/** Small initials avatar, colour derived from the user id so it's stable. */
+export function MemberAvatar({
+  member,
+  size = 18,
+}: {
+  member: BoardMember;
+  size?: number;
+}) {
+  const hue =
+    Array.from(member.id).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+  return (
+    <span
+      title={member.username}
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: `hsl(${hue} 55% 45%)`,
+        fontSize: size * 0.5,
+      }}
+      className="inline-flex shrink-0 items-center justify-center rounded-full font-semibold uppercase text-white"
+    >
+      {member.username.slice(0, 1)}
+    </span>
+  );
+}
+
 function BoardCard({
   task,
   canEdit,
   dragging,
   labels,
+  assignee,
   onDragStart,
   onDragEnd,
   onCyclePriority,
@@ -449,6 +532,7 @@ function BoardCard({
   canEdit: boolean;
   dragging: boolean;
   labels: BoardLabel[];
+  assignee?: BoardMember;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
   onCyclePriority: () => void;
@@ -513,6 +597,12 @@ function BoardCard({
         >
           {task.title}
         </span>
+
+        {assignee && (
+          <span className="mt-0.5 shrink-0">
+            <MemberAvatar member={assignee} />
+          </span>
+        )}
 
         {canEdit && (
           <button

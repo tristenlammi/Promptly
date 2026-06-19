@@ -65,6 +65,7 @@ class WorkspaceTaskResponse(BaseModel):
     description: str | None = None
     subtasks: list[Subtask] | None = None
     labels: list[str] | None = None
+    assignee_user_id: uuid.UUID | None = None
     done: bool
     status: TaskStatus
     priority: TaskPriority
@@ -101,6 +102,7 @@ class WorkspaceTaskUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=20_000)
     subtasks: list[Subtask] | None = None
     labels: list[str] | None = None
+    assignee_user_id: uuid.UUID | None = None
 
 
 # ---------------------------------------------------------------------
@@ -241,6 +243,8 @@ async def update_task(
         )
     if "labels" in sent:
         task.labels = list(payload.labels) if payload.labels else None
+    if "assignee_user_id" in sent:
+        task.assignee_user_id = payload.assignee_user_id  # None clears it
 
     # ``status`` is the board's source of truth; ``done`` is the legacy
     # boolean we keep in lockstep (done ⇔ status=='done'). Either field can

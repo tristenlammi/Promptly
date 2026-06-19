@@ -450,6 +450,11 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     )
     # Label ids (0094) referencing the board item's ``config.labels`` registry.
     labels: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    # Assignee (0095) — a workspace member. ``SET NULL`` so removing a user
+    # doesn't drop the task.
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )

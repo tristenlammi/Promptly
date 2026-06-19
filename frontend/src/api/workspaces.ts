@@ -196,6 +196,12 @@ export interface Subtask {
   done: boolean;
 }
 
+/** A workspace member that can be assigned to a card. */
+export interface BoardMember {
+  id: string;
+  username: string;
+}
+
 /** A first-class workspace task (the dedicated project to-do list — not
  *  the checkbox rollup parsed out of notes). */
 export interface WorkspaceTask {
@@ -205,6 +211,7 @@ export interface WorkspaceTask {
   description: string | null;
   subtasks: Subtask[] | null;
   labels: string[] | null;
+  assignee_user_id: string | null;
   done: boolean;
   status: TaskStatus;
   priority: TaskPriority;
@@ -233,6 +240,7 @@ export interface WorkspaceTaskUpdatePayload {
   description?: string | null;
   subtasks?: Subtask[] | null;
   labels?: string[] | null;
+  assignee_user_id?: string | null;
 }
 
 
