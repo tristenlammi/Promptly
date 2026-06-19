@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Check, Plus, Square, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Square, Tag, Trash2, X } from "lucide-react";
 
 import type {
+  BoardLabel,
   Subtask,
   TaskPriority,
   TaskStatus,
@@ -9,6 +10,21 @@ import type {
   WorkspaceTaskUpdatePayload,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+
+/** Preset palette for board labels (hex; rendered via inline style). */
+export const LABEL_COLORS = [
+  "#ef4444",
+  "#f59e0b",
+  "#eab308",
+  "#22c55e",
+  "#14b8a6",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#64748b",
+];
+
+const genLabelId = () => "l_" + Math.random().toString(36).slice(2, 9);
 
 /**
  * Card detail panel for a Kanban task — the full editor behind a board card.
@@ -39,12 +55,16 @@ const genId = () => Math.random().toString(36).slice(2, 10);
 export function WorkspaceBoardCardDetail({
   task,
   canEdit,
+  labels,
+  onLabelsChange,
   onClose,
   onUpdate,
   onDelete,
 }: {
   task: WorkspaceTask;
   canEdit: boolean;
+  labels: BoardLabel[];
+  onLabelsChange: (labels: BoardLabel[]) => void;
   onClose: () => void;
   onUpdate: (payload: WorkspaceTaskUpdatePayload) => void;
   onDelete: () => void;
@@ -53,6 +73,7 @@ export function WorkspaceBoardCardDetail({
   const [description, setDescription] = useState(task.description ?? "");
   const subtasks: Subtask[] = task.subtasks ?? [];
   const [newSub, setNewSub] = useState("");
+  const assigned = task.labels ?? [];
 
   const commitTitle = () => {
     const next = title.trim();
@@ -65,6 +86,12 @@ export function WorkspaceBoardCardDetail({
   };
   const setSubtasks = (next: Subtask[]) =>
     onUpdate({ subtasks: next.length ? next : null });
+  const toggleLabel = (id: string) =>
+    onUpdate({
+      labels: assigned.includes(id)
+        ? assigned.filter((x) => x !== id)
+        : [...assigned, id],
+    });
 
   const doneCount = subtasks.filter((s) => s.done).length;
 
@@ -169,6 +196,15 @@ export function WorkspaceBoardCardDetail({
             />
           </div>
 
+          {/* Labels */}
+          <LabelsSection
+            labels={labels}
+            assigned={assigned}
+            canEdit={canEdit}
+            onToggle={toggleLabel}
+            onLabelsChange={onLabelsChange}
+          />
+
           {/* Subtasks */}
           <div>
             <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
@@ -272,6 +308,160 @@ export function WorkspaceBoardCardDetail({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function LabelsSection({
+  labels,
+  assigned,
+  canEdit,
+  onToggle,
+  onLabelsChange,
+}: {
+  labels: BoardLabel[];
+  assigned: string[];
+  canEdit: boolean;
+  onToggle: (id: string) => void;
+  onLabelsChange: (labels: BoardLabel[]) => void;
+}) {
+  const [managing, setManaging] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newColor, setNewColor] = useState(LABEL_COLORS[5]);
+
+  const update = (id: string, patch: Partial<BoardLabel>) =>
+    onLabelsChange(labels.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const remove = (id: string) =>
+    onLabelsChange(labels.filter((l) => l.id !== id));
+  const add = () => {
+    const name = newName.trim();
+    if (!name) return;
+    onLabelsChange([
+      ...labels,
+      { id: genLabelId(), name, color: newColor },
+    ]);
+    setNewName("");
+  };
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-1">
+          <Tag className="h-3 w-3" /> Labels
+        </span>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setManaging((m) => !m)}
+            className="inline-flex items-center gap-1 normal-case text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            <Pencil className="h-3 w-3" />
+            {managing ? "Done" : "Edit"}
+          </button>
+        )}
+      </div>
+
+      {!managing ? (
+        <div className="flex flex-wrap gap-1.5">
+          {labels.length === 0 && (
+            <span className="text-xs text-[var(--text-muted)]">
+              No labels yet{canEdit ? " — click Edit to add some." : "."}
+            </span>
+          )}
+          {labels.map((l) => {
+            const on = assigned.includes(l.id);
+            return (
+              <button
+                key={l.id}
+                type="button"
+                disabled={!canEdit}
+                onClick={() => onToggle(l.id)}
+                style={
+                  on
+                    ? { backgroundColor: l.color, borderColor: l.color }
+                    : { borderColor: l.color, color: l.color }
+                }
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-xs",
+                  on ? "text-white" : "bg-transparent"
+                )}
+              >
+                {l.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {labels.map((l) => (
+            <div key={l.id} className="flex items-center gap-2">
+              <input
+                value={l.name}
+                onChange={(e) => update(l.id, { name: e.target.value })}
+                className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
+              />
+              <ColorDots
+                value={l.color}
+                onChange={(c) => update(l.id, { color: c })}
+              />
+              <button
+                type="button"
+                onClick={() => remove(l.id)}
+                className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:text-red-500"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  add();
+                }
+              }}
+              placeholder="New label name…"
+              className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
+            />
+            <ColorDots value={newColor} onChange={setNewColor} />
+            <button
+              type="button"
+              onClick={add}
+              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--text)] hover:bg-[var(--hover)]"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ColorDots({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (c: string) => void;
+}) {
+  return (
+    <div className="flex shrink-0 gap-1">
+      {LABEL_COLORS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          style={{ backgroundColor: c }}
+          className={cn(
+            "h-4 w-4 rounded-full",
+            value === c && "ring-2 ring-[var(--text)] ring-offset-1"
+          )}
+        />
+      ))}
     </div>
   );
 }

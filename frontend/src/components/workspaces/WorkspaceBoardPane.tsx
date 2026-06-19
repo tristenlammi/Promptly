@@ -6,16 +6,21 @@ import {
   Clock,
   Loader2,
   Plus,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 
 import {
   useCreateWorkspaceTask,
   useDeleteWorkspaceTask,
+  useSetBoardConfig,
   useUpdateWorkspaceTask,
+  useWorkspaceItem,
   useWorkspaceTasks,
 } from "@/hooks/useWorkspaces";
 import type {
+  BoardLabel,
   TaskPriority,
   TaskStatus,
   WorkspaceTask,
@@ -118,9 +123,11 @@ export function WorkspaceBoardPane({
   canEdit: boolean;
 }) {
   const { data: tasks, isLoading } = useWorkspaceTasks(workspaceId, boardItemId);
+  const { data: boardItem } = useWorkspaceItem(workspaceId, boardItemId);
   const create = useCreateWorkspaceTask(workspaceId);
   const update = useUpdateWorkspaceTask(workspaceId);
   const remove = useDeleteWorkspaceTask(workspaceId);
+  const setConfig = useSetBoardConfig(workspaceId, boardItemId);
 
   const [sortKey, setSortKey] = useState<SortKey>("created");
   const [draft, setDraft] = useState("");
@@ -128,17 +135,64 @@ export function WorkspaceBoardPane({
   const [dropCol, setDropCol] = useState<TaskStatus | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
+  // Filters (client-side over the loaded task list).
+  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
+    "all"
+  );
+  const [dueFilter, setDueFilter] = useState<
+    "all" | "overdue" | "soon" | "has" | "none"
+  >("all");
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
+
+  const labels: BoardLabel[] = boardItem?.config?.labels ?? [];
+  const labelMap = useMemo(
+    () => Object.fromEntries(labels.map((l) => [l.id, l])),
+    [labels]
+  );
+  const onLabelsChange = (next: BoardLabel[]) =>
+    setConfig.mutate({ ...(boardItem?.config ?? {}), labels: next });
+
+  const filtersActive =
+    Boolean(search.trim()) ||
+    priorityFilter !== "all" ||
+    dueFilter !== "all" ||
+    labelFilter.length > 0;
+
+  const matches = (t: WorkspaceTask): boolean => {
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const hay = `${t.title} ${t.description ?? ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+    if (labelFilter.length) {
+      const tl = t.labels ?? [];
+      if (!labelFilter.some((id) => tl.includes(id))) return false;
+    }
+    if (dueFilter !== "all") {
+      const u = t.due_at ? dueUrgency(t.due_at, t.done) : null;
+      if (dueFilter === "overdue" && u !== "overdue") return false;
+      if (dueFilter === "soon" && u !== "soon") return false;
+      if (dueFilter === "has" && !t.due_at) return false;
+      if (dueFilter === "none" && t.due_at) return false;
+    }
+    return true;
+  };
+
   const list = tasks ?? [];
   const openTask = list.find((t) => t.id === openTaskId) ?? null;
   const columns = useMemo(() => {
+    const filtered = list.filter(matches);
     return COLUMNS.map((col) => ({
       ...col,
       tasks: sortTasks(
-        list.filter((t) => (t.status ?? "todo") === col.key),
+        filtered.filter((t) => (t.status ?? "todo") === col.key),
         sortKey
       ),
     }));
-  }, [list, sortKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, sortKey, search, priorityFilter, dueFilter, labelFilter]);
 
   const addTask = () => {
     const title = draft.trim();
@@ -202,6 +256,88 @@ export function WorkspaceBoardPane({
           )}
         </div>
       )}
+
+      {/* Filter bar */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1">
+          <Search className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="w-28 bg-transparent text-xs text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+        </div>
+        <select
+          value={priorityFilter}
+          onChange={(e) =>
+            setPriorityFilter(e.target.value as TaskPriority | "all")
+          }
+          className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+        >
+          <option value="all">Any priority</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select
+          value={dueFilter}
+          onChange={(e) =>
+            setDueFilter(
+              e.target.value as "all" | "overdue" | "soon" | "has" | "none"
+            )
+          }
+          className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+        >
+          <option value="all">Any due</option>
+          <option value="overdue">Overdue</option>
+          <option value="soon">Due soon</option>
+          <option value="has">Has due date</option>
+          <option value="none">No due date</option>
+        </select>
+        {labels.map((l) => {
+          const on = labelFilter.includes(l.id);
+          return (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() =>
+                setLabelFilter((cur) =>
+                  cur.includes(l.id)
+                    ? cur.filter((x) => x !== l.id)
+                    : [...cur, l.id]
+                )
+              }
+              style={
+                on
+                  ? { backgroundColor: l.color, borderColor: l.color }
+                  : { borderColor: l.color, color: l.color }
+              }
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-xs",
+                on ? "text-white" : "bg-transparent"
+              )}
+            >
+              {l.name}
+            </button>
+          );
+        })}
+        {filtersActive && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch("");
+              setPriorityFilter("all");
+              setDueFilter("all");
+              setLabelFilter([]);
+            }}
+            className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            <X className="h-3 w-3" />
+            Clear
+          </button>
+        )}
+      </div>
 
       {/* Columns */}
       {isLoading ? (
@@ -269,6 +405,9 @@ export function WorkspaceBoardPane({
                       }
                       onDelete={() => remove.mutate(task.id)}
                       onOpen={() => setOpenTaskId(task.id)}
+                      labels={(task.labels ?? [])
+                        .map((id) => labelMap[id])
+                        .filter(Boolean)}
                     />
                   ))
                 )}
@@ -282,6 +421,8 @@ export function WorkspaceBoardPane({
         <WorkspaceBoardCardDetail
           task={openTask}
           canEdit={canEdit}
+          labels={labels}
+          onLabelsChange={onLabelsChange}
           onClose={() => setOpenTaskId(null)}
           onUpdate={(payload) =>
             update.mutate({ taskId: openTask.id, payload })
@@ -297,6 +438,7 @@ function BoardCard({
   task,
   canEdit,
   dragging,
+  labels,
   onDragStart,
   onDragEnd,
   onCyclePriority,
@@ -306,6 +448,7 @@ function BoardCard({
   task: WorkspaceTask;
   canEdit: boolean;
   dragging: boolean;
+  labels: BoardLabel[];
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
   onCyclePriority: () => void;
@@ -330,6 +473,19 @@ function BoardCard({
         dragging && "opacity-40"
       )}
     >
+      {labels.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          {labels.map((l) => (
+            <span
+              key={l.id}
+              style={{ backgroundColor: l.color }}
+              className="rounded-full px-1.5 py-px text-[10px] font-medium text-white"
+            >
+              {l.name}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="flex items-start gap-2">
         {/* Priority dot — click cycles low → medium → high */}
         <button

@@ -400,6 +400,11 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # Kind-specific JSON config (0094). Boards use it for the label registry
+    # (``{labels: [{id, name, color}]}``) and, later, custom columns. NULL
+    # for kinds that don't need it.
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
     def __repr__(self) -> str:
         return (
             f"<WorkspaceItem id={self.id} kind={self.kind} "
@@ -443,6 +448,8 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     subtasks: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSONB, nullable=True
     )
+    # Label ids (0094) referencing the board item's ``config.labels`` registry.
+    labels: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )

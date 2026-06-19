@@ -370,6 +370,24 @@ async def create_workspace_item(
 
 
 # ---------------------------------------------------------------------
+# Read one item (e.g. a board's config / label registry)
+# ---------------------------------------------------------------------
+@router.get(
+    "/{workspace_id}/items/{item_id}",
+    response_model=WorkspaceItemResponse,
+)
+async def get_workspace_item(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemResponse:
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    item = await _load_item(db, ws.id, item_id)
+    return WorkspaceItemResponse.model_validate(item)
+
+
+# ---------------------------------------------------------------------
 # Rename / icon
 # ---------------------------------------------------------------------
 @router.patch(
@@ -416,6 +434,9 @@ async def update_workspace_item(
         item.context_enabled = payload.context_enabled
     if "pinned" in sent and payload.pinned is not None:
         item.pinned = payload.pinned
+    if "config" in sent:
+        # Kind-specific config (boards: label registry / columns).
+        item.config = payload.config
 
     item.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -425,7 +446,9 @@ async def update_workspace_item(
     # the user turns its context toggle on — boards index lazily, so an
     # existing board first gets embedded the next time its tasks change or
     # it's enabled here.
-    if item.kind == "board" and ("title" in sent or "context_enabled" in sent):
+    if item.kind == "board" and (
+        "title" in sent or "context_enabled" in sent or "config" in sent
+    ):
         from app.workspaces.knowledge import index_board_for_workspace
 
         background.add_task(index_board_for_workspace, ws.id, item.id)

@@ -119,6 +119,20 @@ export interface WorkspaceItemNode {
   children: WorkspaceItemNode[];
 }
 
+/** A board's coloured label, defined once per board and referenced by id
+ *  from cards. ``color`` is a hex string. */
+export interface BoardLabel {
+  id: string;
+  name: string;
+  color: string;
+}
+
+/** Kind-specific JSON config on a workspace item. Boards use it for the
+ *  label registry (and, later, custom columns). */
+export interface BoardConfig {
+  labels?: BoardLabel[];
+}
+
 /** Flat ``workspace_items`` row returned by the create / update / move
  *  endpoints (no ``children``). */
 export interface WorkspaceItemResponse {
@@ -133,6 +147,7 @@ export interface WorkspaceItemResponse {
   indexing_status: string | null;
   context_enabled?: boolean;
   pinned?: boolean;
+  config?: BoardConfig | null;
 }
 
 /** A source citation returned by "ask this workspace". ``item_id`` is the
@@ -189,6 +204,7 @@ export interface WorkspaceTask {
   title: string;
   description: string | null;
   subtasks: Subtask[] | null;
+  labels: string[] | null;
   done: boolean;
   status: TaskStatus;
   priority: TaskPriority;
@@ -216,6 +232,7 @@ export interface WorkspaceTaskUpdatePayload {
   position?: number;
   description?: string | null;
   subtasks?: Subtask[] | null;
+  labels?: string[] | null;
 }
 
 
@@ -422,6 +439,27 @@ export const workspacesApi = {
 
   async deleteItem(id: string, itemId: string): Promise<void> {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
+  },
+
+  /** Fetch one item (e.g. a board, to read its ``config`` label registry). */
+  async getItem(id: string, itemId: string): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.get<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}`
+    );
+    return data;
+  },
+
+  /** Replace a board item's config (label registry, etc.). */
+  async setItemConfig(
+    id: string,
+    itemId: string,
+    config: BoardConfig
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.patch<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}`,
+      { config }
+    );
+    return data;
   },
 
   /** Toggle whether a note/canvas item feeds the workspace RAG context. */

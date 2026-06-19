@@ -26,6 +26,7 @@ import {
   type MoveWorkspaceItemPayload,
   type WorkspaceTaskCreatePayload,
   type WorkspaceTaskUpdatePayload,
+  type BoardConfig,
 } from "@/api/workspaces";
 
 const KEYS = {
@@ -201,6 +202,30 @@ export function useWorkspaceOverview(id: string | undefined) {
 // ---------------------------------------------------------------------
 // Task list — first-class, project-level to-dos
 // ---------------------------------------------------------------------
+export function useWorkspaceItem(
+  workspaceId: string,
+  itemId: string | undefined
+) {
+  return useQuery({
+    queryKey: ["workspaces", "item", workspaceId, itemId],
+    queryFn: () => workspacesApi.getItem(workspaceId, itemId as string),
+    enabled: Boolean(itemId),
+  });
+}
+
+export function useSetBoardConfig(workspaceId: string, itemId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (config: BoardConfig) =>
+      workspacesApi.setItemConfig(workspaceId, itemId, config),
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["workspaces", "item", workspaceId, itemId],
+      });
+    },
+  });
+}
+
 export function useWorkspaceTasks(
   id: string | undefined,
   boardItemId?: string

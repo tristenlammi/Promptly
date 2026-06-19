@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -294,6 +294,8 @@ class WorkspaceItemUpdate(BaseModel):
     context_enabled: bool | None = None
     # Toggle the rail Pinned section membership.
     pinned: bool | None = None
+    # Kind-specific JSON config (boards: the label registry / columns).
+    config: dict[str, Any] | None = None
 
 
 class WorkspaceItemMove(BaseModel):
@@ -323,3 +325,4 @@ class WorkspaceItemResponse(BaseModel):
     indexing_status: str | None = None
     context_enabled: bool = True
     pinned: bool = False
+    config: dict[str, Any] | None = None

@@ -801,6 +801,12 @@ def _flatten_board(item: WorkspaceItem, tasks: list[WorkspaceTask]) -> str:
     if not rows:
         return ""
     title = item.title or "Board"
+    # Resolve label ids → names from the board's registry (config.labels).
+    label_names: dict[str, str] = {}
+    cfg = item.config or {}
+    for lab in (cfg.get("labels") or []) if isinstance(cfg, dict) else []:
+        if isinstance(lab, dict) and lab.get("id"):
+            label_names[str(lab["id"])] = str(lab.get("name") or "")
     lines = [f"# Board: {title}", ""]
     for t in rows:
         bits = [
@@ -809,6 +815,13 @@ def _flatten_board(item: WorkspaceItem, tasks: list[WorkspaceTask]) -> str:
         ]
         if t.due_at is not None:
             bits.append(f"due {t.due_at.date().isoformat()}")
+        names = [
+            label_names.get(lid, "")
+            for lid in (t.labels or [])
+            if label_names.get(lid)
+        ]
+        if names:
+            bits.append("labels " + ", ".join(names))
         line = f'- Task "{t.title.strip()}": ' + ", ".join(bits) + "."
         desc = (t.description or "").strip()
         if desc:
