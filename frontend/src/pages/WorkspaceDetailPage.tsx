@@ -387,6 +387,11 @@ export function WorkspaceDetailPage() {
                 workspaceId={id}
                 workspaceTitle={workspace.title}
                 onOpenItem={handleSelect}
+                onOpenBoard={() => {
+                  setBoardOpen(true);
+                  setSelected(null);
+                  setSecondary(null);
+                }}
                 onCloseNote={() => setSelected(null)}
                 isArchived={isArchived}
                 isOwner={isOwner}
@@ -496,6 +501,7 @@ function WorkspaceMainPane({
   workspaceId,
   workspaceTitle,
   onOpenItem,
+  onOpenBoard,
   onCloseNote,
   isArchived,
   isOwner,
@@ -511,6 +517,7 @@ function WorkspaceMainPane({
   workspaceId: string;
   workspaceTitle: string;
   onOpenItem: (node: WorkspaceItemNode) => void;
+  onOpenBoard: () => void;
   onCloseNote: () => void;
   isArchived: boolean;
   isOwner: boolean;
@@ -622,6 +629,7 @@ function WorkspaceMainPane({
         workspaceId={workspaceId}
         title={workspaceTitle}
         onOpenItem={onOpenItem}
+        onOpenBoard={onOpenBoard}
         canEdit={canEdit && !isArchived}
       />
     </div>
