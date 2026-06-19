@@ -486,28 +486,46 @@ function LabelsSection({
               No labels yet{canEdit ? " — click Edit to add some." : "."}
             </span>
           )}
-          {labels.map((l) => {
-            const on = assigned.includes(l.id);
-            return (
-              <button
-                key={l.id}
-                type="button"
-                disabled={!canEdit}
-                onClick={() => onToggle(l.id)}
-                style={
-                  on
-                    ? { backgroundColor: l.color, borderColor: l.color }
-                    : { borderColor: l.color, color: l.color }
-                }
-                className={cn(
-                  "rounded-full border px-2 py-0.5 text-xs",
-                  on ? "text-white" : "bg-transparent"
-                )}
-              >
-                {l.name}
-              </button>
-            );
-          })}
+          {/* Assigned labels first; unassigned ones read as faint "add me"
+              chips so it's never ambiguous what's actually on the card. */}
+          {[...labels]
+            .sort(
+              (a, b) =>
+                Number(assigned.includes(b.id)) -
+                Number(assigned.includes(a.id))
+            )
+            .map((l) => {
+              const on = assigned.includes(l.id);
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => onToggle(l.id)}
+                  title={
+                    on ? "Remove from this card" : "Add to this card"
+                  }
+                  style={
+                    on
+                      ? { backgroundColor: l.color, borderColor: l.color }
+                      : { borderColor: l.color, color: l.color }
+                  }
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition",
+                    on
+                      ? "text-white"
+                      : "border-dashed bg-transparent opacity-55 hover:opacity-100"
+                  )}
+                >
+                  {on ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Plus className="h-3 w-3" />
+                  )}
+                  {l.name}
+                </button>
+              );
+            })}
         </div>
       ) : (
         <div className="space-y-2">
