@@ -420,6 +420,16 @@ function TreeNode({
   };
 
   const handleArchive = async () => {
+    const ok = await confirm({
+      title: "Archive",
+      message: isFolder
+        ? "Archive this folder and everything inside it?"
+        : isChat
+          ? "Archive this chat?"
+          : "Archive this item?",
+      confirmLabel: "Archive",
+    });
+    if (!ok) return;
     if (isChat) {
       if (!node.ref_id) return;
       setChatBusy(true);

@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
@@ -406,7 +407,15 @@ export function WorkspaceDetailPage() {
           workspace={workspace}
           isOwner={isOwner}
           canEdit={canEdit}
-          onArchive={() => archive.mutate(workspace.id)}
+          onArchive={async () => {
+            const ok = await confirm({
+              title: "Archive workspace",
+              message:
+                "Archive this workspace? It moves to your archived list and can be restored anytime.",
+              confirmLabel: "Archive",
+            });
+            if (ok) archive.mutate(workspace.id);
+          }}
           onUnarchive={() => unarchive.mutate(workspace.id)}
           onDelete={() => {
             setSettingsOpen(false);
