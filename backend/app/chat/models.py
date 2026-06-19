@@ -431,6 +431,22 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Kanban column (0091). ``todo`` | ``doing`` | ``done``. Kept in lockstep
+    # with ``done`` (done ⇔ status=='done') so the overview's open-task count
+    # and any pre-board callers keep working unchanged. ``done`` is the
+    # legacy boolean; ``status`` is the source of truth for the board.
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="todo", server_default="todo"
+    )
+    # Priority is a card accent, not a column. ``low`` | ``medium`` | ``high``.
+    priority: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="medium", server_default="medium"
+    )
+    # Optional due date/time. The board badges it orange as it approaches and
+    # red once overdue. NULL = no due date.
+    due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     position: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.0, server_default="0"
     )

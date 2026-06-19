@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
@@ -36,6 +37,9 @@ router = APIRouter()
 
 _MAX_TITLE = 500
 
+TaskStatus = Literal["todo", "doing", "done"]
+TaskPriority = Literal["low", "medium", "high"]
+
 
 # ---------------------------------------------------------------------
 # Schemas
@@ -44,6 +48,9 @@ class WorkspaceTaskResponse(BaseModel):
     id: uuid.UUID
     title: str
     done: bool
+    status: TaskStatus
+    priority: TaskPriority
+    due_at: datetime | None = None
     position: float
     completed_at: datetime | None = None
     created_at: datetime
@@ -55,11 +62,20 @@ class WorkspaceTaskResponse(BaseModel):
 
 class WorkspaceTaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=_MAX_TITLE)
+    status: TaskStatus = "todo"
+    priority: TaskPriority = "medium"
+    due_at: datetime | None = None
 
 
 class WorkspaceTaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=_MAX_TITLE)
     done: bool | None = None
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
+    # ``due_at`` is explicitly nullable: sending ``null`` clears the due
+    # date, so we distinguish "field omitted" from "set to null" via
+    # ``model_fields_set`` at the call site.
+    due_at: datetime | None = None
     position: float | None = None
 
 
@@ -124,9 +140,15 @@ async def create_task(
             WorkspaceTask.workspace_id == ws.id
         )
     )
+    is_done = payload.status == "done"
     task = WorkspaceTask(
         workspace_id=ws.id,
         title=payload.title.strip(),
+        status=payload.status,
+        priority=payload.priority,
+        due_at=payload.due_at,
+        done=is_done,
+        completed_at=datetime.now(timezone.utc) if is_done else None,
         position=float(max_pos or 0.0) + 1.0,
         created_by=user.id,
     )
@@ -149,16 +171,31 @@ async def update_task(
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     task = await _load_task(db, ws.id, task_id)
+    sent = payload.model_fields_set
 
     if payload.title is not None:
         task.title = payload.title.strip()
     if payload.position is not None:
         task.position = payload.position
-    if payload.done is not None and payload.done != task.done:
-        task.done = payload.done
-        # Stamp / clear the completion time as the task flips state.
+    if payload.priority is not None:
+        task.priority = payload.priority
+    if "due_at" in sent:
+        task.due_at = payload.due_at  # may be None to clear it
+
+    # ``status`` is the board's source of truth; ``done`` is the legacy
+    # boolean we keep in lockstep (done ⇔ status=='done'). Either field can
+    # drive the change — if both arrive, ``status`` wins.
+    new_status: str | None = None
+    if payload.status is not None:
+        new_status = payload.status
+    elif payload.done is not None:
+        new_status = "done" if payload.done else "todo"
+
+    if new_status is not None and new_status != task.status:
+        task.status = new_status
+        task.done = new_status == "done"
         task.completed_at = (
-            datetime.now(timezone.utc) if payload.done else None
+            datetime.now(timezone.utc) if task.done else None
         )
 
     await db.commit()
