@@ -412,6 +412,21 @@ export const workspacesApi = {
     return data;
   },
 
+  /** Opt a workspace chat into (or out of) the RAG context. Enabling
+   *  flattens + embeds the transcript; disabling drops it. Returns the
+   *  refreshed chat tree node. */
+  async setChatContext(
+    id: string,
+    conversationId: string,
+    enabled: boolean
+  ): Promise<WorkspaceItemNode> {
+    const { data } = await apiClient.patch<WorkspaceItemNode>(
+      `/workspaces/${id}/chats/${conversationId}/context`,
+      { enabled }
+    );
+    return data;
+  },
+
   /** Pin / unpin a note, canvas, or folder to the rail's Pinned section. */
   async setItemPinned(
     id: string,

@@ -4782,6 +4782,16 @@ async def _stream_generator(
 
             asyncio.create_task(maybe_refresh_workspace_memory(conv.id))
 
+            # Opt-in chat-as-context (0090): keep the embedded transcript
+            # fresh as the chat grows, but only for chats the user has
+            # explicitly turned ON. No-op (cheap hash skip) otherwise.
+            if getattr(conv, "context_enabled", False):
+                from app.workspaces.knowledge import index_chat_for_workspace
+
+                asyncio.create_task(
+                    index_chat_for_workspace(conv.workspace_id, conv.id)
+                )
+
         # Phase 6 — cross-chat memory capture. Cheap regex pre-filter so
         # ordinary turns cost nothing; when the user states something
         # durable (or says "remember…"), run a bounded headless extraction

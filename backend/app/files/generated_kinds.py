@@ -49,5 +49,12 @@ class GeneratedKind(str, Enum):
     # Lives in the workspace's ``Canvases/`` Drive folder.
     CANVAS_TEXT = "canvas_text"
 
+    # Backing text file for a workspace chat the user opted into context
+    # (0090). Holds the flattened conversation transcript so the chat can
+    # be embedded into ``knowledge_chunks`` like a note. Lives in the
+    # workspace's ``Chats/`` Drive folder; trashed when the user turns the
+    # chat's "Use as workspace context" toggle back off.
+    CHAT_TRANSCRIPT = "chat_transcript"
+
 
 __all__ = ["GeneratedKind"]

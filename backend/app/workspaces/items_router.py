@@ -27,7 +27,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +53,7 @@ from app.files.safety import sanitize_filename
 from app.files.system_folders import get_or_create_subfolder
 from app.workspaces.canvas_router import create_canvas_with_item
 from app.workspaces.schemas import (
+    WorkspaceFileContext,
     WorkspaceItemCreate,
     WorkspaceItemMove,
     WorkspaceItemNode,
@@ -250,6 +258,10 @@ async def get_workspace_tree(
                 icon=None,
                 # Sort chats after stored items; recency order within.
                 position=1_000_000.0 + idx,
+                # Chats are out of context by default; surface the toggle
+                # state + index chip so the rail can show both.
+                context_enabled=c.context_enabled,
+                indexing_status=c.context_index_status,
                 pinned=bool(c.pinned),
                 children=[],
             )
@@ -396,6 +408,69 @@ async def update_workspace_item(
     await db.commit()
     await db.refresh(item)
     return WorkspaceItemResponse.model_validate(item)
+
+
+# ---------------------------------------------------------------------
+# Chat → workspace context (opt-in)
+# ---------------------------------------------------------------------
+@router.patch(
+    "/{workspace_id}/chats/{conversation_id}/context",
+    response_model=WorkspaceItemNode,
+)
+async def set_chat_context(
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    payload: WorkspaceFileContext,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemNode:
+    """Opt a workspace chat into (or out of) the RAG context.
+
+    Chats are out of context by default. Turning this ON flattens the
+    transcript into a backing Drive file and embeds it into the workspace
+    pool (so other chats can retrieve it); turning it OFF drops the chunks
+    and trashes the backing file. The actual (re-)index runs in the
+    background — the chat's tree chip reflects ``context_index_status``.
+    """
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None or conv.workspace_id != ws.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found in this workspace",
+        )
+
+    conv.context_enabled = payload.enabled
+    conv.context_index_status = "queued" if payload.enabled else None
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(conv)
+
+    from app.workspaces.knowledge import (  # local — avoids import cycle
+        index_chat_for_workspace,
+        remove_chat_context,
+    )
+
+    if payload.enabled:
+        background.add_task(index_chat_for_workspace, ws.id, conv.id)
+    else:
+        background.add_task(remove_chat_context, ws.id, conv.id)
+
+    return WorkspaceItemNode(
+        id=conv.id,
+        kind="chat",
+        ref_id=conv.id,
+        title=conv.title or "New chat",
+        icon=None,
+        position=0.0,
+        indexing_status=conv.context_index_status,
+        context_enabled=conv.context_enabled,
+        pinned=bool(conv.pinned),
+        children=[],
+    )
 
 
 # ---------------------------------------------------------------------

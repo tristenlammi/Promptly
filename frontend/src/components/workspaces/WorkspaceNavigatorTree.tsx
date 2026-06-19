@@ -26,6 +26,7 @@ import {
 
 import { chatApi } from "@/api/chat";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { workspacesApi } from "@/api/workspaces";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
   useArchiveWorkspaceItem,
@@ -389,10 +390,14 @@ function TreeNode({
 
   const isFolder = node.kind === "folder";
   const isChat = node.kind === "chat";
-  // Only notes + canvases feed the workspace RAG context, so only they get
-  // the "Use as workspace context" toggle. ``context_enabled`` defaults on.
-  const isContextItem = node.kind === "note" || node.kind === "canvas";
-  const contextOn = node.context_enabled !== false;
+  // Notes, canvases, and chats can feed the workspace RAG context, so they
+  // get the "Use as workspace context" toggle. Notes/canvases default ON;
+  // chats default OFF (scratch space until the user opts them in).
+  const isContextItem =
+    node.kind === "note" || node.kind === "canvas" || isChat;
+  const contextOn = isChat
+    ? node.context_enabled === true
+    : node.context_enabled !== false;
   const isPinned = node.pinned === true;
 
   const handleTogglePin = async () => {
@@ -456,6 +461,21 @@ function TreeNode({
       }
     } else {
       remove.mutate(node.id);
+    }
+  };
+
+  const handleToggleContext = async () => {
+    if (isChat) {
+      if (!node.ref_id) return;
+      setChatBusy(true);
+      try {
+        await workspacesApi.setChatContext(workspaceId, node.ref_id, !contextOn);
+        invalidateTreeAndArchive();
+      } finally {
+        setChatBusy(false);
+      }
+    } else {
+      setContext.mutate({ itemId: node.id, enabled: !contextOn });
     }
   };
 
@@ -582,12 +602,7 @@ function TreeNode({
               !isFolder && onOpenToSide ? () => onOpenToSide(node) : undefined
             }
             contextState={isContextItem ? (contextOn ? "on" : "off") : null}
-            onToggleContext={
-              isContextItem
-                ? () =>
-                    setContext.mutate({ itemId: node.id, enabled: !contextOn })
-                : undefined
-            }
+            onToggleContext={isContextItem ? handleToggleContext : undefined}
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}

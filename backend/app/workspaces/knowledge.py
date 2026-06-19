@@ -28,6 +28,7 @@ injection path returns "full-dump everything", exactly as before.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 import uuid
@@ -64,7 +65,14 @@ from app.custom_models.retrieval import (
     retrieve_workspace_context,
 )
 from app.database import SessionLocal
+from app.files.generated_kinds import GeneratedKind
 from app.files.models import UserFile
+from app.files.storage import (
+    absolute_path,
+    ensure_bucket,
+    storage_path_for,
+)
+from app.files.system_folders import get_or_create_subfolder
 from app.files.vision_extract import extract_text_via_vision
 
 logger = logging.getLogger("promptly.workspaces.knowledge")
@@ -527,6 +535,256 @@ async def index_canvas_for_workspace(
                 )
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ---------------------------------------------------------------------
+# Chat ingestion (opt-in chat-as-context — 0090)
+# ---------------------------------------------------------------------
+# Chats are scratch space by default and carry no item row, so unlike
+# notes/canvases there's no backing file until the user flips a chat's
+# "Use as workspace context" toggle ON. At that point we flatten the
+# transcript into a Drive file in the workspace's ``Chats/`` folder and
+# embed it into the shared workspace pool just like a note. Turning the
+# toggle OFF drops the chunks and trashes the backing file. The index
+# lifecycle is tracked inline on the ``conversations`` row.
+
+
+def _flatten_conversation(conv: Conversation, messages: list[Message]) -> str:
+    """Render a conversation as a plain-text transcript for embedding.
+
+    System messages are dropped (workspace instructions, not content) and
+    each turn is labelled by role so a retrieved chunk reads sensibly. No
+    per-message cap — the chunker handles length; we want the full content
+    available to retrieval.
+    """
+    title = conv.title or "Chat"
+    lines: list[str] = []
+    for m in messages:
+        content = (m.content or "").strip()
+        if not content or m.role == "system":
+            continue
+        lines.append(f"{(m.role or 'user').upper()}: {content}")
+    if not lines:
+        return ""
+    return f"# Chat: {title}\n\n" + "\n\n".join(lines)
+
+
+async def _ensure_chat_backing_file(
+    db: AsyncSession,
+    *,
+    ws: Workspace,
+    conv: Conversation,
+    transcript: str,
+) -> UserFile | None:
+    """Create or update the Drive file backing a context-enabled chat.
+
+    Returns the ``UserFile`` (with its blob + ``content_text`` refreshed),
+    or ``None`` if the workspace owner can't be resolved. The file id is
+    stashed on ``conv.context_file_id`` so subsequent refreshes update in
+    place rather than spawning a new file per turn.
+    """
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    title = conv.title or "Chat"
+
+    # Update the existing backing file in place when we still have one.
+    if conv.context_file_id is not None:
+        uf = await db.get(UserFile, conv.context_file_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(transcript)
+            uf.filename = f"{title}.md"
+            uf.size_bytes = len(transcript.encode("utf-8"))
+            uf.content_text = transcript
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    # Otherwise lay down a fresh file in the workspace's Chats/ folder.
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(transcript)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db, user_id=owner.id, parent_id=ws.root_folder_id, name="Chats"
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=f"{title}.md",
+        original_filename=f"{title}.md",
+        mime_type="text/markdown",
+        size_bytes=len(transcript.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.CHAT_TRANSCRIPT.value,
+        content_text=transcript,
+    )
+    db.add(uf)
+    await db.flush()
+    conv.context_file_id = uf.id
+    return uf
+
+
+async def index_chat_for_workspace(
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed (or re-embed) a context-enabled chat's transcript.
+
+    Enqueued when the user turns a chat's context toggle ON and again on
+    each reply finalize while it's on. Owns its own session
+    (``BackgroundTasks``-safe). No-ops when embeddings aren't configured;
+    self-heals to cleanup if the toggle was flipped off in the meantime.
+    """
+    async with SessionLocal() as db:
+        try:
+            conv = await db.get(Conversation, conversation_id)
+            if conv is None or conv.workspace_id != workspace_id:
+                return
+            if not conv.context_enabled:
+                await _remove_chat_context_inner(db, conv, workspace_id)
+                return
+
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return  # leave queued until an embedding provider exists
+
+            messages = list(
+                (
+                    await db.execute(
+                        select(Message)
+                        .where(Message.conversation_id == conv.id)
+                        .order_by(Message.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            transcript = _flatten_conversation(conv, messages)
+            if not transcript.strip():
+                # Nothing to embed yet (empty / system-only chat).
+                conv.context_index_status = "queued"
+                await db.commit()
+                return
+
+            current_hash = hashlib.sha256(
+                transcript.encode("utf-8")
+            ).hexdigest()
+            if (
+                not force
+                and conv.context_indexed_hash == current_hash
+                and conv.context_index_status == "ready"
+            ):
+                return
+
+            conv.context_index_status = "embedding"
+            await db.commit()
+
+            uf = await _ensure_chat_backing_file(
+                db, ws=ws, conv=conv, transcript=transcript
+            )
+            if uf is None:
+                conv.context_index_status = "failed"
+                await db.commit()
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    transcript,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                conv.context_index_status = "failed"
+                await db.commit()
+                logger.info("chat index produced no chunks: %s", exc)
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            conv.context_index_status = "ready"
+            conv.context_indexed_hash = current_hash
+            await db.commit()
+            logger.info(
+                "indexed %d chunks for workspace=%s chat=%s",
+                len(chunks),
+                workspace_id,
+                conversation_id,
+            )
+        except Exception:  # noqa: BLE001 - last-line catch
+            logger.exception("index_chat_for_workspace failed")
+            try:
+                conv = await db.get(Conversation, conversation_id)
+                if conv is not None:
+                    conv.context_index_status = "failed"
+                    await db.commit()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+async def _remove_chat_context_inner(
+    db: AsyncSession, conv: Conversation, workspace_id: uuid.UUID
+) -> None:
+    """Drop a chat's chunks + trash its backing file (toggle turned off)."""
+    if conv.context_file_id is not None:
+        await delete_existing_chunks(
+            db,
+            scope_kind="workspace",
+            scope_id=workspace_id,
+            user_file_id=conv.context_file_id,
+        )
+        uf = await db.get(UserFile, conv.context_file_id)
+        if uf is not None and uf.trashed_at is None:
+            uf.trashed_at = datetime.now(timezone.utc)
+    conv.context_file_id = None
+    conv.context_index_status = None
+    conv.context_indexed_hash = None
+    await db.commit()
+
+
+async def remove_chat_context(
+    workspace_id: uuid.UUID, conversation_id: uuid.UUID
+) -> None:
+    """Tear down a chat's workspace-context index. Owns its own session."""
+    async with SessionLocal() as db:
+        conv = await db.get(Conversation, conversation_id)
+        if conv is None:
+            return
+        await _remove_chat_context_inner(db, conv, workspace_id)
 
 
 # ---------------------------------------------------------------------

@@ -186,6 +186,28 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Chat-as-workspace-context (0090). Opt-in: when a chat lives in a
+    # workspace, the user can flip it ON to feed its transcript into the
+    # workspace RAG pool (default OFF — chats are scratch space by
+    # default). Enabling flattens the transcript into a backing Drive file
+    # (``context_file_id``, in the workspace's ``Chats/`` folder) and
+    # embeds it like a note; disabling drops the chunks and trashes the
+    # file. ``context_index_status`` mirrors the queued/embedding/ready/
+    # failed lifecycle other workspace items use, surfaced as the chat's
+    # tree chip. NULL on every non-workspace chat.
+    context_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    context_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    context_index_status: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    context_indexed_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<Conversation id={self.id} title={self.title!r}>"
 
