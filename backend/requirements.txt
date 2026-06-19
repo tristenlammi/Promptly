@@ -113,6 +113,17 @@ html5lib==1.1
 # <script> through the snapshot pipeline.
 bleach==6.1.0
 
+# ---- Background removal (workspace canvas image tool) ----
+# rembg runs U^2-Net segmentation server-side via onnxruntime (CPU), so the
+# canvas "Remove background" tool needs no client-side model download or CSP
+# relaxation. The ``[cpu]`` extra pulls onnxruntime; the u2net model is
+# pre-downloaded in the Dockerfile (U2NET_HOME) so first use is offline.
+# Pulls opencv-python-headless + scipy/scikit-image — hence the extra
+# system libs in the Dockerfile. Pinned to 2.0.65 (not the latest 2.0.76)
+# because 2.0.7x requires Pillow>=12, which clashes with our Pillow 10.4
+# pin; 2.0.65 leaves Pillow unconstrained.
+rembg[cpu]==2.0.65
+
 # ---- Testing (dev-only; safe to leave installed in images) ----
 # Used by the study-gate regression tests (and any future automated
 # suite). Both are pure-Python with no system dependencies.

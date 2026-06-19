@@ -15,10 +15,18 @@ RUN apt-get update \
         build-essential \
         curl \
         libpq-dev \
+        libglib2.0-0 \
+        libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
+
+# Pre-download the rembg U^2-Net model into the image so the first
+# "Remove background" request doesn't reach out to the network (keeps the
+# feature self-contained / offline). U2NET_HOME persists for runtime too.
+ENV U2NET_HOME=/app/.u2net
+RUN python -c "from rembg import new_session; new_session('u2net')"
 
 # ---- Development target (hot reload via volume mount) ----
 FROM base AS dev

@@ -28,10 +28,13 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    File,
     HTTPException,
     Response,
+    UploadFile,
     status,
 )
+from fastapi.concurrency import run_in_threadpool
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -280,6 +283,56 @@ async def update_canvas_text(
         )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# Background removal — rembg (U^2-Net) runs server-side via onnxruntime,
+# so the canvas image tool needs no client-side model or CSP relaxation.
+# Stateless image-in / PNG-out (not tied to a specific canvas); any
+# authenticated user can call it from the canvas "Remove background" tool.
+# ---------------------------------------------------------------------
+_MAX_BG_IMAGE_BYTES = 25 * 1024 * 1024  # 25 MB upload guard
+
+# Built once on first request (loads the model into memory), then reused.
+_rembg_session = None
+
+
+def _run_rembg(data: bytes) -> bytes:
+    global _rembg_session
+    from rembg import new_session, remove
+
+    if _rembg_session is None:
+        _rembg_session = new_session("u2net")
+    return remove(data, session=_rembg_session)
+
+
+@router.post("/remove-background")
+async def remove_background(
+    file: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+) -> Response:
+    """Return a transparent-background PNG cut-out of the uploaded image.
+
+    Inference is CPU-bound, so it runs in a worker thread to avoid blocking
+    the event loop."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Empty image"
+        )
+    if len(data) > _MAX_BG_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Image too large",
+        )
+    try:
+        out = await run_in_threadpool(_run_rembg, data)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Background removal failed",
+        ) from exc
+    return Response(content=out, media_type="image/png")
 
 
 __all__ = ["router", "create_canvas_with_item"]

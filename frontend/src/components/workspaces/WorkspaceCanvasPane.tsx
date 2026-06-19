@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
-import { Excalidraw, getTextFromElements } from "@excalidraw/excalidraw";
+import { Loader2, Wand2 } from "lucide-react";
+import {
+  Excalidraw,
+  getTextFromElements,
+  sceneCoordsToViewportCoords,
+} from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
@@ -9,6 +13,7 @@ import { useCanvasThemeStore } from "@/store/canvasThemeStore";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
 import { buildBundledLibraryItems } from "./canvas/libraries";
+import { removeImageBackground } from "./canvas/backgroundRemoval";
 
 // The onChange element list type, derived from the component so we don't
 // reach into Excalidraw's internal element type-paths.
@@ -16,6 +21,16 @@ type OnChange = NonNullable<
   React.ComponentProps<typeof Excalidraw>["onChange"]
 >;
 type ChangeElements = Parameters<OnChange>[0];
+
+// The currently-selected single image + where to float its action button
+// (container-relative px). null when the selection isn't one ready image.
+interface ImageSelection {
+  elementId: string;
+  fileId: string;
+  left: number;
+  top: number;
+}
+type BgState = "idle" | "working" | "error";
 
 /**
  * Live, multiplayer Excalidraw board for a workspace canvas item.
@@ -65,6 +80,14 @@ export function WorkspaceCanvasPane({
     readOnly,
   });
 
+  // "Remove background" tool — tracks a single selected image and where to
+  // float its button. containerRef converts Excalidraw's window-relative
+  // viewport coords into coords inside our overlay.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [imageSel, setImageSel] = useState<ImageSelection | null>(null);
+  const [bgState, setBgState] = useState<BgState>("idle");
+  const selIdRef = useRef<string | null>(null);
+
   // --- RAG text push (debounced) --------------------------------------
   const debounceRef = useRef<number | null>(null);
   // Keep the last text we pushed so cosmetic edits (moving a shape) don't
@@ -101,9 +124,51 @@ export function WorkspaceCanvasPane({
       if (nextTheme && nextTheme !== useCanvasThemeStore.getState().theme) {
         useCanvasThemeStore.getState().setTheme(nextTheme);
       }
+
+      // Surface the "Remove background" button for a single selected image.
+      const selectedIds = appState.selectedElementIds;
+      const picked = Object.keys(selectedIds).filter((id) => selectedIds[id]);
+      let next: ImageSelection | null = null;
+      if (!readOnly && picked.length === 1) {
+        const el = elements.find((e) => e.id === picked[0]);
+        if (el && el.type === "image" && !el.isDeleted && el.fileId) {
+          const p = sceneCoordsToViewportCoords(
+            { sceneX: el.x + el.width / 2, sceneY: el.y },
+            appState
+          );
+          const rect = containerRef.current?.getBoundingClientRect();
+          next = {
+            elementId: el.id,
+            fileId: el.fileId,
+            left: p.x - (rect?.left ?? 0),
+            top: p.y - (rect?.top ?? 0),
+          };
+        }
+      }
+      // Reset the button state when the selected image changes.
+      if ((next?.elementId ?? null) !== selIdRef.current) {
+        selIdRef.current = next?.elementId ?? null;
+        setBgState("idle");
+      }
+      setImageSel(next);
     },
-    [binding.onChange, schedulePush]
+    [binding.onChange, schedulePush, readOnly]
   );
+
+  const handleRemoveBackground = useCallback(async () => {
+    const api = excalidrawAPI;
+    if (!api || !imageSel || bgState === "working") return;
+    setBgState("working");
+    try {
+      await removeImageBackground(api, imageSel.elementId, imageSel.fileId);
+      setBgState("idle");
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Background removal failed", err);
+      setBgState("error");
+      window.setTimeout(() => setBgState("idle"), 4000);
+    }
+  }, [excalidrawAPI, imageSel, bgState]);
 
   // Clear any pending debounce on unmount / canvas swap.
   useEffect(() => {
@@ -128,6 +193,7 @@ export function WorkspaceCanvasPane({
 
   return (
     <div
+      ref={containerRef}
       className="relative h-full min-h-0 w-full flex-1"
       // Stop publishing our cursor once the pointer leaves the board, so
       // peers don't see a stranded cursor sitting where we last were.
@@ -142,6 +208,41 @@ export function WorkspaceCanvasPane({
             <Loader2 className="h-4 w-4 animate-spin" />
             Connecting canvas…
           </span>
+        </div>
+      )}
+      {imageSel && (
+        <div
+          className="absolute z-20"
+          style={{
+            left: imageSel.left,
+            top: imageSel.top,
+            transform: "translate(-50%, calc(-100% - 12px))",
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleRemoveBackground}
+            disabled={bgState === "working"}
+            title="Remove the background from this image"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white shadow-md hover:bg-neutral-700 disabled:opacity-70"
+          >
+            {bgState === "working" ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Removing background…
+              </>
+            ) : bgState === "error" ? (
+              <>
+                <Wand2 className="h-3.5 w-3.5 text-red-400" />
+                Failed — try again
+              </>
+            ) : (
+              <>
+                <Wand2 className="h-3.5 w-3.5" />
+                Remove background
+              </>
+            )}
+          </button>
         </div>
       )}
       <Excalidraw

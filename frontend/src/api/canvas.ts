@@ -42,4 +42,23 @@ export const canvasApi = {
     );
     return data;
   },
+
+  /** Run server-side background removal on an image, returning the
+   *  transparent PNG cut-out. The image bytes never leave the user's own
+   *  backend (rembg runs there). */
+  async removeBackground(image: Blob): Promise<Blob> {
+    const form = new FormData();
+    form.append("file", image, "image.png");
+    const { data } = await apiClient.post<Blob>(
+      `/canvas/remove-background`,
+      form,
+      {
+        // apiClient defaults to application/json — override so the backend
+        // parses the multipart upload (same pattern as the other uploads).
+        headers: { "Content-Type": "multipart/form-data" },
+        responseType: "blob",
+      }
+    );
+    return data;
+  },
 };
