@@ -10,7 +10,6 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  FolderPlus,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -148,7 +147,6 @@ export function WorkspaceNavigatorTree({
           <NewMenu
             disabled={create.isPending || creatingChat}
             onNewChat={handleNewChat}
-            onNewFolder={() => handleCreate("folder", null)}
             onNewNote={() => handleCreate("note", null)}
             onNewCanvas={() => handleCreate("canvas", null)}
           />
@@ -604,7 +602,6 @@ function TreeNode({
             onDelete={handleDelete}
             onNewNote={() => onCreateInFolder("note", node.id)}
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
-            onNewFolder={() => onCreateInFolder("folder", node.id)}
             pinned={isPinned}
             onTogglePin={handleTogglePin}
             onOpenToSide={
@@ -683,7 +680,6 @@ function NodeActions({
   onDelete,
   onNewNote,
   onNewCanvas,
-  onNewFolder,
   pinned,
   onTogglePin,
   onOpenToSide,
@@ -698,7 +694,6 @@ function NodeActions({
   onDelete: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
-  onNewFolder: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
@@ -809,14 +804,6 @@ function NodeActions({
                       onNewCanvas();
                     }}
                   />
-                  <MenuItem
-                    icon={<FolderPlus className="h-3.5 w-3.5" />}
-                    label="New folder"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNewFolder();
-                    }}
-                  />
                 </>
               )}
               {contextState && onToggleContext && (
@@ -911,14 +898,12 @@ function MenuItem({
 
 function NewMenu({
   onNewChat,
-  onNewFolder,
   onNewNote,
   onNewCanvas,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
   onNewChat?: () => void;
-  onNewFolder: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
   disabled?: boolean;
@@ -978,14 +963,6 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewCanvas();
-              }}
-            />
-            <MenuItem
-              icon={<FolderPlus className="h-3.5 w-3.5" />}
-              label="New folder"
-              onClick={() => {
-                setOpen(false);
-                onNewFolder();
               }}
             />
           </div>
