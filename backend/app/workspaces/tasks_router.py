@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import WorkspaceTask
+from app.chat.models import WorkspaceItem, WorkspaceTask
 from app.database import get_db
 from app.workspaces.shares import (
     get_accessible_workspace,
@@ -45,8 +45,32 @@ router = APIRouter()
 
 _MAX_TITLE = 500
 
-TaskStatus = Literal["todo", "doing", "done"]
+# ``status`` is a board *column id* — the three defaults (``todo`` /
+# ``doing`` / ``done``) plus any custom columns the board defines in its
+# config. Free string rather than an enum so custom columns work.
+TaskStatus = str
 TaskPriority = Literal["low", "medium", "high"]
+
+
+async def _is_done_status(
+    db: AsyncSession, board_item_id: uuid.UUID | None, status: str
+) -> bool:
+    """Whether ``status`` (a column id) counts as "done" for its board.
+
+    A board's config can flag one or more columns ``done: true``; with no
+    custom columns we fall back to the default ``done`` column id."""
+    if board_item_id is None:
+        return status == "done"
+    item = await db.get(WorkspaceItem, board_item_id)
+    cols = None
+    if item is not None and isinstance(item.config, dict):
+        cols = item.config.get("columns")
+    if not cols:
+        return status == "done"
+    done_ids = {
+        c.get("id") for c in cols if isinstance(c, dict) and c.get("done")
+    }
+    return status in done_ids
 
 
 # ---------------------------------------------------------------------
@@ -188,7 +212,7 @@ async def create_task(
             WorkspaceTask.workspace_id == ws.id
         )
     )
-    is_done = payload.status == "done"
+    is_done = await _is_done_status(db, payload.board_item_id, payload.status)
     task = WorkspaceTask(
         workspace_id=ws.id,
         board_item_id=payload.board_item_id,
@@ -246,20 +270,22 @@ async def update_task(
     if "assignee_user_id" in sent:
         task.assignee_user_id = payload.assignee_user_id  # None clears it
 
-    # ``status`` is the board's source of truth; ``done`` is the legacy
-    # boolean we keep in lockstep (done ⇔ status=='done'). Either field can
-    # drive the change — if both arrive, ``status`` wins.
-    new_status: str | None = None
-    if payload.status is not None:
-        new_status = payload.status
-    elif payload.done is not None:
-        new_status = "done" if payload.done else "todo"
-
-    if new_status is not None and new_status != task.status:
-        task.status = new_status
-        task.done = new_status == "done"
+    # ``status`` (a column id) is the board's source of truth; ``done`` is
+    # the legacy boolean kept in lockstep — derived from whether the target
+    # column is flagged done in the board config.
+    if payload.status is not None and payload.status != task.status:
+        task.status = payload.status
+        task.done = await _is_done_status(
+            db, task.board_item_id, payload.status
+        )
         task.completed_at = (
             datetime.now(timezone.utc) if task.done else None
+        )
+    elif payload.done is not None and payload.done != task.done:
+        # Legacy boolean toggle (no column move).
+        task.done = payload.done
+        task.completed_at = (
+            datetime.now(timezone.utc) if payload.done else None
         )
 
     await db.commit()

@@ -2,11 +2,11 @@ import { useState } from "react";
 import { Check, Pencil, Plus, Square, Tag, Trash2, X } from "lucide-react";
 
 import type {
+  BoardColumn,
   BoardLabel,
   BoardMember,
   Subtask,
   TaskPriority,
-  TaskStatus,
   WorkspaceTask,
   WorkspaceTaskUpdatePayload,
 } from "@/api/workspaces";
@@ -34,11 +34,6 @@ const genLabelId = () => "l_" + Math.random().toString(36).slice(2, 9);
  * the board's react-query invalidation refreshes the columns.
  */
 
-const STATUS_OPTS: { value: TaskStatus; label: string }[] = [
-  { value: "todo", label: "To Do" },
-  { value: "doing", label: "In Progress" },
-  { value: "done", label: "Done" },
-];
 const PRIORITY_OPTS: { value: TaskPriority; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -59,6 +54,7 @@ export function WorkspaceBoardCardDetail({
   labels,
   onLabelsChange,
   members,
+  columns,
   onClose,
   onUpdate,
   onDelete,
@@ -68,6 +64,7 @@ export function WorkspaceBoardCardDetail({
   labels: BoardLabel[];
   onLabelsChange: (labels: BoardLabel[]) => void;
   members: BoardMember[];
+  columns: BoardColumn[];
   onClose: () => void;
   onUpdate: (payload: WorkspaceTaskUpdatePayload) => void;
   onDelete: () => void;
@@ -135,15 +132,17 @@ export function WorkspaceBoardCardDetail({
               Column
               <select
                 disabled={!canEdit}
-                value={task.status}
-                onChange={(e) =>
-                  onUpdate({ status: e.target.value as TaskStatus })
+                value={
+                  columns.some((c) => c.id === task.status)
+                    ? task.status
+                    : columns[0]?.id
                 }
+                onChange={(e) => onUpdate({ status: e.target.value })}
                 className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none"
               >
-                {STATUS_OPTS.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
+                {columns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
                   </option>
                 ))}
               </select>

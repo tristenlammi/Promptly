@@ -4,6 +4,7 @@ import {
   ArrowUpDown,
   CheckSquare,
   Clock,
+  Columns3,
   Loader2,
   Plus,
   Search,
@@ -21,10 +22,10 @@ import {
   useWorkspaceTasks,
 } from "@/hooks/useWorkspaces";
 import type {
+  BoardColumn,
   BoardLabel,
   BoardMember,
   TaskPriority,
-  TaskStatus,
   WorkspaceTask,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
@@ -44,11 +45,15 @@ import { WorkspaceBoardCardDetail } from "./WorkspaceBoardCardDetail";
  * the board is a section in the flow, not a full-height pane.
  */
 
-const COLUMNS: { key: TaskStatus; label: string; hint: string }[] = [
-  { key: "todo", label: "To Do", hint: "Not started" },
-  { key: "doing", label: "In Progress", hint: "Being worked on" },
-  { key: "done", label: "Done", hint: "Completed" },
+/** Columns a board falls back to when it hasn't customised any. The ids
+ *  match the legacy ``status`` values so existing tasks land correctly. */
+const DEFAULT_COLUMNS: BoardColumn[] = [
+  { id: "todo", name: "To Do" },
+  { id: "doing", name: "In Progress" },
+  { id: "done", name: "Done", done: true },
 ];
+
+const genColId = () => "c_" + Math.random().toString(36).slice(2, 9);
 
 const PRIORITY_META: Record<TaskPriority, { dot: string; label: string }> = {
   high: { dot: "bg-red-500", label: "High priority" },
@@ -66,8 +71,9 @@ const PRIORITY_NEXT: Record<TaskPriority, TaskPriority> = {
   high: "low",
 };
 
-type SortKey = "created" | "due" | "priority";
+type SortKey = "manual" | "created" | "due" | "priority";
 const SORTS: { key: SortKey; label: string }[] = [
+  { key: "manual", label: "Manual" },
   { key: "created", label: "Created" },
   { key: "due", label: "Due date" },
   { key: "priority", label: "Priority" },
@@ -75,7 +81,9 @@ const SORTS: { key: SortKey; label: string }[] = [
 
 function sortTasks(tasks: WorkspaceTask[], key: SortKey): WorkspaceTask[] {
   const out = [...tasks];
-  if (key === "due") {
+  if (key === "manual") {
+    out.sort((a, b) => a.position - b.position);
+  } else if (key === "due") {
     // Dated tasks first (soonest → latest), undated tasks last.
     out.sort((a, b) => {
       if (!a.due_at && !b.due_at) return a.position - b.position;
@@ -132,11 +140,12 @@ export function WorkspaceBoardPane({
   const remove = useDeleteWorkspaceTask(workspaceId);
   const setConfig = useSetBoardConfig(workspaceId, boardItemId);
 
-  const [sortKey, setSortKey] = useState<SortKey>("created");
+  const [sortKey, setSortKey] = useState<SortKey>("manual");
   const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dropCol, setDropCol] = useState<TaskStatus | null>(null);
+  const [dropCol, setDropCol] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [managingCols, setManagingCols] = useState(false);
 
   // Filters (client-side over the loaded task list).
   const [search, setSearch] = useState("");
@@ -173,6 +182,13 @@ export function WorkspaceBoardPane({
   const onLabelsChange = (next: BoardLabel[]) =>
     setConfig.mutate({ ...(boardItem?.config ?? {}), labels: next });
 
+  const boardColumns: BoardColumn[] =
+    boardItem?.config?.columns && boardItem.config.columns.length > 0
+      ? boardItem.config.columns
+      : DEFAULT_COLUMNS;
+  const onColumnsChange = (next: BoardColumn[]) =>
+    setConfig.mutate({ ...(boardItem?.config ?? {}), columns: next });
+
   const filtersActive =
     Boolean(search.trim()) ||
     priorityFilter !== "all" ||
@@ -208,12 +224,18 @@ export function WorkspaceBoardPane({
 
   const list = tasks ?? [];
   const openTask = list.find((t) => t.id === openTaskId) ?? null;
+  const firstColId = boardColumns[0]?.id ?? "todo";
+  const colIds = boardColumns.map((c) => c.id);
   const columns = useMemo(() => {
     const filtered = list.filter(matches);
-    return COLUMNS.map((col) => ({
-      ...col,
+    return boardColumns.map((col, idx) => ({
+      col,
+      // Tasks whose status isn't a known column fall into the first column.
       tasks: sortTasks(
-        filtered.filter((t) => (t.status ?? "todo") === col.key),
+        filtered.filter((t) => {
+          const s = t.status ?? firstColId;
+          return colIds.includes(s) ? s === col.id : idx === 0;
+        }),
         sortKey
       ),
     }));
@@ -226,20 +248,49 @@ export function WorkspaceBoardPane({
     dueFilter,
     labelFilter,
     assigneeFilter,
+    boardItem?.config?.columns,
   ]);
 
   const addTask = () => {
     const title = draft.trim();
     if (!title || create.isPending) return;
     create.mutate(
-      { title, status: "todo", board_item_id: boardItemId },
+      { title, status: firstColId, board_item_id: boardItemId },
       { onSuccess: () => setDraft("") }
     );
   };
 
-  const moveTo = (task: WorkspaceTask, status: TaskStatus) => {
-    if (task.status === status) return;
-    update.mutate({ taskId: task.id, payload: { status } });
+  /** Drop a card into a column, optionally before ``beforeTaskId`` (manual
+   *  reorder). Position is the midpoint so neighbours don't renumber. */
+  const drop = (task: WorkspaceTask, colId: string, beforeTaskId?: string) => {
+    const colTasks = sortTasks(
+      list.filter((t) => {
+        const s = t.status ?? firstColId;
+        return colIds.includes(s)
+          ? s === colId
+          : colId === firstColId;
+      }),
+      "manual"
+    ).filter((t) => t.id !== task.id);
+
+    let position = task.position;
+    const idx = beforeTaskId
+      ? colTasks.findIndex((t) => t.id === beforeTaskId)
+      : -1;
+    if (idx <= 0) {
+      const first = colTasks[idx === 0 ? 0 : -1];
+      if (idx === 0 && first) position = first.position - 1;
+      else if (colTasks.length)
+        position = colTasks[colTasks.length - 1].position + 1;
+    } else {
+      const prev = colTasks[idx - 1];
+      const next = colTasks[idx];
+      position = (prev.position + next.position) / 2;
+    }
+
+    const payload: { status?: string; position: number } = { position };
+    if (task.status !== colId) payload.status = colId;
+    update.mutate({ taskId: task.id, payload });
   };
 
   return (
@@ -253,20 +304,32 @@ export function WorkspaceBoardPane({
             {list.filter((t) => !t.done).length} open
           </p>
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-          <ArrowUpDown className="h-3.5 w-3.5" />
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
-          >
-            {SORTS.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setManagingCols((m) => !m)}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+              Columns
+            </button>
+          )}
+          <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+            <ArrowUpDown className="h-3.5 w-3.5" />
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+            >
+              {SORTS.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {/* Add row */}
@@ -389,86 +452,135 @@ export function WorkspaceBoardPane({
         )}
       </div>
 
+      {/* Column manager */}
+      {managingCols && canEdit && (
+        <ColumnsManager
+          columns={boardColumns}
+          onChange={onColumnsChange}
+          onClose={() => setManagingCols(false)}
+        />
+      )}
+
       {/* Columns */}
       {isLoading ? (
         <p className="py-4 text-sm text-[var(--text-muted)]">Loading…</p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {columns.map((col) => (
-            <div
-              key={col.key}
-              onDragOver={(e) => {
-                if (!canEdit || !dragId) return;
-                e.preventDefault();
-                setDropCol(col.key);
-              }}
-              onDragLeave={() => setDropCol((c) => (c === col.key ? null : c))}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDropCol(null);
-                const id = e.dataTransfer.getData("text/plain") || dragId;
-                const task = list.find((t) => t.id === id);
-                if (task) moveTo(task, col.key);
-                setDragId(null);
-              }}
-              className={cn(
-                "flex flex-col rounded-lg border bg-[var(--surface)]/40 transition",
-                dropCol === col.key
-                  ? "border-[var(--accent)] bg-[var(--accent)]/5"
-                  : "border-[var(--border)]"
-              )}
-            >
-              <div className="flex items-center justify-between px-3 py-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  {col.label}
-                </span>
-                <span className="rounded-full bg-[var(--hover)] px-1.5 text-[11px] text-[var(--text-muted)]">
-                  {col.tasks.length}
-                </span>
-              </div>
-              <div className="flex min-h-[56px] flex-1 flex-col gap-2 px-2 pb-3">
-                {col.tasks.length === 0 ? (
-                  <p className="px-1 py-2 text-xs text-[var(--text-muted)]">
-                    {col.hint}
-                  </p>
-                ) : (
-                  col.tasks.map((task) => (
-                    <BoardCard
-                      key={task.id}
-                      task={task}
-                      canEdit={canEdit}
-                      dragging={dragId === task.id}
-                      onDragStart={(e) => {
-                        setDragId(task.id);
-                        e.dataTransfer.setData("text/plain", task.id);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragEnd={() => {
-                        setDragId(null);
-                        setDropCol(null);
-                      }}
-                      onCyclePriority={() =>
-                        update.mutate({
-                          taskId: task.id,
-                          payload: { priority: PRIORITY_NEXT[task.priority] },
-                        })
-                      }
-                      onDelete={() => remove.mutate(task.id)}
-                      onOpen={() => setOpenTaskId(task.id)}
-                      labels={(task.labels ?? [])
-                        .map((id) => labelMap[id])
-                        .filter(Boolean)}
-                      assignee={
-                        task.assignee_user_id
-                          ? memberMap[task.assignee_user_id]
-                          : undefined
-                      }
-                    />
-                  ))
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {columns.map(({ col, tasks: colTasks }) => {
+            const overWip =
+              typeof col.wip === "number" &&
+              col.wip > 0 &&
+              colTasks.length > col.wip;
+            return (
+              <div
+                key={col.id}
+                onDragOver={(e) => {
+                  if (!canEdit || !dragId) return;
+                  e.preventDefault();
+                  setDropCol(col.id);
+                }}
+                onDragLeave={() =>
+                  setDropCol((c) => (c === col.id ? null : c))
+                }
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropCol(null);
+                  const id = e.dataTransfer.getData("text/plain") || dragId;
+                  const task = list.find((t) => t.id === id);
+                  if (task) drop(task, col.id);
+                  setDragId(null);
+                }}
+                className={cn(
+                  "flex w-[270px] shrink-0 flex-col rounded-lg border bg-[var(--surface)]/40 transition md:flex-1",
+                  dropCol === col.id
+                    ? "border-[var(--accent)] bg-[var(--accent)]/5"
+                    : "border-[var(--border)]"
                 )}
+              >
+                <div className="flex items-center justify-between px-3 py-2">
+                  <span className="truncate text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    {col.name}
+                  </span>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 text-[11px]",
+                      overWip
+                        ? "bg-red-500/15 text-red-500"
+                        : "bg-[var(--hover)] text-[var(--text-muted)]"
+                    )}
+                  >
+                    {colTasks.length}
+                    {typeof col.wip === "number" && col.wip > 0
+                      ? `/${col.wip}`
+                      : ""}
+                  </span>
+                </div>
+                <div className="flex min-h-[56px] flex-1 flex-col gap-2 px-2 pb-3">
+                  {colTasks.length === 0 ? (
+                    <p className="px-1 py-2 text-xs text-[var(--text-muted)]">
+                      No tasks
+                    </p>
+                  ) : (
+                    colTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        onDragOver={(e) => {
+                          if (!canEdit || !dragId || dragId === task.id) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDropCol(col.id);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDropCol(null);
+                          const id =
+                            e.dataTransfer.getData("text/plain") || dragId;
+                          const dragged = list.find((t) => t.id === id);
+                          if (dragged && dragged.id !== task.id)
+                            drop(dragged, col.id, task.id);
+                          setDragId(null);
+                        }}
+                      >
+                        <BoardCard
+                          task={task}
+                          canEdit={canEdit}
+                          dragging={dragId === task.id}
+                          onDragStart={(e) => {
+                            setDragId(task.id);
+                            e.dataTransfer.setData("text/plain", task.id);
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragEnd={() => {
+                            setDragId(null);
+                            setDropCol(null);
+                          }}
+                          onCyclePriority={() =>
+                            update.mutate({
+                              taskId: task.id,
+                              payload: {
+                                priority: PRIORITY_NEXT[task.priority],
+                              },
+                            })
+                          }
+                          onDelete={() => remove.mutate(task.id)}
+                          onOpen={() => setOpenTaskId(task.id)}
+                          labels={(task.labels ?? [])
+                            .map((id) => labelMap[id])
+                            .filter(Boolean)}
+                          assignee={
+                            task.assignee_user_id
+                              ? memberMap[task.assignee_user_id]
+                              : undefined
+                          }
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -479,6 +591,7 @@ export function WorkspaceBoardPane({
           labels={labels}
           onLabelsChange={onLabelsChange}
           members={members}
+          columns={boardColumns}
           onClose={() => setOpenTaskId(null)}
           onUpdate={(payload) =>
             update.mutate({ taskId: openTask.id, payload })
@@ -487,6 +600,122 @@ export function WorkspaceBoardPane({
         />
       )}
     </section>
+  );
+}
+
+function ColumnsManager({
+  columns,
+  onChange,
+  onClose,
+}: {
+  columns: BoardColumn[];
+  onChange: (cols: BoardColumn[]) => void;
+  onClose: () => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const update = (id: string, patch: Partial<BoardColumn>) =>
+    onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const remove = (id: string) => {
+    if (columns.length <= 1) return; // keep at least one column
+    onChange(columns.filter((c) => c.id !== id));
+  };
+  const move = (id: string, dir: -1 | 1) => {
+    const i = columns.findIndex((c) => c.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= columns.length) return;
+    const next = [...columns];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const add = () => {
+    const name = newName.trim();
+    if (!name) return;
+    onChange([...columns, { id: genColId(), name }]);
+    setNewName("");
+  };
+
+  return (
+    <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          Columns
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="space-y-2">
+        {columns.map((c, i) => (
+          <div key={c.id} className="flex items-center gap-2">
+            <div className="flex flex-col">
+              <button
+                type="button"
+                disabled={i === 0}
+                onClick={() => move(c.id, -1)}
+                className="text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-30"
+              >
+                <ArrowUpDown className="h-3 w-3 rotate-180" />
+              </button>
+            </div>
+            <input
+              value={c.name}
+              onChange={(e) => update(c.id, { name: e.target.value })}
+              className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
+            />
+            <label
+              className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)]"
+              title="Cards in this column count as done"
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(c.done)}
+                onChange={(e) => update(c.id, { done: e.target.checked })}
+              />
+              Done
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={c.wip ?? ""}
+              placeholder="WIP"
+              onChange={(e) =>
+                update(c.id, {
+                  wip: e.target.value ? Number(e.target.value) : null,
+                })
+              }
+              className="w-14 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-xs text-[var(--text)] outline-none"
+            />
+            <button
+              type="button"
+              disabled={columns.length <= 1}
+              onClick={() => remove(c.id)}
+              className="rounded p-0.5 text-[var(--text-muted)] hover:text-red-500 disabled:opacity-30"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 pt-1">
+          <Plus className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="Add a column…"
+            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -131,6 +131,7 @@ export interface BoardLabel {
  *  label registry (and, later, custom columns). */
 export interface BoardConfig {
   labels?: BoardLabel[];
+  columns?: BoardColumn[];
 }
 
 /** Flat ``workspace_items`` row returned by the create / update / move
@@ -187,8 +188,19 @@ export interface WorkspaceOverview {
   }[];
 }
 
-export type TaskStatus = "todo" | "doing" | "done";
+/** A task's ``status`` is a board *column id* — the defaults (todo / doing
+ *  / done) or any custom column the board defines. */
+export type TaskStatus = string;
 export type TaskPriority = "low" | "medium" | "high";
+
+/** A board column. ``done`` marks the "completed" column; ``wip`` is an
+ *  optional work-in-progress limit. */
+export interface BoardColumn {
+  id: string;
+  name: string;
+  done?: boolean;
+  wip?: number | null;
+}
 
 export interface Subtask {
   id: string;
