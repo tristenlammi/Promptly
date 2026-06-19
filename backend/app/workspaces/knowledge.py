@@ -809,7 +809,19 @@ def _flatten_board(item: WorkspaceItem, tasks: list[WorkspaceTask]) -> str:
         ]
         if t.due_at is not None:
             bits.append(f"due {t.due_at.date().isoformat()}")
-        lines.append(f'- Task "{t.title.strip()}": ' + ", ".join(bits) + ".")
+        line = f'- Task "{t.title.strip()}": ' + ", ".join(bits) + "."
+        desc = (t.description or "").strip()
+        if desc:
+            line += f" Description: {desc[:1000]}"
+        subs = t.subtasks or []
+        if subs:
+            done_n = sum(1 for s in subs if s.get("done"))
+            checklist = "; ".join(
+                ("[x] " if s.get("done") else "[ ] ") + str(s.get("text", ""))
+                for s in subs
+            )
+            line += f" Subtasks ({done_n}/{len(subs)}): {checklist}"
+        lines.append(line)
     return "\n".join(lines)
 
 

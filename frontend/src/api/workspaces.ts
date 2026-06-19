@@ -175,12 +175,20 @@ export interface WorkspaceOverview {
 export type TaskStatus = "todo" | "doing" | "done";
 export type TaskPriority = "low" | "medium" | "high";
 
+export interface Subtask {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
 /** A first-class workspace task (the dedicated project to-do list — not
  *  the checkbox rollup parsed out of notes). */
 export interface WorkspaceTask {
   id: string;
   board_item_id: string | null;
   title: string;
+  description: string | null;
+  subtasks: Subtask[] | null;
   done: boolean;
   status: TaskStatus;
   priority: TaskPriority;
@@ -206,6 +214,8 @@ export interface WorkspaceTaskUpdatePayload {
   priority?: TaskPriority;
   due_at?: string | null;
   position?: number;
+  description?: string | null;
+  subtasks?: Subtask[] | null;
 }
 
 

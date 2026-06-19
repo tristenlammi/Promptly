@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import {
+  AlignLeft,
   ArrowUpDown,
-  CalendarPlus,
+  CheckSquare,
   Clock,
   Loader2,
   Plus,
   Trash2,
-  X,
 } from "lucide-react";
 
 import {
@@ -21,6 +21,7 @@ import type {
   WorkspaceTask,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { WorkspaceBoardCardDetail } from "./WorkspaceBoardCardDetail";
 
 /**
  * The workspace task board — a 3-column Kanban (To Do / In Progress / Done)
@@ -107,13 +108,6 @@ function formatDue(iso: string): string {
   });
 }
 
-/** ISO (UTC) → value for <input type="datetime-local"> (local wall time). */
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
 export function WorkspaceBoardPane({
   workspaceId,
   boardItemId,
@@ -132,8 +126,10 @@ export function WorkspaceBoardPane({
   const [draft, setDraft] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<TaskStatus | null>(null);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
   const list = tasks ?? [];
+  const openTask = list.find((t) => t.id === openTaskId) ?? null;
   const columns = useMemo(() => {
     return COLUMNS.map((col) => ({
       ...col,
@@ -265,19 +261,14 @@ export function WorkspaceBoardPane({
                         setDragId(null);
                         setDropCol(null);
                       }}
-                      onRename={(title) =>
-                        update.mutate({ taskId: task.id, payload: { title } })
-                      }
                       onCyclePriority={() =>
                         update.mutate({
                           taskId: task.id,
                           payload: { priority: PRIORITY_NEXT[task.priority] },
                         })
                       }
-                      onSetDue={(due_at) =>
-                        update.mutate({ taskId: task.id, payload: { due_at } })
-                      }
                       onDelete={() => remove.mutate(task.id)}
+                      onOpen={() => setOpenTaskId(task.id)}
                     />
                   ))
                 )}
@@ -285,6 +276,18 @@ export function WorkspaceBoardPane({
             </div>
           ))}
         </div>
+      )}
+
+      {openTask && (
+        <WorkspaceBoardCardDetail
+          task={openTask}
+          canEdit={canEdit}
+          onClose={() => setOpenTaskId(null)}
+          onUpdate={(payload) =>
+            update.mutate({ taskId: openTask.id, payload })
+          }
+          onDelete={() => remove.mutate(openTask.id)}
+        />
       )}
     </section>
   );
@@ -296,43 +299,34 @@ function BoardCard({
   dragging,
   onDragStart,
   onDragEnd,
-  onRename,
   onCyclePriority,
-  onSetDue,
   onDelete,
+  onOpen,
 }: {
   task: WorkspaceTask;
   canEdit: boolean;
   dragging: boolean;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
-  onRename: (title: string) => void;
   onCyclePriority: () => void;
-  onSetDue: (due_at: string | null) => void;
   onDelete: () => void;
+  onOpen: () => void;
 }) {
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState(task.title);
-  const [editingDue, setEditingDue] = useState(false);
-
   const prio = PRIORITY_META[task.priority];
   const urgency = task.due_at ? dueUrgency(task.due_at, task.done) : null;
-
-  const commitTitle = () => {
-    const next = titleDraft.trim();
-    setEditingTitle(false);
-    if (next && next !== task.title) onRename(next);
-    else setTitleDraft(task.title);
-  };
+  const subs = task.subtasks ?? [];
+  const subDone = subs.filter((s) => s.done).length;
+  const hasDesc = Boolean((task.description ?? "").trim());
+  const hasMeta = Boolean(task.due_at) || subs.length > 0 || hasDesc;
 
   return (
     <div
-      draggable={canEdit && !editingTitle && !editingDue}
+      draggable={canEdit}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onClick={onOpen}
       className={cn(
-        "group rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-sm transition",
-        canEdit && "cursor-grab active:cursor-grabbing",
+        "group cursor-pointer rounded-md border border-[var(--border)] bg-[var(--bg)] p-2 shadow-sm transition hover:border-[var(--accent)]",
         dragging && "opacity-40"
       )}
     >
@@ -341,7 +335,10 @@ function BoardCard({
         <button
           type="button"
           disabled={!canEdit}
-          onClick={onCyclePriority}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCyclePriority();
+          }}
           title={`${prio.label} — click to change`}
           className={cn(
             "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
@@ -350,39 +347,24 @@ function BoardCard({
           )}
         />
 
-        {editingTitle ? (
-          <input
-            autoFocus
-            value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitTitle();
-              if (e.key === "Escape") {
-                setEditingTitle(false);
-                setTitleDraft(task.title);
-              }
-            }}
-            className="min-w-0 flex-1 rounded border border-[var(--accent)] bg-[var(--surface)] px-1 py-0.5 text-sm outline-none"
-          />
-        ) : (
-          <span
-            onDoubleClick={() => canEdit && setEditingTitle(true)}
-            className={cn(
-              "min-w-0 flex-1 break-words text-sm",
-              task.done
-                ? "text-[var(--text-muted)] line-through"
-                : "text-[var(--text)]"
-            )}
-          >
-            {task.title}
-          </span>
-        )}
+        <span
+          className={cn(
+            "min-w-0 flex-1 break-words text-sm",
+            task.done
+              ? "text-[var(--text-muted)] line-through"
+              : "text-[var(--text)]"
+          )}
+        >
+          {task.title}
+        </span>
 
         {canEdit && (
           <button
             type="button"
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             title="Delete task"
             className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
           >
@@ -391,65 +373,36 @@ function BoardCard({
         )}
       </div>
 
-      {/* Due date row */}
-      <div className="mt-1.5 pl-[18px]">
-        {editingDue ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="datetime-local"
-              autoFocus
-              defaultValue={task.due_at ? toLocalInput(task.due_at) : ""}
-              onChange={(e) => {
-                onSetDue(
-                  e.target.value
-                    ? new Date(e.target.value).toISOString()
-                    : null
-                );
-              }}
-              onBlur={() => setEditingDue(false)}
-              className="rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-[11px] text-[var(--text)] outline-none"
-            />
-            <button
-              type="button"
-              title="Close"
-              onClick={() => setEditingDue(false)}
-              className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+      {/* Meta row: due + checklist + description indicator */}
+      {hasMeta && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-[18px] text-[11px] text-[var(--text-muted)]">
+          {task.due_at && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1",
+                urgency === "overdue"
+                  ? "text-red-500"
+                  : urgency === "soon"
+                    ? "text-orange-500"
+                    : "text-[var(--text-muted)]"
+              )}
             >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        ) : task.due_at ? (
-          <button
-            type="button"
-            disabled={!canEdit}
-            onClick={() => canEdit && setEditingDue(true)}
-            title={canEdit ? "Change due date" : undefined}
-            className={cn(
-              "inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] disabled:cursor-default",
-              urgency === "overdue"
-                ? "text-red-500"
-                : urgency === "soon"
-                  ? "text-orange-500"
-                  : "text-[var(--text-muted)]"
-            )}
-          >
-            <Clock className="h-3 w-3" />
-            {formatDue(task.due_at)}
-            {urgency === "overdue" && !task.done && " · overdue"}
-          </button>
-        ) : (
-          canEdit && (
-            <button
-              type="button"
-              onClick={() => setEditingDue(true)}
-              className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[var(--text-muted)] opacity-0 transition hover:text-[var(--text)] group-hover:opacity-100"
-            >
-              <CalendarPlus className="h-3 w-3" />
-              Add due date
-            </button>
-          )
-        )}
-      </div>
+              <Clock className="h-3 w-3" />
+              {formatDue(task.due_at)}
+              {urgency === "overdue" && !task.done && " · overdue"}
+            </span>
+          )}
+          {subs.length > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <CheckSquare className="h-3 w-3" />
+              {subDone}/{subs.length}
+            </span>
+          )}
+          {hasDesc && (
+            <AlignLeft className="h-3 w-3" aria-label="Has description" />
+          )}
+        </div>
+      )}
     </div>
   );
 }

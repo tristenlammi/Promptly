@@ -52,10 +52,18 @@ TaskPriority = Literal["low", "medium", "high"]
 # ---------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------
+class Subtask(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=500)
+    done: bool = False
+
+
 class WorkspaceTaskResponse(BaseModel):
     id: uuid.UUID
     board_item_id: uuid.UUID | None = None
     title: str
+    description: str | None = None
+    subtasks: list[Subtask] | None = None
     done: bool
     status: TaskStatus
     priority: TaskPriority
@@ -87,6 +95,10 @@ class WorkspaceTaskUpdate(BaseModel):
     # ``model_fields_set`` at the call site.
     due_at: datetime | None = None
     position: float | None = None
+    # ``None`` clears the body; both are distinguished from "omitted" via
+    # ``model_fields_set``.
+    description: str | None = Field(default=None, max_length=20_000)
+    subtasks: list[Subtask] | None = None
 
 
 # ---------------------------------------------------------------------
@@ -216,6 +228,15 @@ async def update_task(
         task.priority = payload.priority
     if "due_at" in sent:
         task.due_at = payload.due_at  # may be None to clear it
+    if "description" in sent:
+        desc = (payload.description or "").strip()
+        task.description = desc or None
+    if "subtasks" in sent:
+        task.subtasks = (
+            [s.model_dump() for s in payload.subtasks]
+            if payload.subtasks
+            else None
+        )
 
     # ``status`` is the board's source of truth; ``done`` is the legacy
     # boolean we keep in lockstep (done ⇔ status=='done'). Either field can

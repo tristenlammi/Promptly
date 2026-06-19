@@ -436,6 +436,13 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Rich card body + checklist (0093). ``description`` is free markdown;
+    # ``subtasks`` is a JSON list of ``{id, text, done}``. Both feed the
+    # board's RAG text so card detail is searchable.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subtasks: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
