@@ -264,8 +264,10 @@ export function WorkspaceBoardPane({
     }
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
     if (labelFilter.length) {
+      // AND semantics: a card must carry *every* selected label (it may
+      // carry others too).
       const tl = t.labels ?? [];
-      if (!labelFilter.some((id) => tl.includes(id))) return false;
+      if (!labelFilter.every((id) => tl.includes(id))) return false;
     }
     if (assigneeFilter !== "all") {
       if (assigneeFilter === "none" && t.assignee_user_id) return false;
