@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Archive,
   ArchiveRestore,
@@ -78,6 +78,7 @@ export function WorkspaceDetailPage() {
   const { data: workspace, isLoading } = useWorkspace(id);
   const { data: conversations } = useWorkspaceConversations(id);
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<WorkspaceItemNode | null>(null);
   const [secondary, setSecondary] = useState<WorkspaceItemNode | null>(null);
@@ -87,6 +88,53 @@ export function WorkspaceDetailPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
+
+  // Persist the open item(s) in the URL so a refresh restores the view
+  // instead of dropping back to the workspace home. ``item`` is the primary
+  // pane; ``item2`` the split-screen secondary.
+  const findNode = useCallback(
+    (
+      nodes: WorkspaceItemNode[] | undefined,
+      target: string | null
+    ): WorkspaceItemNode | null => {
+      if (!nodes || !target) return null;
+      for (const n of nodes) {
+        if (n.id === target) return n;
+        const found = findNode(n.children, target);
+        if (found) return found;
+      }
+      return null;
+    },
+    []
+  );
+
+  // Restore selection from the URL once the tree is available — once per
+  // workspace id, so closing an item later doesn't re-open it, and a
+  // workspace switch re-reads (and clears stale state).
+  const restoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tree || !id || restoredForRef.current === id) return;
+    restoredForRef.current = id;
+    const primary = findNode(tree, searchParams.get("item"));
+    setSelected(primary);
+    const split = findNode(tree, searchParams.get("item2"));
+    setSecondary(split && split.id !== primary?.id ? split : null);
+  }, [tree, id, searchParams, findNode]);
+
+  // Mirror the current selection back into the URL (replace, so selecting
+  // items doesn't pile up browser history). Guarded until restore has run
+  // for this id so we never clobber the param before reading it.
+  useEffect(() => {
+    if (restoredForRef.current !== id) return;
+    const next = new URLSearchParams(searchParams);
+    if (selected) next.set("item", selected.id);
+    else next.delete("item");
+    if (secondary) next.set("item2", secondary.id);
+    else next.delete("item2");
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [selected, secondary, id, searchParams, setSearchParams]);
 
   // ⌘K / Ctrl+K opens the workspace command palette (jump / ask).
   useEffect(() => {
