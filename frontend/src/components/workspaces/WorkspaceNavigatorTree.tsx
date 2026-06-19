@@ -543,6 +543,23 @@ function TreeNode({
             <span className="w-3.5 shrink-0" />
           )}
 
+          {isContextItem && contextOn && (
+            <span
+              title="Used as workspace context"
+              className="inline-flex shrink-0 items-center text-emerald-500"
+            >
+              <Zap className="h-3 w-3" />
+            </span>
+          )}
+          {isContextItem && !contextOn && (
+            <span
+              title="Not used as workspace context"
+              className="inline-flex shrink-0 items-center text-[var(--text-muted)]"
+            >
+              <ZapOff className="h-3 w-3" />
+            </span>
+          )}
+
           <NodeIcon node={node} expanded={expanded} />
 
           {renaming ? (
@@ -571,22 +588,6 @@ function TreeNode({
               className="inline-flex shrink-0 items-center gap-1 text-[10px] text-[var(--text-muted)]"
             >
               <Loader2 className="h-3 w-3 animate-spin" />
-            </span>
-          )}
-          {isContextItem && contextOn && !renaming && (
-            <span
-              title="Used as workspace context"
-              className="inline-flex shrink-0 items-center text-emerald-500"
-            >
-              <Zap className="h-3 w-3" />
-            </span>
-          )}
-          {isContextItem && !contextOn && !renaming && (
-            <span
-              title="Not used as workspace context"
-              className="inline-flex shrink-0 items-center text-[var(--text-muted)]"
-            >
-              <ZapOff className="h-3 w-3" />
             </span>
           )}
         </button>

@@ -133,7 +133,10 @@ export function WorkspaceCanvasPane({
         const el = elements.find((e) => e.id === picked[0]);
         if (el && el.type === "image" && !el.isDeleted && el.fileId) {
           const p = sceneCoordsToViewportCoords(
-            { sceneX: el.x + el.width / 2, sceneY: el.y },
+            // Anchor at the image's bottom-centre so the button floats
+            // below the image — keeps it clear of the rotation handle
+            // that sits above the top edge.
+            { sceneX: el.x + el.width / 2, sceneY: el.y + el.height },
             appState
           );
           const rect = containerRef.current?.getBoundingClientRect();
@@ -216,7 +219,7 @@ export function WorkspaceCanvasPane({
           style={{
             left: imageSel.left,
             top: imageSel.top,
-            transform: "translate(-50%, calc(-100% - 12px))",
+            transform: "translate(-50%, 12px)",
           }}
         >
           <button
