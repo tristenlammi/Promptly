@@ -11,6 +11,7 @@ import {
   FileText,
   Loader2,
   Save,
+  StretchHorizontal,
   X,
 } from "lucide-react";
 
@@ -18,6 +19,11 @@ import { filesApi, type FileItem } from "@/api/files";
 import { documentsApi, type DocumentDownloadFormat } from "@/api/documents";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/utils/cn";
+import {
+  NOTE_WIDTH_CLASS,
+  NOTE_WIDTH_LABEL,
+  useNoteWidthStore,
+} from "@/store/noteWidthStore";
 
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
@@ -71,6 +77,10 @@ export function DocumentEditorModal({
   const queryClient = useQueryClient();
   const { ydoc, provider, status: collabStatus, user, error } =
     useCollabProvider(file.id);
+
+  // Per-user editor width (shared with standalone Drive documents).
+  const noteWidth = useNoteWidthStore((s) => s.width);
+  const cycleNoteWidth = useNoteWidthStore((s) => s.cycle);
 
   const [filename, setFilename] = useState(file.filename);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -749,6 +759,21 @@ export function DocumentEditorModal({
 
         <button
           type="button"
+          onClick={cycleNoteWidth}
+          aria-label={`Editor width: ${NOTE_WIDTH_LABEL[noteWidth]} — click to change`}
+          title={`Editor width: ${NOTE_WIDTH_LABEL[noteWidth]} (click to change)`}
+          className={cn(
+            "inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-black/5 dark:hover:bg-white/10",
+            noteWidth === "default"
+              ? "text-[var(--muted)] hover:text-[var(--text)]"
+              : "text-[var(--accent)]"
+          )}
+        >
+          <StretchHorizontal className="h-5 w-5" />
+        </button>
+
+        <button
+          type="button"
           onClick={onClose}
           aria-label="Close document"
           className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-black/5 hover:text-[var(--text)] dark:hover:bg-white/10"
@@ -846,7 +871,12 @@ export function DocumentEditorModal({
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl px-0 md:px-4">
+          <div
+            className={cn(
+              "mx-auto px-0 md:px-4",
+              NOTE_WIDTH_CLASS[noteWidth]
+            )}
+          >
             <EditorContent editor={editor} />
           </div>
         )}
