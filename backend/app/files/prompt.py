@@ -34,9 +34,10 @@ logger = logging.getLogger(__name__)
 _TEXT_ATTACHMENT_LIMIT = 64 * 1024
 
 # Hard ceiling on PDF bytes we'll even open — pypdf has to load the whole
-# file into memory, and a malicious upload could pin a worker. The upload
-# size limit (40 MB) is the real wall; this is just defense-in-depth.
-_PDF_PARSE_BYTE_LIMIT = 25 * 1024 * 1024
+# file into memory, and a malicious upload could pin a worker. Matches the
+# upload size limit (100 MB) so large-but-legitimate PDFs still get their
+# text extracted instead of silently falling back to a filename marker.
+_PDF_PARSE_BYTE_LIMIT = 100 * 1024 * 1024
 
 # MIME types we treat as PDFs.
 _PDF_MIMES: frozenset[str] = frozenset({"application/pdf", "application/x-pdf"})
@@ -60,12 +61,28 @@ _IMAGE_EXTS: frozenset[str] = frozenset(
     {".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif"}
 )
 
-# Cap per-image bytes we actually base64 + ship to the LLM. The upload
-# limit (40 MB) covers everything; this is the tighter budget that keeps
-# a single multimodal request from blowing up. ~8 MB raw → ~10.7 MB
-# base64, which most providers tolerate. Larger images are skipped with
-# a warning so the user knows.
-_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+# Vision models downsample images to a fixed resolution before they ever
+# reach the model, so shipping anything larger is pure wasted payload: it
+# inflates the request and, because we re-feed every prior turn's images
+# on each new turn, pushes the *aggregate* base64 size toward the
+# provider's per-request ceiling (OpenRouter rejects >30 MB of image
+# content with a 413). We therefore downscale to this longest edge and
+# re-encode to the byte budget below before base64-ing. A side benefit:
+# an upload far larger than this still reaches the model (downscaled)
+# instead of being dropped.
+#
+# 2048 px matches GPT-4o's effective ceiling and sits comfortably within
+# what Gemini's tiling can use for dense text — higher than Claude's
+# 1568 px internal cap, but the extra pixels are cheap (~1 MB/image) and
+# benefit the high-res-capable models we actually target. At 2048 px you
+# would need ~40+ images in a single conversation to approach the 30 MB
+# aggregate limit.
+_MAX_IMAGE_EDGE = 2048
+
+# Per-image byte budget for the (possibly downscaled) payload we base64
+# and ship. A 1568 px JPEG normally lands well under this; it's a ceiling
+# for unusually detailed images, not a typical size.
+_PER_IMAGE_TARGET_BYTES = 4 * 1024 * 1024
 
 # Smallest plausible real image. A valid JPEG/PNG/WebP/GIF has a
 # multi-byte magic header + palette/IDAT chunks; anything under this is
@@ -331,24 +348,64 @@ def build_attachment_preamble(
     return "\n".join(chunks)
 
 
-def _transcode_to_jpeg(raw: bytes) -> bytes | None:
-    """Best-effort re-encode of arbitrary image bytes to JPEG.
+def _prepare_image_for_vision(raw: bytes, mime: str) -> tuple[bytes, str] | None:
+    """Return ``(payload, mime)`` ready to base64 + ship to a vision model.
 
-    Returns ``None`` if Pillow can't open the payload (truncated upload,
-    unsupported format, etc.). Used as a fallback for non-universal
-    formats (GIF, BMP, …) so every provider accepts the resulting
-    data URL.
+    Returns ``None`` if Pillow can't decode the bytes at all (truncated
+    upload, unsupported format, etc.) so the caller can warn and skip.
+
+    Behaviour:
+
+    * Images already in a universal format (PNG/JPEG/WebP) that fit both
+      the dimension cap and the per-image byte budget are returned
+      untouched — we don't want to re-compress a crisp screenshot of code
+      and introduce JPEG artefacts.
+    * Everything else (oversize dimensions, too many bytes, or a non-
+      universal format like GIF/BMP/HEIC) is downscaled to
+      ``_MAX_IMAGE_EDGE`` and re-encoded as JPEG, stepping quality down
+      until it fits ``_PER_IMAGE_TARGET_BYTES``.
     """
     try:
         with Image.open(io.BytesIO(raw)) as im:
             im.load()
+            width, height = im.size
+            longest = max(width, height)
+
+            already_fine = (
+                mime in _UNIVERSAL_IMAGE_MIMES
+                and len(raw) <= _PER_IMAGE_TARGET_BYTES
+                and longest <= _MAX_IMAGE_EDGE
+            )
+            if already_fine:
+                return raw, mime
+
+            # Cap the longest edge, preserving aspect ratio.
+            if longest > _MAX_IMAGE_EDGE:
+                scale = _MAX_IMAGE_EDGE / longest
+                im = im.resize(
+                    (max(1, round(width * scale)), max(1, round(height * scale))),
+                    Image.LANCZOS,
+                )
+
             if im.mode not in ("RGB", "L"):
                 im = im.convert("RGB")
-            buf = io.BytesIO()
-            im.save(buf, format="JPEG", quality=90, optimize=False)
-            return buf.getvalue()
+
+            # Step quality down until we fit the budget. A 1568 px JPEG at
+            # q85 is normally a few hundred KB, so this rarely iterates
+            # past the first pass; the lower steps are a safety net for
+            # unusually detailed images.
+            data = b""
+            for quality in (85, 75, 65, 55):
+                buf = io.BytesIO()
+                im.save(buf, format="JPEG", quality=quality, optimize=True)
+                data = buf.getvalue()
+                if len(data) <= _PER_IMAGE_TARGET_BYTES:
+                    break
+            # Even at q55 a resized 1568 px image is comfortably under any
+            # provider's per-image limit, so ship the smallest we made.
+            return data, "image/jpeg"
     except (UnidentifiedImageError, OSError, ValueError) as exc:
-        logger.warning("Pillow could not transcode image to JPEG: %s", exc)
+        logger.warning("could not prepare image for vision: %s", exc)
         return None
 
 
@@ -397,14 +454,6 @@ def build_image_parts(
         if not looks_image(f):
             continue
 
-        if f.size_bytes > _MAX_IMAGE_BYTES:
-            warnings.append(
-                f"{f.filename!r} is {_human_size(f.size_bytes)} — over the "
-                f"{_human_size(_MAX_IMAGE_BYTES)} per-image limit. The model "
-                "won't see this image."
-            )
-            continue
-
         try:
             path = absolute_path(f.storage_path)
             with open(path, "rb") as fh:
@@ -442,21 +491,21 @@ def build_image_parts(
             continue
 
         mime = _normalise_image_mime(f)
-        if mime not in _UNIVERSAL_IMAGE_MIMES:
-            # GIF/BMP/HEIC → JPEG so every provider accepts it. HEIC
-            # should never reach here (blocked by the upload allowlist)
-            # but we keep the fallback in case the allowlist ever widens.
-            transcoded = _transcode_to_jpeg(raw)
-            if transcoded is None:
-                warnings.append(
-                    f"{f.filename!r} couldn't be converted to a vision-"
-                    "friendly format; the model won't see it."
-                )
-                continue
-            raw = transcoded
-            mime = "image/jpeg"
+        # Downscale + re-encode so the payload fits the per-image budget
+        # (and transcode non-universal formats like GIF/BMP/HEIC to JPEG).
+        # This keeps the aggregate request under the provider's image
+        # ceiling and lets oversized uploads through instead of dropping
+        # them.
+        prepared = _prepare_image_for_vision(raw, mime)
+        if prepared is None:
+            warnings.append(
+                f"{f.filename!r} couldn't be converted to a vision-"
+                "friendly format; the model won't see it."
+            )
+            continue
+        payload, mime = prepared
 
-        encoded = base64.b64encode(raw).decode("ascii")
+        encoded = base64.b64encode(payload).decode("ascii")
         url = f"data:{mime};base64,{encoded}"
         parts.append(ImagePart(url=url, detail="auto"))
 
