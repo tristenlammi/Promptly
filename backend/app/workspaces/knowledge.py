@@ -47,6 +47,7 @@ from app.chat.models import (
     WorkspaceCanvas,
     WorkspaceFile,
     WorkspaceItem,
+    WorkspaceTask,
 )
 from app.chat.semantic_search import get_embedding_config
 from app.models_config.models import ModelProvider
@@ -789,6 +790,217 @@ async def remove_chat_context(
 
 
 # ---------------------------------------------------------------------
+# Board ingestion (boards feed RAG like notes — Phase 0+)
+# ---------------------------------------------------------------------
+_BOARD_STATUS_LABEL = {"todo": "To Do", "doing": "In Progress", "done": "Done"}
+
+
+def _flatten_board(item: WorkspaceItem, tasks: list[WorkspaceTask]) -> str:
+    """Render a board's tasks as natural-language text for embedding."""
+    rows = [t for t in tasks if (t.title or "").strip()]
+    if not rows:
+        return ""
+    title = item.title or "Board"
+    lines = [f"# Board: {title}", ""]
+    for t in rows:
+        bits = [
+            f"status {_BOARD_STATUS_LABEL.get(t.status, t.status)}",
+            f"{t.priority} priority",
+        ]
+        if t.due_at is not None:
+            bits.append(f"due {t.due_at.date().isoformat()}")
+        lines.append(f'- Task "{t.title.strip()}": ' + ", ".join(bits) + ".")
+    return "\n".join(lines)
+
+
+async def _ensure_board_backing_file(
+    db: AsyncSession, *, ws: Workspace, item: WorkspaceItem, text: str
+) -> UserFile | None:
+    """Create or update the Drive file backing a board's RAG text. The file
+    id is stored on ``item.ref_id`` so re-indexes update it in place."""
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    title = item.title or "Board"
+
+    if item.ref_id is not None:
+        uf = await db.get(UserFile, item.ref_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            uf.filename = f"{title}.md"
+            uf.size_bytes = len(text.encode("utf-8"))
+            uf.content_text = text
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db, user_id=owner.id, parent_id=ws.root_folder_id, name="Boards"
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=f"{title}.md",
+        original_filename=f"{title}.md",
+        mime_type="text/markdown",
+        size_bytes=len(text.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.BOARD_TEXT.value,
+        content_text=text,
+    )
+    db.add(uf)
+    await db.flush()
+    item.ref_id = uf.id
+    return uf
+
+
+async def index_board_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed (or re-embed) a board's task list so chats can retrieve it.
+
+    Enqueued whenever the board's tasks change. Owns its own session
+    (``BackgroundTasks``-safe). No-ops when embeddings aren't configured;
+    an empty board drops its chunks and parks at ``queued``."""
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "board":
+                return
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            tasks = list(
+                (
+                    await db.execute(
+                        select(WorkspaceTask)
+                        .where(WorkspaceTask.board_item_id == item.id)
+                        .order_by(
+                            WorkspaceTask.status.asc(),
+                            WorkspaceTask.position.asc(),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            text = _flatten_board(item, tasks)
+            if not text.strip():
+                # Empty board: drop its chunks AND blank the backing file so
+                # full-dump injection doesn't keep inlining stale tasks.
+                if item.ref_id is not None:
+                    await delete_existing_chunks(
+                        db,
+                        scope_kind="workspace",
+                        scope_id=workspace_id,
+                        user_file_id=item.ref_id,
+                    )
+                    uf = await db.get(UserFile, item.ref_id)
+                    if uf is not None and uf.trashed_at is None:
+                        uf.content_text = None
+                        try:
+                            abs_path = absolute_path(uf.storage_path)
+                            abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            with open(abs_path, "w", encoding="utf-8") as fh:
+                                fh.write("")
+                            uf.size_bytes = 0
+                        except OSError:
+                            pass
+                await _set_note_index_status(
+                    db, item_id=item_id, status="queued"
+                )
+                return
+
+            current_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(
+                db, item_id=item_id, status="embedding"
+            )
+            uf = await _ensure_board_backing_file(
+                db, ws=ws, item=item, text=text
+            )
+            if uf is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="workspace owner missing",
+                )
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    text,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db, item_id=item_id, status="ready", indexed_hash=current_hash
+            )
+        except Exception:  # noqa: BLE001 - last-line catch
+            logger.exception("index_board_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error="indexing error"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
+# ---------------------------------------------------------------------
 # Injection (per-send)
 # ---------------------------------------------------------------------
 
@@ -832,18 +1044,19 @@ async def context_disabled_file_ids(
     """Backing file ids of items the user has flipped OFF for workspace
     context ("Use as workspace context" toggle).
 
-    Covers disabled notes (``ref_id`` is the note's UserFile), disabled
-    canvases (mapped to their backing ``text_file_id``), and disabled
-    pinned files. The injection builder unions this into its excluded set
-    so a disabled item's embeddings are simply never retrieved — the
-    chunks stay put, so re-enabling is instant.
+    Covers disabled notes + boards (``ref_id`` is the backing UserFile),
+    disabled canvases (mapped to their backing ``text_file_id``), and
+    disabled pinned files. The injection builder unions this into its
+    excluded set so a disabled item's embeddings are simply never
+    retrieved — the chunks stay put, so re-enabling is instant.
     """
     out: set[uuid.UUID] = set()
 
+    # Notes and boards both back their RAG text on ``ref_id``.
     note_ids = await db.execute(
         select(WorkspaceItem.ref_id).where(
             WorkspaceItem.workspace_id == workspace_id,
-            WorkspaceItem.kind == "note",
+            WorkspaceItem.kind.in_(("note", "board")),
             WorkspaceItem.context_enabled.is_(False),
             WorkspaceItem.ref_id.is_not(None),
         )
@@ -916,12 +1129,33 @@ async def _workspace_canvases(
     ]
 
 
+async def _workspace_boards(
+    db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
+) -> list[tuple[WorkspaceItem, UserFile]]:
+    """Live board items paired with their backing text file (the flattened
+    task list), minus anything excluded by that file id."""
+    rows = (
+        await db.execute(
+            select(WorkspaceItem, UserFile)
+            .join(UserFile, UserFile.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == workspace_id,
+                WorkspaceItem.kind == "board",
+                UserFile.trashed_at.is_(None),
+            )
+            .order_by(WorkspaceItem.position.asc())
+        )
+    ).all()
+    return [(it, uf) for it, uf in rows if uf.id not in excluded]
+
+
 def _format_context_block(
     notes: list[tuple[WorkspaceItem, UserFile]],
     canvases: list[tuple[WorkspaceItem, "WorkspaceCanvas"]],
+    boards: list[tuple[WorkspaceItem, UserFile]] | None = None,
 ) -> str | None:
-    """Full text of the workspace's notes + canvases for full-dump mode.
-    Capped so a runaway set can't blow the context window (retrieval
+    """Full text of the workspace's notes + canvases + boards for full-dump
+    mode. Capped so a runaway set can't blow the context window (retrieval
     takes over past the cap). ``None`` when there's nothing to inject."""
     sections: list[tuple[str, str]] = []
     for it, uf in notes:
@@ -932,12 +1166,16 @@ def _format_context_block(
         text = (c.content_text or "").strip()
         if text:
             sections.append((f"{it.title} (canvas)", text))
+    for it, uf in boards or []:
+        text = (uf.content_text or "").strip()
+        if text:
+            sections.append((f"{it.title} (board)", text))
     if not sections:
         return None
 
     header = (
-        "The user's notes and canvases in this workspace. Treat them as "
-        "authoritative context for this conversation:"
+        "The user's notes, canvases, and boards in this workspace. Treat "
+        "them as authoritative context for this conversation:"
     )
     parts: list[str] = []
     used = 0
@@ -988,7 +1226,8 @@ async def build_workspace_injection(
     file_rows = [(wsf, uf) for wsf, uf in file_rows if uf.id not in excluded]
     note_rows = await _workspace_notes(db, workspace_id, excluded)
     canvas_rows = await _workspace_canvases(db, workspace_id, excluded)
-    if not file_rows and not note_rows and not canvas_rows:
+    board_rows = await _workspace_boards(db, workspace_id, excluded)
+    if not file_rows and not note_rows and not canvas_rows and not board_rows:
         return WorkspaceInjection()
 
     cfg = await get_embedding_config(db)
@@ -1000,10 +1239,12 @@ async def build_workspace_injection(
     )
 
     if not retrieval_active:
-        # Full-dump: pinned files ride the attachment path; notes and
-        # canvases are injected as text (they have no attachment form).
+        # Full-dump: pinned files ride the attachment path; notes,
+        # canvases, and boards are injected as text (no attachment form).
         return WorkspaceInjection(
-            system_block=_format_context_block(note_rows, canvas_rows),
+            system_block=_format_context_block(
+                note_rows, canvas_rows, board_rows
+            ),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
         )

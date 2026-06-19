@@ -19,7 +19,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,6 +103,22 @@ async def _load_task(
     return task
 
 
+def _reindex_board(
+    background: BackgroundTasks,
+    workspace_id: uuid.UUID,
+    board_item_id: uuid.UUID | None,
+) -> None:
+    """Re-embed the board's task list so it stays fresh in workspace RAG.
+    No-op for tasks not attached to a board."""
+    if board_item_id is None:
+        return
+    from app.workspaces.knowledge import index_board_for_workspace
+
+    background.add_task(
+        index_board_for_workspace, workspace_id, board_item_id
+    )
+
+
 # ---------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------
@@ -135,6 +159,7 @@ async def list_tasks(
 async def create_task(
     workspace_id: uuid.UUID,
     payload: WorkspaceTaskCreate,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceTask:
@@ -163,6 +188,7 @@ async def create_task(
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    _reindex_board(background, ws.id, task.board_item_id)
     return task
 
 
@@ -173,6 +199,7 @@ async def update_task(
     workspace_id: uuid.UUID,
     task_id: uuid.UUID,
     payload: WorkspaceTaskUpdate,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceTask:
@@ -208,6 +235,7 @@ async def update_task(
 
     await db.commit()
     await db.refresh(task)
+    _reindex_board(background, ws.id, task.board_item_id)
     return task
 
 
@@ -219,14 +247,17 @@ async def update_task(
 async def delete_task(
     workspace_id: uuid.UUID,
     task_id: uuid.UUID,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     task = await _load_task(db, ws.id, task_id)
+    board_item_id = task.board_item_id
     await db.delete(task)
     await db.commit()
+    _reindex_board(background, ws.id, board_item_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -101,14 +101,17 @@ async def _load_item(
 async def _next_position(
     db: AsyncSession, workspace_id: uuid.UUID, parent_id: uuid.UUID | None
 ) -> float:
-    """End-of-list slot among ``parent_id``'s children: max + 1."""
-    current_max = await db.scalar(
-        select(func.max(WorkspaceItem.position)).where(
+    """Top-of-list slot among ``parent_id``'s children: min - 1, so a freshly
+    created item appears at the top of the tree (the rail orders by
+    ``position`` ascending). Pinned items surface in their own section
+    regardless of position."""
+    current_min = await db.scalar(
+        select(func.min(WorkspaceItem.position)).where(
             WorkspaceItem.workspace_id == workspace_id,
             WorkspaceItem.parent_id == parent_id,
         )
     )
-    return float(current_max or 0.0) + 1.0
+    return float(current_min or 0.0) - 1.0
 
 
 async def _validate_parent(
@@ -377,6 +380,7 @@ async def update_workspace_item(
     workspace_id: uuid.UUID,
     item_id: uuid.UUID,
     payload: WorkspaceItemUpdate,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceItemResponse:
@@ -407,7 +411,7 @@ async def update_workspace_item(
     if "icon" in sent:
         item.icon = payload.icon
     if "context_enabled" in sent and payload.context_enabled is not None:
-        # Only note/canvas items participate in RAG context; folders/chats
+        # Note/canvas/board items participate in RAG context; folders/chats
         # carry the flag harmlessly but it's never consulted for them.
         item.context_enabled = payload.context_enabled
     if "pinned" in sent and payload.pinned is not None:
@@ -416,6 +420,16 @@ async def update_workspace_item(
     item.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
+
+    # Keep a board's RAG text current after a rename, and (re)index it when
+    # the user turns its context toggle on — boards index lazily, so an
+    # existing board first gets embedded the next time its tasks change or
+    # it's enabled here.
+    if item.kind == "board" and ("title" in sent or "context_enabled" in sent):
+        from app.workspaces.knowledge import index_board_for_workspace
+
+        background.add_task(index_board_for_workspace, ws.id, item.id)
+
     return WorkspaceItemResponse.model_validate(item)
 
 
@@ -753,7 +767,10 @@ async def delete_workspace_item(
 
     now = datetime.now(timezone.utc)
     for it in doomed:
-        if it.kind == "note" and it.ref_id is not None:
+        if it.kind in ("note", "board") and it.ref_id is not None:
+            # Notes + boards back their content on a ref_id UserFile; trash
+            # it (its chunks cascade off the file delete). A board's tasks
+            # cascade via the board_item_id FK when the item row is deleted.
             uf = await db.get(UserFile, it.ref_id)
             if uf is not None and uf.trashed_at is None:
                 uf.trashed_at = now

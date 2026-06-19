@@ -56,5 +56,12 @@ class GeneratedKind(str, Enum):
     # chat's "Use as workspace context" toggle back off.
     CHAT_TRANSCRIPT = "chat_transcript"
 
+    # Backing text file for a workspace board (Phase 0+). Holds the
+    # flattened task list (title / status / priority / due) so the board
+    # feeds ``knowledge_chunks`` like a note. Lives in the workspace's
+    # ``Boards/`` Drive folder; re-written whenever the board's tasks
+    # change. Keyed off the board ``WorkspaceItem.ref_id``.
+    BOARD_TEXT = "board_text"
+
 
 __all__ = ["GeneratedKind"]
