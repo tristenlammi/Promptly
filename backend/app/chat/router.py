@@ -689,6 +689,13 @@ async def list_mention_candidates(
             # ``file:`` mention mechanism. Hidden inline doc assets are
             # excluded.
             if ws.root_folder_id is not None:
+                # Prefer the navigator name over the backing filename: a
+                # canvas's backing file is always "Untitled canvas.md" and a
+                # note's file carries an extension. Notes carry their title on
+                # ``workspace_items`` (ref_id → file); canvases carry it on
+                # ``workspace_canvas`` (text_file_id → file). Match the query
+                # against those titles too, so searching by the name the user
+                # sees actually finds the canvas/note.
                 file_rows = (
                     await db.execute(
                         text(
@@ -699,26 +706,43 @@ async def list_mention_candidates(
                                 SELECT f.id FROM file_folders f
                                 JOIN subtree s ON f.parent_id = s.id
                             )
-                            SELECT id, filename, source_kind
-                            FROM files
-                            WHERE folder_id IN (SELECT id FROM subtree)
-                              AND trashed_at IS NULL
-                              AND (source_kind IS NULL
-                                   OR source_kind <> 'document_asset')
-                              AND (:q = '' OR lower(filename) LIKE :qlike)
-                            ORDER BY updated_at DESC
+                            SELECT f.id, f.filename, f.source_kind,
+                                   COALESCE(wi.title, wci.title, wc.title)
+                                       AS display_title
+                            FROM files f
+                            LEFT JOIN workspace_items wi
+                              ON wi.ref_id = f.id
+                             AND wi.workspace_id = :wsid
+                            LEFT JOIN workspace_canvas wc
+                              ON wc.text_file_id = f.id
+                             AND wc.workspace_id = :wsid
+                            LEFT JOIN workspace_items wci
+                              ON wci.ref_id = wc.id
+                             AND wci.workspace_id = :wsid
+                             AND wci.kind = 'canvas'
+                            WHERE f.folder_id IN (SELECT id FROM subtree)
+                              AND f.trashed_at IS NULL
+                              AND (f.source_kind IS NULL
+                                   OR f.source_kind <> 'document_asset')
+                              AND (:q = ''
+                                   OR lower(f.filename) LIKE :qlike
+                                   OR lower(coalesce(wi.title, '')) LIKE :qlike
+                                   OR lower(coalesce(wci.title, '')) LIKE :qlike
+                                   OR lower(coalesce(wc.title, '')) LIKE :qlike)
+                            ORDER BY f.updated_at DESC
                             LIMIT :lim
                             """
                         ),
                         {
                             "root": str(ws.root_folder_id),
+                            "wsid": str(workspace_id),
                             "q": q_norm,
                             "qlike": f"%{q_norm}%",
                             "lim": limit,
                         },
                     )
                 ).all()
-                for fid, fname, skind in file_rows:
+                for fid, fname, skind, item_title in file_rows:
                     kind = (
                         "note"
                         if skind == "document"
@@ -728,7 +752,9 @@ async def list_mention_candidates(
                     )
                     workspace_file_candidates.append(
                         MentionFileCandidate(
-                            id=fid, filename=fname or "Untitled", kind=kind
+                            id=fid,
+                            filename=item_title or fname or "Untitled",
+                            kind=kind,
                         )
                     )
 
