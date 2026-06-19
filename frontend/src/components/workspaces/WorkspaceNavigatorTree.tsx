@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
   useArchiveWorkspaceItem,
@@ -273,13 +274,17 @@ function WorkspaceArchiveSection({
   };
 
   const del = async (node: WorkspaceItemNode) => {
-    const ok = window.confirm(
-      node.kind === "chat"
-        ? "Permanently delete this chat?"
-        : node.kind === "folder"
-          ? "Permanently delete this folder and everything inside it?"
-          : "Permanently delete this item?"
-    );
+    const ok = await confirm({
+      title: "Delete",
+      message:
+        node.kind === "chat"
+          ? "Permanently delete this chat?"
+          : node.kind === "folder"
+            ? "Permanently delete this folder and everything inside it?"
+            : "Permanently delete this item?",
+      confirmLabel: "Delete",
+      danger: true,
+    });
     if (!ok) return;
     if (node.kind === "chat") {
       if (node.ref_id) {
@@ -815,19 +820,19 @@ function NodeActions({
                 label="Delete"
                 destructive
                 disabled={deleting}
-                onClick={() => {
+                onClick={async () => {
                   setMenuOpen(false);
-                  if (
-                    window.confirm(
-                      isFolder
-                        ? "Permanently delete this folder and everything inside it?"
-                        : isChat
-                          ? "Permanently delete this chat?"
-                          : "Permanently delete this item?"
-                    )
-                  ) {
-                    onDelete();
-                  }
+                  const ok = await confirm({
+                    title: "Delete",
+                    message: isFolder
+                      ? "Permanently delete this folder and everything inside it?"
+                      : isChat
+                        ? "Permanently delete this chat?"
+                        : "Permanently delete this item?",
+                    confirmLabel: "Delete",
+                    danger: true,
+                  });
+                  if (ok) onDelete();
                 }}
               />
             </div>
