@@ -1382,7 +1382,24 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    conv = await _get_owned_conversation(conversation_id, user, db)
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
+    # Deletable by the chat's creator, or — for a workspace chat — by the
+    # workspace owner, who administers the shared space and must be able to
+    # prune any chat in it (a collaborator's chat carries their user_id, so
+    # the plain creator check alone locks the owner out of their own
+    # workspace). A collaborator still can't delete someone else's chat.
+    allowed = conv.user_id == user.id
+    if not allowed and conv.workspace_id is not None:
+        ws = await db.get(Workspace, conv.workspace_id)
+        allowed = ws is not None and ws.user_id == user.id
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
+        )
     await db.delete(conv)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
