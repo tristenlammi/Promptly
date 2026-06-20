@@ -240,10 +240,17 @@ export function ChatWindow({
       const m = messages[i];
       if (m.role !== "user") continue;
       if (m.id.startsWith("optimistic-")) return null;
+      // Authorship gate (shared workspace chats): the backend only lets
+      // you rewrite messages *you* sent — author = author_user_id ?? the
+      // conversation owner. Offering the pencil on a collaborator's turn
+      // just earns a 403 on save. A null author is a legacy/solo-chat row
+      // that resolves to the owner, so it stays editable for them (and in
+      // a shared chat every real turn carries a concrete author id).
+      if (m.author_user_id && m.author_user_id !== currentUserId) return null;
       return m.id;
     }
     return null;
-  }, [messages, isStreaming, onEditAndResend]);
+  }, [messages, isStreaming, onEditAndResend, currentUserId]);
 
   // Same rule, mirrored for assistant turns: only the most recent
   // assistant reply gets a Regenerate action. Optimistic rows (live
