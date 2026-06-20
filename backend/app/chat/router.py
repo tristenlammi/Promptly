@@ -4184,7 +4184,11 @@ async def _stream_generator(
             # are dropped silently so a stale token can't block the send.
             file_mentions_found = extract_file_mentions(trig_row.content)
             if file_mentions_found:
-                from app.files.models import UserFile
+                # NB: do NOT re-import UserFile here. It's already imported at
+                # module scope; a local ``import UserFile`` would make the name
+                # function-local for the whole generator and turn the earlier
+                # workspace-pin reference (select(UserFile)) into an
+                # UnboundLocalError whenever this @-mention branch is skipped.
                 from app.files.router import _load_readable_file
 
                 resolved_files: list[UserFile] = []
