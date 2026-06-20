@@ -160,6 +160,18 @@ class Settings(BaseSettings):
     # How long we'll wait on the transcription backend before giving up.
     STT_TIMEOUT_S: int = 60
 
+    # ---- Text-to-speech (Voice Phase 2) ----
+    # Internal-only Kokoro worker the backend POSTs assistant text to for
+    # read-aloud + voice mode. Empty disables TTS (the endpoint returns a
+    # friendly 503).
+    TTS_URL: str = "http://tts:8000"
+    # Default Kokoro voice. Overridable per request by the client.
+    TTS_VOICE: str = "af_heart"
+    # Longest chunk of text we'll synthesise in one call. Voice mode feeds
+    # sentences, so this is a generous safety cap, not a normal limit.
+    TTS_MAX_CHARS: int = 4000
+    TTS_TIMEOUT_S: int = 60
+
     # ---- Search ----
     SEARXNG_URL: str = "http://searxng:8080"
     DEFAULT_SEARCH_PROVIDER: str = "searxng"

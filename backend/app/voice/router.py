@@ -13,12 +13,17 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import Response
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.config import get_settings
-from app.voice.schemas import TranscriptionResponse
-from app.voice.service import TranscriptionError, transcribe_audio
+from app.voice.schemas import SpeechRequest, TranscriptionResponse
+from app.voice.service import (
+    TranscriptionError,
+    synthesize_speech,
+    transcribe_audio,
+)
 
 logger = logging.getLogger("promptly.voice")
 
@@ -59,3 +64,37 @@ async def transcribe(
         )
     except TranscriptionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post("/tts")
+async def tts(
+    req: SpeechRequest,
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Synthesize text to speech (read-aloud + voice mode).
+
+    Returns a WAV clip. The client plays it directly; we don't persist
+    the audio. Voice mode chunks long replies into sentences and calls
+    this once per sentence so playback can start before the whole reply
+    is synthesised.
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing to read.",
+        )
+    try:
+        wav = await synthesize_speech(text=text, voice=req.voice, speed=req.speed)
+    except TranscriptionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return Response(
+        content=wav,
+        media_type="audio/wav",
+        headers={
+            # Short-lived, per-utterance — let the browser cache within a
+            # session (identical sentences re-read) but not persist.
+            "Cache-Control": "private, max-age=60",
+        },
+    )

@@ -117,6 +117,10 @@ services:
       # cloud Whisper API instead.
       - WHISPER_URL=http://whisper:8000
       - STT_BACKEND=${STT_BACKEND:-local}
+      # Text-to-speech worker (Voice Phase 2). Internal-only Kokoro service
+      # the backend POSTs assistant text to for read-aloud + voice mode.
+      - TTS_URL=http://tts:8000
+      - TTS_VOICE=${TTS_VOICE:-af_heart}
     volumes:
       # Bind-mount user data into the project directory so it's
       # always next to the compose file — easy to back up, easy
@@ -147,6 +151,10 @@ services:
       # unavailable" error if Whisper is still loading its model, rather
       # than blocking the whole backend boot on the weight download.
       whisper:
+        condition: service_started
+      # Soft dependency — read-aloud / voice mode degrade gracefully if
+      # TTS is still warming up its model.
+      tts:
         condition: service_started
     restart: unless-stopped
     healthcheck:
@@ -460,6 +468,37 @@ services:
       # Long start period: the model download + load on a cold install
       # can take a couple of minutes on a slow connection.
       start_period: 180s
+    networks:
+      - promptly
+
+  tts:
+    # Text-to-speech worker (Voice Phase 2). Wraps Kokoro-82M in a tiny
+    # FastAPI service; the backend POSTs assistant text to
+    # http://tts:8000/tts over the internal network and gets back a WAV.
+    # CPU/onnxruntime by default — no GPU, no torch.
+    #
+    # First start downloads the model weights (~330 MB) into ./data/tts,
+    # so give it a generous start_period before the healthcheck counts
+    # failures.
+    build:
+      context: ./tts
+      dockerfile: Dockerfile
+    container_name: Promptly-TTS
+    environment:
+      - TTS_VOICE=${TTS_VOICE:-af_heart}
+      - TTS_LANG=${TTS_LANG:-en-us}
+    volumes:
+      # Persist downloaded model weights so the pull is a one-time cost.
+      - ./data/tts:/root/.cache
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 240s
     networks:
       - promptly
 

@@ -39,4 +39,27 @@ export const voiceApi = {
     );
     return data;
   },
+
+  /** Synthesize a chunk of text to speech, returning the WAV audio blob.
+   *  Used by read-aloud and voice mode. Voice mode calls this once per
+   *  sentence so playback can start before the whole reply is spoken. */
+  async synthesize(
+    text: string,
+    opts?: { voice?: string | null; speed?: number; signal?: AbortSignal }
+  ): Promise<Blob> {
+    const { data } = await apiClient.post<Blob>(
+      "/voice/tts",
+      {
+        text,
+        voice: opts?.voice ?? null,
+        speed: opts?.speed ?? 1.0,
+      },
+      {
+        responseType: "blob",
+        signal: opts?.signal,
+        timeout: 60_000,
+      }
+    );
+    return data;
+  },
 };

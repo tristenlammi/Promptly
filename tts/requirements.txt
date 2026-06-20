@@ -1,0 +1,12 @@
+# Promptly text-to-speech worker.
+#
+# kokoro-onnx runs the Kokoro-82M TTS model on onnxruntime (no torch) —
+# small, fast on CPU, and notably more natural than Piper/espeak. It
+# pulls its own phonemizer; we add espeak-ng at the system level as the
+# fallback G2P backend (see the Dockerfile).
+kokoro-onnx==0.4.9
+onnxruntime==1.20.1
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+numpy==2.2.1
+requests==2.32.3

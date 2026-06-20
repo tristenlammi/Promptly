@@ -118,6 +118,52 @@ async def _transcribe_local(
     )
 
 
+async def synthesize_speech(
+    *,
+    text: str,
+    voice: str | None = None,
+    speed: float = 1.0,
+) -> bytes:
+    """Synthesize ``text`` to a WAV clip via the Kokoro TTS worker.
+
+    Returns the raw WAV bytes. Raises :class:`TranscriptionError` (reused
+    as the module's generic voice error) on any failure.
+    """
+    settings = get_settings()
+    base_url = (settings.TTS_URL or "").rstrip("/")
+    if not base_url:
+        raise TranscriptionError(
+            "Text-to-speech isn't configured on this server.",
+            status_code=503,
+        )
+
+    body = {
+        "text": text,
+        "voice": voice or settings.TTS_VOICE or None,
+        "speed": speed,
+    }
+    timeout = max(5, int(settings.TTS_TIMEOUT_S or 60))
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(f"{base_url}/tts", json=body)
+    except httpx.HTTPError as exc:
+        logger.warning("tts unreachable: %s", exc)
+        raise TranscriptionError(
+            "Couldn't reach the speech service. It may still be loading its "
+            "model — try again in a moment.",
+            status_code=503,
+        ) from exc
+
+    if resp.status_code != 200:
+        detail = resp.text[:300]
+        logger.warning("tts error %s: %s", resp.status_code, detail)
+        raise TranscriptionError(
+            f"Speech synthesis failed ({resp.status_code}).",
+            status_code=502,
+        )
+    return resp.content
+
+
 async def _transcribe_openai(
     *,
     data: bytes,

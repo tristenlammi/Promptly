@@ -27,6 +27,7 @@ import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ConversationInstructionsButton } from "@/components/chat/ConversationInstructionsButton";
 import { MemoryConversationButton } from "@/components/chat/MemoryConversationButton";
 import { ResearchDialog } from "@/components/chat/ResearchDialog";
+import { VoiceModeOverlay } from "@/components/chat/VoiceModeOverlay";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
 import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
@@ -140,6 +141,7 @@ export function ChatPage({
 
   // Phase 11 — Deep Research.
   const [researchDialogOpen, setResearchDialogOpen] = useState(false);
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const { startResearch, cancelResearch } = useResearch();
   const researchStep = useResearchStore((s) => s.step);
   const researchConvId = useResearchStore((s) => s.conversationId);
@@ -1060,6 +1062,7 @@ export function ChatPage({
             toolsEnabled={toolsEnabled}
             onToolsChange={handleToolsChange}
             onResearch={() => setResearchDialogOpen(true)}
+            onVoiceMode={() => setVoiceModeOpen(true)}
             footer={footerText}
             autoFocus
             currentConversationId={id ?? null}
@@ -1081,6 +1084,17 @@ export function ChatPage({
           Renders into the same DOM tree but its fixed positioning takes
           it out of normal flow; null when no file is selected. */}
       <PdfEditorPanel />
+
+      {/* Voice mode (Phase 2) — hands-free conversational overlay. Mounted
+          only while open so all teardown lives in its unmount cleanup. */}
+      {voiceModeOpen && (
+        <VoiceModeOverlay
+          onClose={() => setVoiceModeOpen(false)}
+          onSend={(text) => void handleSend(text)}
+          onCancelStream={cancel}
+          modelReady={!!selectedModel}
+        />
+      )}
 
       {/* Phase 11 — Deep Research confirmation dialog. */}
       <ResearchDialog

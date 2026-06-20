@@ -64,6 +64,7 @@ import { useEditorStore } from "@/store/editorStore";
 import { useModelStore } from "@/store/modelStore";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePopoverFlip } from "@/hooks/usePopoverFlip";
+import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { cn } from "@/utils/cn";
 
 /** Override passed to a regenerate handler. ``null`` regenerates with
@@ -900,53 +901,28 @@ function MessageBubbleImpl({
     }
   };
 
-  // Phase 2.4 — read-aloud (TTS). Assistant replies only; hidden when
-  // the browser has no SpeechSynthesis. Toggles play/stop.
+  // Read-aloud (Voice Phase 2). Assistant replies only. Uses the
+  // server-side Kokoro TTS (natural voice, identical in every browser)
+  // instead of the browser's robotic ``speechSynthesis``. The hook owns
+  // playback state + cleanup; here we just toggle play/stop.
+  const tts = useTextToSpeech();
+  const speaking = tts.speaking;
   const canReadAloud =
     !isUser &&
     !streaming &&
     !!content &&
     content.trim().length > 0 &&
-    typeof window !== "undefined" &&
-    "speechSynthesis" in window;
-  const [speaking, setSpeaking] = useState(false);
-  const speakingRef = useRef(false);
-  useEffect(() => {
-    speakingRef.current = speaking;
-  }, [speaking]);
-  // Stop narration if this bubble unmounts mid-utterance.
-  useEffect(
-    () => () => {
-      if (
-        speakingRef.current &&
-        typeof window !== "undefined" &&
-        "speechSynthesis" in window
-      ) {
-        window.speechSynthesis.cancel();
-      }
-    },
-    [],
-  );
+    tts.supported;
   const handleReadAloud = () => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    const synth = window.speechSynthesis;
-    if (speakingRef.current) {
-      synth.cancel();
-      setSpeaking(false);
+    if (tts.speaking) {
+      tts.stop();
       return;
     }
     // Read the clean answer aloud — skip the collapsed guided-reasoning
     // <thinking> block (``answer``) and inline citation markers.
     const plain = markdownToSpeech(stripInlineCitations(answer || ""));
     if (!plain) return;
-    // Cancel anything another bubble might be reading so only one
-    // narration plays at a time.
-    synth.cancel();
-    const utterance = new SpeechSynthesisUtterance(plain);
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
-    setSpeaking(true);
-    synth.speak(utterance);
+    void tts.speak(plain);
   };
 
   // Phase 2.5 — thumbs feedback. Assistant replies only.

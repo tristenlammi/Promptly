@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ArrowUp,
+  AudioLines,
   Brain,
   Check,
   Eye,
@@ -82,6 +83,9 @@ interface InputBarProps {
   /** Phase 11 — open the deep-research confirmation dialog. Only provided
    *  on the main chat surface; study/task views omit it. */
   onResearch?: () => void;
+  /** Voice mode (Phase 2) — open the hands-free voice conversation
+   *  overlay. Only provided on the main chat surface. */
+  onVoiceMode?: () => void;
   /**
    * Focus the textarea on mount. Use on surfaces where the student's
    * primary intent is to type — chat / study pages — so the user can
@@ -133,6 +137,7 @@ export function InputBar({
   currentConversationId = null,
   workspaceId = null,
   onResearch,
+  onVoiceMode,
   newlineOnEnter = false,
   showEnhance = true,
 }: InputBarProps) {
@@ -1026,6 +1031,29 @@ export function InputBar({
                           : "Voice"}
                     </span>
                   )}
+                </button>
+              )}
+              {onVoiceMode && (
+                <button
+                  type="button"
+                  onClick={onVoiceMode}
+                  disabled={disabled || streaming}
+                  className={cn(
+                    "inline-flex items-center rounded-full border transition",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    "border-[var(--border)] text-[var(--text-muted)]",
+                    "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
+                    isMobile
+                      ? "h-9 w-9 justify-center"
+                      : "h-8 gap-1.5 px-2.5 text-xs"
+                  )}
+                  aria-label="Voice mode — talk hands-free"
+                  title="Voice mode — talk hands-free"
+                >
+                  <AudioLines
+                    className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"}
+                  />
+                  {!isMobile && <span className="font-medium">Talk</span>}
                 </button>
               )}
               <ComposerMoreMenu
