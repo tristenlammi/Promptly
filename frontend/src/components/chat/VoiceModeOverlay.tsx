@@ -69,10 +69,25 @@ export function VoiceModeOverlay({
   const closingRef = useRef(false);
 
   const tts = useTextToSpeech();
+  // Live mic level → drive the orb ring directly via a ref (no React
+  // re-render per frame).
+  const levelRingRef = useRef<HTMLDivElement>(null);
+  const handleLevel = useCallback((level: number) => {
+    const el = levelRingRef.current;
+    if (el) {
+      el.style.transform = `scale(${1 + Math.min(1, level) * 0.5})`;
+      el.style.opacity = `${0.25 + Math.min(1, level) * 0.45}`;
+    }
+  }, []);
   // ``onFinal`` runs inside the dictation hook's closure; route it through
   // a ref so it always sees fresh state without rebuilding the recorder.
   const onFinalRef = useRef<(t: string) => void>(() => {});
-  const dictation = useDictation({ onFinal: (t) => onFinalRef.current(t) });
+  const dictation = useDictation({
+    onFinal: (t) => onFinalRef.current(t),
+    // Hands-free turn-taking: auto-submit after the user pauses.
+    autoStop: true,
+    onLevel: handleLevel,
+  });
   const {
     start: startDictation,
     stop: stopDictation,
@@ -99,7 +114,9 @@ export function VoiceModeOverlay({
       if (closingRef.current) return;
       const t = text.trim();
       if (!t) {
-        startListening();
+        // Nothing intelligible (e.g. the auto-stop timed out on silence) —
+        // fall back to idle rather than looping the mic. The user taps to
+        // try again.
         return;
       }
       setUserText(t);
@@ -211,7 +228,7 @@ export function VoiceModeOverlay({
 
   const STATUS: Record<Phase, string> = {
     idle: "Tap to talk",
-    listening: "Listening… tap when you're done",
+    listening: "Listening… just pause when you're done",
     transcribing: "Transcribing…",
     thinking: "Thinking…",
     speaking: "Speaking… tap to interrupt",
@@ -290,21 +307,20 @@ export function VoiceModeOverlay({
           )}
           aria-label={STATUS[phase]}
         >
-          {/* Pulsing rings while listening / speaking */}
-          {active && (
+          {/* Live mic-level ring — scales with the user's voice while
+              listening (driven directly via the ref, no React churn). */}
+          {phase === "listening" && (
+            <div
+              ref={levelRingRef}
+              className="absolute inset-0 rounded-full bg-red-500/30"
+              style={{ transform: "scale(1)", opacity: 0.25 }}
+            />
+          )}
+          {/* Soft pulsing ring while speaking */}
+          {phase === "speaking" && (
             <>
-              <span
-                className={cn(
-                  "absolute inset-0 rounded-full opacity-60 animate-ping",
-                  phase === "listening" ? "bg-red-500/20" : "bg-[var(--accent)]/20"
-                )}
-              />
-              <span
-                className={cn(
-                  "absolute inset-4 rounded-full",
-                  phase === "listening" ? "bg-red-500/10" : "bg-[var(--accent)]/10"
-                )}
-              />
+              <span className="absolute inset-0 animate-ping rounded-full bg-[var(--accent)]/20 opacity-60" />
+              <span className="absolute inset-4 rounded-full bg-[var(--accent)]/10" />
             </>
           )}
           {busy ? (
