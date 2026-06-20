@@ -412,6 +412,53 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         )
 
 
+class DocumentPage(UUIDPKMixin, TimestampMixin, Base):
+    """One page inside a multi-page workspace document.
+
+    A note (``WorkspaceItem kind='note'``) is the container; its pages are
+    the ordered rows here. ``kind`` selects the surface — ``'richtext'`` (a
+    Drive Document, the same TipTap/Yjs stack a single-page note already
+    uses) today, ``'sheet'`` (a Fortune-sheet spreadsheet) in a later phase.
+
+    ``ref_id`` is the backing entity, polymorphic like
+    :attr:`WorkspaceItem.ref_id`: a ``files.id`` for a richtext page. Not a
+    DB FK for the same reason — it points across tables by kind.
+
+    ``position`` orders pages as a float so a drag inserts between two
+    neighbours by midpoint without renumbering the list.
+
+    Backward-compat invariant: the owning note keeps
+    ``WorkspaceItem.ref_id`` pointing at the **first** page's document, so
+    every single-page-era path (collab room, RAG, snapshot, delete) keeps
+    working unchanged for page 0 while later pages are purely additive.
+    """
+
+    __tablename__ = "document_pages"
+
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # 'richtext' (Drive Document) | 'sheet' (spreadsheet, later phase).
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="richtext", server_default="richtext"
+    )
+    # Backing entity id — ``files.id`` for a richtext page. Polymorphic, so
+    # not a FK (mirrors ``WorkspaceItem.ref_id``).
+    ref_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<DocumentPage id={self.id} kind={self.kind} "
+            f"item={self.item_id}>"
+        )
+
+
 class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     """A first-class task on a workspace's shared task list.
 

@@ -42,6 +42,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.chat.models import (
     Conversation,
+    DocumentPage,
     Workspace,
     WorkspaceCanvas,
     WorkspaceItem,
@@ -53,6 +54,9 @@ from app.files.safety import sanitize_filename
 from app.files.system_folders import get_or_create_subfolder
 from app.workspaces.canvas_router import create_canvas_with_item
 from app.workspaces.schemas import (
+    DocumentPageCreate,
+    DocumentPageResponse,
+    DocumentPageUpdate,
     WorkspaceFileContext,
     WorkspaceItemCreate,
     WorkspaceItemMove,
@@ -367,6 +371,205 @@ async def create_workspace_item(
     await db.commit()
     await db.refresh(item)
     return WorkspaceItemResponse.model_validate(item)
+
+
+# ---------------------------------------------------------------------
+# Document pages — a note is a multi-page document
+# ---------------------------------------------------------------------
+# A note (``kind='note'``) is the container; its pages live in
+# ``document_pages``, each backed by its own Drive Document (richtext) and,
+# later, spreadsheet rooms. The note keeps ``ref_id`` pointing at the first
+# page so every single-page-era path (collab/RAG/snapshot/delete) is unchanged.
+_DEFAULT_PAGE_TITLE = "Untitled page"
+
+
+async def _load_note_item(
+    db: AsyncSession, workspace_id: uuid.UUID, item_id: uuid.UUID
+) -> WorkspaceItem:
+    item = await _load_item(db, workspace_id, item_id)
+    if item.kind != "note":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only document (note) items have pages.",
+        )
+    return item
+
+
+async def _pages_for(
+    db: AsyncSession, item_id: uuid.UUID
+) -> list[DocumentPage]:
+    return list(
+        (
+            await db.execute(
+                select(DocumentPage)
+                .where(DocumentPage.item_id == item_id)
+                .order_by(DocumentPage.position.asc())
+            )
+        ).scalars()
+    )
+
+
+@router.get(
+    "/{workspace_id}/items/{item_id}/pages",
+    response_model=list[DocumentPageResponse],
+)
+async def list_document_pages(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[DocumentPageResponse]:
+    """Ordered pages of a document. Read access (any workspace member)."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    item = await _load_note_item(db, ws.id, item_id)
+    rows = await _pages_for(db, item.id)
+    return [DocumentPageResponse.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/{workspace_id}/items/{item_id}/pages",
+    response_model=DocumentPageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_document_page(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    payload: DocumentPageCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DocumentPageResponse:
+    """Append a page to a document. Phase 1: richtext only — lays down a
+    blank Drive Document in the workspace's ``Notes`` folder (same stack a
+    single-page note uses) and links it as the new last page."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_note_item(db, ws.id, item_id)
+
+    owner = user if ws.user_id == user.id else await db.get(User, ws.user_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace owner is missing",
+        )
+
+    title = (payload.title or "").strip() or _DEFAULT_PAGE_TITLE
+    notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
+    doc = await create_blank_document(
+        db, owner_id=owner.id, folder_id=notes_folder_id, name=title
+    )
+    # Append to the end of the tab strip (pages read left-to-right).
+    current_max = await db.scalar(
+        select(func.max(DocumentPage.position)).where(
+            DocumentPage.item_id == item.id
+        )
+    )
+    position = float(current_max or 0.0) + 1.0
+    page = DocumentPage(
+        item_id=item.id,
+        kind="richtext",
+        ref_id=doc.id,
+        title=title,
+        position=position,
+    )
+    db.add(page)
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(page)
+    return DocumentPageResponse.model_validate(page)
+
+
+@router.patch(
+    "/{workspace_id}/items/{item_id}/pages/{page_id}",
+    response_model=DocumentPageResponse,
+)
+async def update_document_page(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    page_id: uuid.UUID,
+    payload: DocumentPageUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DocumentPageResponse:
+    """Rename and/or reorder a page. PATCH: only keys present are applied."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_note_item(db, ws.id, item_id)
+    page = await db.get(DocumentPage, page_id)
+    if page is None or page.item_id != item.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Page not found"
+        )
+
+    sent = payload.model_fields_set
+    if "title" in sent and payload.title is not None:
+        new_title = payload.title.strip() or _DEFAULT_PAGE_TITLE
+        page.title = new_title
+        # Keep the backing doc filename in sync (mirrors note rename) so
+        # Drive + the tab agree.
+        if page.kind == "richtext" and page.ref_id is not None:
+            uf = await db.get(UserFile, page.ref_id)
+            if uf is not None and _strip_doc_ext(uf.filename) != new_title:
+                uf.filename = sanitize_filename(f"{new_title}.html")
+        # If this is the note's primary page, keep the tree title aligned.
+        if item.ref_id == page.ref_id and item.title != new_title:
+            item.title = new_title
+    if "position" in sent and payload.position is not None:
+        page.position = payload.position
+
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(page)
+    return DocumentPageResponse.model_validate(page)
+
+
+@router.delete(
+    "/{workspace_id}/items/{item_id}/pages/{page_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_document_page(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    page_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Delete a page and trash its backing document. Refuses to remove the
+    last page — a document always keeps at least one."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_note_item(db, ws.id, item_id)
+    pages = await _pages_for(db, item.id)
+    page = next((p for p in pages if p.id == page_id), None)
+    if page is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Page not found"
+        )
+    if len(pages) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A document must keep at least one page.",
+        )
+
+    now = datetime.now(timezone.utc)
+    # Trash the backing document (its knowledge_chunks cascade off the file
+    # delete, same as a note delete).
+    if page.kind == "richtext" and page.ref_id is not None:
+        uf = await db.get(UserFile, page.ref_id)
+        if uf is not None and uf.trashed_at is None:
+            uf.trashed_at = now
+    # If we removed the note's *primary* page (the one ``item.ref_id`` points
+    # at), re-point the item at the new first page so the single-page code
+    # paths (collab/RAG/snapshot/delete) keep resolving to a live document.
+    remaining = [p for p in pages if p.id != page.id]
+    if item.ref_id == page.ref_id and remaining:
+        new_primary = remaining[0]
+        item.ref_id = new_primary.ref_id
+        item.title = new_primary.title
+
+    await db.delete(page)
+    ws.updated_at = now
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------

@@ -227,7 +227,12 @@ async def file_is_accessible_via_workspace(
     dependency on the chat tables (the chat side knows about files, not
     vice-versa, and a top-level import would be circular).
     """
-    from app.chat.models import WorkspaceCanvas, WorkspaceFile, WorkspaceItem
+    from app.chat.models import (
+        DocumentPage,
+        WorkspaceCanvas,
+        WorkspaceFile,
+        WorkspaceItem,
+    )
     from app.chat.shares import list_accessible_workspace_ids
 
     workspace_ids = await list_accessible_workspace_ids(user, db)
@@ -270,6 +275,23 @@ async def file_is_accessible_via_workspace(
             .where(
                 WorkspaceCanvas.text_file_id == file_id,
                 WorkspaceCanvas.workspace_id.in_(workspace_ids),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
+    # A richtext page of a multi-page document (the file backs a
+    # ``document_pages`` row whose owning note is in an accessible
+    # workspace). Covers every page beyond the note's primary one, which is
+    # already caught by the WorkspaceItem.ref_id check above.
+    if (
+        await db.execute(
+            select(DocumentPage.id)
+            .join(WorkspaceItem, WorkspaceItem.id == DocumentPage.item_id)
+            .where(
+                DocumentPage.ref_id == file_id,
+                WorkspaceItem.workspace_id.in_(workspace_ids),
             )
             .limit(1)
         )
