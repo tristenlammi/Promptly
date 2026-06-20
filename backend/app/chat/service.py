@@ -35,6 +35,11 @@ class StreamContext(TypedDict):
     # ride on ``web_search_mode``, *not* this flag, so a user can have
     # search-only or artefacts-only modes without enabling both.
     tools_enabled: bool
+    # Voice mode (Phase 2): this turn was spoken in the hands-free voice
+    # overlay. Drives a brevity system-prompt block + a token backstop so
+    # spoken replies stay short and conversational. ``NotRequired`` so
+    # in-flight contexts enqueued before this field existed still parse.
+    voice: NotRequired[bool]
     # DeepSeek-only reasoning knob. ``None`` (the default for every
     # non-DeepSeek conversation, and for fresh DeepSeek chats that
     # haven't explicitly picked a value yet) means "don't attach the

@@ -107,6 +107,11 @@ export interface SendMessagePayload {
    *  on ``web_search_mode``, not this flag. The backend defaults to
    *  ``false`` so omitting this is a no-artefact-tool turn. */
   tools_enabled?: boolean;
+  /** Voice mode (Phase 2): this turn was spoken in the hands-free voice
+   *  overlay. The backend shortens the reply to a spoken, conversational
+   *  length (no markdown/lists/code) and applies a token backstop. Omit
+   *  / false for typed messages. */
+  voice?: boolean;
 }
 
 /** Edit-and-resend payload. Attachments aren't sent — the backend

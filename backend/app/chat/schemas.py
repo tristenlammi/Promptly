@@ -287,6 +287,12 @@ class SendMessageRequest(BaseModel):
     # ever fire — and so the UI affordance for "this turn used tools" is
     # always meaningful.
     tools_enabled: bool = False
+    # Voice mode (Phase 2): when true, this turn was spoken in the
+    # hands-free voice overlay. The generator injects a "you're speaking
+    # out loud" system prompt so the reply is short + conversational
+    # (no markdown / lists / code that can't be heard) and applies a
+    # modest token backstop. Off for every typed message.
+    voice: bool = False
 
 
 class SendMessageResponse(BaseModel):

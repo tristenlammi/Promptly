@@ -493,7 +493,11 @@ export function ChatPage({
   }, [location.hash, conversation]);
 
   const handleSend = useCallback(
-    async (text: string, attachments: AttachedFile[] = []) => {
+    async (
+      text: string,
+      attachments: AttachedFile[] = [],
+      opts?: { voice?: boolean }
+    ) => {
       if (!selectedModel) return;
 
       // 1. Optimistic user bubble + thinking state, BEFORE any network call.
@@ -571,6 +575,9 @@ export function ChatPage({
               : undefined,
           attachment_ids: attachments.map((a) => a.id),
           tools_enabled: toolsEnabled,
+          // Voice mode turns get shorter, spoken-style replies (backend
+          // injects a brevity prompt + token backstop).
+          voice: opts?.voice ?? false,
         },
         { optimisticUserId: optimisticId }
       );
@@ -1090,7 +1097,7 @@ export function ChatPage({
       {voiceModeOpen && (
         <VoiceModeOverlay
           onClose={() => setVoiceModeOpen(false)}
-          onSend={(text) => void handleSend(text)}
+          onSend={(text) => void handleSend(text, [], { voice: true })}
           onCancelStream={cancel}
           modelReady={!!selectedModel}
         />

@@ -157,7 +157,7 @@ from app.models_config.provider import (
     model_router,
 )
 from app.rate_limit import enforce_user_message_rate
-from app.chat.base_prompt import PROMPTLY_BASE_PROMPT
+from app.chat.base_prompt import PROMPTLY_BASE_PROMPT, VOICE_SYSTEM_PROMPT
 from app.search.service import (
     canonicalise_url,
     distill_query,
@@ -1635,6 +1635,10 @@ async def send_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        # Voice mode (Phase 2): a spoken turn. Only ``SendMessageRequest``
+        # carries this; edit/regenerate payloads default to False via
+        # getattr. Drives the brevity system-prompt + token backstop.
+        "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
     }
     await enqueue_stream(stream_id, ctx)
@@ -1820,6 +1824,10 @@ async def edit_and_resend_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        # Voice mode (Phase 2): a spoken turn. Only ``SendMessageRequest``
+        # carries this; edit/regenerate payloads default to False via
+        # getattr. Drives the brevity system-prompt + token backstop.
+        "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
     }
     await enqueue_stream(stream_id, ctx)
@@ -2178,6 +2186,10 @@ async def regenerate_assistant_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        # Voice mode (Phase 2): a spoken turn. Only ``SendMessageRequest``
+        # carries this; edit/regenerate payloads default to False via
+        # getattr. Drives the brevity system-prompt + token backstop.
+        "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
     }
     await enqueue_stream(stream_id, ctx)
@@ -2328,6 +2340,10 @@ async def continue_assistant_message(
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
         "tools_enabled": bool(payload.tools_enabled),
+        # Voice mode (Phase 2): a spoken turn. Only ``SendMessageRequest``
+        # carries this; edit/regenerate payloads default to False via
+        # getattr. Drives the brevity system-prompt + token backstop.
+        "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
         "continue_from_message_id": str(target.id),
     }
@@ -2960,6 +2976,13 @@ async def _load_message_attachments(
 # error-chip path stays in place for the pathological case where the
 # model produces neither text nor tool-calls on the forced hop.
 MAX_TOOL_HOPS = 8
+
+# Token backstop for voice-mode turns when the client didn't set its own
+# cap. The brevity system prompt does the real work (replies end
+# naturally); this is just a guard so a model that ignores the steer
+# can't read a 1,000-word essay aloud. Generous enough that a normal
+# 2–4 sentence spoken reply is never truncated mid-word.
+VOICE_MAX_TOKENS = 400
 
 
 def _build_tool_calls_payload(
@@ -3821,6 +3844,14 @@ async def _stream_generator(
             # mid-stream.
             web_search_mode = "off"
 
+        # Voice mode (Phase 2): a spoken turn. Drives the brevity system
+        # prompt (merged last, below) + a token backstop so a runaway reply
+        # can't drone on when read aloud. Only applied when the client
+        # didn't set its own explicit cap.
+        voice_turn = bool(ctx.get("voice"))
+        if voice_turn and ctx.get("max_tokens") is None:
+            ctx["max_tokens"] = VOICE_MAX_TOKENS
+
         enabled_categories: set[str] = set()
         if ctx.get("tools_enabled"):
             enabled_categories.add("artefact")
@@ -4208,6 +4239,14 @@ async def _stream_generator(
                 system_prompt = merge_system_prompt(
                     "\n\n".join(blocks), system_prompt or ""
                 )
+
+        # Voice mode (Phase 2): a spoken turn. Merge the brevity steer
+        # LAST so it's the highest-priority layer — format/length for
+        # speech should win over any verbose persona or instruction.
+        if voice_turn:
+            system_prompt = merge_system_prompt(
+                VOICE_SYSTEM_PROMPT, system_prompt or ""
+            )
 
         # Phase 3.2 — in-chat transparency. Emit which facts were injected
         # this turn so the UI can show a "🧠 N memories in context" chip.
