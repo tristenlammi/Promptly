@@ -352,6 +352,19 @@ async def create_workspace_item(
             indexing_status="queued",
         )
         db.add(item)
+        # A note is a multi-page document: seed its first ("primary") page,
+        # pointing at the same backing doc ``ref_id`` references. Flush first
+        # so ``item.id`` is assigned before the page row links to it.
+        await db.flush()
+        db.add(
+            DocumentPage(
+                item_id=item.id,
+                kind="richtext",
+                ref_id=doc.id,
+                title=note_title,
+                position=0.0,
+            )
+        )
     else:  # kind == "canvas"
         canvas_title = title or _DEFAULT_CANVAS_TITLE
         canvases_folder_id = await _resolve_subfolder_id(
@@ -1000,6 +1013,26 @@ async def delete_workspace_item(
             uf = await db.get(UserFile, it.ref_id)
             if uf is not None and uf.trashed_at is None:
                 uf.trashed_at = now
+            # A note is a multi-page document — trash every page's backing
+            # doc too. The ``document_pages`` rows themselves cascade off the
+            # item delete (item_id FK), but their files aren't a FK target.
+            if it.kind == "note":
+                page_ref_ids = list(
+                    (
+                        await db.execute(
+                            select(DocumentPage.ref_id).where(
+                                DocumentPage.item_id == it.id,
+                                DocumentPage.ref_id.is_not(None),
+                            )
+                        )
+                    ).scalars()
+                )
+                for pid in page_ref_ids:
+                    if pid == it.ref_id:
+                        continue  # primary page already trashed above
+                    pf = await db.get(UserFile, pid)
+                    if pf is not None and pf.trashed_at is None:
+                        pf.trashed_at = now
         elif it.kind == "canvas" and it.ref_id is not None:
             # Trash the backing text file and drop the canvas row (its
             # chunks cascade off the file delete; the canvas isn't a
