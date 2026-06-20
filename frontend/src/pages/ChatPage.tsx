@@ -1021,13 +1021,16 @@ export function ChatPage({
           <StreamingAnnouncer streaming={isStreaming} />
           {(id || isStreaming) && (hasMessages || isStreaming) ? (
             <ChatWindow
-              onEditAndResend={handleEditAndResend}
-              onEditAssistant={id ? handleEditAssistant : undefined}
+              // Single-owner chats: mutating affordances are owner-only
+              // (the backend 403s a collaborator). Branch stays open so a
+              // collaborator can fork the thread into their own chat.
+              onEditAndResend={isOwner ? handleEditAndResend : undefined}
+              onEditAssistant={id && isOwner ? handleEditAssistant : undefined}
               participants={participants}
               onBranchFrom={id ? handleBranchFrom : undefined}
-              onRegenerate={id ? handleRegenerate : undefined}
-              onContinue={id ? handleContinue : undefined}
-              onRetry={id ? handleRetry : undefined}
+              onRegenerate={id && isOwner ? handleRegenerate : undefined}
+              onContinue={id && isOwner ? handleContinue : undefined}
+              onRetry={id && isOwner ? handleRetry : undefined}
               onPickAnotherModel={handlePickAnotherModel}
               onDelete={id && isOwner ? handleDeleteMessage : undefined}
               onFeedback={id && isOwner ? handleMessageFeedback : undefined}
@@ -1053,33 +1056,51 @@ export function ChatPage({
             />
           )}
 
-          <InputBar
-            streaming={isStreaming}
-            disabled={!selectedModel}
-            onSend={handleSend}
-            onCancel={cancel}
-            webSearchMode={webSearchMode}
-            onWebSearchModeChange={handleWebSearchModeChange}
-            reasoningEffort={reasoningEffort}
-            // Shown only for models with a native reasoning knob (gated by
-            // ``reasoningSupported`` → supports_native_reasoning).
-            onReasoningEffortChange={
-              reasoningSupported ? handleReasoningEffortChange : undefined
-            }
-            toolsEnabled={toolsEnabled}
-            onToolsChange={handleToolsChange}
-            onResearch={() => setResearchDialogOpen(true)}
-            onVoiceMode={() => setVoiceModeOpen(true)}
-            footer={footerText}
-            autoFocus
-            currentConversationId={id ?? null}
-            workspaceId={conversation?.workspace_id ?? null}
-            placeholder={
-              selectedModel
-                ? "Message Promptly... (@ to reference a chat)"
-                : "Configure a model in the Models tab first"
-            }
-          />
+          {isOwner ? (
+            <InputBar
+              streaming={isStreaming}
+              disabled={!selectedModel}
+              onSend={handleSend}
+              onCancel={cancel}
+              webSearchMode={webSearchMode}
+              onWebSearchModeChange={handleWebSearchModeChange}
+              reasoningEffort={reasoningEffort}
+              // Shown only for models with a native reasoning knob (gated by
+              // ``reasoningSupported`` → supports_native_reasoning).
+              onReasoningEffortChange={
+                reasoningSupported ? handleReasoningEffortChange : undefined
+              }
+              toolsEnabled={toolsEnabled}
+              onToolsChange={handleToolsChange}
+              onResearch={() => setResearchDialogOpen(true)}
+              onVoiceMode={() => setVoiceModeOpen(true)}
+              footer={footerText}
+              autoFocus
+              currentConversationId={id ?? null}
+              workspaceId={conversation?.workspace_id ?? null}
+              placeholder={
+                selectedModel
+                  ? "Message Promptly... (@ to reference a chat)"
+                  : "Configure a model in the Models tab first"
+              }
+            />
+          ) : (
+            // Single-owner chats: a workspace collaborator can read the
+            // whole conversation but only its creator can send into it.
+            // Mirrors the backend, which 403s a non-owner send/edit.
+            <div className="mx-auto w-full max-w-3xl px-4 pb-4">
+              <div
+                className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 text-center text-sm text-[var(--text-muted)]"
+                role="status"
+              >
+                Read-only ·{" "}
+                {conversation?.owner?.username
+                  ? `only ${conversation.owner.username} can send messages in this chat`
+                  : "only the chat's creator can send messages"}
+                . You can read it and start your own chat in this workspace.
+              </div>
+            </div>
+          )}
         </div>
         {/* Code Artifact split-pane companion. Renders nothing when
             closed, so the chat column owns the full width by default.

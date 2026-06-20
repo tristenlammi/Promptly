@@ -1455,6 +1455,25 @@ async def _enforce_send_quotas(
     )
 
 
+def _require_chat_owner(role: str) -> None:
+    """Single-owner chats: only the creator may mutate the conversation.
+
+    Workspace collaborators reach a chat through their workspace share
+    (``get_accessible_conversation`` hands back ``role="collaborator"``)
+    and can *read* the whole thread, but sending / editing / regenerating
+    / continuing is reserved for the owner. Keeping chats single-author
+    sidesteps the authorship-and-permission tangle of multi-party turns;
+    a collaborator who wants to participate starts their own chat in the
+    shared workspace. The frontend hides the composer for non-owners, so
+    this is the defence-in-depth backstop, not the primary UX.
+    """
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This chat is read-only — only its creator can send messages.",
+        )
+
+
 @router.post(
     "/conversations/{conversation_id}/messages",
     response_model=SendMessageResponse,
@@ -1468,11 +1487,11 @@ async def send_message(
     user: User = Depends(get_current_user),
 ) -> SendMessageResponse:
     await _enforce_send_quotas(request, user, db)
-    # Phase 4b — collaborators can post into shared chats. The cost
-    # rolls onto whoever is authenticated here (``user``) because
-    # ``record_usage`` keys on the sender, exactly the "sender pays"
-    # behaviour the product wants.
-    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+    # Single-owner chats: a workspace collaborator can read this thread
+    # but only its creator sends into it. ``record_usage`` keys on the
+    # sender, so the owner always pays for their own chat.
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+    _require_chat_owner(role)
 
     # Resolve effective model + provider (request overrides conversation default).
     provider_id = payload.provider_id or conv.provider_id
@@ -1684,11 +1703,10 @@ async def edit_and_resend_message(
     # Quota gates apply to every regenerate too — otherwise the
     # easiest way around a budget cap is to spam the "edit" button.
     await _enforce_send_quotas(request, user, db)
-    # Phase 4b — collaborators can edit their *own* prior messages
-    # in a shared chat (defended by the author check below). They
-    # can't edit the other party's turns; that would silently
-    # rewrite their words on the page.
-    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+    # Single-owner chats: only the creator may edit/resend. (The author
+    # check further down stays as defence-in-depth for legacy rows.)
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+    _require_chat_owner(role)
 
     target = await db.get(Message, message_id)
     if target is None or target.conversation_id != conv.id:
@@ -2065,7 +2083,8 @@ async def regenerate_assistant_message(
     # Same quota treatment as edit — otherwise "regenerate" becomes a
     # budget escape hatch.
     await _enforce_send_quotas(request, user, db)
-    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+    _require_chat_owner(role)
 
     target = await db.get(Message, message_id)
     if target is None or target.conversation_id != conv.id:
@@ -2229,7 +2248,8 @@ async def continue_assistant_message(
     * Its lineage parent must be a user message.
     """
     await _enforce_send_quotas(request, user, db)
-    conv, _role = await get_accessible_conversation(conversation_id, user, db)
+    conv, role = await get_accessible_conversation(conversation_id, user, db)
+    _require_chat_owner(role)
 
     target = await db.get(Message, message_id)
     if target is None or target.conversation_id != conv.id:
