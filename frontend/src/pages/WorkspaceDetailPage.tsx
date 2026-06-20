@@ -1,5 +1,4 @@
 import {
-  lazy,
   Suspense,
   useCallback,
   useEffect,
@@ -10,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import {
   Archive,
   ArchiveRestore,
@@ -39,11 +39,15 @@ import {
   type WikiTarget,
 } from "@/components/files/documents/WikiLinkExtension";
 // Lazy so the (large) Excalidraw editor chunk only downloads when a
-// canvas is actually opened, not on every workspace visit.
-const WorkspaceCanvasPane = lazy(() =>
-  import("@/components/workspaces/WorkspaceCanvasPane").then((m) => ({
-    default: m.WorkspaceCanvasPane,
-  }))
+// canvas is actually opened, not on every workspace visit. Wrapped so a
+// stale chunk after a redeploy auto-reloads instead of dead-ending on the
+// "Failed to fetch dynamically imported module" error boundary.
+const WorkspaceCanvasPane = lazyWithRetry(
+  () =>
+    import("@/components/workspaces/WorkspaceCanvasPane").then((m) => ({
+      default: m.WorkspaceCanvasPane,
+    })),
+  "WorkspaceCanvasPane"
 );
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";

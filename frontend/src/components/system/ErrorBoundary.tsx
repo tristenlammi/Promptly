@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { isChunkLoadError } from "@/utils/lazyWithRetry";
+
 interface ErrorBoundaryProps {
   children: ReactNode;
   /** Optional override for the rendered fallback. Receives the error
@@ -38,6 +40,19 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    // A failed dynamic import almost always means the app was redeployed
+    // under this tab and the old hashed chunk is gone. Hard-reload once to
+    // pull the fresh build instead of stranding the user on the fallback.
+    // The sessionStorage guard prevents a reload loop if the chunk is
+    // genuinely unreachable (e.g. offline).
+    if (isChunkLoadError(error)) {
+      const flag = "chunk-reload:boundary";
+      if (!sessionStorage.getItem(flag)) {
+        sessionStorage.setItem(flag, "1");
+        window.location.reload();
+        return;
+      }
+    }
     // Surface to the browser console in dev. In production this is the
     // only place we capture the error today; once the in-app log
     // pipeline lands (Phase 2) we'll forward it through the same
