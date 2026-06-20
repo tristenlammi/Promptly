@@ -24,9 +24,12 @@
  *     the app layer (IndexedDB / React Query) where a SW uninstall
  *     doesn't leak into other browser profiles.
  */
-import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
+import {
+  cleanupOutdatedCaches,
+  matchPrecache,
+  precacheAndRoute,
+} from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
-import { createHandlerBoundToURL } from "workbox-precaching";
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -36,10 +39,27 @@ declare const self: ServiceWorkerGlobalScope & {
 precacheAndRoute(self.__WB_MANIFEST ?? []);
 cleanupOutdatedCaches();
 
-// ----- SPA navigation fallback -----
-const navFallback = createHandlerBoundToURL("/index.html");
+// ----- SPA navigation: NETWORK-FIRST -----
+// Critically NOT cache-first. The app shell (index.html) embeds the hashed
+// chunk filenames for the *current* build; serving a stale precached shell
+// after a redeploy makes the page reference chunks the server already
+// deleted → "Failed to fetch dynamically imported module" 404s on lazy
+// routes (e.g. the workspace canvas). So every navigation fetches the live
+// index.html (which always reflects what's on disk), and we fall back to the
+// precached shell ONLY when the network is unreachable (offline support).
+async function navigationHandler(): Promise<Response> {
+  try {
+    const fresh = await fetch("/index.html", { cache: "no-store" });
+    if (fresh && fresh.ok) return fresh;
+  } catch {
+    // Network unreachable — fall through to the offline shell below.
+  }
+  const cached = await matchPrecache("/index.html");
+  return cached ?? Response.error();
+}
+
 registerRoute(
-  new NavigationRoute(navFallback, {
+  new NavigationRoute(navigationHandler, {
     denylist: [
       /^\/api\//,
       /^\/uploads\//,
