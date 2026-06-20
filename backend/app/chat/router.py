@@ -3511,7 +3511,10 @@ async def _stream_generator(
                 # ride the attachment path). Local import mirrors the
                 # ``_has_workspace_access`` lazy import above — keeps the
                 # already-heavy router import graph narrow.
-                from app.workspaces.knowledge import build_workspace_injection
+                from app.workspaces.knowledge import (
+                    WorkspaceInjection,
+                    build_workspace_injection,
+                )
 
                 triggering_text = next(
                     (
@@ -3537,12 +3540,30 @@ async def _stream_generator(
                     .scalars()
                     .all()
                 )
-                injection = await build_workspace_injection(
-                    db,
-                    workspace_id=workspace_row.id,
-                    query=triggering_text or "",
-                    excluded_file_ids=excluded_ids,
-                )
+                # Gathering workspace context (pinned-file retrieval / query
+                # embedding / pgvector search) must never take down the chat
+                # turn. A single bad or mid-indexing file — or a transient
+                # embedding-provider hiccup (prod uses a cloud embedder) —
+                # would otherwise raise here and abort the whole stream, which
+                # is exactly the "adding a file breaks chat until I remove it"
+                # failure. Degrade to "no workspace context" and keep going,
+                # mirroring the soft-fail of the vision relay below.
+                try:
+                    injection = await build_workspace_injection(
+                        db,
+                        workspace_id=workspace_row.id,
+                        query=triggering_text or "",
+                        excluded_file_ids=excluded_ids,
+                    )
+                except Exception:
+                    logger.exception(
+                        "workspace context gathering failed "
+                        "(workspace_id=%s, conversation_id=%s); "
+                        "proceeding without workspace context",
+                        workspace_row.id,
+                        conv.id,
+                    )
+                    injection = WorkspaceInjection()
                 if injection.system_block:
                     # Workspace instructions stay first; the retrieved
                     # "Workspace knowledge" block sits under them.
