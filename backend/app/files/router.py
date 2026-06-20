@@ -307,25 +307,34 @@ async def _load_readable_file(
 async def _file_is_accessible_via_workspace(
     db: AsyncSession, file_id: uuid.UUID, user: User
 ) -> bool:
-    """Does ``user`` reach ``file_id`` through a shared workspace pin?
+    """Does ``user`` reach ``file_id`` through a shared workspace?
 
-    Returns True if the file is pinned to any workspace the caller
-    can access (owns or has an accepted share on). Isolated as a
-    helper so the fast path in :func:`_load_readable_file` stays
-    synchronous-ish (one ``SELECT`` then done) and we only issue
-    the second query after the simple ownership check fails.
+    Returns True if the file backs any surface of a workspace the
+    caller can access (owns or has an accepted share on). A file is
+    reachable three ways, all of which must grant access — otherwise a
+    note/canvas created by one member 404s for everyone else:
+
+      * a pinned file               (``WorkspaceFile.file_id``)
+      * a note / file tree item     (``WorkspaceItem.ref_id``)
+      * a canvas's backing text     (``WorkspaceCanvas.text_file_id``)
+
+    Isolated as a helper so the fast path in
+    :func:`_load_readable_file` stays cheap (we only issue these
+    queries after the simple ownership check fails).
     """
     # Importing here keeps the files module free of a top-level
     # dependency on chat tables — the chat side already knows
     # everything about files, but not vice-versa.
-    from app.chat.models import WorkspaceFile
+    from app.chat.models import WorkspaceCanvas, WorkspaceFile, WorkspaceItem
     from app.chat.shares import list_accessible_workspace_ids
     from sqlalchemy import select as _select
 
     accessible_workspace_ids = await list_accessible_workspace_ids(user, db)
     if not accessible_workspace_ids:
         return False
-    row = (
+
+    # Pinned file.
+    if (
         await db.execute(
             _select(WorkspaceFile.file_id)
             .where(
@@ -334,8 +343,39 @@ async def _file_is_accessible_via_workspace(
             )
             .limit(1)
         )
-    ).first()
-    return row is not None
+    ).first() is not None:
+        return True
+
+    # Note / file tree item — ``ref_id`` is a ``files.id`` for these
+    # kinds (canvas items point ``ref_id`` at a workspace_canvas row, a
+    # disjoint id space, so they simply won't match a file id here).
+    if (
+        await db.execute(
+            _select(WorkspaceItem.id)
+            .where(
+                WorkspaceItem.ref_id == file_id,
+                WorkspaceItem.kind.in_(("note", "file")),
+                WorkspaceItem.workspace_id.in_(accessible_workspace_ids),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
+    # Canvas backing text file.
+    if (
+        await db.execute(
+            _select(WorkspaceCanvas.id)
+            .where(
+                WorkspaceCanvas.text_file_id == file_id,
+                WorkspaceCanvas.workspace_id.in_(accessible_workspace_ids),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
+    return False
 
 
 async def _load_writable_file(
