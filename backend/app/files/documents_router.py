@@ -271,10 +271,19 @@ async def _load_document(
     if row.user_id is not None and row.user_id == user.id:
         return row
     # Grantee path — folder cascade is honoured.
-    from app.files.sharing import caller_grants_for_file
+    from app.files.sharing import (
+        caller_grants_for_file,
+        file_is_accessible_via_workspace,
+    )
 
     grants = await caller_grants_for_file(db, row, user)
     if grants:
+        return row
+    # Workspace side-door: a collaborator on a shared workspace can open
+    # any note / canvas backed by this document. Without it the backing
+    # UserFile (owned by the note's creator) 404s for everyone else and
+    # the editor shows "collaboration unavailable".
+    if await file_is_accessible_via_workspace(db, row.id, user):
         return row
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
@@ -429,9 +438,22 @@ async def get_collab_token(
     user: User = Depends(get_current_user),
 ) -> CollabTokenResponse:
     row = await _load_document(db, document_id, user)
-    from app.files.sharing import caller_can_write_file
+    from app.files.sharing import (
+        caller_can_write_file,
+        file_is_accessible_via_workspace,
+    )
 
-    perm = "write" if await caller_can_write_file(db, row, user) else "read"
+    # Workspace collaborators co-edit shared notes/canvases: workspace
+    # shares are full-collaborator (no read-only tier), so reaching the
+    # doc through a workspace grants write, same as the owner.
+    perm = (
+        "write"
+        if (
+            await caller_can_write_file(db, row, user)
+            or await file_is_accessible_via_workspace(db, row.id, user)
+        )
+        else "read"
+    )
     token, exp = _mint_collab_token(document_id=row.id, user=user, perm=perm)
     return CollabTokenResponse(
         token=token,

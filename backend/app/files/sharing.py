@@ -204,6 +204,81 @@ async def caller_can_write_file(
     return effective_can_edit(grants)
 
 
+async def file_is_accessible_via_workspace(
+    db: AsyncSession, file_id: uuid.UUID, user: User
+) -> bool:
+    """Does ``user`` reach ``file_id`` through a shared workspace?
+
+    A file backs a workspace three ways, all of which grant access —
+    otherwise a note / canvas created by one member is invisible to the
+    others (the backing ``UserFile`` is owned by its creator and carries
+    no peer-to-peer grant):
+
+      * a pinned file               (``WorkspaceFile.file_id``)
+      * a note / file tree item     (``WorkspaceItem.ref_id``)
+      * a canvas's backing text     (``WorkspaceCanvas.text_file_id``)
+
+    "Access" means the caller owns the workspace or holds an accepted
+    share on it. Workspace shares are full-collaborator (there's no
+    read-only tier), so a True here implies co-edit rights on notes and
+    canvases — callers may use it to grant collab *write*.
+
+    Imports are local so the files package keeps no module-level
+    dependency on the chat tables (the chat side knows about files, not
+    vice-versa, and a top-level import would be circular).
+    """
+    from app.chat.models import WorkspaceCanvas, WorkspaceFile, WorkspaceItem
+    from app.chat.shares import list_accessible_workspace_ids
+
+    workspace_ids = await list_accessible_workspace_ids(user, db)
+    if not workspace_ids:
+        return False
+
+    # Pinned file.
+    if (
+        await db.execute(
+            select(WorkspaceFile.file_id)
+            .where(
+                WorkspaceFile.file_id == file_id,
+                WorkspaceFile.workspace_id.in_(workspace_ids),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
+    # Note / file tree item — ``ref_id`` is a ``files.id`` for these
+    # kinds (canvas items point ``ref_id`` at a workspace_canvas row, a
+    # disjoint id space, so they won't match a file id here).
+    if (
+        await db.execute(
+            select(WorkspaceItem.id)
+            .where(
+                WorkspaceItem.ref_id == file_id,
+                WorkspaceItem.kind.in_(("note", "file")),
+                WorkspaceItem.workspace_id.in_(workspace_ids),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
+    # Canvas backing text file.
+    if (
+        await db.execute(
+            select(WorkspaceCanvas.id)
+            .where(
+                WorkspaceCanvas.text_file_id == file_id,
+                WorkspaceCanvas.workspace_id.in_(workspace_ids),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
+    return False
+
+
 # --------------------------------------------------------------------
 # Render summary
 # --------------------------------------------------------------------
