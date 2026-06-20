@@ -119,6 +119,19 @@ export interface WorkspaceItemNode {
   children: WorkspaceItemNode[];
 }
 
+/** One page of a multi-page document (a note). ``kind`` selects the surface
+ *  ('richtext' | 'sheet'); ``ref_id`` is the backing entity — a Drive
+ *  Document id for a richtext page. Pages render as a tab strip ordered by
+ *  ``position``. */
+export interface DocumentPage {
+  id: string;
+  item_id: string;
+  kind: string;
+  ref_id: string | null;
+  title: string;
+  position: number;
+}
+
 /** A board's coloured label, defined once per board and referenced by id
  *  from cards. ``color`` is a hex string. */
 export interface BoardLabel {
@@ -496,6 +509,49 @@ export const workspacesApi = {
 
   async deleteItem(id: string, itemId: string): Promise<void> {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
+  },
+
+  // --- Document pages (a note is a multi-page document) ----------------
+  async listPages(id: string, itemId: string): Promise<DocumentPage[]> {
+    const { data } = await apiClient.get<DocumentPage[]>(
+      `/workspaces/${id}/items/${itemId}/pages`
+    );
+    return data;
+  },
+
+  async createPage(
+    id: string,
+    itemId: string,
+    payload: { title?: string } = {}
+  ): Promise<DocumentPage> {
+    const { data } = await apiClient.post<DocumentPage>(
+      `/workspaces/${id}/items/${itemId}/pages`,
+      { kind: "richtext", ...payload }
+    );
+    return data;
+  },
+
+  async updatePage(
+    id: string,
+    itemId: string,
+    pageId: string,
+    payload: { title?: string; position?: number }
+  ): Promise<DocumentPage> {
+    const { data } = await apiClient.patch<DocumentPage>(
+      `/workspaces/${id}/items/${itemId}/pages/${pageId}`,
+      payload
+    );
+    return data;
+  },
+
+  async deletePage(
+    id: string,
+    itemId: string,
+    pageId: string
+  ): Promise<void> {
+    await apiClient.delete(
+      `/workspaces/${id}/items/${itemId}/pages/${pageId}`
+    );
   },
 
   /** Fetch one item (e.g. a board, to read its ``config`` label registry). */

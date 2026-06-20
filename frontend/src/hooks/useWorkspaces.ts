@@ -27,6 +27,7 @@ import {
   type WorkspaceTaskCreatePayload,
   type WorkspaceTaskUpdatePayload,
   type BoardConfig,
+  type DocumentPage,
 } from "@/api/workspaces";
 
 const KEYS = {
@@ -44,6 +45,8 @@ const KEYS = {
   tasks: (id: string) => ["workspaces", "tasks", id] as const,
   backlinks: (workspaceId: string, itemId: string) =>
     ["workspaces", "backlinks", workspaceId, itemId] as const,
+  pages: (workspaceId: string, itemId: string) =>
+    ["workspaces", "pages", workspaceId, itemId] as const,
   invites: ["workspace-invites"] as const,
 };
 
@@ -195,6 +198,62 @@ export function useWorkspaceOverview(id: string | undefined) {
     queryKey: id ? KEYS.overview(id) : ["workspaces", "overview", "_"],
     queryFn: () => workspacesApi.overview(id as string),
     enabled: Boolean(id),
+  });
+}
+
+// ---------------------------------------------------------------------
+// Document pages — a note is a multi-page document
+// ---------------------------------------------------------------------
+export function useDocumentPages(
+  workspaceId: string | undefined,
+  itemId: string | undefined
+) {
+  return useQuery<DocumentPage[]>({
+    queryKey:
+      workspaceId && itemId
+        ? KEYS.pages(workspaceId, itemId)
+        : ["workspaces", "pages", "_"],
+    queryFn: () =>
+      workspacesApi.listPages(workspaceId as string, itemId as string),
+    enabled: Boolean(workspaceId && itemId),
+  });
+}
+
+export function useCreateDocumentPage(workspaceId: string, itemId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { title?: string } = {}) =>
+      workspacesApi.createPage(workspaceId, itemId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.pages(workspaceId, itemId) });
+    },
+  });
+}
+
+export function useUpdateDocumentPage(workspaceId: string, itemId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      pageId: string;
+      payload: { title?: string; position?: number };
+    }) => workspacesApi.updatePage(workspaceId, itemId, args.pageId, args.payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.pages(workspaceId, itemId) });
+      // Renaming the primary page re-titles the tree node server-side.
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
+  });
+}
+
+export function useDeleteDocumentPage(workspaceId: string, itemId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pageId: string) =>
+      workspacesApi.deletePage(workspaceId, itemId, pageId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.pages(workspaceId, itemId) });
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
   });
 }
 
