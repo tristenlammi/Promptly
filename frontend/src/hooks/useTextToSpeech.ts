@@ -74,6 +74,17 @@ function detectSupported(): boolean {
   return typeof window !== "undefined" && typeof Audio !== "undefined";
 }
 
+// --- Global single-playback coordination ---
+// Only one utterance plays across the whole app at a time. Each hook
+// instance (every message bubble's read-aloud + voice mode) is otherwise
+// independent, so without this two of them could talk over each other —
+// the old browser ``speechSynthesis.cancel()`` was implicitly global and
+// we want to preserve that. ``ttsCounter`` hands each instance a stable
+// id; ``activeStopper`` stops whoever is currently speaking.
+let ttsCounter = 0;
+let activeTtsId = 0;
+let activeStopper: (() => void) | null = null;
+
 export function useTextToSpeech(): UseTextToSpeechReturn {
   const [supported] = useState<boolean>(detectSupported);
   const [speaking, setSpeaking] = useState(false);
@@ -81,6 +92,9 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
   const [error, setError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Stable per-instance id for the global single-playback registry.
+  const idRef = useRef(0);
+  if (idRef.current === 0) idRef.current = ++ttsCounter;
   // Monotonic token: every ``speak``/``stop`` bumps it, invalidating any
   // in-flight fetch or queued playback from a previous run.
   const runRef = useRef(0);
@@ -105,6 +119,10 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
       audio.src = "";
     }
     cleanupUrls();
+    if (activeTtsId === idRef.current) {
+      activeTtsId = 0;
+      activeStopper = null;
+    }
     setSpeaking(false);
     setLoading(false);
   }, [cleanupUrls]);
@@ -112,8 +130,13 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
   const speak = useCallback(
     async (text: string, opts?: SpeakOptions) => {
       if (!supported) return;
-      // Cancel anything currently playing first.
+      // Cancel this instance's own prior playback first.
       stop();
+      // Then stop any *other* instance that's speaking, and claim the
+      // single global playback slot — one voice at a time, app-wide.
+      if (activeStopper && activeTtsId !== idRef.current) activeStopper();
+      activeTtsId = idRef.current;
+      activeStopper = stop;
       const run = (runRef.current += 1);
       const chunks = splitIntoSpeechChunks(text);
       if (chunks.length === 0) return;
@@ -191,6 +214,10 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
         setSpeaking(false);
         setLoading(false);
         cleanupUrls();
+        if (activeTtsId === idRef.current) {
+          activeTtsId = 0;
+          activeStopper = null;
+        }
         opts?.onDone?.();
       }
     },
@@ -211,6 +238,10 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
       }
       for (const url of urlsRef.current) URL.revokeObjectURL(url);
       urlsRef.current = [];
+      if (activeTtsId === idRef.current) {
+        activeTtsId = 0;
+        activeStopper = null;
+      }
     };
   }, []);
 
