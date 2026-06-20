@@ -139,6 +139,27 @@ class Settings(BaseSettings):
     CODE_SANDBOX_SECRET: str = ""
     CODE_SANDBOX_TIMEOUT_S: int = 30
 
+    # ---- Speech-to-text (Voice Phase 1) ----
+    # ``STT_BACKEND`` selects how dictation clips are transcribed:
+    #   * ``local``  — POST the audio to the bundled faster-whisper
+    #     service at ``WHISPER_URL`` (private, self-hosted, default).
+    #   * ``openai`` — use OpenAI's hosted transcription API (needs
+    #     ``OPENAI_API_KEY``). Lower latency / higher accuracy, but the
+    #     audio leaves the box.
+    # Empty ``WHISPER_URL`` disables the local path (the endpoint then
+    # returns a friendly 503 instead of hanging).
+    STT_BACKEND: str = "local"
+    WHISPER_URL: str = "http://whisper:8000"
+    # Model the cloud path asks for when ``STT_BACKEND=openai``. ``whisper-1``
+    # is the broadly-available default; ``gpt-4o-transcribe`` is newer/better
+    # where the account has access.
+    STT_OPENAI_MODEL: str = "whisper-1"
+    # Hard ceiling on an uploaded dictation clip (bytes). Mirrors the
+    # whisper worker's own cap so we reject early at the edge.
+    STT_MAX_AUDIO_BYTES: int = 25 * 1024 * 1024
+    # How long we'll wait on the transcription backend before giving up.
+    STT_TIMEOUT_S: int = 60
+
     # ---- Search ----
     SEARXNG_URL: str = "http://searxng:8080"
     DEFAULT_SEARCH_PROVIDER: str = "searxng"

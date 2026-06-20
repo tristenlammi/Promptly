@@ -1,0 +1,16 @@
+# Promptly speech-to-text worker.
+#
+# faster-whisper is a CTranslate2 reimplementation of OpenAI Whisper —
+# no torch, several times faster, and runs comfortably in int8 on CPU.
+# It bundles a Silero VAD (onnxruntime) used to trim silence before
+# transcription, and decodes the incoming audio with PyAV (which ships
+# its own ffmpeg), so WebM/Opus from the browser's MediaRecorder needs
+# no extra system codecs.
+faster-whisper==1.1.0
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+# faster-whisper 1.1.0 imports ``requests`` in its model-download helper
+# but doesn't declare it as a dependency — pin it explicitly so the
+# import at startup doesn't blow up.
+requests==2.32.3

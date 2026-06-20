@@ -111,6 +111,12 @@ services:
       # submission as defense-in-depth on top of the network boundary.
       - CODE_SANDBOX_URL=http://sandbox:8000
       - CODE_SANDBOX_SECRET=${SECRET_KEY}
+      # Speech-to-text worker (Voice Phase 1). Internal-only faster-whisper
+      # service the backend POSTs dictation clips to. STT_BACKEND=local
+      # uses it; set STT_BACKEND=openai (+ an OpenAI key) to route to the
+      # cloud Whisper API instead.
+      - WHISPER_URL=http://whisper:8000
+      - STT_BACKEND=${STT_BACKEND:-local}
     volumes:
       # Bind-mount user data into the project directory so it's
       # always next to the compose file — easy to back up, easy
@@ -136,6 +142,11 @@ services:
       # ``service_started`` is enough; we don't wait on a healthcheck
       # because the model pull can take a minute on a cold install.
       ollama:
+        condition: service_started
+      # Soft dependency — dictation degrades to a friendly "transcription
+      # unavailable" error if Whisper is still loading its model, rather
+      # than blocking the whole backend boot on the weight download.
+      whisper:
         condition: service_started
     restart: unless-stopped
     healthcheck:
@@ -416,6 +427,41 @@ services:
       start_period: 20s
     networks:
       - sandbox-net
+
+  whisper:
+    # Speech-to-text worker (Voice Phase 1). Wraps faster-whisper in a
+    # tiny FastAPI service; the backend POSTs dictation clips to
+    # http://whisper:8000/transcribe over the internal network. CPU/int8
+    # by default so it runs on any homelab box — no GPU required.
+    #
+    # First start downloads the model weights (~140 MB for ``base``) into
+    # ./data/whisper, so give it a generous start_period before the
+    # healthcheck counts failures. Bump WHISPER_MODEL to small/medium/
+    # large-v3 (and add a GPU) for higher accuracy.
+    build:
+      context: ./whisper
+      dockerfile: Dockerfile
+    container_name: Promptly-Whisper
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+    volumes:
+      # Persist downloaded model weights so the pull is a one-time cost.
+      - ./data/whisper:/root/.cache
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Long start period: the model download + load on a cold install
+      # can take a couple of minutes on a slow connection.
+      start_period: 180s
+    networks:
+      - promptly
 
 networks:
   promptly:

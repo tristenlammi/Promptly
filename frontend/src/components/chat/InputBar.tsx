@@ -33,7 +33,7 @@ import { filesApi } from "@/api/files";
 import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { useDictation } from "@/hooks/useDictation";
 import { useComposerStore } from "@/store/composerStore";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
@@ -561,7 +561,9 @@ export function InputBar({
     // Don't send while a drop is still uploading. Cheaper UX than dropping
     // the file silently.
     if (pending.some((p) => !p.error)) return;
-    if (speech.isListening) speech.stop();
+    // Discard any in-progress recording on send — we don't want a
+    // half-spoken clip transcribing into the next, already-sent turn.
+    if (dictation.busy) dictation.cancel();
     onSend(trimmed, attachments);
     setValue("");
     setAttachments([]);
@@ -612,10 +614,12 @@ export function InputBar({
     setCaret(el.selectionStart ?? 0);
   }, []);
 
-  // Voice dictation (Phase 2.1). The hook delivers finalised chunks via
-  // ``onFinal``; we append each to the composer with sensible spacing.
-  // Hidden entirely when the Web Speech API is unavailable.
-  const speech = useSpeechRecognition({
+  // Voice dictation (Voice Phase 1). Records a clip with MediaRecorder and
+  // transcribes it server-side via Whisper — works in every browser and
+  // keeps audio on the user's own server (unlike the old Web Speech API).
+  // The hook delivers the full transcript via ``onFinal``; we append it
+  // to the composer with sensible spacing.
+  const dictation = useDictation({
     onFinal: (chunk) => {
       const piece = chunk.trim();
       if (!piece) return;
@@ -790,7 +794,7 @@ export function InputBar({
               </span>
             </div>
           )}
-          {speech.isListening && (
+          {dictation.isRecording && (
             <div
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
@@ -800,8 +804,32 @@ export function InputBar({
             >
               <Mic className="h-3 w-3 shrink-0 animate-pulse" />
               <span className="leading-snug">
-                {speech.interimText || "Listening… speak now."}
+                Recording… tap the mic to finish.
               </span>
+            </div>
+          )}
+          {dictation.status === "transcribing" && (
+            <div
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
+                "bg-[var(--accent)]/10 text-[var(--accent)]"
+              )}
+              role="status"
+            >
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+              <span className="leading-snug">Transcribing…</span>
+            </div>
+          )}
+          {dictation.error && !dictation.busy && (
+            <div
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
+                "bg-red-500/10 text-red-600 dark:text-red-400"
+              )}
+              role="status"
+            >
+              <Mic className="h-3 w-3 shrink-0" />
+              <span className="leading-snug">{dictation.error}</span>
             </div>
           )}
           {enhanceStatus === "loading" && (
@@ -942,15 +970,20 @@ export function InputBar({
                 )}
                 {!isMobile && <span className="font-medium">Enhance</span>}
               </button>}
-              {speech.supported && (
+              {dictation.supported && (
                 <button
                   type="button"
-                  onClick={() => speech.toggle()}
-                  disabled={disabled || streaming}
+                  onClick={() => dictation.toggle()}
+                  // Disabled while sending or mid-transcription (nothing to
+                  // toggle then). Recording stays tappable so the user can
+                  // stop it.
+                  disabled={
+                    disabled || streaming || dictation.status === "transcribing"
+                  }
                   className={cn(
                     "inline-flex items-center rounded-full border transition",
                     "disabled:cursor-not-allowed disabled:opacity-50",
-                    speech.isListening
+                    dictation.isRecording
                       ? "border-red-500/60 bg-red-500/10 text-red-600 dark:text-red-400"
                       : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
                     isMobile
@@ -958,24 +991,39 @@ export function InputBar({
                       : "h-8 gap-1.5 px-2.5 text-xs"
                   )}
                   aria-label={
-                    speech.isListening ? "Stop dictation" : "Dictate message"
+                    dictation.isRecording ? "Stop dictation" : "Dictate message"
                   }
-                  aria-pressed={speech.isListening}
+                  aria-pressed={dictation.isRecording}
                   title={
-                    speech.isListening
-                      ? "Stop dictation"
-                      : "Dictate — speak to type"
+                    dictation.isRecording
+                      ? "Stop & transcribe"
+                      : dictation.status === "transcribing"
+                        ? "Transcribing…"
+                        : "Dictate — speak to type"
                   }
                 >
-                  <Mic
-                    className={cn(
-                      isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
-                      speech.isListening && "animate-pulse"
-                    )}
-                  />
+                  {dictation.status === "transcribing" ? (
+                    <Loader2
+                      className={cn(
+                        isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
+                        "animate-spin"
+                      )}
+                    />
+                  ) : (
+                    <Mic
+                      className={cn(
+                        isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
+                        dictation.isRecording && "animate-pulse"
+                      )}
+                    />
+                  )}
                   {!isMobile && (
                     <span className="font-medium">
-                      {speech.isListening ? "Listening…" : "Voice"}
+                      {dictation.isRecording
+                        ? "Stop"
+                        : dictation.status === "transcribing"
+                          ? "Transcribing…"
+                          : "Voice"}
                     </span>
                   )}
                 </button>

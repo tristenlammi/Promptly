@@ -282,6 +282,7 @@ from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
 from app.memory.router import router as memory_router  # noqa: E402
 from app.tasks.router import router as tasks_router  # noqa: E402
+from app.voice.router import router as voice_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
@@ -365,6 +366,8 @@ app.include_router(
 app.include_router(study_router, prefix="/api/study", tags=["study"])
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
+# Voice — speech-to-text dictation (Phase 1). POST /api/voice/transcribe.
+app.include_router(voice_router, prefix="/api/voice", tags=["voice"])
 app.include_router(billing_router, prefix="/api/usage", tags=["usage"])
 app.include_router(research_router, prefix="/api", tags=["research"])
 app.include_router(search_router, prefix="/api/search", tags=["search"])
