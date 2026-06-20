@@ -140,13 +140,33 @@ export function useDictation(
     setError(null);
     cancelledRef.current = false;
 
+    // A non-secure context (plain HTTP on a non-localhost origin) strips
+    // ``getUserMedia`` entirely — catch it early with a clear message
+    // rather than a generic "permission denied".
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      setError(
+        "Voice needs a secure (HTTPS) connection. Open Promptly over https://."
+      );
+      return;
+    }
+
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setError(
-        "Microphone permission was denied. Enable it in your browser's site settings."
-      );
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setError("No microphone was found.");
+      } else if (name === "NotAllowedError" || name === "SecurityError") {
+        // Could be a user denial OR the page's Permissions-Policy blocking
+        // the mic (in which case no prompt ever appears) — cover both.
+        setError(
+          "Microphone access is blocked. Allow the mic for this site; if no " +
+            "prompt appears, the server's Permissions-Policy may be blocking it."
+        );
+      } else {
+        setError("Couldn't access the microphone. Try again.");
+      }
       return;
     }
     streamRef.current = stream;
