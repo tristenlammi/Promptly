@@ -1,6 +1,7 @@
 """Pydantic schemas for the auth module."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -185,6 +186,26 @@ class UserPreferencesUpdate(BaseModel):
     # = no change, ``""`` (or whitespace-only) clears it. Capped to keep
     # the per-turn prompt overhead bounded.
     custom_system_prompt: str | None = Field(default=None, max_length=8000)
+    # Preferred text-to-speech voice for read-aloud + voice mode. A Kokoro
+    # voice id like ``"af_heart"`` (``[accent][gender]_name``). ``None`` =
+    # no change; ``""`` clears it (falls back to the server default).
+    # Format-validated (not allowlisted against the live model) so the
+    # backend doesn't have to track the exact voice catalogue.
+    tts_voice: str | None = Field(default=None, max_length=64)
+
+    @field_validator("tts_voice")
+    @classmethod
+    def _clean_tts_voice(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if v == "":
+            return ""  # "" → clear (handled by the merge layer)
+        # Kokoro ids are short, lowercase ``xx_name`` tokens. Reject
+        # anything else rather than persisting junk into settings.
+        if not re.fullmatch(r"[a-z]{2}_[a-z]+", v):
+            raise ValueError("Invalid voice id.")
+        return v
 
     @field_validator("hidden_nav")
     @classmethod

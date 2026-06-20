@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   UserRound,
+  Volume2,
 } from "lucide-react";
 
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
@@ -17,6 +18,7 @@ import { NotificationsPanel } from "@/components/account/NotificationsPanel";
 import { PersonalContextPanel } from "@/components/account/PersonalContextPanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { UsagePanel } from "@/components/account/UsagePanel";
+import { VoicePanel } from "@/components/account/VoicePanel";
 import { MfaSettingsPanel } from "@/components/mfa/MfaSettingsPanel";
 import { TopNav } from "@/components/layout/TopNav";
 import { useAuthStore } from "@/store/authStore";
@@ -51,6 +53,7 @@ export function AccountSecurityPage() {
     { id: "chat", label: "Chat defaults", icon: SlidersHorizontal, node: <ChatPreferencesPanel /> },
     { id: "memory", label: "Memory", icon: Brain, node: <MemoryPanel /> },
     { id: "interface", label: "Interface", icon: LayoutGrid, node: <FeatureVisibilityPanel /> },
+    { id: "voice", label: "Voice", icon: Volume2, node: <VoicePanel /> },
     { id: "usage", label: "Usage & cost", icon: BarChart3, node: <UsagePanel /> },
     { id: "prompts", label: "Saved prompts", icon: Bookmark, node: <SavedPromptsPanel /> },
     { id: "notifications", label: "Notifications", icon: Bell, node: <NotificationsPanel /> },

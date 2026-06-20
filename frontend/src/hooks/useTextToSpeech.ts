@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { voiceApi } from "@/api/voice";
+import { useAuthStore } from "@/store/authStore";
 
 /**
  * Server-side text-to-speech playback via Kokoro (``/api/voice/tts``).
@@ -150,10 +151,19 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
 
       // Fetch one chunk to an object URL. Returns null if this run was
       // superseded or the fetch failed.
+      // Resolve the voice once per utterance: an explicit ``opts.voice``
+      // (e.g. the account picker's preview) wins; otherwise fall back to
+      // the user's saved preference, then the server default. Read from
+      // the store at call time so changing the voice takes effect on the
+      // next utterance without rebuilding this callback.
+      const prefVoice =
+        useAuthStore.getState().user?.settings?.tts_voice || null;
+      const voice = opts?.voice ?? prefVoice;
+
       const fetchChunk = async (i: number): Promise<string | null> => {
         try {
           const blob = await voiceApi.synthesize(chunks[i], {
-            voice: opts?.voice ?? null,
+            voice,
             speed: opts?.speed ?? 1.0,
             signal: ac.signal,
           });

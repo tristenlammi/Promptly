@@ -66,6 +66,9 @@ export interface UserSettings {
    *  system prompt. Overridden by per-workspace and per-chat instructions.
    *  Capped at 8000 chars server-side. */
   custom_system_prompt?: string;
+  /** Preferred Kokoro TTS voice id (e.g. ``"af_heart"``) for read-aloud
+   *  and voice mode. Absent = the server default. */
+  tts_voice?: string;
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -94,6 +97,8 @@ export interface UserPreferencesUpdate {
   hidden_conversations?: string[];
   /** Account-wide custom system prompt. Pass an empty string to clear. */
   custom_system_prompt?: string;
+  /** Preferred TTS voice id. Pass an empty string to clear (use default). */
+  tts_voice?: string;
 }
 
 export interface User {
