@@ -37,7 +37,10 @@ backend/alembic/versions/*.pyc
 # ---- Stateful container data (bind-mounted from compose) ----
 # Created on first `docker compose up` and contains the live
 # database, uploads, redis snapshots, etc. Never goes in git.
-data/
+# Anchored to the repo root (leading slash) so it ONLY ignores the
+# top-level ./data/ runtime dir — an unanchored ``data/`` also matched
+# nested source dirs like frontend/src/data/, silently dropping files.
+/data/
 
 # Legacy named-volume directory names (kept for cleanup of
 # earlier installs that may still have them lying around).
