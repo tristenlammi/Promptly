@@ -496,35 +496,47 @@ async def save_spreadsheet(
     workspace_id: uuid.UUID,
     sheet_id: uuid.UUID,
     payload: SpreadsheetSaveRequest,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SpreadsheetResponse:
     """Persist a spreadsheet page's workbook (debounced save from the
-    editor). Single-user for now — live collaboration is a later phase."""
+    editor). Single-user for now — live collaboration is a later phase.
+    Re-indexes the sheet so its cell text feeds workspace RAG + memory."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
     sheet.data = payload.data
+    text_changed = (
+        payload.content_text is not None
+        and payload.content_text != sheet.content_text
+    )
     if payload.content_text is not None:
         sheet.content_text = payload.content_text
+    # The sheet is backed by a ``kind='sheet'`` WorkspaceItem; we need its id
+    # both to align an in-editor rename and to enqueue re-indexing.
+    sheet_item = (
+        await db.execute(
+            select(WorkspaceItem).where(
+                WorkspaceItem.ref_id == sheet.id,
+                WorkspaceItem.kind == "sheet",
+            )
+        )
+    ).scalars().first()
     if payload.title is not None and payload.title.strip():
         new_title = payload.title.strip()
         sheet.title = new_title
-        # Keep the tree node / notebook tab title aligned with an in-editor
-        # rename — a sheet is backed by a ``kind='sheet'`` WorkspaceItem.
-        sheet_item = (
-            await db.execute(
-                select(WorkspaceItem).where(
-                    WorkspaceItem.ref_id == sheet.id,
-                    WorkspaceItem.kind == "sheet",
-                )
-            )
-        ).scalars().first()
         if sheet_item is not None:
             sheet_item.title = new_title
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(sheet)
+    # Embed the fresh cell text off the request path (no-op without an
+    # embedding provider; the content_text still feeds full-dump + memory).
+    if text_changed and sheet_item is not None:
+        from app.workspaces.knowledge import index_sheet_for_workspace
+
+        background.add_task(index_sheet_for_workspace, ws.id, sheet_item.id)
     return SpreadsheetResponse.model_validate(sheet)
 
 

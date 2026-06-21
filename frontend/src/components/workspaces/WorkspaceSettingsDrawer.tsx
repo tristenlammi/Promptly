@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Archive,
   ArchiveRestore,
   BarChart3,
+  Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -679,18 +680,58 @@ function SettingsTab({
     (memModelId || null) !== (workspace.memory_model_id || null) ||
     (memProviderId || null) !== (workspace.memory_provider_id || null);
 
-  const handleSave = async () => {
+  // Autosave: debounce changes and persist them, no Save button. The
+  // indicator below reflects saving / saved / failed. ``title`` can't be
+  // blanked (it's required), so an empty title just parks until refilled.
+  const [saveState, setSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const skipFirst = useRef(true);
+
+  useEffect(() => {
+    if (!canEdit) return;
+    if (skipFirst.current) {
+      skipFirst.current = false;
+      return;
+    }
     if (!dirty || !title.trim()) return;
-    await update.mutateAsync({
-      title: title.trim(),
-      description: description.trim() || null,
-      system_prompt: systemPrompt.trim() || null,
-      default_model_id: modelId,
-      default_provider_id: providerId,
-      memory_model_id: memModelId,
-      memory_provider_id: memProviderId,
-    });
-  };
+    const t = setTimeout(async () => {
+      setSaveState("saving");
+      try {
+        await update.mutateAsync({
+          title: title.trim(),
+          description: description.trim() || null,
+          system_prompt: systemPrompt.trim() || null,
+          default_model_id: modelId,
+          default_provider_id: providerId,
+          memory_model_id: memModelId,
+          memory_provider_id: memProviderId,
+        });
+        setSaveState("saved");
+      } catch {
+        setSaveState("error");
+      }
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    title,
+    description,
+    systemPrompt,
+    modelId,
+    providerId,
+    memModelId,
+    memProviderId,
+    dirty,
+    canEdit,
+  ]);
+
+  // Let the "Saved" confirmation fade back to the resting hint.
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const t = setTimeout(() => setSaveState("idle"), 2500);
+    return () => clearTimeout(t);
+  }, [saveState]);
 
   const toggleAutoMemory = async () => {
     await update.mutateAsync({
@@ -744,15 +785,11 @@ function SettingsTab({
           }}
         />
         {canEdit && (
-          <div className="flex items-center justify-end">
-            <Button
-              variant="primary"
-              leftIcon={<Save className="h-3.5 w-3.5" />}
-              onClick={handleSave}
-              disabled={!dirty || !title.trim() || update.isPending}
-            >
-              {update.isPending ? "Saving..." : "Save changes"}
-            </Button>
+          <div className="flex h-5 items-center justify-end">
+            <AutosaveIndicator
+              state={saveState}
+              needsTitle={!title.trim()}
+            />
           </div>
         )}
       </section>
@@ -831,8 +868,7 @@ function SettingsTab({
               </li>
             </ul>
             <p>
-              Leave on the default if you're unsure. Saved with{" "}
-              <strong>Save changes</strong> above.
+              Leave on the default if you're unsure. Saves automatically.
             </p>
           </div>
           <WorkspaceMemoryEditor
@@ -880,6 +916,53 @@ function SettingsTab({
         </section>
       )}
     </div>
+  );
+}
+
+/** Tiny status line that replaces the old "Save changes" button — the
+ *  General settings now autosave on change. */
+function AutosaveIndicator({
+  state,
+  needsTitle,
+}: {
+  state: "idle" | "saving" | "saved" | "error";
+  needsTitle: boolean;
+}) {
+  if (needsTitle && state !== "saving") {
+    return (
+      <span className="text-xs text-amber-500">
+        Title can't be empty — changes pause until you add one.
+      </span>
+    );
+  }
+  if (state === "saving") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  if (state === "saved") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500">
+        <Check className="h-3 w-3" />
+        Saved
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-red-500">
+        <CircleAlert className="h-3 w-3" />
+        Couldn't save — keep editing to retry
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-[var(--text-muted)]">
+      Changes save automatically
+    </span>
   );
 }
 

@@ -63,5 +63,11 @@ class GeneratedKind(str, Enum):
     # change. Keyed off the board ``WorkspaceItem.ref_id``.
     BOARD_TEXT = "board_text"
 
+    # Backing text file for a workspace sheet. Holds the client-flattened
+    # cell text so the spreadsheet feeds ``knowledge_chunks`` like a note.
+    # Lives in the workspace's ``Sheets/`` Drive folder; re-written on save.
+    # Keyed off ``Spreadsheet.text_file_id``.
+    SHEET_TEXT = "sheet_text"
+
 
 __all__ = ["GeneratedKind"]

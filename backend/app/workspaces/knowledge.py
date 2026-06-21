@@ -44,6 +44,7 @@ from app.auth.models import User
 from app.chat.models import (
     Conversation,
     Message,
+    Spreadsheet,
     Workspace,
     WorkspaceCanvas,
     WorkspaceFile,
@@ -633,6 +634,128 @@ async def index_canvas_for_workspace(
                 pass
 
 
+async def index_sheet_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed a sheet's flattened cell text into the workspace pool.
+
+    The client pushes flattened cell text on save (``content_text``); we
+    mirror it onto a backing Drive file (``Spreadsheet.text_file_id``,
+    created on demand) and embed that, so the sheet participates in
+    retrieval like a note/canvas/board. Index status is tracked on the
+    navigator item row (kind='sheet'). Owns its own session
+    (``BackgroundTasks``-safe); no-ops when embeddings aren't configured.
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "sheet" or item.ref_id is None:
+                return
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+            sheet = await db.get(Spreadsheet, item.ref_id)
+            if sheet is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            text = (sheet.content_text or "").strip()
+            if not text:
+                # Empty sheet → drop any stale chunks + blank the backing file
+                # so full-dump stops inlining old cells; park at queued.
+                if sheet.text_file_id is not None:
+                    await delete_existing_chunks(
+                        db,
+                        scope_kind="workspace",
+                        scope_id=workspace_id,
+                        user_file_id=sheet.text_file_id,
+                    )
+                    uf = await db.get(UserFile, sheet.text_file_id)
+                    if uf is not None and uf.trashed_at is None:
+                        uf.content_text = None
+                        try:
+                            abs_path = absolute_path(uf.storage_path)
+                            abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            with open(abs_path, "w", encoding="utf-8") as fh:
+                                fh.write("")
+                            uf.size_bytes = 0
+                        except OSError:
+                            pass
+                await _set_note_index_status(
+                    db, item_id=item_id, status="queued"
+                )
+                return
+
+            current_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(
+                db, item_id=item_id, status="embedding"
+            )
+            uf = await _ensure_sheet_backing_file(
+                db, ws=ws, sheet=sheet, text=text
+            )
+            if uf is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="workspace owner missing",
+                )
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    text,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db, item_id=item_id, status="ready", indexed_hash=current_hash
+            )
+        except Exception:  # noqa: BLE001 - last-line catch
+            logger.exception("index_sheet_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error="indexing error"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
 # ---------------------------------------------------------------------
 # Chat ingestion (opt-in chat-as-context — 0090)
 # ---------------------------------------------------------------------
@@ -1027,6 +1150,65 @@ async def _ensure_board_backing_file(
     return uf
 
 
+async def _ensure_sheet_backing_file(
+    db: AsyncSession, *, ws: Workspace, sheet: Spreadsheet, text: str
+) -> UserFile | None:
+    """Create or update the Drive file backing a sheet's RAG text. The file
+    id is stored on ``Spreadsheet.text_file_id`` so re-indexes update it in
+    place — the spreadsheet analogue of :func:`_ensure_board_backing_file`."""
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    title = sheet.title or "Sheet"
+
+    if sheet.text_file_id is not None:
+        uf = await db.get(UserFile, sheet.text_file_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            uf.filename = f"{title}.md"
+            uf.size_bytes = len(text.encode("utf-8"))
+            uf.content_text = text
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db, user_id=owner.id, parent_id=ws.root_folder_id, name="Sheets"
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=f"{title}.md",
+        original_filename=f"{title}.md",
+        mime_type="text/markdown",
+        size_bytes=len(text.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.SHEET_TEXT.value,
+        content_text=text,
+    )
+    db.add(uf)
+    await db.flush()
+    sheet.text_file_id = uf.id
+    return uf
+
+
 async def index_board_for_workspace(
     workspace_id: uuid.UUID,
     item_id: uuid.UUID,
@@ -1280,6 +1462,19 @@ async def context_disabled_file_ids(
     )
     out.update(r for (r,) in canvas_ids if r is not None)
 
+    sheet_ids = await db.execute(
+        select(Spreadsheet.text_file_id)
+        .join(WorkspaceItem, WorkspaceItem.ref_id == Spreadsheet.id)
+        .outerjoin(Parent, Parent.id == WorkspaceItem.parent_id)
+        .where(
+            WorkspaceItem.workspace_id == workspace_id,
+            WorkspaceItem.kind == "sheet",
+            Spreadsheet.text_file_id.is_not(None),
+            _disabled(WorkspaceItem),
+        )
+    )
+    out.update(r for (r,) in sheet_ids if r is not None)
+
     file_ids = await db.execute(
         select(WorkspaceFile.file_id).where(
             WorkspaceFile.workspace_id == workspace_id,
@@ -1354,14 +1549,38 @@ async def _workspace_boards(
     return [(it, uf) for it, uf in rows if uf.id not in excluded]
 
 
+async def _workspace_sheets(
+    db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
+) -> list[tuple[WorkspaceItem, Spreadsheet]]:
+    """Live sheet items paired with their backing spreadsheet row, minus
+    anything excluded by the sheet's backing ``text_file_id``."""
+    rows = (
+        await db.execute(
+            select(WorkspaceItem, Spreadsheet)
+            .join(Spreadsheet, Spreadsheet.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == workspace_id,
+                WorkspaceItem.kind == "sheet",
+            )
+            .order_by(WorkspaceItem.position.asc())
+        )
+    ).all()
+    return [
+        (it, s)
+        for it, s in rows
+        if s.text_file_id is None or s.text_file_id not in excluded
+    ]
+
+
 def _format_context_block(
     notes: list[tuple[WorkspaceItem, UserFile]],
     canvases: list[tuple[WorkspaceItem, "WorkspaceCanvas"]],
     boards: list[tuple[WorkspaceItem, UserFile]] | None = None,
+    sheets: list[tuple[WorkspaceItem, "Spreadsheet"]] | None = None,
 ) -> str | None:
-    """Full text of the workspace's notes + canvases + boards for full-dump
-    mode. Capped so a runaway set can't blow the context window (retrieval
-    takes over past the cap). ``None`` when there's nothing to inject."""
+    """Full text of the workspace's notes + canvases + boards + sheets for
+    full-dump mode. Capped so a runaway set can't blow the context window
+    (retrieval takes over past the cap). ``None`` when there's nothing."""
     sections: list[tuple[str, str]] = []
     for it, uf in notes:
         text = (uf.content_text or "").strip()
@@ -1375,12 +1594,16 @@ def _format_context_block(
         text = (uf.content_text or "").strip()
         if text:
             sections.append((f"{it.title} (board)", text))
+    for it, s in sheets or []:
+        text = (s.content_text or "").strip()
+        if text:
+            sections.append((f"{it.title} (sheet)", text))
     if not sections:
         return None
 
     header = (
-        "The user's notes, canvases, and boards in this workspace. Treat "
-        "them as authoritative context for this conversation:"
+        "The user's notes, canvases, boards, and sheets in this workspace. "
+        "Treat them as authoritative context for this conversation:"
     )
     parts: list[str] = []
     used = 0
@@ -1517,7 +1740,14 @@ async def build_workspace_injection(
     note_rows = await _workspace_notes(db, workspace_id, excluded)
     canvas_rows = await _workspace_canvases(db, workspace_id, excluded)
     board_rows = await _workspace_boards(db, workspace_id, excluded)
-    if not file_rows and not note_rows and not canvas_rows and not board_rows:
+    sheet_rows = await _workspace_sheets(db, workspace_id, excluded)
+    if (
+        not file_rows
+        and not note_rows
+        and not canvas_rows
+        and not board_rows
+        and not sheet_rows
+    ):
         # No retrievable content, but the map still tells the chat what's here.
         return WorkspaceInjection(system_block=map_md)
 
@@ -1535,7 +1765,9 @@ async def build_workspace_injection(
         return WorkspaceInjection(
             system_block=_with_map(
                 map_md,
-                _format_context_block(note_rows, canvas_rows, board_rows),
+                _format_context_block(
+                    note_rows, canvas_rows, board_rows, sheet_rows
+                ),
             ),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
@@ -1649,6 +1881,11 @@ WORKSPACE_MEMORY_SOURCE_KIND = "workspace_memory"
 _MEMORY_COOLDOWN_SECONDS = 180.0
 _last_memory_run: dict[str, float] = {}
 
+# Char cap on the workspace-documents block fed to the librarian (notes,
+# sheets, canvases, boards). Keeps the merge prompt bounded so a few big
+# docs can't crowd out the chat signal (~3k tokens of documents).
+_MEMORY_DOCS_CHAR_CAP = 12000
+
 
 async def get_workspace_memory_doc(
     db: AsyncSession, workspace_id: uuid.UUID
@@ -1761,8 +1998,10 @@ def _format_transcript_excerpt(
 _MERGE_SYSTEM_PROMPT = (
     "You are the librarian for a workspace's living 'Workspace Memory' — a "
     "compact, accurate record of what has been established across its chats. "
-    "You are given the CURRENT memory (which may be empty) and RECENT CHAT "
-    "EXCERPTS. Produce the UPDATED memory document.\n\n"
+    "You are given the CURRENT memory (which may be empty), RECENT CHAT "
+    "EXCERPTS, and the workspace's own DOCUMENTS (notes, sheets, canvases, "
+    "boards). Mine all of them for durable signal. Produce the UPDATED memory "
+    "document.\n\n"
     "WHAT TO CAPTURE (durable signal):\n"
     "- The user's explicit decisions and commitments (\"let's use X\", \"go "
     "with B\", \"the goal is Y\").\n"
@@ -1864,9 +2103,6 @@ async def regenerate_workspace_memory(
         .scalars()
         .all()
     )
-    if not recent_convs:
-        return None, 0
-
     # Build per-conversation transcripts, each capped to _MEMORY_BG_MSG_LIMIT
     # so the merged prompt stays bounded.
     excerpts: list[str] = []
@@ -1887,7 +2123,45 @@ async def regenerate_workspace_memory(
             continue
         excerpts.append(_format_transcript_excerpt(textual, c.title))
 
-    if not excerpts:
+    # Also mine the workspace's own documents — durable decisions and facts
+    # often live in a note, sheet, board, or canvas, not just in chat. Respect
+    # the same per-item "use as workspace context" toggle, and cap the total
+    # so a few big docs can't crowd out the chat signal.
+    doc_excluded = await context_disabled_file_ids(db, ws.id)
+    doc_sections: list[tuple[str, str]] = []
+    for it, uf in await _workspace_notes(db, ws.id, doc_excluded):
+        t = (uf.content_text or "").strip()
+        if t:
+            doc_sections.append((it.title or "Note", t))
+    for it, cv in await _workspace_canvases(db, ws.id, doc_excluded):
+        t = (cv.content_text or "").strip()
+        if t:
+            doc_sections.append((f"{it.title or 'Canvas'} (canvas)", t))
+    for it, uf in await _workspace_boards(db, ws.id, doc_excluded):
+        t = (uf.content_text or "").strip()
+        if t:
+            doc_sections.append((f"{it.title or 'Board'} (board)", t))
+    for it, sh in await _workspace_sheets(db, ws.id, doc_excluded):
+        t = (sh.content_text or "").strip()
+        if t:
+            doc_sections.append((f"{it.title or 'Sheet'} (sheet)", t))
+
+    docs_text = ""
+    if doc_sections:
+        buf: list[str] = []
+        used = 0
+        for title, text in doc_sections:
+            seg = f"\n\n## {title}\n{text}"
+            if used + len(seg) > _MEMORY_DOCS_CHAR_CAP:
+                seg = seg[: max(0, _MEMORY_DOCS_CHAR_CAP - used)]
+            buf.append(seg)
+            used += len(seg)
+            if used >= _MEMORY_DOCS_CHAR_CAP:
+                break
+        docs_text = "".join(buf).strip()
+
+    # Nothing to distil from — no usable chats and no documents.
+    if not excerpts and not docs_text:
         return None, 0
 
     # Load the current memory doc (if any) so the librarian *updates* it —
@@ -1904,10 +2178,16 @@ async def regenerate_workspace_memory(
             "=== CURRENT WORKSPACE MEMORY (revise this; keep what still "
             "holds, supersede what changed) ===\n" + current_memory
         )
-    parts.append(
-        "=== RECENT CHAT EXCERPTS (new material to mine for durable "
-        "signal) ===\n" + "\n\n".join(excerpts)
-    )
+    if excerpts:
+        parts.append(
+            "=== RECENT CHAT EXCERPTS (new material to mine for durable "
+            "signal) ===\n" + "\n\n".join(excerpts)
+        )
+    if docs_text:
+        parts.append(
+            "=== WORKSPACE DOCUMENTS (notes, sheets, canvases, boards — mine "
+            "these for durable signal too) ===\n" + docs_text
+        )
     merged_input = "\n\n".join(parts)
 
     try:
@@ -1934,11 +2214,18 @@ async def regenerate_workspace_memory(
         return None, 0
 
     conv_count = len(recent_convs)
+    src_bits: list[str] = []
+    if excerpts:
+        src_bits.append(
+            f"the last {len(excerpts)} active chat"
+            f"{'s' if len(excerpts) > 1 else ''}"
+        )
+    if doc_sections:
+        src_bits.append("the workspace's notes, sheets, canvases, and boards")
+    source_desc = " and ".join(src_bits) or "this workspace"
     body = (
         f"# Workspace Memory: {ws.title}\n\n"
-        f"_Auto-maintained from the last {conv_count} active chat"
-        f"{'s' if conv_count > 1 else ''} in this workspace. "
-        "Turn this off in Settings._\n\n"
+        f"_Auto-maintained from {source_desc}. Turn this off in Settings._\n\n"
         f"{memo}\n"
     )
 

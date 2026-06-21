@@ -14,6 +14,62 @@ const DEFAULT_SHEET: Sheet[] = [{ name: "Sheet1" }];
 
 const SAVE_DEBOUNCE_MS = 800;
 
+// Cap the flattened text we ship for RAG so a giant sheet can't bloat the
+// save payload / embeddings. ~200k chars is far beyond any normal sheet.
+const FLATTEN_CHAR_CAP = 200_000;
+
+/** A Fortune-sheet cell can be a primitive or a ``{ v, m, ... }`` object —
+ *  ``m`` is the rendered display string, ``v`` the raw value. Prefer the
+ *  display string so dates/formats read the way the user sees them. */
+function cellText(cell: unknown): string {
+  if (cell == null) return "";
+  if (typeof cell !== "object") return String(cell).trim();
+  const obj = cell as { v?: unknown; m?: unknown };
+  const val = obj.m ?? obj.v;
+  return val == null ? "" : String(val).trim();
+}
+
+/** Flatten a workbook to plain text for workspace RAG + memory: each sheet
+ *  becomes a ``## Name`` block of tab-separated rows. Reads either the sparse
+ *  ``celldata`` form or the dense ``data`` grid, whichever the workbook uses. */
+function flattenSheets(sheets: Sheet[]): string {
+  const blocks: string[] = [];
+  for (const sheet of sheets) {
+    const name = sheet.name || "Sheet";
+    const rows = new Map<number, Map<number, string>>();
+    const put = (r: number, c: number, cell: unknown) => {
+      const text = cellText(cell);
+      if (!text) return;
+      if (!rows.has(r)) rows.set(r, new Map());
+      rows.get(r)!.set(c, text);
+    };
+    const cd = (sheet as { celldata?: Array<{ r: number; c: number; v: unknown }> })
+      .celldata;
+    const grid = (sheet as { data?: unknown[][] }).data;
+    if (cd && cd.length) {
+      for (const { r, c, v } of cd) put(r, c, v);
+    } else if (grid) {
+      for (let r = 0; r < grid.length; r++) {
+        const row = grid[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) put(r, c, row[c]);
+      }
+    }
+    if (!rows.size) continue;
+    const lines = [...rows.keys()]
+      .sort((a, b) => a - b)
+      .map((r) => {
+        const cols = rows.get(r)!;
+        return [...cols.keys()]
+          .sort((a, b) => a - b)
+          .map((c) => cols.get(c)!)
+          .join("\t");
+      });
+    blocks.push(`## ${name}\n${lines.join("\n")}`);
+  }
+  return blocks.join("\n\n").trim().slice(0, FLATTEN_CHAR_CAP);
+}
+
 /**
  * A spreadsheet page of a multi-page document. Mounts Fortune-sheet against a
  * ``Spreadsheet`` row and persists edits with a debounced PUT (single-user
@@ -62,7 +118,10 @@ export function WorkspaceSheetPane({
         saveTimer.current = null;
         if (latest.current && canEdit) {
           void workspacesApi
-            .saveSpreadsheet(workspaceId, sheetId, { data: latest.current })
+            .saveSpreadsheet(workspaceId, sheetId, {
+              data: latest.current,
+              content_text: flattenSheets(latest.current),
+            })
             .catch(() => {});
         }
       }
@@ -79,9 +138,11 @@ export function WorkspaceSheetPane({
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
+        const sheets = latest.current ?? next;
         void workspacesApi
           .saveSpreadsheet(workspaceId, sheetId, {
-            data: latest.current ?? next,
+            data: sheets,
+            content_text: flattenSheets(sheets),
           })
           .catch(() => {});
       }, SAVE_DEBOUNCE_MS);
