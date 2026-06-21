@@ -321,19 +321,21 @@ export function WorkspaceDetailPage() {
           >
             {settingsOpen ? (
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-5 py-2.5">
-                  <h2 className="truncate text-sm font-semibold text-[var(--text)]">
-                    {workspace.title} · Settings
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => setSettingsOpen(false)}
-                    title="Close settings"
-                    aria-label="Close settings"
-                    className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+                <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)]">
+                  <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2 px-5 py-2.5">
+                    <h2 className="truncate text-sm font-semibold text-[var(--text)]">
+                      {workspace.title} · Settings
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsOpen(false)}
+                      title="Close settings"
+                      aria-label="Close settings"
+                      className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
                 <WorkspaceSettingsContent
                   workspace={workspace}
