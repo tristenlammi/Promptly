@@ -132,6 +132,16 @@ export interface SpreadsheetData {
   data: unknown[] | null;
 }
 
+/** The workspace's rolling memory doc, as maintained by the librarian and
+ *  optionally hand-edited. ``exists`` is false until the first auto-run or
+ *  manual save creates it. */
+export interface WorkspaceMemory {
+  exists: boolean;
+  markdown: string;
+  updated_at: string | null;
+  auto_memory_enabled: boolean;
+}
+
 /** A board's coloured label, defined once per board and referenced by id
  *  from cards. ``color`` is a hex string. */
 export interface BoardLabel {
@@ -518,6 +528,23 @@ export const workspacesApi = {
   async map(id: string): Promise<{ markdown: string }> {
     const { data } = await apiClient.get<{ markdown: string }>(
       `/workspaces/${id}/map`
+    );
+    return data;
+  },
+
+  /** The librarian-maintained workspace memory doc (viewable + editable). */
+  async getMemory(id: string): Promise<WorkspaceMemory> {
+    const { data } = await apiClient.get<WorkspaceMemory>(
+      `/workspaces/${id}/memory`
+    );
+    return data;
+  },
+
+  /** Replace the workspace memory with a hand-edited version. */
+  async saveMemory(id: string, markdown: string): Promise<WorkspaceMemory> {
+    const { data } = await apiClient.put<WorkspaceMemory>(
+      `/workspaces/${id}/memory`,
+      { markdown }
     );
     return data;
   },

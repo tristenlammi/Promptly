@@ -1649,6 +1649,88 @@ WORKSPACE_MEMORY_SOURCE_KIND = "workspace_memory"
 _MEMORY_COOLDOWN_SECONDS = 180.0
 _last_memory_run: dict[str, float] = {}
 
+
+async def get_workspace_memory_doc(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> UserFile | None:
+    """The workspace's single auto-maintained memory file, if one exists.
+
+    There is at most one per workspace (the librarian retires the old row
+    each refresh), identified by ``source_kind == workspace_memory``."""
+    return (
+        (
+            await db.execute(
+                select(UserFile)
+                .join(WorkspaceFile, WorkspaceFile.file_id == UserFile.id)
+                .where(
+                    WorkspaceFile.workspace_id == workspace_id,
+                    UserFile.source_kind == WORKSPACE_MEMORY_SOURCE_KIND,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+async def save_workspace_memory(
+    db: AsyncSession, *, ws: Workspace, content_md: str
+) -> uuid.UUID | None:
+    """Create or replace the workspace memory doc with user-supplied Markdown.
+
+    Lets a user hand-edit what the librarian stored (or seed it before any
+    auto-run). Overwrites the existing pinned file in place when present so
+    its id — and thus its pin + any references — stay stable. Returns the
+    file id to (re)index, or ``None`` when the workspace has no resolvable
+    owner. The caller re-indexes so the edit participates in retrieval."""
+    from app.files.generated import (
+        GeneratedFileError,
+        overwrite_generated_file,
+        persist_generated_file,
+    )
+
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+
+    body = content_md.strip() or f"# Workspace Memory: {ws.title}"
+    data = (body + "\n").encode("utf-8")
+
+    existing = await get_workspace_memory_doc(db, ws.id)
+    if existing is not None:
+        try:
+            await overwrite_generated_file(
+                db, user=owner, file=existing, content=data
+            )
+        except GeneratedFileError:
+            return None
+        # ``overwrite_generated_file`` committed the byte/size change; refresh
+        # the extracted text too so the AI (and the next GET) see the edit
+        # even before re-indexing populates embeddings.
+        existing.content_text = body
+        ws.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return existing.id
+
+    try:
+        new_uf = await persist_generated_file(
+            db,
+            user=owner,
+            filename="Workspace Memory.md",
+            mime_type="text/markdown",
+            content=data,
+            source_kind=WORKSPACE_MEMORY_SOURCE_KIND,
+        )
+    except GeneratedFileError:
+        return None
+    new_uf.content_text = body
+    db.add(
+        WorkspaceFile(workspace_id=ws.id, file_id=new_uf.id, pinned_by=owner.id)
+    )
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return new_uf.id
+
 # How many recently-active conversations to pull for cross-chat merging.
 # Enough to capture meaningful divergence without blowing the summary
 # model's context. The most recent conversation is always included
@@ -1814,16 +1896,7 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
         # Load the current memory doc (if any) so the librarian *updates* it
         # — accumulating durable knowledge and superseding changed decisions —
         # rather than regenerating from only the last few chats.
-        existing = (
-            await db.execute(
-                select(UserFile)
-                .join(WorkspaceFile, WorkspaceFile.file_id == UserFile.id)
-                .where(
-                    WorkspaceFile.workspace_id == ws.id,
-                    UserFile.source_kind == WORKSPACE_MEMORY_SOURCE_KIND,
-                )
-            )
-        ).scalars().first()
+        existing = await get_workspace_memory_doc(db, ws.id)
         current_memory = (
             (existing.content_text or "").strip() if existing is not None else ""
         )

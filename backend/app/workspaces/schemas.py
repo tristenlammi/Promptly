@@ -356,3 +356,18 @@ class SpreadsheetSaveRequest(BaseModel):
     data: Any
     content_text: str | None = None
     title: str | None = Field(default=None, max_length=255)
+
+
+class WorkspaceMemoryResponse(BaseModel):
+    """The workspace's auto-maintained memory doc, surfaced for viewing/editing."""
+
+    exists: bool
+    markdown: str
+    updated_at: datetime | None = None
+    auto_memory_enabled: bool
+
+
+class WorkspaceMemorySaveRequest(BaseModel):
+    """A hand-edit of the workspace memory. Replaces the stored Markdown."""
+
+    markdown: str = Field(max_length=40_000)

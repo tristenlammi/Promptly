@@ -27,6 +27,7 @@ import {
   type WorkspaceTaskCreatePayload,
   type WorkspaceTaskUpdatePayload,
   type BoardConfig,
+  type WorkspaceMemory,
 } from "@/api/workspaces";
 
 const KEYS = {
@@ -205,6 +206,30 @@ export function useWorkspaceMap(id: string | undefined) {
     queryKey: id ? ["workspaces", "map", id] : ["workspaces", "map", "_"],
     queryFn: () => workspacesApi.map(id as string),
     enabled: Boolean(id),
+  });
+}
+
+export function useWorkspaceMemory(id: string | undefined) {
+  return useQuery<WorkspaceMemory>({
+    queryKey: id
+      ? ["workspaces", "memory", id]
+      : ["workspaces", "memory", "_"],
+    queryFn: () => workspacesApi.getMemory(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+export function useSaveWorkspaceMemory(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (markdown: string) => workspacesApi.saveMemory(id, markdown),
+    onSuccess: (data) => {
+      qc.setQueryData(["workspaces", "memory", id], data);
+      // The memory file is pinned, so its edit shifts per-turn context +
+      // the map; refresh detail so the budget bar/map reflect it.
+      qc.invalidateQueries({ queryKey: KEYS.detail(id) });
+      qc.invalidateQueries({ queryKey: ["workspaces", "map", id] });
+    },
   });
 }
 

@@ -62,6 +62,8 @@ from app.workspaces.schemas import (
     WorkspaceItemNode,
     WorkspaceItemResponse,
     WorkspaceItemUpdate,
+    WorkspaceMemoryResponse,
+    WorkspaceMemorySaveRequest,
 )
 from app.workspaces.shares import (
     get_accessible_workspace,
@@ -542,6 +544,65 @@ async def get_workspace_map_endpoint(
 
     md = await build_workspace_map(db, ws.id)
     return {"markdown": md or ""}
+
+
+# ---------------------------------------------------------------------
+# Workspace memory — the librarian-maintained doc, viewable + editable
+# ---------------------------------------------------------------------
+@router.get("/{workspace_id}/memory", response_model=WorkspaceMemoryResponse)
+async def get_workspace_memory_endpoint(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceMemoryResponse:
+    """The workspace's rolling memory doc — what the librarian has distilled.
+    Read access for anyone who can open the workspace; edits gated separately."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    from app.workspaces.knowledge import get_workspace_memory_doc
+
+    uf = await get_workspace_memory_doc(db, ws.id)
+    return WorkspaceMemoryResponse(
+        exists=uf is not None,
+        markdown=(uf.content_text or "") if uf is not None else "",
+        updated_at=uf.updated_at if uf is not None else None,
+        auto_memory_enabled=ws.auto_memory_enabled,
+    )
+
+
+@router.put("/{workspace_id}/memory", response_model=WorkspaceMemoryResponse)
+async def save_workspace_memory_endpoint(
+    workspace_id: uuid.UUID,
+    payload: WorkspaceMemorySaveRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceMemoryResponse:
+    """Hand-edit the workspace memory. Replaces the stored Markdown in place
+    and re-indexes it so the edit feeds retrieval. Requires write access."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    from app.workspaces.knowledge import (
+        get_workspace_memory_doc,
+        index_file_for_workspace,
+        save_workspace_memory,
+    )
+
+    file_id = await save_workspace_memory(db, ws=ws, content_md=payload.markdown)
+    if file_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Couldn't save workspace memory.",
+        )
+    # Re-embed off the request path so the editor returns immediately.
+    background.add_task(index_file_for_workspace, ws.id, file_id, force=True)
+
+    uf = await get_workspace_memory_doc(db, ws.id)
+    return WorkspaceMemoryResponse(
+        exists=uf is not None,
+        markdown=(uf.content_text or "") if uf is not None else payload.markdown,
+        updated_at=uf.updated_at if uf is not None else None,
+        auto_memory_enabled=ws.auto_memory_enabled,
+    )
 
 
 # ---------------------------------------------------------------------

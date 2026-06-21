@@ -34,6 +34,8 @@ import {
   usePinWorkspaceFile,
   useReindexWorkspace,
   useUnpinWorkspaceFile,
+  useWorkspaceMemory,
+  useSaveWorkspaceMemory,
   useWorkspaceUsage,
 } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
@@ -831,6 +833,10 @@ function SettingsTab({
               <strong>Save changes</strong> above.
             </p>
           </div>
+          <WorkspaceMemoryEditor
+            workspaceId={workspace.id}
+            canEdit={canEdit}
+          />
         </section>
       )}
 
@@ -870,6 +876,132 @@ function SettingsTab({
             move back to your top-level chat list.
           </p>
         </section>
+      )}
+    </div>
+  );
+}
+
+/**
+ * View + hand-edit the librarian-maintained Workspace Memory. Collapsed by
+ * default (the section above already explains the feature); expanding reveals
+ * the stored Markdown, editable in place. Saving replaces the pinned memory
+ * file and re-indexes it. Viewers (no edit access) see it read-only.
+ */
+function WorkspaceMemoryEditor({
+  workspaceId,
+  canEdit,
+}: {
+  workspaceId: string;
+  canEdit: boolean;
+}) {
+  const { data, isLoading } = useWorkspaceMemory(workspaceId);
+  const save = useSaveWorkspaceMemory(workspaceId);
+  const [open, setOpen] = useState(false);
+  // ``draft === null`` means "in sync with the server copy"; any string is an
+  // unsaved edit. This keeps the textarea live-updating from auto-runs until
+  // the moment the user starts typing.
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const loaded = data?.markdown ?? "";
+  const value = draft ?? loaded;
+  const dirty = draft !== null && draft !== loaded;
+
+  const status = isLoading
+    ? "Loading…"
+    : data?.exists
+      ? data.updated_at
+        ? `Updated ${new Date(data.updated_at).toLocaleString()}`
+        : "Stored"
+      : "Not created yet";
+
+  const handleSave = async () => {
+    if (!dirty) return;
+    try {
+      await save.mutateAsync(value);
+      setDraft(null);
+    } catch {
+      // Surfaced by the axios interceptor's error toast.
+    }
+  };
+
+  return (
+    <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+      >
+        <span className="flex items-center gap-2 text-xs font-medium text-[var(--text)]">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+          Stored memory
+        </span>
+        <span className="truncate text-[11px] text-[var(--text-muted)]">
+          {status}
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-2 border-t border-[var(--border)] px-3 py-3">
+          {!data?.exists && !isLoading && (
+            <p className="text-xs text-[var(--text-muted)]">
+              No memory yet. It's created automatically after the first chat
+              once <strong>Keep a rolling workspace memory</strong> is on — or
+              you can write the initial memory here and save.
+            </p>
+          )}
+          <textarea
+            value={value}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={!canEdit || isLoading}
+            rows={14}
+            placeholder={
+              canEdit
+                ? "# Workspace overview\n\n## Durable facts\n- …\n\n## Decisions\n- …"
+                : "No memory stored yet."
+            }
+            className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
+            maxLength={40000}
+          />
+          {canEdit && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Edits replace what the librarian stored. It may rewrite them on
+                the next run if chats contradict them.
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                {dirty && (
+                  <button
+                    type="button"
+                    onClick={() => setDraft(null)}
+                    disabled={save.isPending}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-50"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Reset
+                  </button>
+                )}
+                <Button
+                  variant="primary"
+                  leftIcon={
+                    save.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )
+                  }
+                  onClick={handleSave}
+                  disabled={!dirty || save.isPending}
+                >
+                  {save.isPending ? "Saving…" : "Save memory"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
