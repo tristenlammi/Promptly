@@ -36,8 +36,10 @@ import {
   useUnpinWorkspaceFile,
   useWorkspaceMemory,
   useSaveWorkspaceMemory,
+  useRegenerateWorkspaceMemory,
   useWorkspaceUsage,
 } from "@/hooks/useWorkspaces";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/utils/cn";
 import { estimateTokens, formatTokens } from "@/utils/tokenEstimate";
 
@@ -896,6 +898,7 @@ function WorkspaceMemoryEditor({
 }) {
   const { data, isLoading } = useWorkspaceMemory(workspaceId);
   const save = useSaveWorkspaceMemory(workspaceId);
+  const regen = useRegenerateWorkspaceMemory(workspaceId);
   const [open, setOpen] = useState(false);
   // ``draft === null`` means "in sync with the server copy"; any string is an
   // unsaved edit. This keeps the textarea live-updating from auto-runs until
@@ -914,6 +917,8 @@ function WorkspaceMemoryEditor({
         : "Stored"
       : "Not created yet";
 
+  const busy = save.isPending || regen.isPending;
+
   const handleSave = async () => {
     if (!dirty) return;
     try {
@@ -921,6 +926,24 @@ function WorkspaceMemoryEditor({
       setDraft(null);
     } catch {
       // Surfaced by the axios interceptor's error toast.
+    }
+  };
+
+  const handleRegenerate = async () => {
+    if (dirty) {
+      const ok = await confirm({
+        title: "Regenerate memory",
+        message:
+          "Rebuild the memory from recent chats now? This discards your unsaved edits above.",
+        confirmLabel: "Regenerate",
+      });
+      if (!ok) return;
+    }
+    try {
+      await regen.mutateAsync();
+      setDraft(null); // show the freshly distilled doc
+    } catch {
+      // 422 (no model / no chats) or other failure → toast via interceptor.
     }
   };
 
@@ -967,39 +990,57 @@ function WorkspaceMemoryEditor({
             maxLength={40000}
           />
           {canEdit && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] text-[var(--text-muted)]">
-                Edits replace what the librarian stored. It may rewrite them on
-                the next run if chats contradict them.
-              </span>
-              <div className="flex shrink-0 items-center gap-2">
-                {dirty && (
-                  <button
-                    type="button"
-                    onClick={() => setDraft(null)}
-                    disabled={save.isPending}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-50"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    Reset
-                  </button>
-                )}
+            <>
+              <div className="flex items-center justify-between gap-2">
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   leftIcon={
-                    save.isPending ? (
+                    regen.isPending ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Save className="h-3.5 w-3.5" />
+                      <RefreshCw className="h-3.5 w-3.5" />
                     )
                   }
-                  onClick={handleSave}
-                  disabled={!dirty || save.isPending}
+                  onClick={handleRegenerate}
+                  disabled={busy}
+                  title="Rebuild the memory from this workspace's recent chats now"
                 >
-                  {save.isPending ? "Saving…" : "Save memory"}
+                  {regen.isPending ? "Regenerating…" : "Regenerate from chats"}
                 </Button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {dirty && (
+                    <button
+                      type="button"
+                      onClick={() => setDraft(null)}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-50"
+                    >
+                      Reset
+                    </button>
+                  )}
+                  <Button
+                    variant="primary"
+                    leftIcon={
+                      save.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )
+                    }
+                    onClick={handleSave}
+                    disabled={!dirty || busy}
+                  >
+                    {save.isPending ? "Saving…" : "Save memory"}
+                  </Button>
+                </div>
               </div>
-            </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                <strong>Regenerate</strong> distils the workspace's recent chats
+                into a fresh memory (merging with what's here). Hand-edits you{" "}
+                <strong>Save</strong> may still be rewritten on the next run if
+                chats contradict them.
+              </p>
+            </>
           )}
         </div>
       )}

@@ -605,6 +605,49 @@ async def save_workspace_memory_endpoint(
     )
 
 
+@router.post(
+    "/{workspace_id}/memory/regenerate", response_model=WorkspaceMemoryResponse
+)
+async def regenerate_workspace_memory_endpoint(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceMemoryResponse:
+    """Manually rebuild the workspace memory from recent chats now — bypasses
+    the auto-memory opt-in and the per-workspace cooldown. Requires write
+    access. Runs the distillation inline so the fresh memory comes back in the
+    response."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    from app.workspaces.knowledge import (
+        get_workspace_memory_doc,
+        index_file_for_workspace,
+        mark_memory_refreshed,
+        regenerate_workspace_memory,
+    )
+
+    file_id, _count = await regenerate_workspace_memory(db, ws=ws)
+    if file_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Couldn't regenerate memory. Make sure a memory or default "
+                "model is set and the workspace has at least one chat with a "
+                "few messages."
+            ),
+        )
+    mark_memory_refreshed(ws.id)
+    await index_file_for_workspace(ws.id, file_id, force=True)
+
+    uf = await get_workspace_memory_doc(db, ws.id)
+    return WorkspaceMemoryResponse(
+        exists=uf is not None,
+        markdown=(uf.content_text or "") if uf is not None else "",
+        updated_at=uf.updated_at if uf is not None else None,
+        auto_memory_enabled=ws.auto_memory_enabled,
+    )
+
+
 # ---------------------------------------------------------------------
 # Read one item (e.g. a board's config / label registry)
 # ---------------------------------------------------------------------

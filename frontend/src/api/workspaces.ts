@@ -549,6 +549,14 @@ export const workspacesApi = {
     return data;
   },
 
+  /** Rebuild the memory from recent chats now (bypasses cooldown + opt-in). */
+  async regenerateMemory(id: string): Promise<WorkspaceMemory> {
+    const { data } = await apiClient.post<WorkspaceMemory>(
+      `/workspaces/${id}/memory/regenerate`
+    );
+    return data;
+  },
+
   // --- Spreadsheet pages (single-user persistence) ---------------------
   async getSpreadsheet(
     id: string,

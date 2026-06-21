@@ -1804,23 +1804,183 @@ _MERGE_SYSTEM_PROMPT = (
 )
 
 
-async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
-    """Refresh a workspace's rolling 'Workspace Memory' by merging the last
-    few conversations, when the workspace has ``auto_memory_enabled``.
+def mark_memory_refreshed(workspace_id: uuid.UUID) -> None:
+    """Stamp the per-workspace debounce clock — call after a manual
+    regenerate so the automatic path doesn't immediately redo the work."""
+    _last_memory_run[str(workspace_id)] = time.monotonic()
 
-    This is a multi-chat upgrade from the original single-chat approach:
-    instead of summarising only the triggering chat, it pulls recent
-    transcripts from up to :data:`_MEMORY_SOURCE_CONV_COUNT` conversations
-    and asks the model to produce a coherent merged document. Knowledge
-    accumulates across conversations rather than overwriting.
 
-    Owns its own session (spawned via ``asyncio.create_task`` from the
-    stream finalize). Entirely best-effort; every failure path is a
-    quiet return. Debounced per workspace.
+async def regenerate_workspace_memory(
+    db: AsyncSession,
+    *,
+    ws: Workspace,
+    fallback_conv: Conversation | None = None,
+) -> tuple[uuid.UUID | None, int]:
+    """Distil the workspace's recent chats into the rolling memory doc.
+
+    The shared core behind both the automatic librarian and the manual
+    "Regenerate now" action. Pulls up to :data:`_MEMORY_SOURCE_CONV_COUNT`
+    recently-active conversations, merges them with the *current* memory,
+    asks the configured memory model for an updated document, and persists
+    it — retiring the prior pinned file. Returns ``(file_id, chat_count)``;
+    ``file_id`` is ``None`` on any soft-fail (no model resolvable, no usable
+    chats, empty model output). The caller owns gating, the session, and
+    re-indexing the returned file.
     """
     from app.files.generated import GeneratedFileError, persist_generated_file
-    from app.models_config.provider import ChatMessage, ProviderError, model_router
+    from app.models_config.provider import ChatMessage, model_router
 
+    # Resolve the memory model: the workspace's dedicated pick, else its
+    # default chat model, else the fallback conversation's model. Lets a
+    # creator on a machine that can't run Ollama point memory at an API model.
+    mem_provider_id = (
+        ws.memory_provider_id
+        or ws.default_provider_id
+        or (fallback_conv.provider_id if fallback_conv else None)
+    )
+    mem_model_id = (
+        ws.memory_model_id
+        or ws.default_model_id
+        or (fallback_conv.model_id if fallback_conv else None)
+    )
+    if not mem_provider_id or not mem_model_id:
+        return None, 0
+    provider = await db.get(ModelProvider, mem_provider_id)
+    if provider is None or not provider.enabled:
+        return None, 0
+
+    recent_convs = list(
+        (
+            await db.execute(
+                select(Conversation)
+                .where(
+                    Conversation.workspace_id == ws.id,
+                    Conversation.temporary_mode.is_(None),
+                )
+                .order_by(Conversation.updated_at.desc())
+                .limit(_MEMORY_SOURCE_CONV_COUNT)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not recent_convs:
+        return None, 0
+
+    # Build per-conversation transcripts, each capped to _MEMORY_BG_MSG_LIMIT
+    # so the merged prompt stays bounded.
+    excerpts: list[str] = []
+    for c in recent_convs:
+        msgs = list(
+            (
+                await db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == c.id)
+                    .order_by(Message.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        textual = [m for m in msgs if (m.content or "").strip() and m.role != "system"]
+        if len(textual) < 2:
+            continue
+        excerpts.append(_format_transcript_excerpt(textual, c.title))
+
+    if not excerpts:
+        return None, 0
+
+    # Load the current memory doc (if any) so the librarian *updates* it —
+    # accumulating durable knowledge and superseding changed decisions —
+    # rather than regenerating from only the last few chats.
+    existing = await get_workspace_memory_doc(db, ws.id)
+    current_memory = (
+        (existing.content_text or "").strip() if existing is not None else ""
+    )
+
+    parts: list[str] = []
+    if current_memory:
+        parts.append(
+            "=== CURRENT WORKSPACE MEMORY (revise this; keep what still "
+            "holds, supersede what changed) ===\n" + current_memory
+        )
+    parts.append(
+        "=== RECENT CHAT EXCERPTS (new material to mine for durable "
+        "signal) ===\n" + "\n\n".join(excerpts)
+    )
+    merged_input = "\n\n".join(parts)
+
+    try:
+        chunks: list[str] = []
+        async for token in model_router.stream_chat(
+            provider=provider,
+            model_id=mem_model_id,
+            messages=[ChatMessage(role="user", content=merged_input)],
+            system=_MERGE_SYSTEM_PROMPT,
+            temperature=0.2,
+            max_tokens=1500,
+        ):
+            chunks.append(token)
+        memo = "".join(chunks).strip()
+    except Exception:  # noqa: BLE001 - ProviderError or any other failure
+        logger.debug("workspace-memory: merge call failed for workspace %s", ws.id)
+        return None, 0
+
+    if not memo:
+        return None, 0
+
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None, 0
+
+    conv_count = len(recent_convs)
+    body = (
+        f"# Workspace Memory: {ws.title}\n\n"
+        f"_Auto-maintained from the last {conv_count} active chat"
+        f"{'s' if conv_count > 1 else ''} in this workspace. "
+        "Turn this off in Settings._\n\n"
+        f"{memo}\n"
+    )
+
+    try:
+        new_uf = await persist_generated_file(
+            db,
+            user=owner,
+            filename="Workspace Memory.md",
+            mime_type="text/markdown",
+            content=body.encode("utf-8"),
+            source_kind=WORKSPACE_MEMORY_SOURCE_KIND,
+        )
+    except GeneratedFileError:
+        return None, 0
+
+    # Set ``content_text`` directly so the doc reads back correctly even when
+    # embeddings aren't configured (the re-index that populates it is a no-op
+    # in that case). This is also what the next merge loads as current memory.
+    new_uf.content_text = body
+    db.add(WorkspaceFile(workspace_id=ws.id, file_id=new_uf.id, pinned_by=owner.id))
+    if existing is not None:
+        await db.execute(
+            delete(WorkspaceFile).where(
+                WorkspaceFile.workspace_id == ws.id,
+                WorkspaceFile.file_id == existing.id,
+            )
+        )
+        await db.delete(existing)
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return new_uf.id, conv_count
+
+
+async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
+    """Refresh a workspace's rolling 'Workspace Memory' when it has
+    ``auto_memory_enabled`` — the automatic, debounced wrapper around
+    :func:`regenerate_workspace_memory`.
+
+    Owns its own session (spawned via ``asyncio.create_task`` from the
+    stream finalize). Entirely best-effort; every failure path is a quiet
+    return. Debounced per workspace.
+    """
     async with SessionLocal() as db:
         conv = await db.get(Conversation, conversation_id)
         if conv is None or conv.workspace_id is None:
@@ -1835,147 +1995,17 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
             return
         _last_memory_run[key] = now
 
-        # Resolve the memory model: the workspace's dedicated memory model
-        # (creator's pick), else the workspace default chat model, else the
-        # triggering conversation's model. This lets a creator on a machine
-        # that can't run Ollama point memory at an API model.
-        mem_provider_id = (
-            ws.memory_provider_id or ws.default_provider_id or conv.provider_id
-        )
-        mem_model_id = ws.memory_model_id or ws.default_model_id or conv.model_id
-        if not mem_provider_id or not mem_model_id:
-            return
-        provider = await db.get(ModelProvider, mem_provider_id)
-        if provider is None or not provider.enabled:
-            return
-
-        # Pull the last N recently-active conversations in this workspace
-        # (triggering conv always leads the list).
-        recent_convs = list(
-            (
-                await db.execute(
-                    select(Conversation)
-                    .where(
-                        Conversation.workspace_id == ws.id,
-                        Conversation.temporary_mode.is_(None),
-                    )
-                    .order_by(Conversation.updated_at.desc())
-                    .limit(_MEMORY_SOURCE_CONV_COUNT)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not recent_convs:
-            return
-
-        # Build per-conversation transcripts. Triggering conv is always
-        # pulled in full (up to _MEMORY_BG_MSG_LIMIT); older ones also
-        # up to the same limit so the merged prompt stays bounded.
-        excerpts: list[str] = []
-        for c in recent_convs:
-            msgs = list(
-                (
-                    await db.execute(
-                        select(Message)
-                        .where(Message.conversation_id == c.id)
-                        .order_by(Message.created_at.asc())
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            textual = [m for m in msgs if (m.content or "").strip() and m.role != "system"]
-            if len(textual) < 2:
-                continue
-            excerpts.append(_format_transcript_excerpt(textual, c.title))
-
-        if not excerpts:
-            return
-
-        # Load the current memory doc (if any) so the librarian *updates* it
-        # — accumulating durable knowledge and superseding changed decisions —
-        # rather than regenerating from only the last few chats.
-        existing = await get_workspace_memory_doc(db, ws.id)
-        current_memory = (
-            (existing.content_text or "").strip() if existing is not None else ""
+        ws_id = ws.id
+        file_id, conv_count = await regenerate_workspace_memory(
+            db, ws=ws, fallback_conv=conv
         )
 
-        parts: list[str] = []
-        if current_memory:
-            parts.append(
-                "=== CURRENT WORKSPACE MEMORY (revise this; keep what still "
-                "holds, supersede what changed) ===\n" + current_memory
-            )
-        parts.append(
-            "=== RECENT CHAT EXCERPTS (new material to mine for durable "
-            "signal) ===\n" + "\n\n".join(excerpts)
-        )
-        merged_input = "\n\n".join(parts)
-
-        try:
-            chunks: list[str] = []
-            async for token in model_router.stream_chat(
-                provider=provider,
-                model_id=mem_model_id,
-                messages=[ChatMessage(role="user", content=merged_input)],
-                system=_MERGE_SYSTEM_PROMPT,
-                temperature=0.2,
-                max_tokens=1500,
-            ):
-                chunks.append(token)
-            memo = "".join(chunks).strip()
-        except Exception:  # noqa: BLE001 - ProviderError or any other failure
-            logger.debug("auto-memory: merge call failed for workspace %s", ws.id)
-            return
-
-        if not memo:
-            return
-
-        owner = await db.get(User, ws.user_id)
-        if owner is None:
-            return
-
-        conv_count = len(recent_convs)
-        body = (
-            f"# Workspace Memory: {ws.title}\n\n"
-            f"_Auto-maintained from the last {conv_count} active chat"
-            f"{'s' if conv_count > 1 else ''} in this workspace. "
-            "Turn this off in Settings._\n\n"
-            f"{memo}\n"
-        )
-
-        # ``existing`` was loaded above (to feed the librarian); reuse it to
-        # retire the old pinned memory file after the new one is persisted.
-        try:
-            new_uf = await persist_generated_file(
-                db,
-                user=owner,
-                filename="Workspace Memory.md",
-                mime_type="text/markdown",
-                content=body.encode("utf-8"),
-                source_kind=WORKSPACE_MEMORY_SOURCE_KIND,
-            )
-        except GeneratedFileError:
-            return
-
-        db.add(WorkspaceFile(workspace_id=ws.id, file_id=new_uf.id, pinned_by=owner.id))
-        if existing is not None:
-            await db.execute(
-                delete(WorkspaceFile).where(
-                    WorkspaceFile.workspace_id == ws.id,
-                    WorkspaceFile.file_id == existing.id,
-                )
-            )
-            await db.delete(existing)
-        ws.updated_at = datetime.now(timezone.utc)
-        await db.commit()
-        new_id = new_uf.id
-
+    if file_id is None:
+        return
     # Index the fresh memory file so it participates in retrieval.
-    await index_file_for_workspace(ws.id, new_id, force=True)
+    await index_file_for_workspace(ws_id, file_id, force=True)
     logger.info(
         "auto-memory refreshed for workspace %s (merged %d chats)",
-        ws.id,
-        len(recent_convs),
+        ws_id,
+        conv_count,
     )
