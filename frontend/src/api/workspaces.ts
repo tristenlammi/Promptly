@@ -35,6 +35,8 @@ export interface WorkspaceSummary {
   description: string | null;
   default_model_id: string | null;
   default_provider_id: string | null;
+  memory_model_id?: string | null;
+  memory_provider_id?: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -375,6 +377,8 @@ export interface UpdateWorkspacePayload {
   default_model_id?: string | null;
   default_provider_id?: string | null;
   auto_memory_enabled?: boolean;
+  memory_model_id?: string | null;
+  memory_provider_id?: string | null;
 }
 
 export const workspacesApi = {

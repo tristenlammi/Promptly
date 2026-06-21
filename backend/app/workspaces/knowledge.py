@@ -1677,25 +1677,48 @@ def _format_transcript_excerpt(
 
 
 _MERGE_SYSTEM_PROMPT = (
-    "You are maintaining a rolling 'Workspace Memory' document that "
-    "accumulates knowledge across all chats in a workspace.\n\n"
-    "You will receive excerpts from several recent chats. Your job is "
-    "to synthesise them into a single up-to-date memory document.\n\n"
-    "Output format (Markdown only, no preamble):\n"
-    "- `## Workspace overview` — one or two sentences: what is this workspace about?\n"
-    "- `## Durable facts` — bulleted list of things that are always true: "
-    "tech stack, constraints, preferences, names, versions.\n"
-    "- `## Recent decisions` — bulleted: concrete choices made across "
-    "recent chats. Include which chat if relevant.\n"
-    "- `## Open questions` — bulleted: unresolved threads across any of "
-    "the recent chats. Omit if none.\n"
-    "- `## Next steps` — bulleted: actions mentioned as upcoming. Omit if none.\n\n"
-    "Rules:\n"
-    "- Merge and deduplicate — don't repeat the same fact twice.\n"
-    "- Prefer the most recent information when chats conflict.\n"
-    "- Write in third person: 'The user ...', 'The assistant ...'.\n"
-    "- Hard ceiling: under 700 words. Aim for 350-500.\n"
-    "- No commentary about this being a summary."
+    "You are the librarian for a workspace's living 'Workspace Memory' — a "
+    "compact, accurate record of what has been established across its chats. "
+    "You are given the CURRENT memory (which may be empty) and RECENT CHAT "
+    "EXCERPTS. Produce the UPDATED memory document.\n\n"
+    "WHAT TO CAPTURE (durable signal):\n"
+    "- The user's explicit decisions and commitments (\"let's use X\", \"go "
+    "with B\", \"the goal is Y\").\n"
+    "- Established facts, constraints, preferences, names, versions, scope.\n"
+    "- The project's overall goal.\n\n"
+    "WHAT TO IGNORE (noise):\n"
+    "- Options or possibilities the ASSISTANT merely offered (\"here are three "
+    "ways…\") — these are NOT decisions until the user endorses one.\n"
+    "- Exploration, brainstorming, questions, hypotheticals, small talk.\n"
+    "- Anything tentative (\"maybe\", \"not sure\") — at most note it under "
+    "Open questions, never as a fact or decision.\n"
+    "The signal is USER ENDORSEMENT: the assistant suggesting something is not "
+    "signal; the user choosing it is.\n\n"
+    "UPDATING & CONFLICTS:\n"
+    "- PRESERVE everything in the current memory that still holds — do NOT drop "
+    "a fact just because the recent chats didn't mention it.\n"
+    "- When new material CHANGES a prior entry on the SAME subject, SUPERSEDE "
+    "it: replace the old value with the new one — do NOT keep both "
+    "contradicting each other. You may briefly note the change, e.g. \"Dog "
+    "name: D (changed from B)\". The newest explicit user decision wins.\n"
+    "- When new material is about a DIFFERENT subject, ADD it.\n"
+    "- If the user re-opens a settled question without deciding, move it from "
+    "Decisions to Open questions.\n\n"
+    "OUTPUT (Markdown only, no preamble or meta-commentary):\n"
+    "- `## Workspace overview` — one or two sentences: the project's goal.\n"
+    "- `## Durable facts` — bullets of things always true: stack, constraints, "
+    "preferences, names, versions. Omit if none.\n"
+    "- `## Decisions` — bullets of concrete choices the user has committed to. "
+    "Omit if none.\n"
+    "- `## Open questions` — bullets of unresolved/tentative threads. Omit if "
+    "none.\n"
+    "- `## Next steps` — bullets of upcoming actions. Omit if none.\n\n"
+    "RULES:\n"
+    "- Third person (\"The user …\").\n"
+    "- Merge and deduplicate; never list the same fact twice or keep "
+    "contradictions.\n"
+    "- Under 700 words; aim for 350-500.\n"
+    "- No commentary about being a summary or about these instructions."
 )
 
 
@@ -1788,7 +1811,34 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
         if not excerpts:
             return
 
-        merged_input = "\n\n".join(excerpts)
+        # Load the current memory doc (if any) so the librarian *updates* it
+        # — accumulating durable knowledge and superseding changed decisions —
+        # rather than regenerating from only the last few chats.
+        existing = (
+            await db.execute(
+                select(UserFile)
+                .join(WorkspaceFile, WorkspaceFile.file_id == UserFile.id)
+                .where(
+                    WorkspaceFile.workspace_id == ws.id,
+                    UserFile.source_kind == WORKSPACE_MEMORY_SOURCE_KIND,
+                )
+            )
+        ).scalars().first()
+        current_memory = (
+            (existing.content_text or "").strip() if existing is not None else ""
+        )
+
+        parts: list[str] = []
+        if current_memory:
+            parts.append(
+                "=== CURRENT WORKSPACE MEMORY (revise this; keep what still "
+                "holds, supersede what changed) ===\n" + current_memory
+            )
+        parts.append(
+            "=== RECENT CHAT EXCERPTS (new material to mine for durable "
+            "signal) ===\n" + "\n\n".join(excerpts)
+        )
+        merged_input = "\n\n".join(parts)
 
         try:
             chunks: list[str] = []
@@ -1822,17 +1872,8 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
             f"{memo}\n"
         )
 
-        existing = (
-            await db.execute(
-                select(UserFile)
-                .join(WorkspaceFile, WorkspaceFile.file_id == UserFile.id)
-                .where(
-                    WorkspaceFile.workspace_id == ws.id,
-                    UserFile.source_kind == WORKSPACE_MEMORY_SOURCE_KIND,
-                )
-            )
-        ).scalars().first()
-
+        # ``existing`` was loaded above (to feed the librarian); reuse it to
+        # retire the old pinned memory file after the new one is persisted.
         try:
             new_uf = await persist_generated_file(
                 db,

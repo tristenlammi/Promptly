@@ -619,6 +619,12 @@ function SettingsTab({
   );
   const [modelId, setModelId] = useState(workspace.default_model_id);
   const [providerId, setProviderId] = useState(workspace.default_provider_id);
+  const [memModelId, setMemModelId] = useState(
+    workspace.memory_model_id ?? null
+  );
+  const [memProviderId, setMemProviderId] = useState(
+    workspace.memory_provider_id ?? null
+  );
   const update = useUpdateWorkspace(workspace.id);
 
   const dirty =
@@ -626,7 +632,9 @@ function SettingsTab({
     (description || "") !== (workspace.description || "") ||
     (systemPrompt || "") !== (workspace.system_prompt || "") ||
     (modelId || null) !== (workspace.default_model_id || null) ||
-    (providerId || null) !== (workspace.default_provider_id || null);
+    (providerId || null) !== (workspace.default_provider_id || null) ||
+    (memModelId || null) !== (workspace.memory_model_id || null) ||
+    (memProviderId || null) !== (workspace.memory_provider_id || null);
 
   const handleSave = async () => {
     if (!dirty || !title.trim()) return;
@@ -636,6 +644,8 @@ function SettingsTab({
       system_prompt: systemPrompt.trim() || null,
       default_model_id: modelId,
       default_provider_id: providerId,
+      memory_model_id: memModelId,
+      memory_provider_id: memProviderId,
     });
   };
 
@@ -727,6 +737,24 @@ function SettingsTab({
               </span>
             </span>
           </label>
+          <WorkspaceModelField
+            modelId={memModelId}
+            providerId={memProviderId}
+            disabled={!canEdit}
+            label="Memory model"
+            labelHint="(maintains the memory — pick any model from your stack)"
+            clearLabel="Use the workspace default model"
+            onChange={(m, p) => {
+              setMemModelId(m);
+              setMemProviderId(p);
+            }}
+          />
+          <p className="text-xs text-[var(--text-muted)]">
+            Choose which model maintains the memory — an API model or a local
+            Ollama model. Leave on the default if you're unsure (machines that
+            can't run Ollama should pick an API model). Saved with{" "}
+            <strong>Save changes</strong> above.
+          </p>
         </section>
       )}
 

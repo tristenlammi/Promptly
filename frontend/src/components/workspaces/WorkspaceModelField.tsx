@@ -16,6 +16,13 @@ interface WorkspaceModelFieldProps {
   /** Read-only: show the current default model but don't allow changing it
    *  (viewers see what the workspace uses without being able to edit). */
   disabled?: boolean;
+  /** Field label (default "Default model"). */
+  label?: string;
+  /** Muted hint after the label. */
+  labelHint?: string;
+  /** Label for the "clear" / fall-back option (default
+   *  "No default — use my current model"). */
+  clearLabel?: string;
 }
 
 /** Controlled model picker for the workspace's default model.
@@ -34,6 +41,9 @@ export function WorkspaceModelField({
   providerId,
   onChange,
   disabled = false,
+  label = "Default model",
+  labelHint = "(new chats in this workspace start with this)",
+  clearLabel = "No default — use my current model",
 }: WorkspaceModelFieldProps) {
   useAvailableModels(); // ensure the catalogue is loaded into the store
   const available = useModelStore((s) => s.available);
@@ -92,10 +102,8 @@ export function WorkspaceModelField({
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-        Default model{" "}
-        <span className="text-[var(--text-muted)]/70">
-          (new chats in this workspace start with this)
-        </span>
+        {label}{" "}
+        <span className="text-[var(--text-muted)]/70">{labelHint}</span>
       </label>
       <div ref={ref} className="relative">
         <button
@@ -113,9 +121,7 @@ export function WorkspaceModelField({
               <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
             )}
             <span className={cn("truncate", !selected && "text-[var(--text-muted)]")}>
-              {selected
-                ? selected.display_name
-                : staleLabel ?? "No default — use my current model"}
+              {selected ? selected.display_name : staleLabel ?? clearLabel}
             </span>
           </span>
           <ChevronDown className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
@@ -127,7 +133,7 @@ export function WorkspaceModelField({
               active={!modelId}
               onClick={() => pick(null)}
               icon={<X className="h-3.5 w-3.5" />}
-              label="No default — use my current model"
+              label={clearLabel}
             />
             {grouped.customs.length > 0 && (
               <>
