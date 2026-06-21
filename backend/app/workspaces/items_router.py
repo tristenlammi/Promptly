@@ -43,6 +43,7 @@ from app.auth.models import User
 from app.chat.models import (
     Conversation,
     DocumentPage,
+    Spreadsheet,
     Workspace,
     WorkspaceCanvas,
     WorkspaceItem,
@@ -57,6 +58,8 @@ from app.workspaces.schemas import (
     DocumentPageCreate,
     DocumentPageResponse,
     DocumentPageUpdate,
+    SpreadsheetResponse,
+    SpreadsheetSaveRequest,
     WorkspaceFileContext,
     WorkspaceItemCreate,
     WorkspaceItemMove,
@@ -394,6 +397,7 @@ async def create_workspace_item(
 # later, spreadsheet rooms. The note keeps ``ref_id`` pointing at the first
 # page so every single-page-era path (collab/RAG/snapshot/delete) is unchanged.
 _DEFAULT_PAGE_TITLE = "Untitled page"
+_DEFAULT_SHEET_TITLE = "Untitled spreadsheet"
 
 
 async def _load_note_item(
@@ -465,11 +469,6 @@ async def create_document_page(
             detail="Workspace owner is missing",
         )
 
-    title = (payload.title or "").strip() or _DEFAULT_PAGE_TITLE
-    notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
-    doc = await create_blank_document(
-        db, owner_id=owner.id, folder_id=notes_folder_id, name=title
-    )
     # Append to the end of the tab strip (pages read left-to-right).
     current_max = await db.scalar(
         select(func.max(DocumentPage.position)).where(
@@ -477,13 +476,34 @@ async def create_document_page(
         )
     )
     position = float(current_max or 0.0) + 1.0
-    page = DocumentPage(
-        item_id=item.id,
-        kind="richtext",
-        ref_id=doc.id,
-        title=title,
-        position=position,
-    )
+
+    if payload.kind == "sheet":
+        # A spreadsheet page: its backing entity is a ``Spreadsheet`` row
+        # (the Fortune-sheet analogue of a canvas), not a Drive Document.
+        title = (payload.title or "").strip() or _DEFAULT_SHEET_TITLE
+        sheet = Spreadsheet(workspace_id=ws.id, title=title)
+        db.add(sheet)
+        await db.flush()  # assign sheet.id before the page links to it
+        page = DocumentPage(
+            item_id=item.id,
+            kind="sheet",
+            ref_id=sheet.id,
+            title=title,
+            position=position,
+        )
+    else:
+        title = (payload.title or "").strip() or _DEFAULT_PAGE_TITLE
+        notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
+        doc = await create_blank_document(
+            db, owner_id=owner.id, folder_id=notes_folder_id, name=title
+        )
+        page = DocumentPage(
+            item_id=item.id,
+            kind="richtext",
+            ref_id=doc.id,
+            title=title,
+            position=position,
+        )
     db.add(page)
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -523,6 +543,10 @@ async def update_document_page(
             uf = await db.get(UserFile, page.ref_id)
             if uf is not None and _strip_doc_ext(uf.filename) != new_title:
                 uf.filename = sanitize_filename(f"{new_title}.html")
+        elif page.kind == "sheet" and page.ref_id is not None:
+            sheet = await db.get(Spreadsheet, page.ref_id)
+            if sheet is not None:
+                sheet.title = new_title
         # If this is the note's primary page, keep the tree title aligned.
         if item.ref_id == page.ref_id and item.title != new_title:
             item.title = new_title
@@ -564,12 +588,21 @@ async def delete_document_page(
         )
 
     now = datetime.now(timezone.utc)
-    # Trash the backing document (its knowledge_chunks cascade off the file
-    # delete, same as a note delete).
+    # Trash/drop the backing entity. A richtext page trashes its Drive doc
+    # (chunks cascade off the file delete); a sheet page drops its
+    # Spreadsheet row and trashes its RAG text file.
     if page.kind == "richtext" and page.ref_id is not None:
         uf = await db.get(UserFile, page.ref_id)
         if uf is not None and uf.trashed_at is None:
             uf.trashed_at = now
+    elif page.kind == "sheet" and page.ref_id is not None:
+        sheet = await db.get(Spreadsheet, page.ref_id)
+        if sheet is not None:
+            if sheet.text_file_id is not None:
+                tf = await db.get(UserFile, sheet.text_file_id)
+                if tf is not None and tf.trashed_at is None:
+                    tf.trashed_at = now
+            await db.delete(sheet)
     # If we removed the note's *primary* page (the one ``item.ref_id`` points
     # at), re-point the item at the new first page so the single-page code
     # paths (collab/RAG/snapshot/delete) keep resolving to a live document.
@@ -583,6 +616,76 @@ async def delete_document_page(
     ws.updated_at = now
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# Spreadsheet pages — single-user persistence
+# ---------------------------------------------------------------------
+async def _load_workspace_spreadsheet(
+    db: AsyncSession, workspace_id: uuid.UUID, sheet_id: uuid.UUID
+) -> Spreadsheet:
+    sheet = await db.get(Spreadsheet, sheet_id)
+    if sheet is None or sheet.workspace_id != workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Spreadsheet not found",
+        )
+    return sheet
+
+
+@router.get(
+    "/{workspace_id}/spreadsheets/{sheet_id}",
+    response_model=SpreadsheetResponse,
+)
+async def get_spreadsheet(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SpreadsheetResponse:
+    """Load a spreadsheet page's workbook. Read access (any member)."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
+    return SpreadsheetResponse.model_validate(sheet)
+
+
+@router.put(
+    "/{workspace_id}/spreadsheets/{sheet_id}",
+    response_model=SpreadsheetResponse,
+)
+async def save_spreadsheet(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    payload: SpreadsheetSaveRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SpreadsheetResponse:
+    """Persist a spreadsheet page's workbook (debounced save from the
+    editor). Single-user for now — live collaboration is a later phase."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
+    sheet.data = payload.data
+    if payload.content_text is not None:
+        sheet.content_text = payload.content_text
+    if payload.title is not None and payload.title.strip():
+        new_title = payload.title.strip()
+        sheet.title = new_title
+        # Keep the page tab title aligned with an in-editor rename.
+        page = (
+            await db.execute(
+                select(DocumentPage).where(
+                    DocumentPage.ref_id == sheet.id,
+                    DocumentPage.kind == "sheet",
+                )
+            )
+        ).scalars().first()
+        if page is not None:
+            page.title = new_title
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(sheet)
+    return SpreadsheetResponse.model_validate(sheet)
 
 
 # ---------------------------------------------------------------------
@@ -1013,26 +1116,38 @@ async def delete_workspace_item(
             uf = await db.get(UserFile, it.ref_id)
             if uf is not None and uf.trashed_at is None:
                 uf.trashed_at = now
-            # A note is a multi-page document — trash every page's backing
-            # doc too. The ``document_pages`` rows themselves cascade off the
-            # item delete (item_id FK), but their files aren't a FK target.
+            # A note is a multi-page document — clean up every page's backing
+            # entity too. The ``document_pages`` rows themselves cascade off
+            # the item delete (item_id FK), but their files/sheets aren't a
+            # tree-cascade target.
             if it.kind == "note":
-                page_ref_ids = list(
+                page_rows = list(
                     (
                         await db.execute(
-                            select(DocumentPage.ref_id).where(
+                            select(
+                                DocumentPage.ref_id, DocumentPage.kind
+                            ).where(
                                 DocumentPage.item_id == it.id,
                                 DocumentPage.ref_id.is_not(None),
                             )
                         )
-                    ).scalars()
+                    ).all()
                 )
-                for pid in page_ref_ids:
-                    if pid == it.ref_id:
-                        continue  # primary page already trashed above
-                    pf = await db.get(UserFile, pid)
-                    if pf is not None and pf.trashed_at is None:
-                        pf.trashed_at = now
+                for pid, pkind in page_rows:
+                    if pkind == "sheet":
+                        sheet = await db.get(Spreadsheet, pid)
+                        if sheet is not None:
+                            if sheet.text_file_id is not None:
+                                tf = await db.get(UserFile, sheet.text_file_id)
+                                if tf is not None and tf.trashed_at is None:
+                                    tf.trashed_at = now
+                            await db.delete(sheet)
+                    else:
+                        if pid == it.ref_id:
+                            continue  # primary page already trashed above
+                        pf = await db.get(UserFile, pid)
+                        if pf is not None and pf.trashed_at is None:
+                            pf.trashed_at = now
         elif it.kind == "canvas" and it.ref_id is not None:
             # Trash the backing text file and drop the canvas row (its
             # chunks cascade off the file delete; the canvas isn't a

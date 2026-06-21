@@ -638,6 +638,50 @@ class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
         return f"<WorkspaceCanvas id={self.id} title={self.title!r}>"
 
 
+class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
+    """A spreadsheet page of a multi-page document (Fortune-sheet).
+
+    The backing entity for a ``DocumentPage`` of ``kind='sheet'`` — the
+    spreadsheet analogue of :class:`WorkspaceCanvas`. Phase 2 persists the
+    workbook as ``data`` (the Fortune-sheet JSON: a list of sheet objects)
+    saved single-user via a debounced PUT. ``content_text`` holds the
+    flattened cell text and ``text_file_id`` the backing Drive text file
+    that carries it into ``knowledge_chunks`` — mirroring how a canvas feeds
+    workspace RAG. Live collaboration (a ``sheet:<id>`` Yjs room) is a later
+    phase; the columns above are all single-user needs for now.
+    """
+
+    __tablename__ = "spreadsheets"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="Untitled spreadsheet",
+        server_default="Untitled spreadsheet",
+    )
+    # Fortune-sheet workbook JSON: a list of sheet objects ``[{name,
+    # celldata, ...}]``. NULL until the first save → the client seeds a
+    # blank sheet.
+    data: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # Flattened cell text for RAG, pushed by the client on save (mirrors
+    # ``WorkspaceCanvas.content_text``).
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Backing Drive text file that carries ``content_text`` into
+    # ``knowledge_chunks``. ``ON DELETE SET NULL`` so a Drive-side delete
+    # doesn't cascade away the spreadsheet.
+    text_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<Spreadsheet id={self.id} title={self.title!r}>"
+
+
 class WorkspaceFile(Base):
     """Pinned-file join row — attaches a :class:`UserFile` to a
     :class:`Workspace` so every new conversation in the workspace

@@ -132,6 +132,15 @@ export interface DocumentPage {
   position: number;
 }
 
+/** A spreadsheet page's persisted state. ``data`` is the Fortune-sheet
+ *  workbook JSON (an array of sheet objects), ``null`` until first save. */
+export interface SpreadsheetData {
+  id: string;
+  workspace_id: string;
+  title: string;
+  data: unknown[] | null;
+}
+
 /** A board's coloured label, defined once per board and referenced by id
  *  from cards. ``color`` is a hex string. */
 export interface BoardLabel {
@@ -522,11 +531,34 @@ export const workspacesApi = {
   async createPage(
     id: string,
     itemId: string,
-    payload: { title?: string } = {}
+    payload: { title?: string; kind?: "richtext" | "sheet" } = {}
   ): Promise<DocumentPage> {
     const { data } = await apiClient.post<DocumentPage>(
       `/workspaces/${id}/items/${itemId}/pages`,
-      { kind: "richtext", ...payload }
+      { kind: payload.kind ?? "richtext", title: payload.title }
+    );
+    return data;
+  },
+
+  // --- Spreadsheet pages (single-user persistence) ---------------------
+  async getSpreadsheet(
+    id: string,
+    sheetId: string
+  ): Promise<SpreadsheetData> {
+    const { data } = await apiClient.get<SpreadsheetData>(
+      `/workspaces/${id}/spreadsheets/${sheetId}`
+    );
+    return data;
+  },
+
+  async saveSpreadsheet(
+    id: string,
+    sheetId: string,
+    payload: { data: unknown; content_text?: string; title?: string }
+  ): Promise<SpreadsheetData> {
+    const { data } = await apiClient.put<SpreadsheetData>(
+      `/workspaces/${id}/spreadsheets/${sheetId}`,
+      payload
     );
     return data;
   },

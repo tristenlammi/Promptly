@@ -23,6 +23,7 @@ import {
   Plus,
   Search,
   Settings,
+  Table2,
   Share2,
   Upload,
   Users,
@@ -50,6 +51,15 @@ const WorkspaceCanvasPane = lazyWithRetry(
       default: m.WorkspaceCanvasPane,
     })),
   "WorkspaceCanvasPane"
+);
+// Lazy too — the Fortune-sheet editor chunk is large and only needed when a
+// spreadsheet page is opened.
+const WorkspaceSheetPane = lazyWithRetry(
+  () =>
+    import("@/components/workspaces/WorkspaceSheetPane").then((m) => ({
+      default: m.WorkspaceSheetPane,
+    })),
+  "WorkspaceSheetPane"
 );
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
@@ -930,6 +940,11 @@ function WorkspaceNotePane({
     setError(null);
     setFile(null);
     syncedTitleRef.current = activePage?.title ?? "";
+    // Sheet pages render their own editor (WorkspaceSheetPane) and manage
+    // their own state — they aren't Drive documents, so skip getFile.
+    if (activePage && activePage.kind !== "richtext") {
+      return;
+    }
     if (!activeRefId) {
       if (pages && pages.length === 0) {
         setError("This document has no pages.");
@@ -956,14 +971,17 @@ function WorkspaceNotePane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRefId]);
 
-  const handleAddPage = useCallback(async () => {
-    try {
-      const created = await createPage.mutateAsync({});
-      setActivePageId(created.id);
-    } catch {
-      // Surfaced by the mutation error toast; nothing to do here.
-    }
-  }, [createPage]);
+  const handleAddPage = useCallback(
+    async (kind: "richtext" | "sheet") => {
+      try {
+        const created = await createPage.mutateAsync({ kind });
+        setActivePageId(created.id);
+      } catch {
+        // Surfaced by the mutation error toast; nothing to do here.
+      }
+    },
+    [createPage]
+  );
 
   const handleDeletePage = useCallback(
     async (pageId: string) => {
@@ -1008,7 +1026,25 @@ function WorkspaceNotePane({
         className="flex min-h-0 flex-1 flex-col"
         onClickCapture={handleEditorClick}
       >
-        {error ? (
+        {activePage?.kind === "sheet" && activeRefId ? (
+          <Suspense
+            fallback={
+              <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading spreadsheet…
+                </span>
+              </div>
+            }
+          >
+            <WorkspaceSheetPane
+              key={activeRefId}
+              workspaceId={workspaceId}
+              sheetId={activeRefId}
+              canEdit={canEdit}
+            />
+          </Suspense>
+        ) : error ? (
           <div className="flex flex-1 items-center justify-center px-6 py-10">
             <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
               {error}
@@ -1067,12 +1103,13 @@ function DocumentPageTabs({
   canEdit: boolean;
   adding: boolean;
   onSelect: (pageId: string) => void;
-  onAdd: () => void;
+  onAdd: (kind: "richtext" | "sheet") => void;
   onRename: (pageId: string, title: string) => void;
   onDelete: (pageId: string) => void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
 
   if (pages.length === 0) return null;
 
@@ -1083,10 +1120,16 @@ function DocumentPageTabs({
     setRenamingId(null);
   };
 
+  const pick = (kind: "richtext" | "sheet") => {
+    setAddOpen(false);
+    onAdd(kind);
+  };
+
   return (
     <div className="flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] px-2 py-1">
       {pages.map((p) => {
         const active = p.id === activePageId;
+        const Icon = p.kind === "sheet" ? Table2 : FileText;
         if (renamingId === p.id) {
           return (
             <input
@@ -1121,10 +1164,11 @@ function DocumentPageTabs({
                 setDraftTitle(p.title);
                 setRenamingId(p.id);
               }}
-              className="max-w-[12rem] truncate"
+              className="inline-flex max-w-[12rem] items-center gap-1.5 truncate"
               title={canEdit ? "Click to open · double-click to rename" : p.title}
             >
-              {p.title || "Untitled"}
+              <Icon className="h-3 w-3 shrink-0 opacity-70" />
+              <span className="truncate">{p.title || "Untitled"}</span>
             </button>
             {canEdit && pages.length > 1 && (
               <button
@@ -1141,20 +1185,57 @@ function DocumentPageTabs({
         );
       })}
       {canEdit && (
-        <button
-          type="button"
-          onClick={onAdd}
-          disabled={adding}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] disabled:opacity-50 dark:hover:bg-white/[0.06]"
-          title="Add a page"
-        >
-          {adding ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Plus className="h-3 w-3" />
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setAddOpen((o) => !o)}
+            disabled={adding}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] disabled:opacity-50 dark:hover:bg-white/[0.06]"
+            title="Add a page"
+            aria-haspopup="menu"
+            aria-expanded={addOpen}
+          >
+            {adding ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Plus className="h-3 w-3" />
+            )}
+            <span>Page</span>
+          </button>
+          {addOpen && (
+            <>
+              {/* click-away backdrop */}
+              {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setAddOpen(false)}
+              />
+              <div
+                role="menu"
+                className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => pick("richtext")}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                >
+                  <FileText className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                  Text page
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => pick("sheet")}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                >
+                  <Table2 className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                  Spreadsheet
+                </button>
+              </div>
+            </>
           )}
-          <span>Page</span>
-        </button>
+        </div>
       )}
     </div>
   );

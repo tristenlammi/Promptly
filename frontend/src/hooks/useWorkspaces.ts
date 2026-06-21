@@ -222,8 +222,9 @@ export function useDocumentPages(
 export function useCreateDocumentPage(workspaceId: string, itemId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { title?: string } = {}) =>
-      workspacesApi.createPage(workspaceId, itemId, payload),
+    mutationFn: (
+      payload: { title?: string; kind?: "richtext" | "sheet" } = {}
+    ) => workspacesApi.createPage(workspaceId, itemId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.pages(workspaceId, itemId) });
     },

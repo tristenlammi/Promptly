@@ -346,10 +346,32 @@ class DocumentPageResponse(BaseModel):
 
 
 class DocumentPageCreate(BaseModel):
-    """Body for ``POST .../items/{item_id}/pages``. Phase 1 ships
-    richtext-only; the spreadsheet kind lands in a later phase."""
+    """Body for ``POST .../items/{item_id}/pages``. ``richtext`` lays down a
+    Drive Document; ``sheet`` a Fortune-sheet spreadsheet."""
 
-    kind: Literal["richtext"] = "richtext"
+    kind: Literal["richtext", "sheet"] = "richtext"
+    title: str | None = Field(default=None, max_length=255)
+
+
+class SpreadsheetResponse(BaseModel):
+    """A spreadsheet page's persisted state. ``data`` is the Fortune-sheet
+    workbook JSON (a list of sheet objects), NULL until the first save."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    data: Any | None
+
+
+class SpreadsheetSaveRequest(BaseModel):
+    """Debounced save from the spreadsheet editor. ``data`` is the full
+    Fortune-sheet workbook; ``content_text`` is the client-flattened cell
+    text used for workspace RAG."""
+
+    data: Any
+    content_text: str | None = None
     title: str | None = Field(default=None, max_length=255)
 
 

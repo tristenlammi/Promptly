@@ -129,6 +129,13 @@ export default defineConfig({
           if (id.includes("@excalidraw") || id.includes("roughjs")) {
             return "excalidraw";
           }
+          // Fortune-sheet (spreadsheet page) is large and lazy-loaded. Must
+          // come BEFORE the react rule below, whose ``react/`` substring
+          // match would otherwise pull ``@fortune-sheet/react`` into the
+          // eager react vendor chunk.
+          if (id.includes("@fortune-sheet")) {
+            return "fortunesheet";
+          }
           if (id.includes("@tiptap") || id.includes("prosemirror")) {
             return "tiptap";
           }
