@@ -758,12 +758,16 @@ function WorkspaceItemView({
   onOpenItem,
   onClose,
   canEdit,
+  embeddedInNotebook = false,
 }: {
   node: WorkspaceItemNode;
   workspaceId: string;
   onOpenItem: (node: WorkspaceItemNode) => void;
   onClose: () => void;
   canEdit: boolean;
+  /** True when rendered as a notebook page — suppresses chrome (e.g. the
+   *  chat's "Back to workspace" bar) that the notebook tab strip replaces. */
+  embeddedInNotebook?: boolean;
 }) {
   if (node.kind === "note") {
     return (
@@ -808,6 +812,7 @@ function WorkspaceItemView({
           embedded
           embeddedConversationId={node.ref_id}
           onExitToWorkspace={onClose}
+          hideWorkspaceBar={embeddedInNotebook}
         />
       </div>
     );
@@ -1157,6 +1162,7 @@ function WorkspaceNotebookPane({
             onOpenItem={onOpenItem}
             onClose={() => {}}
             canEdit={canEdit}
+            embeddedInNotebook
           />
         ) : (
           <NotebookEmptyState

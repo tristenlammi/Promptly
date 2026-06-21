@@ -1395,6 +1395,86 @@ def _format_context_block(
     return header + "".join(parts)
 
 
+_MAP_KIND_LABEL = {
+    "folder": "Folder",
+    "container": "Notebook",
+    "note": "Note",
+    "sheet": "Sheet",
+    "canvas": "Canvas",
+    "board": "Board",
+    "chat": "Chat",
+}
+# Soft cap so a giant workspace can't blow the system prompt. Workspaces are
+# "dozens of items" in practice; this is a backstop.
+_MAP_MAX_LINES = 200
+
+
+async def build_workspace_map(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> str | None:
+    """A compact, deterministic table-of-contents of the workspace.
+
+    Lists every item and its place in the tree (notebooks show their pages,
+    folders their contents) so a chat always knows *what exists and where to
+    look* — then it retrieves / the user @-mentions the actual content. This
+    is the "map" layer of workspace memory: no LLM, never stale, regenerated
+    from the live tree on every turn.
+    """
+    items = list(
+        (
+            await db.execute(
+                select(WorkspaceItem)
+                .where(
+                    WorkspaceItem.workspace_id == workspace_id,
+                    WorkspaceItem.archived_at.is_(None),
+                )
+                .order_by(WorkspaceItem.position.asc())
+            )
+        ).scalars()
+    )
+    if not items:
+        return None
+
+    by_parent: dict[uuid.UUID | None, list[WorkspaceItem]] = {}
+    for it in items:
+        by_parent.setdefault(it.parent_id, []).append(it)
+
+    lines: list[str] = []
+    truncated = False
+
+    def render(parent_id: uuid.UUID | None, depth: int) -> None:
+        nonlocal truncated
+        for it in by_parent.get(parent_id, []):
+            if len(lines) >= _MAP_MAX_LINES:
+                truncated = True
+                return
+            label = _MAP_KIND_LABEL.get(it.kind, it.kind)
+            title = (it.title or "Untitled").strip() or "Untitled"
+            lines.append(f'{"  " * depth}- {label}: "{title}"')
+            if it.kind in ("folder", "container"):
+                render(it.id, depth + 1)
+
+    render(None, 0)
+    if not lines:
+        return None
+    if truncated:
+        lines.append(f"  - …and more (showing first {_MAP_MAX_LINES})")
+
+    return (
+        "## Workspace contents\n"
+        "A map of everything in this workspace. Use it to decide what to look "
+        "up — the user can @-mention an item or ask you to use one. This is a "
+        "catalog of what exists and where, not the content itself.\n\n"
+        + "\n".join(lines)
+    )
+
+
+def _with_map(map_md: str | None, block: str | None) -> str | None:
+    """Prepend the workspace map to a context block (either may be None)."""
+    parts = [p for p in (map_md, block) if p]
+    return "\n\n".join(parts) if parts else None
+
+
 async def build_workspace_injection(
     db: AsyncSession,
     *,
@@ -1418,6 +1498,11 @@ async def build_workspace_injection(
     On top of the per-chat exclusions we always drop items whose
     workspace-level "Use as workspace context" toggle is OFF.
     """
+    # The structural map ("what exists and where") is always injected, in
+    # every mode — it's deterministic and cheap, and it's what lets the model
+    # route to the right item even when retrieval would miss a tiny chunk.
+    map_md = await build_workspace_map(db, workspace_id)
+
     excluded = set(excluded_file_ids or set())
     excluded |= await context_disabled_file_ids(db, workspace_id)
     file_rows = (
@@ -1433,7 +1518,8 @@ async def build_workspace_injection(
     canvas_rows = await _workspace_canvases(db, workspace_id, excluded)
     board_rows = await _workspace_boards(db, workspace_id, excluded)
     if not file_rows and not note_rows and not canvas_rows and not board_rows:
-        return WorkspaceInjection()
+        # No retrievable content, but the map still tells the chat what's here.
+        return WorkspaceInjection(system_block=map_md)
 
     cfg = await get_embedding_config(db)
     indexed_tokens = (
@@ -1447,8 +1533,9 @@ async def build_workspace_injection(
         # Full-dump: pinned files ride the attachment path; notes,
         # canvases, and boards are injected as text (no attachment form).
         return WorkspaceInjection(
-            system_block=_format_context_block(
-                note_rows, canvas_rows, board_rows
+            system_block=_with_map(
+                map_md,
+                _format_context_block(note_rows, canvas_rows, board_rows),
             ),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
@@ -1478,7 +1565,9 @@ async def build_workspace_injection(
     chunks = chunks[:WORKSPACE_RETRIEVAL_TOP_K]
     block = format_retrieved_block(chunks) if chunks else None
     return WorkspaceInjection(
-        system_block=block, attach_file_ids=attach_ids, retrieval_active=True
+        system_block=_with_map(map_md, block),
+        attach_file_ids=attach_ids,
+        retrieval_active=True,
     )
 
 

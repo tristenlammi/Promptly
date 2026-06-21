@@ -69,6 +69,7 @@ export function ChatPage({
   embeddedConversationId,
   embedded = false,
   onExitToWorkspace,
+  hideWorkspaceBar = false,
 }: {
   /** When set, drive the page off this conversation id instead of the
    *  route param — lets the Workspace navigator render a chat inline in
@@ -81,6 +82,10 @@ export function ChatPage({
    *  navigating (the route is already ``/workspaces/:id``, so a navigate
    *  would be a no-op). */
   onExitToWorkspace?: () => void;
+  /** Suppress the workspace breadcrumb bar entirely — used when the chat is
+   *  a *page inside a notebook*, where the notebook tab strip already gives
+   *  the context and a "Back to workspace" row is redundant. */
+  hideWorkspaceBar?: boolean;
 } = {}) {
   const { id: routeId } = useParams<{ id?: string }>();
   const id = embeddedConversationId ?? routeId;
@@ -1000,7 +1005,7 @@ export function ChatPage({
               parentMessageId={conversation.parent_message_id ?? null}
             />
           )}
-          {conversation?.workspace_id && (
+          {conversation?.workspace_id && !hideWorkspaceBar && (
             <WorkspaceBreadcrumb
               workspaceId={conversation.workspace_id}
               onBack={onExitToWorkspace}
