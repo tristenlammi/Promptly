@@ -1,0 +1,79 @@
+/*
+ * Theme overrides for the Fortune-sheet spreadsheet widget.
+ *
+ * Fortune-sheet renders its grid on a <canvas> and ships no dark theme, so the
+ * sheet always renders as a light "paper" surface. The bug this fixes: the
+ * app's global text colour (near-white in dark mode) cascades into the widget's
+ * light chrome and makes toolbar labels + dialog text invisible (and inputs
+ * inherit transparent/odd backgrounds via Tailwind Preflight). We pin readable
+ * light-surface colours inside the widget so it stays legible in every app
+ * theme.
+ *
+ * Every selector below is a `.fortune-*` class — unique to the library — so the
+ * rest of the app is never affected. Higher specificity than the library's own
+ * `.fortune-*` rules (we prefix nothing but rely on the cascade order; the file
+ * is imported after the library CSS in WorkspaceSheetPane).
+ */
+
+/* Force a light, readable text colour on every chrome surface that otherwise
+   inherits the app's (possibly near-white) text colour. */
+.fortune-container,
+.fortune-toolbar,
+.fortune-toolbar-combo,
+.fortune-toolbar-combo-text,
+.fortune-toolbar-combo-popup,
+.fortune-toolbar-select,
+.fortune-toolbar-select-option,
+.fortune-toolbar-more-container,
+.fortune-context-menu,
+.fortune-menuitem-row,
+.fortune-filter-menu,
+.fortune-border-select-menu,
+.fortune-border-style-picker-menu,
+.fortune-dialog,
+.fortune-dialog-box-content,
+.fortune-modal-container,
+.fortune-modal-dialog-header,
+.fortune-link-modify-modal,
+.fortune-link-modify-title,
+.fortune-sheettab-container,
+.fortune-sheettab-button,
+.fortune-stat-area,
+.fortune-name-box-container {
+  color: #1f2937;
+}
+
+/* Inputs / selects / textareas inside the widget: explicit light field so the
+   value and placeholder are legible (Preflight otherwise leaves them
+   transparent, inheriting the app's near-white text). */
+.fortune-dialog input,
+.fortune-dialog select,
+.fortune-dialog textarea,
+.fortune-modal-container input,
+.fortune-modal-container select,
+.fortune-modal-container textarea,
+.fortune-link-modify-input,
+.fortune-link-modify-select,
+.fortune-fx-input,
+.fortune-name-box {
+  background-color: #ffffff;
+  color: #1f2937;
+  border-color: #d1d5db;
+}
+
+.fortune-dialog input::placeholder,
+.fortune-modal-container input::placeholder,
+.fortune-fx-input::placeholder {
+  color: #9ca3af;
+}
+
+/* Dropdown / menu surfaces get an explicit light background so dark-mode bleed
+   can't leave them translucent-dark. */
+.fortune-toolbar-combo-popup,
+.fortune-toolbar-select-option,
+.fortune-context-menu,
+.fortune-filter-menu,
+.fortune-border-select-menu,
+.fortune-border-style-picker-menu {
+  background-color: #ffffff;
+}

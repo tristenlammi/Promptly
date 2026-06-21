@@ -3,6 +3,8 @@ import { Loader2 } from "lucide-react";
 import { Workbook } from "@fortune-sheet/react";
 import type { Sheet } from "@fortune-sheet/core";
 import "@fortune-sheet/react/dist/index.css";
+// Our legibility overrides — imported after the library CSS so they win.
+import "@/styles/fortune-sheet.css";
 
 import { workspacesApi } from "@/api/workspaces";
 
