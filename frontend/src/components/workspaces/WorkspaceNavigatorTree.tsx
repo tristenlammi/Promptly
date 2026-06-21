@@ -20,6 +20,7 @@ import {
   PenTool,
   Pin,
   Plus,
+  Settings,
   Shapes,
   Table2,
   Trash2,
@@ -66,6 +67,8 @@ export function WorkspaceNavigatorTree({
   canEdit,
   onHome,
   atHome,
+  onSettings,
+  atSettings,
 }: {
   workspaceId: string;
   tree: WorkspaceItemNode[];
@@ -78,6 +81,10 @@ export function WorkspaceNavigatorTree({
   onHome?: () => void;
   /** True when the overview is showing (no item selected). */
   atHome?: boolean;
+  /** Open the workspace settings page in the main pane. */
+  onSettings?: () => void;
+  /** True when the settings page is showing. */
+  atSettings?: boolean;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
@@ -169,6 +176,24 @@ export function WorkspaceNavigatorTree({
           >
             <Home className="h-4 w-4" />
             Home
+          </button>
+        </div>
+      )}
+      {onSettings && (
+        <div className="px-3 pb-1 pt-1">
+          <button
+            type="button"
+            onClick={onSettings}
+            className={cn(
+              "flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition",
+              atSettings
+                ? "border-[var(--border)] bg-[var(--hover)] text-[var(--text)]"
+                : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
+            )}
+            title="Workspace settings — instructions, model, members, files, usage"
+          >
+            <Settings className="h-4 w-4" />
+            Settings
           </button>
         </div>
       )}

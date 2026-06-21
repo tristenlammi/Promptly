@@ -24,7 +24,6 @@ import {
   MessageSquare,
   Plus,
   Search,
-  Settings,
   Shapes,
   Table2,
   Share2,
@@ -70,7 +69,7 @@ import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceComman
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
-import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
+import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
 import type { WorkspaceItemNode } from "@/api/workspaces";
@@ -193,6 +192,7 @@ export function WorkspaceDetailPage() {
   const handleSelect = (node: WorkspaceItemNode) => {
     // Avoid the same item on both sides of a split.
     if (secondary && secondary.id === node.id) setSecondary(null);
+    setSettingsOpen(false);
     setSelected(node);
   };
 
@@ -271,15 +271,6 @@ export function WorkspaceDetailPage() {
                 Import
               </Button>
             )}
-            {workspace && (
-              <Button
-                variant="ghost"
-                leftIcon={<Settings className="h-4 w-4" />}
-                onClick={() => setSettingsOpen(true)}
-                title="Workspace settings"
-                aria-label="Workspace settings"
-              />
-            )}
           </div>
         }
       />
@@ -307,10 +298,16 @@ export function WorkspaceDetailPage() {
                 onOpenToSide={handleOpenToSide}
                 canEdit={canEdit && !isArchived}
                 onHome={() => {
+                  setSettingsOpen(false);
                   setSelected(null);
                   setSecondary(null);
                 }}
-                atHome={!selected}
+                atHome={!selected && !settingsOpen}
+                onSettings={() => {
+                  setSecondary(null);
+                  setSettingsOpen(true);
+                }}
+                atSettings={settingsOpen}
               />
             )}
           </aside>
@@ -319,10 +316,48 @@ export function WorkspaceDetailPage() {
           <main
             className={
               "flex min-w-0 flex-1 flex-col " +
-              (secondary ? "overflow-hidden" : "overflow-y-auto")
+              (secondary || settingsOpen ? "overflow-hidden" : "overflow-y-auto")
             }
           >
-            {secondary && selected ? (
+            {settingsOpen ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-5 py-2.5">
+                  <h2 className="truncate text-sm font-semibold text-[var(--text)]">
+                    {workspace.title} · Settings
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(false)}
+                    title="Close settings"
+                    aria-label="Close settings"
+                    className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <WorkspaceSettingsContent
+                  workspace={workspace}
+                  isOwner={isOwner}
+                  canEdit={canEdit}
+                  onArchive={async () => {
+                    const ok = await confirm({
+                      title: "Archive workspace",
+                      message:
+                        "Archive this workspace? It moves to your archived list and can be restored anytime.",
+                      confirmLabel: "Archive",
+                    });
+                    if (ok) archive.mutate(workspace.id);
+                  }}
+                  onUnarchive={() => unarchive.mutate(workspace.id)}
+                  onDelete={() => {
+                    setSettingsOpen(false);
+                    setDeleteOpen(true);
+                  }}
+                  archivePending={archive.isPending}
+                  unarchivePending={unarchive.isPending}
+                />
+              </div>
+            ) : secondary && selected ? (
               // Split screen — primary on the left, secondary on the right,
               // with a draggable gutter. The chat side defaults narrower
               // (chats cap their own width, so a full half wastes space);
@@ -402,32 +437,6 @@ export function WorkspaceDetailPage() {
             )}
           </main>
         </div>
-      )}
-
-      {workspace && (
-        <WorkspaceSettingsDrawer
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          workspace={workspace}
-          isOwner={isOwner}
-          canEdit={canEdit}
-          onArchive={async () => {
-            const ok = await confirm({
-              title: "Archive workspace",
-              message:
-                "Archive this workspace? It moves to your archived list and can be restored anytime.",
-              confirmLabel: "Archive",
-            });
-            if (ok) archive.mutate(workspace.id);
-          }}
-          onUnarchive={() => unarchive.mutate(workspace.id)}
-          onDelete={() => {
-            setSettingsOpen(false);
-            setDeleteOpen(true);
-          }}
-          archivePending={archive.isPending}
-          unarchivePending={unarchive.isPending}
-        />
       )}
 
       <ImportConversationsModal

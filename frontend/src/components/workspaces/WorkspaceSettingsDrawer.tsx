@@ -79,8 +79,6 @@ export function WorkspaceSettingsDrawer({
   archivePending: boolean;
   unarchivePending: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("settings");
-
   if (!open) return null;
 
   return createPortal(
@@ -114,65 +112,102 @@ export function WorkspaceSettingsDrawer({
             <X className="h-4 w-4" />
           </button>
         </div>
-
-        <div className="flex items-center gap-1 border-b border-[var(--border)] px-3">
-          <DrawerTab
-            active={tab === "settings"}
-            onClick={() => setTab("settings")}
-            icon={<Settings2 className="h-3.5 w-3.5" />}
-            label="General"
-          />
-          <DrawerTab
-            active={tab === "files"}
-            onClick={() => setTab("files")}
-            icon={<FileText className="h-3.5 w-3.5" />}
-            label="Pinned files"
-            count={workspace.files.length}
-          />
-          <DrawerTab
-            active={tab === "members"}
-            onClick={() => setTab("members")}
-            icon={<Users className="h-3.5 w-3.5" />}
-            label="Members"
-            count={(workspace.collaborators?.length ?? 0) + 1}
-          />
-          <DrawerTab
-            active={tab === "usage"}
-            onClick={() => setTab("usage")}
-            icon={<BarChart3 className="h-3.5 w-3.5" />}
-            label="Usage"
-          />
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-5">
-          {tab === "settings" && (
-            <SettingsTab
-              workspace={workspace}
-              onArchive={onArchive}
-              onUnarchive={onUnarchive}
-              onDelete={onDelete}
-              archivePending={archivePending}
-              unarchivePending={unarchivePending}
-              isOwner={isOwner}
-              canEdit={canEdit}
-            />
-          )}
-          {tab === "files" && (
-            <FilesTab workspace={workspace} canEdit={canEdit} />
-          )}
-          {tab === "members" && (
-            <WorkspaceMembersPanel
-              workspaceId={workspace.id}
-              isOwner={isOwner}
-              owner={workspace.owner}
-              collaborators={workspace.collaborators ?? []}
-            />
-          )}
-          {tab === "usage" && <UsageTab workspaceId={workspace.id} />}
-        </div>
+        <WorkspaceSettingsContent
+          workspace={workspace}
+          isOwner={isOwner}
+          canEdit={canEdit}
+          onArchive={onArchive}
+          onUnarchive={onUnarchive}
+          onDelete={onDelete}
+          archivePending={archivePending}
+          unarchivePending={unarchivePending}
+        />
       </div>
     </div>,
     document.body
+  );
+}
+
+/** The settings tabs + panels, decoupled from the drawer chrome so they can
+ *  render inline as a dedicated page in the workspace's main pane. */
+export function WorkspaceSettingsContent({
+  workspace,
+  isOwner,
+  canEdit,
+  onArchive,
+  onUnarchive,
+  onDelete,
+  archivePending,
+  unarchivePending,
+}: {
+  workspace: WorkspaceDetail;
+  isOwner: boolean;
+  canEdit: boolean;
+  onArchive: () => void;
+  onUnarchive: () => void;
+  onDelete: () => void;
+  archivePending: boolean;
+  unarchivePending: boolean;
+}) {
+  const [tab, setTab] = useState<Tab>("settings");
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 border-b border-[var(--border)] px-3">
+        <DrawerTab
+          active={tab === "settings"}
+          onClick={() => setTab("settings")}
+          icon={<Settings2 className="h-3.5 w-3.5" />}
+          label="General"
+        />
+        <DrawerTab
+          active={tab === "files"}
+          onClick={() => setTab("files")}
+          icon={<FileText className="h-3.5 w-3.5" />}
+          label="Pinned files"
+          count={workspace.files.length}
+        />
+        <DrawerTab
+          active={tab === "members"}
+          onClick={() => setTab("members")}
+          icon={<Users className="h-3.5 w-3.5" />}
+          label="Members"
+          count={(workspace.collaborators?.length ?? 0) + 1}
+        />
+        <DrawerTab
+          active={tab === "usage"}
+          onClick={() => setTab("usage")}
+          icon={<BarChart3 className="h-3.5 w-3.5" />}
+          label="Usage"
+        />
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        {tab === "settings" && (
+          <SettingsTab
+            workspace={workspace}
+            onArchive={onArchive}
+            onUnarchive={onUnarchive}
+            onDelete={onDelete}
+            archivePending={archivePending}
+            unarchivePending={unarchivePending}
+            isOwner={isOwner}
+            canEdit={canEdit}
+          />
+        )}
+        {tab === "files" && (
+          <FilesTab workspace={workspace} canEdit={canEdit} />
+        )}
+        {tab === "members" && (
+          <WorkspaceMembersPanel
+            workspaceId={workspace.id}
+            isOwner={isOwner}
+            owner={workspace.owner}
+            collaborators={workspace.collaborators ?? []}
+          />
+        )}
+        {tab === "usage" && <UsageTab workspaceId={workspace.id} />}
+      </div>
+    </div>
   );
 }
 
