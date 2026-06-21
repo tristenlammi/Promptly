@@ -661,8 +661,8 @@ class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        default="Untitled spreadsheet",
-        server_default="Untitled spreadsheet",
+        default="Untitled sheet",
+        server_default="Untitled sheet",
     )
     # Fortune-sheet workbook JSON: a list of sheet objects ``[{name,
     # celldata, ...}]``. NULL until the first save → the client seeds a

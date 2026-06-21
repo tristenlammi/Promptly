@@ -524,7 +524,8 @@ function WorkspaceMainPane({
     (node.kind === "note" ||
       node.kind === "canvas" ||
       node.kind === "chat" ||
-      node.kind === "board")
+      node.kind === "board" ||
+      node.kind === "sheet")
   ) {
     return (
       <WorkspaceItemView
@@ -786,7 +787,7 @@ function WorkspaceItemView({
           <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
             <span className="inline-flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading spreadsheet…
+              Loading sheet…
             </span>
           </div>
         }

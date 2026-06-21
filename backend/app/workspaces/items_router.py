@@ -414,7 +414,7 @@ async def create_workspace_item(
 # later, spreadsheet rooms. The note keeps ``ref_id`` pointing at the first
 # page so every single-page-era path (collab/RAG/snapshot/delete) is unchanged.
 _DEFAULT_PAGE_TITLE = "Untitled page"
-_DEFAULT_SHEET_TITLE = "Untitled spreadsheet"
+_DEFAULT_SHEET_TITLE = "Untitled sheet"
 
 
 async def _load_note_item(

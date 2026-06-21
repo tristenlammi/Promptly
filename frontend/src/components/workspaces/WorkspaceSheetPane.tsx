@@ -102,7 +102,7 @@ export function WorkspaceSheetPane({
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
         <span className="inline-flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Opening spreadsheet…
+          Opening sheet…
         </span>
       </div>
     );
