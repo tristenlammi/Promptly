@@ -192,6 +192,27 @@ class UserPreferencesUpdate(BaseModel):
     # Format-validated (not allowlisted against the live model) so the
     # backend doesn't have to track the exact voice catalogue.
     tts_voice: str | None = Field(default=None, max_length=64)
+    # Preferred display currency (ISO 4217 code, e.g. ``"AUD"``). Surfaces in
+    # the ambient personal-context block and takes precedence over whatever
+    # the user's location would imply — so someone whose locale is ambiguous
+    # (or who simply wants a different currency) gets consistent pricing.
+    # ``None`` = no change; ``""`` clears it (falls back to locale inference).
+    currency: str | None = Field(default=None, max_length=8)
+
+    @field_validator("currency")
+    @classmethod
+    def _clean_currency(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().upper()
+        if v == "":
+            return ""  # "" → clear (falls back to location-based inference)
+        # ISO 4217 alpha codes are three letters; accept 3–4 to be lenient
+        # but reject anything that isn't plain letters so junk never reaches
+        # the prompt.
+        if not re.fullmatch(r"[A-Z]{3,4}", v):
+            raise ValueError("Invalid currency code.")
+        return v
 
     @field_validator("tts_voice")
     @classmethod

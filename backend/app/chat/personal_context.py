@@ -26,6 +26,7 @@ from app.auth.models import User
 # malicious or legacy oversized value would otherwise blow up the
 # system prompt.
 _MAX_LOCATION_CHARS = 120
+_MAX_CURRENCY_CHARS = 8
 
 
 def _safe_zone(tz: str | None) -> ZoneInfo | None:
@@ -72,6 +73,7 @@ def build_personal_context_prompt(user: User) -> str | None:
     settings: Mapping[str, object] = user.settings or {}
     raw_location = settings.get("location")
     raw_timezone = settings.get("timezone")
+    raw_currency = settings.get("currency")
 
     location = (
         raw_location.strip()[:_MAX_LOCATION_CHARS]
@@ -79,8 +81,13 @@ def build_personal_context_prompt(user: User) -> str | None:
         else ""
     )
     zone = _safe_zone(raw_timezone if isinstance(raw_timezone, str) else None)
+    currency = (
+        raw_currency.strip().upper()[:_MAX_CURRENCY_CHARS]
+        if isinstance(raw_currency, str) and raw_currency.strip()
+        else ""
+    )
 
-    if not location and zone is None:
+    if not location and zone is None and not currency:
         return None
 
     lines: list[str] = []
@@ -111,13 +118,28 @@ def build_personal_context_prompt(user: User) -> str | None:
         )
     if location:
         lines.append(f"- User location: {location}")
+    if currency:
+        lines.append(f"- Preferred currency: {currency}")
     lines.append("")
+    # When the user has set an explicit currency, that's authoritative —
+    # it overrides whatever the locale would imply, which is the whole
+    # point (a user in one country may want prices in another currency).
+    if currency:
+        currency_rule = (
+            f"currency — quote ALL prices in {currency} by default, "
+            "regardless of locale; convert from foreign sources and note "
+            "the original amount + currency"
+        )
+    else:
+        currency_rule = (
+            "currency (prices in the user's local currency, e.g. AUD for "
+            "Australia, GBP for the UK; convert from foreign sources when "
+            "needed and note the original)"
+        )
     lines.append(
         "How to use this context:\n"
-        "1. Apply local conventions by DEFAULT — currency (prices in "
-        "the user's local currency, e.g. AUD for Australia, GBP for "
-        "the UK; convert from foreign sources when needed and note "
-        "the original), measurement units (metric vs imperial), "
+        f"1. Apply local conventions by DEFAULT — {currency_rule}, "
+        "measurement units (metric vs imperial), "
         "spelling (en-AU/en-GB vs en-US), date format (DD/MM/YYYY in "
         "AU/UK, MM/DD/YYYY in the US), 12h vs 24h time, and any "
         "region-specific norms (tax, public holidays, business "

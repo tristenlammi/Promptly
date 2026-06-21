@@ -34,7 +34,12 @@ export function PersonalContextPanel() {
   const [timezone, setTimezone] = useState<string>(
     typeof user?.settings?.timezone === "string" ? user.settings.timezone : ""
   );
-  const [busy, setBusy] = useState<"location" | "timezone" | null>(null);
+  const [currency, setCurrency] = useState<string>(
+    typeof user?.settings?.currency === "string" ? user.settings.currency : ""
+  );
+  const [busy, setBusy] = useState<
+    "location" | "timezone" | "currency" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   // Re-seed when the cached user changes (e.g. /me refresh from
@@ -46,6 +51,9 @@ export function PersonalContextPanel() {
     }
     if (typeof user.settings.timezone === "string") {
       setTimezone(user.settings.timezone);
+    }
+    if (typeof user.settings.currency === "string") {
+      setCurrency(user.settings.currency);
     }
   }, [user?.settings]);
 
@@ -86,9 +94,9 @@ export function PersonalContextPanel() {
   // empty string as "remove this key" so we can route both Save
   // and Reset through the same path.
   async function persist(
-    key: "location" | "timezone",
+    key: "location" | "timezone" | "currency",
     value: string,
-    busyKey: "location" | "timezone"
+    busyKey: "location" | "timezone" | "currency"
   ) {
     setError(null);
     setBusy(busyKey);
@@ -99,11 +107,10 @@ export function PersonalContextPanel() {
       setUser(fresh);
     } catch (err) {
       patchSettings({ [key]: previous as never });
-      if (busyKey === "location") {
-        setLocation(typeof previous === "string" ? previous : "");
-      } else {
-        setTimezone(typeof previous === "string" ? previous : "");
-      }
+      const prev = typeof previous === "string" ? previous : "";
+      if (busyKey === "location") setLocation(prev);
+      else if (busyKey === "timezone") setTimezone(prev);
+      else setCurrency(prev);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
@@ -120,6 +127,10 @@ export function PersonalContextPanel() {
     typeof user?.settings?.timezone === "string"
       ? user.settings.timezone
       : "";
+  const savedCurrency =
+    typeof user?.settings?.currency === "string"
+      ? user.settings.currency
+      : "";
   const locationDirty = trimmedLocation !== savedLocation;
   const timezoneDirty = trimmedTimezone !== savedTimezone;
 
@@ -129,7 +140,8 @@ export function PersonalContextPanel() {
   const preview = useMemo(() => {
     const tz = trimmedTimezone || null;
     const loc = trimmedLocation;
-    if (!tz && !loc) return null;
+    const cur = currency.trim().toUpperCase();
+    if (!tz && !loc && !cur) return null;
     let dateLine = "";
     let timeLine = "";
     if (tz) {
@@ -153,8 +165,8 @@ export function PersonalContextPanel() {
         // will already show the validation hint via the server.
       }
     }
-    return { dateLine, timeLine, location: loc, timezone: tz };
-  }, [trimmedLocation, trimmedTimezone]);
+    return { dateLine, timeLine, location: loc, timezone: tz, currency: cur };
+  }, [trimmedLocation, trimmedTimezone, currency]);
 
   return (
     <section className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
@@ -312,6 +324,62 @@ export function PersonalContextPanel() {
           </p>
         </div>
 
+        {/* ---- Currency ---- */}
+        <div className="space-y-1.5">
+          <label
+            htmlFor="pc-currency"
+            className="block text-xs font-semibold text-[var(--text)]"
+          >
+            Currency
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              id="pc-currency"
+              value={currency}
+              onChange={(e) => {
+                const next = e.target.value;
+                setCurrency(next);
+                void persist("currency", next, "currency");
+              }}
+              disabled={busy === "currency"}
+              className={cn(
+                "min-w-[220px] flex-1 rounded-input border bg-[var(--bg)] px-3 py-2 text-sm",
+                "border-[var(--border)] text-[var(--text)]",
+                "focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]",
+                "disabled:cursor-not-allowed disabled:opacity-60"
+              )}
+            >
+              <option value="">— Auto (from location) —</option>
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} — {c.label}
+                </option>
+              ))}
+            </select>
+            {savedCurrency && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setCurrency("");
+                  void persist("currency", "", "currency");
+                }}
+                disabled={busy === "currency"}
+                className="text-xs"
+              >
+                <RotateCcw className="mr-1 h-3 w-3" />
+                Clear
+              </Button>
+            )}
+          </div>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Which currency the AI quotes prices in. Leave on{" "}
+            <span className="font-medium">Auto</span> to infer it from your
+            location, or pin one if that's ever ambiguous.
+          </p>
+        </div>
+
         {/* ---- Live preview ---- */}
         {preview && (
           <div
@@ -332,6 +400,7 @@ export function PersonalContextPanel() {
                 </li>
               )}
               {preview.location && <li>Location: {preview.location}</li>}
+              {preview.currency && <li>Currency: {preview.currency}</li>}
             </ul>
           </div>
         )}
@@ -368,6 +437,31 @@ export function PersonalContextPanel() {
     </section>
   );
 }
+
+// Common display currencies (ISO 4217). Curated rather than exhaustive —
+// covers the overwhelming majority of users; anyone outside this set can
+// lean on Auto (location inference). Codes are sent verbatim to the prompt.
+const CURRENCIES: { code: string; label: string }[] = [
+  { code: "AUD", label: "Australian Dollar" },
+  { code: "USD", label: "US Dollar" },
+  { code: "EUR", label: "Euro" },
+  { code: "GBP", label: "British Pound" },
+  { code: "CAD", label: "Canadian Dollar" },
+  { code: "NZD", label: "New Zealand Dollar" },
+  { code: "JPY", label: "Japanese Yen" },
+  { code: "CNY", label: "Chinese Yuan" },
+  { code: "INR", label: "Indian Rupee" },
+  { code: "SGD", label: "Singapore Dollar" },
+  { code: "HKD", label: "Hong Kong Dollar" },
+  { code: "CHF", label: "Swiss Franc" },
+  { code: "SEK", label: "Swedish Krona" },
+  { code: "NOK", label: "Norwegian Krone" },
+  { code: "DKK", label: "Danish Krone" },
+  { code: "ZAR", label: "South African Rand" },
+  { code: "AED", label: "UAE Dirham" },
+  { code: "BRL", label: "Brazilian Real" },
+  { code: "MXN", label: "Mexican Peso" },
+];
 
 // Curated fallback for browsers without ``Intl.supportedValuesOf``.
 // Covers the major regions our user base is likely to span without

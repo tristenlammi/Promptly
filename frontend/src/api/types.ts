@@ -69,6 +69,10 @@ export interface UserSettings {
   /** Preferred Kokoro TTS voice id (e.g. ``"af_heart"``) for read-aloud
    *  and voice mode. Absent = the server default. */
   tts_voice?: string;
+  /** Preferred display currency (ISO 4217 code, e.g. ``"AUD"``). Surfaces in
+   *  the ambient personal-context block and overrides locale inference.
+   *  Absent / ``""`` = infer from location. */
+  currency?: string;
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -99,6 +103,9 @@ export interface UserPreferencesUpdate {
   custom_system_prompt?: string;
   /** Preferred TTS voice id. Pass an empty string to clear (use default). */
   tts_voice?: string;
+  /** Preferred display currency (ISO 4217). Pass an empty string to clear
+   *  (fall back to locale inference). */
+  currency?: string;
 }
 
 export interface User {
