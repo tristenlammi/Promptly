@@ -29,6 +29,22 @@ function cellText(cell: unknown): string {
   return val == null ? "" : String(val).trim();
 }
 
+/** Debug: count non-empty cells across a workbook (celldata + dense grid). */
+function countCells(sheets: Sheet[] | null | undefined): number {
+  if (!sheets) return -1;
+  let n = 0;
+  for (const s of sheets) {
+    const cd = (s as { celldata?: unknown[] }).celldata;
+    if (Array.isArray(cd)) n += cd.length;
+    const grid = (s as { data?: unknown[][] }).data;
+    if (Array.isArray(grid)) {
+      for (const row of grid)
+        for (const c of row ?? []) if (c != null) n += 1;
+    }
+  }
+  return n;
+}
+
 /** Flatten a workbook to plain text for workspace RAG + memory: each sheet
  *  becomes a ``## Name`` block of tab-separated rows. Reads either the sparse
  *  ``celldata`` form or the dense ``data`` grid, whichever the workbook uses. */
@@ -94,16 +110,34 @@ export function WorkspaceSheetPane({
   // grid. Read the live workbook via the ref at save time instead.
   const workbookRef = useRef<WorkbookInstance | null>(null);
 
-  // Current workbook state — prefer the ref (authoritative), fall back to the
-  // last ``onChange`` snapshot if the ref isn't ready yet.
+  // Current workbook state. ``onChange``'s snapshot and the ref's
+  // ``getAllSheets()`` can disagree (one empty, one populated) depending on
+  // commit timing, so use whichever actually carries cells — never overwrite
+  // good data with an empty grid.
   const readSheets = useCallback((): Sheet[] | null => {
-    const fromRef = workbookRef.current?.getAllSheets?.();
-    if (fromRef && fromRef.length) return fromRef as Sheet[];
-    return latest.current;
+    const fromRef = workbookRef.current?.getAllSheets?.() as
+      | Sheet[]
+      | undefined;
+    const fromChange = latest.current;
+    const refN = countCells(fromRef);
+    const chN = countCells(fromChange);
+    if (fromRef && refN >= chN) return fromRef;
+    return fromChange ?? fromRef ?? null;
   }, []);
+
+  // Tracks whether this sheet has ever held content this session. Fortune-
+  // sheet fires a spurious *empty* onChange while it tears down on navigate-
+  // away; that empty save would otherwise land last and clobber the real
+  // data. So once a sheet has content, we refuse to autosave it back to a
+  // fully-empty grid (clearing individual cells still persists — only an
+  // all-zero workbook is rejected).
+  const hadContentRef = useRef(false);
 
   const persist = useCallback(
     (sheets: Sheet[]) => {
+      const n = countCells(sheets);
+      if (n <= 0 && hadContentRef.current) return;
+      if (n > 0) hadContentRef.current = true;
       void workspacesApi
         .saveSpreadsheet(workspaceId, sheetId, {
           data: sheets,
@@ -158,8 +192,7 @@ export function WorkspaceSheetPane({
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
-        const sheets = readSheets() ?? next;
-        persist(sheets);
+        persist(readSheets() ?? next);
       }, SAVE_DEBOUNCE_MS);
     },
     [canEdit, readSheets, persist]
