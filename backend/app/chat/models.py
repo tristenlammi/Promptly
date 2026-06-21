@@ -286,6 +286,19 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
     auto_memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Dedicated model for the workspace-memory "librarian" (summarisation /
+    # distillation). Lets the workspace creator pick a model from their own
+    # stack — any enabled API model OR a local Ollama model — independent of
+    # which chat triggered the refresh. NULL falls back to the workspace's
+    # default chat model, then to the triggering conversation's model. This
+    # is what keeps memory working on machines that can't run Ollama: pick an
+    # API model here (or leave it on the API-backed workspace default).
+    memory_model_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    memory_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="SET NULL"), nullable=True
+    )
     # Drive folder backing this workspace (Phase 1). Points at the
     # auto-created ``My files / Workspaces / <title>`` folder where the
     # workspace's notes / canvases / uploaded files physically live, so

@@ -426,6 +426,25 @@ async def update_workspace(
         ws.default_provider_id = new_provider
     if "auto_memory_enabled" in sent and payload.auto_memory_enabled is not None:
         ws.auto_memory_enabled = payload.auto_memory_enabled
+    # Dedicated memory model — validated as a pair only when actually set;
+    # clearing both falls back to the workspace default chat model.
+    if "memory_model_id" in sent or "memory_provider_id" in sent:
+        new_mem_model = (
+            payload.memory_model_id
+            if "memory_model_id" in sent
+            else ws.memory_model_id
+        )
+        new_mem_provider = (
+            payload.memory_provider_id
+            if "memory_provider_id" in sent
+            else ws.memory_provider_id
+        )
+        if new_mem_model and new_mem_provider:
+            await _validate_default_model(
+                new_mem_provider, new_mem_model, user, db
+            )
+        ws.memory_model_id = new_mem_model
+        ws.memory_provider_id = new_mem_provider
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(ws)

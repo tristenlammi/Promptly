@@ -1730,10 +1730,17 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
             return
         _last_memory_run[key] = now
 
-        # Resolve provider from the triggering conversation.
-        if not conv.provider_id or not conv.model_id:
+        # Resolve the memory model: the workspace's dedicated memory model
+        # (creator's pick), else the workspace default chat model, else the
+        # triggering conversation's model. This lets a creator on a machine
+        # that can't run Ollama point memory at an API model.
+        mem_provider_id = (
+            ws.memory_provider_id or ws.default_provider_id or conv.provider_id
+        )
+        mem_model_id = ws.memory_model_id or ws.default_model_id or conv.model_id
+        if not mem_provider_id or not mem_model_id:
             return
-        provider = await db.get(ModelProvider, conv.provider_id)
+        provider = await db.get(ModelProvider, mem_provider_id)
         if provider is None or not provider.enabled:
             return
 
@@ -1787,7 +1794,7 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
             chunks: list[str] = []
             async for token in model_router.stream_chat(
                 provider=provider,
-                model_id=conv.model_id,
+                model_id=mem_model_id,
                 messages=[ChatMessage(role="user", content=merged_input)],
                 system=_MERGE_SYSTEM_PROMPT,
                 temperature=0.2,

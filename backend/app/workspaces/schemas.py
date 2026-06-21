@@ -75,6 +75,8 @@ class WorkspaceSummary(BaseModel):
     description: str | None
     default_model_id: str | None
     default_provider_id: uuid.UUID | None
+    memory_model_id: str | None = None
+    memory_provider_id: uuid.UUID | None = None
     archived_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -171,6 +173,10 @@ class WorkspaceUpdate(BaseModel):
     default_model_id: str | None = Field(default=None, max_length=255)
     default_provider_id: uuid.UUID | None = None
     auto_memory_enabled: bool | None = None
+    # Dedicated model for the workspace-memory librarian (creator's pick).
+    # NULL/cleared falls back to the workspace default chat model.
+    memory_model_id: str | None = Field(default=None, max_length=255)
+    memory_provider_id: uuid.UUID | None = None
 
 
 class WorkspaceFileContext(BaseModel):
