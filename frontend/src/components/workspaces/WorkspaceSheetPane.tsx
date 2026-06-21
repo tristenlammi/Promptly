@@ -138,19 +138,16 @@ export function WorkspaceSheetPane({
     return best;
   }, []);
 
-  // Tracks whether this sheet has ever held content this session. Fortune-
-  // sheet fires a spurious *empty* onChange while it tears down on navigate-
-  // away; that empty save would otherwise land last and clobber the real
-  // data. So once a sheet has content, we refuse to autosave it back to a
-  // fully-empty grid (clearing individual cells still persists — only an
-  // all-zero workbook is rejected).
-  const hadContentRef = useRef(false);
-
   const persist = useCallback(
     (sheets: Sheet[]) => {
-      const n = countCells(sheets);
-      if (n <= 0 && hadContentRef.current) return;
-      if (n > 0) hadContentRef.current = true;
+      // Never autosave an empty workbook. Fortune-sheet fires an empty
+      // ``onChange`` both as a mount echo (every time the editor opens) and
+      // while tearing down on navigate-away; persisting either one clobbers
+      // the real data with a blank grid. The only legit "all empty" is a
+      // brand-new untouched sheet, which has nothing worth saving anyway.
+      // (Clearing individual cells among others still persists — only an
+      // all-zero grid is rejected. To truly blank a sheet, delete it.)
+      if (countCells(sheets) <= 0) return;
       void workspacesApi
         .saveSpreadsheet(workspaceId, sheetId, {
           data: sheets,
@@ -189,7 +186,8 @@ export function WorkspaceSheetPane({
         saveTimer.current = null;
       }
       // Flush the live workbook on unmount / page switch so a quick edit →
-      // tab-away doesn't lose the last keystrokes.
+      // tab-away doesn't lose the last keystrokes. ``persist`` no-ops on an
+      // empty grid, so a teardown that reads blank can't clobber.
       const sheets = readSheets();
       if (sheets && canEdit) persist(sheets);
     };
@@ -202,13 +200,9 @@ export function WorkspaceSheetPane({
     (next: Sheet[]) => {
       if (!canEdit) return;
       latest.current = next;
-      // Capture content the moment it appears — not just inside ``persist`` —
-      // so a quick type-then-navigate (debounce never fires) is still guarded
-      // against the teardown's empty save.
-      if (countCells(next) > 0) {
-        hadContentRef.current = true;
-        lastGoodRef.current = next;
-      }
+      // Remember the last snapshot that had cells, so a save during teardown
+      // (when the live workbook reads empty) still writes the real data.
+      if (countCells(next) > 0) lastGoodRef.current = next;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
