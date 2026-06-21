@@ -110,19 +110,32 @@ export function WorkspaceSheetPane({
   // grid. Read the live workbook via the ref at save time instead.
   const workbookRef = useRef<WorkbookInstance | null>(null);
 
-  // Current workbook state. ``onChange``'s snapshot and the ref's
-  // ``getAllSheets()`` can disagree (one empty, one populated) depending on
-  // commit timing, so use whichever actually carries cells — never overwrite
-  // good data with an empty grid.
+  // The last ``onChange`` snapshot that actually had cells. Fortune-sheet
+  // emits a spurious *empty* workbook while tearing down on navigate-away;
+  // remembering the last good state lets us save that instead of the blank.
+  const lastGoodRef = useRef<Sheet[] | null>(null);
+
+  // Current workbook state. ``getAllSheets()``, the latest ``onChange``
+  // snapshot, and the last-good snapshot can disagree (one empty, one
+  // populated) depending on commit/teardown timing, so save whichever
+  // carries the most cells — never overwrite good data with an empty grid.
   const readSheets = useCallback((): Sheet[] | null => {
-    const fromRef = workbookRef.current?.getAllSheets?.() as
-      | Sheet[]
-      | undefined;
-    const fromChange = latest.current;
-    const refN = countCells(fromRef);
-    const chN = countCells(fromChange);
-    if (fromRef && refN >= chN) return fromRef;
-    return fromChange ?? fromRef ?? null;
+    const candidates: (Sheet[] | null | undefined)[] = [
+      workbookRef.current?.getAllSheets?.() as Sheet[] | undefined,
+      latest.current,
+      lastGoodRef.current,
+    ];
+    let best: Sheet[] | null = null;
+    let bestN = -1;
+    for (const c of candidates) {
+      if (!c) continue;
+      const n = countCells(c);
+      if (n > bestN) {
+        bestN = n;
+        best = c;
+      }
+    }
+    return best;
   }, []);
 
   // Tracks whether this sheet has ever held content this session. Fortune-
@@ -189,6 +202,13 @@ export function WorkspaceSheetPane({
     (next: Sheet[]) => {
       if (!canEdit) return;
       latest.current = next;
+      // Capture content the moment it appears — not just inside ``persist`` —
+      // so a quick type-then-navigate (debounce never fires) is still guarded
+      // against the teardown's empty save.
+      if (countCells(next) > 0) {
+        hadContentRef.current = true;
+        lastGoodRef.current = next;
+      }
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
