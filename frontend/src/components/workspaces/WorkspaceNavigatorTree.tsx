@@ -161,40 +161,40 @@ export function WorkspaceNavigatorTree({
 
   return (
     <div className="flex h-full flex-col">
-      {onHome && (
-        <div className="px-3 pt-3 pb-1">
-          <button
-            type="button"
-            onClick={onHome}
-            className={cn(
-              "flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition",
-              atHome
-                ? "bg-[var(--accent)] text-white"
-                : "bg-[var(--accent)]/90 text-white hover:bg-[var(--accent)]"
-            )}
-            title="Workspace home — overview, board, and recent items"
-          >
-            <Home className="h-4 w-4" />
-            Home
-          </button>
-        </div>
-      )}
-      {onSettings && (
-        <div className="px-3 pb-1 pt-1">
-          <button
-            type="button"
-            onClick={onSettings}
-            className={cn(
-              "flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition",
-              atSettings
-                ? "border-[var(--border)] bg-[var(--hover)] text-[var(--text)]"
-                : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]"
-            )}
-            title="Workspace settings — instructions, model, members, files, usage"
-          >
-            <Settings className="h-4 w-4" />
-            Settings
-          </button>
+      {(onHome || onSettings) && (
+        <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+          {onSettings && (
+            <button
+              type="button"
+              onClick={onSettings}
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-md border p-2 transition",
+                atSettings
+                  ? "border-[var(--border)] bg-[var(--hover)] text-[var(--text)]"
+                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              )}
+              title="Workspace settings — instructions, model, members, files, usage"
+              aria-label="Workspace settings"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+          )}
+          {onHome && (
+            <button
+              type="button"
+              onClick={onHome}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition",
+                atHome
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--accent)]/90 text-white hover:bg-[var(--accent)]"
+              )}
+              title="Workspace home — overview, board, and recent items"
+            >
+              <Home className="h-4 w-4" />
+              Home
+            </button>
+          )}
         </div>
       )}
       <div className="flex items-center justify-between gap-2 px-3 py-2">
