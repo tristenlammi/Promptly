@@ -121,19 +121,6 @@ export interface WorkspaceItemNode {
   children: WorkspaceItemNode[];
 }
 
-/** One page of a multi-page document (a note). ``kind`` selects the surface
- *  ('richtext' | 'sheet'); ``ref_id`` is the backing entity — a Drive
- *  Document id for a richtext page. Pages render as a tab strip ordered by
- *  ``position``. */
-export interface DocumentPage {
-  id: string;
-  item_id: string;
-  kind: string;
-  ref_id: string | null;
-  title: string;
-  position: number;
-}
-
 /** A spreadsheet page's persisted state. ``data`` is the Fortune-sheet
  *  workbook JSON (an array of sheet objects), ``null`` until first save. */
 export interface SpreadsheetData {
@@ -522,26 +509,6 @@ export const workspacesApi = {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
   },
 
-  // --- Document pages (a note is a multi-page document) ----------------
-  async listPages(id: string, itemId: string): Promise<DocumentPage[]> {
-    const { data } = await apiClient.get<DocumentPage[]>(
-      `/workspaces/${id}/items/${itemId}/pages`
-    );
-    return data;
-  },
-
-  async createPage(
-    id: string,
-    itemId: string,
-    payload: { title?: string; kind?: "richtext" | "sheet" } = {}
-  ): Promise<DocumentPage> {
-    const { data } = await apiClient.post<DocumentPage>(
-      `/workspaces/${id}/items/${itemId}/pages`,
-      { kind: payload.kind ?? "richtext", title: payload.title }
-    );
-    return data;
-  },
-
   // --- Spreadsheet pages (single-user persistence) ---------------------
   async getSpreadsheet(
     id: string,
@@ -563,29 +530,6 @@ export const workspacesApi = {
       payload
     );
     return data;
-  },
-
-  async updatePage(
-    id: string,
-    itemId: string,
-    pageId: string,
-    payload: { title?: string; position?: number }
-  ): Promise<DocumentPage> {
-    const { data } = await apiClient.patch<DocumentPage>(
-      `/workspaces/${id}/items/${itemId}/pages/${pageId}`,
-      payload
-    );
-    return data;
-  },
-
-  async deletePage(
-    id: string,
-    itemId: string,
-    pageId: string
-  ): Promise<void> {
-    await apiClient.delete(
-      `/workspaces/${id}/items/${itemId}/pages/${pageId}`
-    );
   },
 
   /** Fetch one item (e.g. a board, to read its ``config`` label registry). */

@@ -556,7 +556,7 @@ async def write_snapshot(
     # If this document backs a workspace note, (re)index it so workspace
     # chats stay grounded in the note's latest content. Local imports keep
     # the workspace layer out of the generic documents import graph.
-    from app.chat.models import DocumentPage, WorkspaceItem
+    from app.chat.models import WorkspaceItem
 
     note_item = (
         await db.execute(
@@ -566,19 +566,6 @@ async def write_snapshot(
             )
         )
     ).scalars().first()
-    if note_item is None:
-        # A non-primary page of a multi-page document: resolve the owning
-        # note via the page row so editing any page re-grounds the note.
-        note_item = (
-            await db.execute(
-                select(WorkspaceItem)
-                .join(DocumentPage, DocumentPage.item_id == WorkspaceItem.id)
-                .where(
-                    DocumentPage.ref_id == document_id,
-                    WorkspaceItem.kind == "note",
-                )
-            )
-        ).scalars().first()
     if note_item is not None:
         from app.workspaces.knowledge import index_note_for_workspace
 

@@ -328,31 +328,6 @@ class WorkspaceItemResponse(BaseModel):
     config: dict[str, Any] | None = None
 
 
-class DocumentPageResponse(BaseModel):
-    """One page of a multi-page document (a ``note`` item).
-
-    ``kind`` selects the surface ('richtext' | 'sheet'); ``ref_id`` is the
-    backing entity (a ``files.id`` for a richtext page). Pages render as a
-    tab strip ordered by ``position``."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    item_id: uuid.UUID
-    kind: str
-    ref_id: uuid.UUID | None
-    title: str
-    position: float
-
-
-class DocumentPageCreate(BaseModel):
-    """Body for ``POST .../items/{item_id}/pages``. ``richtext`` lays down a
-    Drive Document; ``sheet`` a Fortune-sheet spreadsheet."""
-
-    kind: Literal["richtext", "sheet"] = "richtext"
-    title: str | None = Field(default=None, max_length=255)
-
-
 class SpreadsheetResponse(BaseModel):
     """A spreadsheet page's persisted state. ``data`` is the Fortune-sheet
     workbook JSON (a list of sheet objects), NULL until the first save."""
@@ -373,11 +348,3 @@ class SpreadsheetSaveRequest(BaseModel):
     data: Any
     content_text: str | None = None
     title: str | None = Field(default=None, max_length=255)
-
-
-class DocumentPageUpdate(BaseModel):
-    """PATCH a page — rename and/or reorder. PATCH semantics: only keys
-    present in the body are applied."""
-
-    title: str | None = Field(default=None, max_length=255)
-    position: float | None = None

@@ -228,7 +228,6 @@ async def file_is_accessible_via_workspace(
     vice-versa, and a top-level import would be circular).
     """
     from app.chat.models import (
-        DocumentPage,
         WorkspaceCanvas,
         WorkspaceFile,
         WorkspaceItem,
@@ -275,23 +274,6 @@ async def file_is_accessible_via_workspace(
             .where(
                 WorkspaceCanvas.text_file_id == file_id,
                 WorkspaceCanvas.workspace_id.in_(workspace_ids),
-            )
-            .limit(1)
-        )
-    ).first() is not None:
-        return True
-
-    # A richtext page of a multi-page document (the file backs a
-    # ``document_pages`` row whose owning note is in an accessible
-    # workspace). Covers every page beyond the note's primary one, which is
-    # already caught by the WorkspaceItem.ref_id check above.
-    if (
-        await db.execute(
-            select(DocumentPage.id)
-            .join(WorkspaceItem, WorkspaceItem.id == DocumentPage.item_id)
-            .where(
-                DocumentPage.ref_id == file_id,
-                WorkspaceItem.workspace_id.in_(workspace_ids),
             )
             .limit(1)
         )

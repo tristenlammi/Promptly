@@ -42,7 +42,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.models import User
 from app.chat.models import (
     Conversation,
-    DocumentPage,
     Message,
     Workspace,
     WorkspaceCanvas,
@@ -413,45 +412,6 @@ async def _set_note_index_status(
     await db.commit()
 
 
-async def _note_page_files(
-    db: AsyncSession, item: WorkspaceItem
-) -> list[UserFile]:
-    """Backing documents of a note's richtext pages, in page order.
-
-    Falls back to the note's own ``ref_id`` for any item that predates page
-    rows (defensive — the migration backfills one page per note, and note
-    creation seeds a primary page)."""
-    rows = list(
-        (
-            await db.execute(
-                select(DocumentPage)
-                .where(
-                    DocumentPage.item_id == item.id,
-                    DocumentPage.kind == "richtext",
-                    DocumentPage.ref_id.is_not(None),
-                )
-                .order_by(DocumentPage.position.asc())
-            )
-        ).scalars()
-    )
-    ref_ids = [p.ref_id for p in rows]
-    if not ref_ids and item.ref_id is not None:
-        ref_ids = [item.ref_id]
-    files: list[UserFile] = []
-    for rid in ref_ids:
-        f = await db.get(UserFile, rid)
-        if f is not None:
-            files.append(f)
-    return files
-
-
-def _combined_content_hash(files: list[UserFile]) -> str:
-    """Stable hash over several page documents — changes when any page's
-    content changes, so a multi-page note re-embeds only when needed."""
-    parts = [file_content_hash(f) for f in files]
-    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
-
-
 async def index_note_for_workspace(
     workspace_id: uuid.UUID,
     item_id: uuid.UUID,
@@ -468,13 +428,10 @@ async def index_note_for_workspace(
     async with SessionLocal() as db:
         try:
             item = await db.get(WorkspaceItem, item_id)
-            if item is None or item.kind != "note":
+            if item is None or item.kind != "note" or item.ref_id is None:
                 return
-            # A note is a multi-page document: index every richtext page's
-            # backing doc into the workspace pool. Fall back to the legacy
-            # single ``ref_id`` for any item without page rows.
-            files = await _note_page_files(db, item)
-            if not files:
+            file = await db.get(UserFile, item.ref_id)
+            if file is None:
                 await _set_note_index_status(
                     db,
                     item_id=item_id,
@@ -487,14 +444,12 @@ async def index_note_for_workspace(
             if cfg is None:
                 return  # leave queued until an embedding provider exists
 
-            # Nothing typed on any page yet → nothing to embed. Leave queued
+            # Empty / never-typed note → nothing to embed. Leave queued
             # (not failed) so the first real edit indexes it cleanly.
-            if not any((f.content_text or "").strip() for f in files):
+            if not (file.content_text or "").strip():
                 return
 
-            current_hash = await run_in_threadpool(
-                _combined_content_hash, files
-            )
+            current_hash = await run_in_threadpool(file_content_hash, file)
             if (
                 not force
                 and item.indexed_content_hash == current_hash
@@ -505,40 +460,35 @@ async def index_note_for_workspace(
             await _set_note_index_status(
                 db, item_id=item_id, status="embedding"
             )
-            total_chunks = 0
-            for file in files:
-                # Drop stale chunks first so an emptied page clears cleanly.
-                await delete_existing_chunks(
-                    db,
-                    scope_kind="workspace",
-                    scope_id=workspace_id,
-                    user_file_id=file.id,
+            try:
+                chunks, embeddings = await embed_file_to_chunks(
+                    file,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
                 )
-                if not (file.content_text or "").strip():
-                    continue
-                try:
-                    chunks, embeddings = await embed_file_to_chunks(
-                        file,
-                        provider=cfg.provider,
-                        model_id=cfg.model_id,
-                        dim=cfg.dim,
-                    )
-                except ValueError as exc:
-                    await _set_note_index_status(
-                        db, item_id=item_id, status="failed", error=str(exc)
-                    )
-                    return
-                await insert_chunks(
-                    db,
-                    scope_kind="workspace",
-                    scope_id=workspace_id,
-                    user_file_id=file.id,
-                    chunks=chunks,
-                    embeddings=embeddings,
-                    embedding_model=cfg.model_id,
-                    embedding_dim=cfg.dim,
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
                 )
-                total_chunks += len(chunks)
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=file.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
             await _set_note_index_status(
                 db,
                 item_id=item_id,
@@ -546,9 +496,8 @@ async def index_note_for_workspace(
                 indexed_hash=current_hash,
             )
             logger.info(
-                "indexed %d chunks across %d page(s) for workspace=%s note=%s",
-                total_chunks,
-                len(files),
+                "indexed %d chunks for workspace=%s note=%s",
+                len(chunks),
                 workspace_id,
                 item_id,
             )
@@ -1290,20 +1239,6 @@ async def context_disabled_file_ids(
     )
     out.update(r for (r,) in note_ids if r is not None)
 
-    # Every page of a disabled note (multi-page docs) — exclude all their
-    # backing docs, not just the primary one caught above.
-    page_ids = await db.execute(
-        select(DocumentPage.ref_id)
-        .join(WorkspaceItem, WorkspaceItem.id == DocumentPage.item_id)
-        .where(
-            WorkspaceItem.workspace_id == workspace_id,
-            WorkspaceItem.kind == "note",
-            WorkspaceItem.context_enabled.is_(False),
-            DocumentPage.ref_id.is_not(None),
-        )
-    )
-    out.update(r for (r,) in page_ids if r is not None)
-
     canvas_ids = await db.execute(
         select(WorkspaceCanvas.text_file_id)
         .join(WorkspaceItem, WorkspaceItem.ref_id == WorkspaceCanvas.id)
@@ -1330,26 +1265,18 @@ async def context_disabled_file_ids(
 async def _workspace_notes(
     db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
 ) -> list[tuple[WorkspaceItem, UserFile]]:
-    """Live note pages in the workspace paired with their backing doc,
-    minus anything this chat has excluded (by page file id).
-
-    A note is a multi-page document, so we join through ``document_pages``:
-    one row per richtext page. A single-page note yields exactly one row
-    (its primary page), matching the pre-multi-page behaviour."""
+    """Live note items in the workspace paired with their backing doc,
+    minus anything this chat has excluded (by note file id)."""
     rows = (
         await db.execute(
             select(WorkspaceItem, UserFile)
-            .join(DocumentPage, DocumentPage.item_id == WorkspaceItem.id)
-            .join(UserFile, UserFile.id == DocumentPage.ref_id)
+            .join(UserFile, UserFile.id == WorkspaceItem.ref_id)
             .where(
                 WorkspaceItem.workspace_id == workspace_id,
                 WorkspaceItem.kind == "note",
-                DocumentPage.kind == "richtext",
                 UserFile.trashed_at.is_(None),
             )
-            .order_by(
-                WorkspaceItem.position.asc(), DocumentPage.position.asc()
-            )
+            .order_by(WorkspaceItem.position.asc())
         )
     ).all()
     return [(it, uf) for it, uf in rows if uf.id not in excluded]
