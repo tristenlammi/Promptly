@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { Workbook } from "@fortune-sheet/react";
+import { Workbook, type WorkbookInstance } from "@fortune-sheet/react";
 import type { Sheet } from "@fortune-sheet/core";
 import "@fortune-sheet/react/dist/index.css";
 // Our legibility overrides — imported after the library CSS so they win.
@@ -89,6 +89,30 @@ export function WorkspaceSheetPane({
   const [error, setError] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<Sheet[] | null>(null);
+  // Fortune-sheet's ``onChange`` data argument is unreliable — the cell being
+  // edited often isn't committed into it, so saving that produces an empty
+  // grid. Read the live workbook via the ref at save time instead.
+  const workbookRef = useRef<WorkbookInstance | null>(null);
+
+  // Current workbook state — prefer the ref (authoritative), fall back to the
+  // last ``onChange`` snapshot if the ref isn't ready yet.
+  const readSheets = useCallback((): Sheet[] | null => {
+    const fromRef = workbookRef.current?.getAllSheets?.();
+    if (fromRef && fromRef.length) return fromRef as Sheet[];
+    return latest.current;
+  }, []);
+
+  const persist = useCallback(
+    (sheets: Sheet[]) => {
+      void workspacesApi
+        .saveSpreadsheet(workspaceId, sheetId, {
+          data: sheets,
+          content_text: flattenSheets(sheets),
+        })
+        .catch(() => {});
+    },
+    [workspaceId, sheetId]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -116,15 +140,11 @@ export function WorkspaceSheetPane({
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        if (latest.current && canEdit) {
-          void workspacesApi
-            .saveSpreadsheet(workspaceId, sheetId, {
-              data: latest.current,
-              content_text: flattenSheets(latest.current),
-            })
-            .catch(() => {});
-        }
       }
+      // Flush the live workbook on unmount / page switch so a quick edit →
+      // tab-away doesn't lose the last keystrokes.
+      const sheets = readSheets();
+      if (sheets && canEdit) persist(sheets);
     };
     // canEdit intentionally excluded — flushing on unmount reads it via ref
     // semantics; re-running the loader on a permission flip isn't desired.
@@ -138,16 +158,11 @@ export function WorkspaceSheetPane({
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null;
-        const sheets = latest.current ?? next;
-        void workspacesApi
-          .saveSpreadsheet(workspaceId, sheetId, {
-            data: sheets,
-            content_text: flattenSheets(sheets),
-          })
-          .catch(() => {});
+        const sheets = readSheets() ?? next;
+        persist(sheets);
       }, SAVE_DEBOUNCE_MS);
     },
-    [workspaceId, sheetId, canEdit]
+    [canEdit, readSheets, persist]
   );
 
   if (error) {
@@ -177,6 +192,7 @@ export function WorkspaceSheetPane({
   return (
     <div className="relative min-h-0 flex-1" style={{ height: "100%" }}>
       <Workbook
+        ref={workbookRef}
         data={data}
         onChange={handleChange}
         allowEdit={canEdit}
