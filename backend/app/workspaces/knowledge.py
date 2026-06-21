@@ -36,8 +36,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.auth.models import User
 from app.chat.models import (
@@ -1228,13 +1229,29 @@ async def context_disabled_file_ids(
     """
     out: set[uuid.UUID] = set()
 
+    # An item is excluded when its own context toggle is OFF, or when it's a
+    # page inside a Notebook (container) whose context toggle is OFF — the
+    # container acts as a master switch over its pages.
+    Parent = aliased(WorkspaceItem)
+
+    def _disabled(item):
+        return or_(
+            item.context_enabled.is_(False),
+            and_(
+                Parent.kind == "container",
+                Parent.context_enabled.is_(False),
+            ),
+        )
+
     # Notes and boards both back their RAG text on ``ref_id``.
     note_ids = await db.execute(
-        select(WorkspaceItem.ref_id).where(
+        select(WorkspaceItem.ref_id)
+        .outerjoin(Parent, Parent.id == WorkspaceItem.parent_id)
+        .where(
             WorkspaceItem.workspace_id == workspace_id,
             WorkspaceItem.kind.in_(("note", "board")),
-            WorkspaceItem.context_enabled.is_(False),
             WorkspaceItem.ref_id.is_not(None),
+            _disabled(WorkspaceItem),
         )
     )
     out.update(r for (r,) in note_ids if r is not None)
@@ -1242,11 +1259,12 @@ async def context_disabled_file_ids(
     canvas_ids = await db.execute(
         select(WorkspaceCanvas.text_file_id)
         .join(WorkspaceItem, WorkspaceItem.ref_id == WorkspaceCanvas.id)
+        .outerjoin(Parent, Parent.id == WorkspaceItem.parent_id)
         .where(
             WorkspaceItem.workspace_id == workspace_id,
             WorkspaceItem.kind == "canvas",
-            WorkspaceItem.context_enabled.is_(False),
             WorkspaceCanvas.text_file_id.is_not(None),
+            _disabled(WorkspaceItem),
         )
     )
     out.update(r for (r,) in canvas_ids if r is not None)

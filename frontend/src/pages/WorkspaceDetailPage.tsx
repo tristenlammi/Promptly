@@ -18,7 +18,6 @@ import {
   FileText,
   FolderX,
   Columns3,
-  Home,
   Layers,
   Link2,
   Loader2,
@@ -30,6 +29,8 @@ import {
   Share2,
   Upload,
   Users,
+  Zap,
+  ZapOff,
   X,
 } from "lucide-react";
 
@@ -78,6 +79,8 @@ import {
   useCreateWorkspaceItem,
   useDeleteWorkspaceItem,
   useItemBacklinks,
+  useMoveWorkspaceItem,
+  useSetItemContext,
   useUpdateWorkspaceItem,
   useWorkspace,
   useWorkspaceConversations,
@@ -267,17 +270,6 @@ export function WorkspaceDetailPage() {
                 Import
               </Button>
             )}
-            <Button
-              variant={!selected ? "primary" : "ghost"}
-              leftIcon={<Home className="h-4 w-4" />}
-              onClick={() => {
-                setSelected(null);
-                setSecondary(null);
-              }}
-              title="Workspace home — overview, board, and recent items"
-            >
-              <span className="hidden sm:inline">Home</span>
-            </Button>
             {workspace && (
               <Button
                 variant="ghost"
@@ -313,6 +305,11 @@ export function WorkspaceDetailPage() {
                 onSelect={handleSelect}
                 onOpenToSide={handleOpenToSide}
                 canEdit={canEdit && !isArchived}
+                onHome={() => {
+                  setSelected(null);
+                  setSecondary(null);
+                }}
+                atHome={!selected}
               />
             )}
           </aside>
@@ -1077,6 +1074,8 @@ function WorkspaceNotebookPane({
   const create = useCreateWorkspaceItem(workspaceId);
   const updateItem = useUpdateWorkspaceItem(workspaceId);
   const del = useDeleteWorkspaceItem(workspaceId);
+  const setContext = useSetItemContext(workspaceId);
+  const move = useMoveWorkspaceItem(workspaceId);
 
   const [activeId, setActiveId] = useState<string | null>(null);
   useEffect(() => {
@@ -1135,6 +1134,15 @@ function WorkspaceNotebookPane({
           updateItem.mutate({ itemId: pageId, payload: { title } })
         }
         onDelete={deletePage}
+        onToggleContext={(pageId, enabled) =>
+          setContext.mutate({ itemId: pageId, enabled })
+        }
+        onReorder={(pageId, position) =>
+          move.mutate({
+            itemId: pageId,
+            payload: { parent_id: node.id, position },
+          })
+        }
       />
       <div className="flex min-h-0 flex-1 flex-col">
         {active ? (
@@ -1211,6 +1219,8 @@ function NotebookTabs({
   onAdd,
   onRename,
   onDelete,
+  onToggleContext,
+  onReorder,
 }: {
   pages: WorkspaceItemNode[];
   activeId: string | null;
@@ -1220,10 +1230,13 @@ function NotebookTabs({
   onAdd: (kind: NotebookPageKind) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onToggleContext: (id: string, enabled: boolean) => void;
+  onReorder: (id: string, position: number) => void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
 
   if (pages.length === 0 && !canEdit) return null;
 
@@ -1237,6 +1250,21 @@ function NotebookTabs({
   const pick = (kind: NotebookPageKind) => {
     setAddOpen(false);
     onAdd(kind);
+  };
+
+  // Reorder: drop the dragged page immediately *before* the target. We
+  // compute a float midpoint between the target and its left neighbour
+  // (among the other pages) so no full renumber is needed — the same
+  // scheme the navigator tree uses.
+  const handleDropBefore = (targetId: string) => {
+    if (!dragId || dragId === targetId) return;
+    const others = pages.filter((p) => p.id !== dragId);
+    const idx = others.findIndex((p) => p.id === targetId);
+    if (idx < 0) return;
+    const target = others[idx];
+    const prev = others[idx - 1];
+    const before = prev ? prev.position : target.position - 1;
+    onReorder(dragId, (before + target.position) / 2);
   };
 
   return (
@@ -1261,11 +1289,24 @@ function NotebookTabs({
               />
             );
           }
+          const contextOn = p.context_enabled !== false;
           return (
             <div
               key={p.id}
+              draggable={canEdit}
+              onDragStart={() => setDragId(p.id)}
+              onDragOver={(e) => {
+                if (canEdit && dragId) e.preventDefault();
+              }}
+              onDrop={() => {
+                handleDropBefore(p.id);
+                setDragId(null);
+              }}
+              onDragEnd={() => setDragId(null)}
               className={cn(
                 "group inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition",
+                canEdit && "cursor-grab active:cursor-grabbing",
+                dragId === p.id && "opacity-50",
                 active
                   ? "bg-[var(--accent)]/15 text-[var(--text)]"
                   : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
@@ -1281,12 +1322,42 @@ function NotebookTabs({
                 }}
                 className="inline-flex max-w-[12rem] items-center gap-1.5 truncate"
                 title={
-                  canEdit ? "Click to open · double-click to rename" : p.title
+                  canEdit
+                    ? "Click to open · double-click to rename · drag to reorder"
+                    : p.title
                 }
               >
                 <Icon className="h-3 w-3 shrink-0 opacity-70" />
                 <span className="truncate">{p.title || "Untitled"}</span>
               </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => onToggleContext(p.id, !contextOn)}
+                  className={cn(
+                    "transition",
+                    contextOn
+                      ? "text-[var(--accent)]"
+                      : "text-[var(--text-muted)] opacity-0 group-hover:opacity-100"
+                  )}
+                  aria-label={
+                    contextOn
+                      ? "Used as workspace context — click to exclude"
+                      : "Excluded from workspace context — click to include"
+                  }
+                  title={
+                    contextOn
+                      ? "Used as workspace context (click to exclude)"
+                      : "Excluded from workspace context (click to include)"
+                  }
+                >
+                  {contextOn ? (
+                    <Zap className="h-3 w-3" />
+                  ) : (
+                    <ZapOff className="h-3 w-3" />
+                  )}
+                </button>
+              )}
               {canEdit && pages.length > 1 && (
                 <button
                   type="button"

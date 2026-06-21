@@ -11,6 +11,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  Home,
   Layers,
   Loader2,
   MessageSquare,
@@ -63,6 +64,8 @@ export function WorkspaceNavigatorTree({
   onSelect,
   onOpenToSide,
   canEdit,
+  onHome,
+  atHome,
 }: {
   workspaceId: string;
   tree: WorkspaceItemNode[];
@@ -71,6 +74,10 @@ export function WorkspaceNavigatorTree({
   /** Open the item alongside the current one (split-screen). */
   onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
+  /** Jump back to the workspace overview ("home"). */
+  onHome?: () => void;
+  /** True when the overview is showing (no item selected). */
+  atHome?: boolean;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
@@ -147,6 +154,24 @@ export function WorkspaceNavigatorTree({
 
   return (
     <div className="flex h-full flex-col">
+      {onHome && (
+        <div className="px-3 pt-3 pb-1">
+          <button
+            type="button"
+            onClick={onHome}
+            className={cn(
+              "flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition",
+              atHome
+                ? "bg-[var(--accent)] text-white"
+                : "bg-[var(--accent)]/90 text-white hover:bg-[var(--accent)]"
+            )}
+            title="Workspace home — overview, board, and recent items"
+          >
+            <Home className="h-4 w-4" />
+            Home
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
           Content
@@ -406,6 +431,7 @@ function TreeNode({
     node.kind === "note" ||
     node.kind === "canvas" ||
     node.kind === "board" ||
+    node.kind === "container" ||
     isChat;
   const contextOn = isChat
     ? node.context_enabled === true
