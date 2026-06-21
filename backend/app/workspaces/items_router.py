@@ -368,6 +368,23 @@ async def create_workspace_item(
                 position=0.0,
             )
         )
+    elif payload.kind == "sheet":
+        # A standalone spreadsheet — its backing entity is a ``Spreadsheet``
+        # row (no Drive folder needed). RAG indexing of sheet content is a
+        # later phase, so ``indexing_status`` stays NULL for now.
+        sheet_title = title or _DEFAULT_SHEET_TITLE
+        sheet = Spreadsheet(workspace_id=ws.id, title=sheet_title)
+        db.add(sheet)
+        await db.flush()  # assign sheet.id before the item links to it
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=payload.parent_id,
+            kind="sheet",
+            ref_id=sheet.id,
+            title=sheet_title,
+            position=position,
+        )
+        db.add(item)
     else:  # kind == "canvas"
         canvas_title = title or _DEFAULT_CANVAS_TITLE
         canvases_folder_id = await _resolve_subfolder_id(
@@ -1148,6 +1165,16 @@ async def delete_workspace_item(
                         pf = await db.get(UserFile, pid)
                         if pf is not None and pf.trashed_at is None:
                             pf.trashed_at = now
+        elif it.kind == "sheet" and it.ref_id is not None:
+            # Drop the backing Spreadsheet row and trash its RAG text file
+            # (neither is a tree-cascade target since ref_id isn't a real FK).
+            sheet = await db.get(Spreadsheet, it.ref_id)
+            if sheet is not None:
+                if sheet.text_file_id is not None:
+                    sf = await db.get(UserFile, sheet.text_file_id)
+                    if sf is not None and sf.trashed_at is None:
+                        sf.trashed_at = now
+                await db.delete(sheet)
         elif it.kind == "canvas" and it.ref_id is not None:
             # Trash the backing text file and drop the canvas row (its
             # chunks cascade off the file delete; the canvas isn't a

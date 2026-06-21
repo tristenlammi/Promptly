@@ -95,7 +95,8 @@ export type WorkspaceItemKind =
   | "canvas"
   | "board"
   | "file"
-  | "chat";
+  | "chat"
+  | "sheet";
 
 /** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
  *  ``children``; chats are appended flat at the root. */
@@ -316,7 +317,7 @@ export interface WorkspaceTaskUpdatePayload {
 
 
 export interface CreateWorkspaceItemPayload {
-  kind: "folder" | "note" | "canvas" | "board";
+  kind: "folder" | "note" | "canvas" | "board" | "sheet";
   parent_id?: string | null;
   title?: string;
 }

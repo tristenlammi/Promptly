@@ -779,6 +779,26 @@ function WorkspaceItemView({
       <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />
     );
   }
+  if (node.kind === "sheet" && node.ref_id) {
+    return (
+      <Suspense
+        fallback={
+          <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading spreadsheet…
+            </span>
+          </div>
+        }
+      >
+        <WorkspaceSheetPane
+          workspaceId={workspaceId}
+          sheetId={node.ref_id}
+          canEdit={canEdit}
+        />
+      </Suspense>
+    );
+  }
   if (node.kind === "chat" && node.ref_id) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">

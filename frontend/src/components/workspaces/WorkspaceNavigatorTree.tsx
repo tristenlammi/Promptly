@@ -19,6 +19,7 @@ import {
   Pin,
   Plus,
   Shapes,
+  Table2,
   Trash2,
   Zap,
   ZapOff,
@@ -81,14 +82,14 @@ export function WorkspaceNavigatorTree({
   const mainTree = removePinned(tree);
 
   const handleCreate = async (
-    kind: "folder" | "note" | "canvas" | "board",
+    kind: "folder" | "note" | "canvas" | "board" | "sheet",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
-    // A freshly-created note or canvas should open straight away. Folders
-    // just appear in place. We synthesise a node so the pane can open the
-    // editor without waiting for the tree refetch.
-    if (kind === "note" || kind === "canvas") {
+    // A freshly-created note / canvas / sheet should open straight away.
+    // Folders just appear in place. We synthesise a node so the pane can
+    // open the editor without waiting for the tree refetch.
+    if (kind === "note" || kind === "canvas" || kind === "sheet") {
       onSelect({
         id: item.id,
         kind: item.kind,
@@ -151,6 +152,7 @@ export function WorkspaceNavigatorTree({
             onNewNote={() => handleCreate("note", null)}
             onNewCanvas={() => handleCreate("canvas", null)}
             onNewBoard={() => handleCreate("board", null)}
+            onNewSheet={() => handleCreate("sheet", null)}
           />
         )}
       </div>
@@ -372,7 +374,7 @@ function TreeNode({
   onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
   onCreateInFolder: (
-    kind: "folder" | "note" | "canvas" | "board",
+    kind: "folder" | "note" | "canvas" | "board" | "sheet",
     parentId: string
   ) => void;
 }) {
@@ -608,6 +610,7 @@ function TreeNode({
             onNewNote={() => onCreateInFolder("note", node.id)}
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
             onNewBoard={() => onCreateInFolder("board", node.id)}
+            onNewSheet={() => onCreateInFolder("sheet", node.id)}
             pinned={isPinned}
             onTogglePin={handleTogglePin}
             onOpenToSide={
@@ -668,6 +671,8 @@ function NodeIcon({
       return <Shapes className={cls} />;
     case "board":
       return <Columns3 className={cls} />;
+    case "sheet":
+      return <Table2 className={cls} />;
     case "note":
     default:
       return <FileText className={cls} />;
@@ -689,6 +694,7 @@ function NodeActions({
   onNewNote,
   onNewCanvas,
   onNewBoard,
+  onNewSheet,
   pinned,
   onTogglePin,
   onOpenToSide,
@@ -704,6 +710,7 @@ function NodeActions({
   onNewNote: () => void;
   onNewCanvas: () => void;
   onNewBoard: () => void;
+  onNewSheet: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
@@ -822,6 +829,14 @@ function NodeActions({
                       onNewBoard();
                     }}
                   />
+                  <MenuItem
+                    icon={<Table2 className="h-3.5 w-3.5" />}
+                    label="New sheet"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNewSheet();
+                    }}
+                  />
                 </>
               )}
               {contextState && onToggleContext && (
@@ -919,6 +934,7 @@ function NewMenu({
   onNewNote,
   onNewCanvas,
   onNewBoard,
+  onNewSheet,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
@@ -926,6 +942,7 @@ function NewMenu({
   onNewNote: () => void;
   onNewCanvas: () => void;
   onNewBoard: () => void;
+  onNewSheet: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -991,6 +1008,14 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewBoard();
+              }}
+            />
+            <MenuItem
+              icon={<Table2 className="h-3.5 w-3.5" />}
+              label="New sheet"
+              onClick={() => {
+                setOpen(false);
+                onNewSheet();
               }}
             />
           </div>
