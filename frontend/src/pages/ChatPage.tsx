@@ -1040,6 +1040,9 @@ export function ChatPage({
               onDelete={id && isOwner ? handleDeleteMessage : undefined}
               onFeedback={id && isOwner ? handleMessageFeedback : undefined}
               onSelectVersion={id ? handleSelectVersion : undefined}
+              // Workspaces are a self-contained zone — their chats shouldn't
+              // push into the account-level personal memory. Hide "Remember".
+              hideRemember={Boolean(conversation?.workspace_id)}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">

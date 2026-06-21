@@ -70,6 +70,10 @@ interface ChatWindowProps {
   /** Phase 2.6 — switch to a sibling version from the ``‹ 2/3 ›`` pager.
    *  Receives the id of the sibling to activate. */
   onSelectVersion?: (siblingId: string) => Promise<void> | void;
+  /** Hide the "Remember" (save to account memory) action — set for
+   *  workspace chats, which are a self-contained zone that shouldn't feed
+   *  the user's personal account memory. */
+  hideRemember?: boolean;
 }
 
 export function ChatWindow({
@@ -84,6 +88,7 @@ export function ChatWindow({
   onDelete,
   onFeedback,
   onSelectVersion,
+  hideRemember = false,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
   const activeId = useChatStore((s) => s.activeId);
@@ -343,7 +348,9 @@ export function ChatWindow({
               versionCount={m.version_count ?? undefined}
               siblingIds={m.sibling_ids ?? undefined}
               onSelectVersion={onSelectVersion}
-              onRemember={(text) => setRememberText(text)}
+              onRemember={
+                hideRemember ? undefined : (text) => setRememberText(text)
+              }
             />
           );
         })}
