@@ -283,8 +283,18 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
     # job maintains a single pinned "Workspace Memory" file, refreshed
     # from whichever chat in the workspace most recently produced a reply.
     # Off by default — distinct from the manual "Save summary to workspace".
+    # Retained as a synced mirror of ``memory_mode`` (== "auto") for any
+    # legacy reader; ``memory_mode`` is the source of truth.
     auto_memory_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Tri-state memory mode, mirroring the account-level memory toggle:
+    #   "off"    — no workspace memory: not maintained, not injected.
+    #   "auto"   — the librarian auto-maintains it (== auto_memory_enabled).
+    #   "manual" — used + hand-managed (editor + "save to memory"), but the
+    #              librarian never auto-runs.
+    memory_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="off", server_default="off"
     )
     # Dedicated model for the workspace-memory "librarian" (summarisation /
     # distillation). Lets the workspace creator pick a model from their own

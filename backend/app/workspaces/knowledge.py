@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -1728,6 +1729,13 @@ async def build_workspace_injection(
 
     excluded = set(excluded_file_ids or set())
     excluded |= await context_disabled_file_ids(db, workspace_id)
+    # In "off" memory mode the workspace memory is dormant — never inject it
+    # (it's a pinned file, so it would otherwise ride the pinned-file path).
+    ws_row = await db.get(Workspace, workspace_id)
+    if ws_row is not None and ws_row.memory_mode == "off":
+        mem_doc = await get_workspace_memory_doc(db, workspace_id)
+        if mem_doc is not None:
+            excluded.add(mem_doc.id)
     file_rows = (
         await db.execute(
             select(WorkspaceFile, UserFile)
@@ -1968,6 +1976,76 @@ async def save_workspace_memory(
     await db.commit()
     return new_uf.id
 
+
+# ---------------------------------------------------------------------
+# Sticky / pinned memory — a fenced block the librarian preserves verbatim
+# ---------------------------------------------------------------------
+# Invisible HTML-comment fences (don't render in Markdown) bound a region of
+# the memory the auto-librarian must never rewrite. We strip it before the
+# merge (so the model never echoes or mangles it) and re-attach it verbatim
+# after. "Save to memory" appends here, so saved facts are sticky by nature.
+_PINNED_START = "<!-- pinned:start -->"
+_PINNED_END = "<!-- pinned:end -->"
+_PINNED_HEADING = "## 📌 Pinned (kept verbatim — never auto-changed)"
+_PINNED_RE = re.compile(
+    re.escape(_PINNED_START) + r"(.*?)" + re.escape(_PINNED_END),
+    re.DOTALL,
+)
+
+
+def split_pinned_memory(md: str) -> tuple[str, str]:
+    """Split memory markdown into ``(pinned_inner, rest)``.
+
+    ``pinned_inner`` is the bullet content between the pinned fences (the
+    canonical heading stripped), trimmed; ``rest`` is the markdown with the
+    whole fenced block removed. Both empty-safe."""
+    m = _PINNED_RE.search(md or "")
+    if not m:
+        return "", (md or "").strip()
+    kept: list[str] = []
+    for ln in m.group(1).splitlines():
+        s = ln.strip()
+        if s.startswith("## ") and "Pinned" in s:
+            continue  # drop the heading; re-rendered canonically
+        kept.append(ln)
+    pinned_inner = "\n".join(kept).strip()
+    rest = ((md[: m.start()] + md[m.end():]) or "").strip()
+    return pinned_inner, rest
+
+
+def compose_with_pinned(body: str, pinned_inner: str) -> str:
+    """Re-attach the fenced pinned block to ``body``. No-op when empty."""
+    body = (body or "").strip()
+    pinned_inner = (pinned_inner or "").strip()
+    if not pinned_inner:
+        return body
+    block = f"{_PINNED_START}\n{_PINNED_HEADING}\n\n{pinned_inner}\n{_PINNED_END}"
+    return (body + "\n\n" + block) if body else block
+
+
+async def append_to_workspace_memory(
+    db: AsyncSession, *, ws: Workspace, text: str
+) -> uuid.UUID | None:
+    """Append ``text`` as a pinned bullet in the workspace memory, creating the
+    doc if needed. Pinned items survive librarian runs verbatim, so this is the
+    workspace-scoped "remember this". Returns the file id to (re)index."""
+    snippet = " ".join((text or "").split())
+    if not snippet:
+        return None
+    if len(snippet) > 2000:
+        snippet = snippet[:2000].rstrip() + "…"
+
+    existing = await get_workspace_memory_doc(db, ws.id)
+    current = (existing.content_text or "").strip() if existing is not None else ""
+    pinned_inner, rest = split_pinned_memory(current)
+    bullet = f"- {snippet}"
+    pinned_inner = (pinned_inner + "\n" + bullet).strip() if pinned_inner else bullet
+    if not rest:
+        rest = f"# Workspace Memory: {ws.title}"
+    new_md = compose_with_pinned(rest, pinned_inner)
+    return await save_workspace_memory(db, ws=ws, content_md=new_md)
+
+
 # How many recently-active conversations to pull for cross-chat merging.
 # Enough to capture meaningful divergence without blowing the summary
 # model's context. The most recent conversation is always included
@@ -1999,9 +2077,11 @@ _MERGE_SYSTEM_PROMPT = (
     "You are the librarian for a workspace's living 'Workspace Memory' — a "
     "compact, accurate record of what has been established across its chats. "
     "You are given the CURRENT memory (which may be empty), RECENT CHAT "
-    "EXCERPTS, and the workspace's own DOCUMENTS (notes, sheets, canvases, "
-    "boards). Mine all of them for durable signal. Produce the UPDATED memory "
-    "document.\n\n"
+    "EXCERPTS, the workspace's own DOCUMENTS (notes, sheets, canvases, "
+    "boards), and possibly PINNED FACTS the user has locked. Mine the first "
+    "three for durable signal; treat PINNED FACTS as authoritative but NEVER "
+    "reproduce or alter them (they are preserved automatically). Produce the "
+    "UPDATED memory document.\n\n"
     "WHAT TO CAPTURE (durable signal):\n"
     "- The user's explicit decisions and commitments (\"let's use X\", \"go "
     "with B\", \"the goal is Y\").\n"
@@ -2166,17 +2246,26 @@ async def regenerate_workspace_memory(
 
     # Load the current memory doc (if any) so the librarian *updates* it —
     # accumulating durable knowledge and superseding changed decisions —
-    # rather than regenerating from only the last few chats.
+    # rather than regenerating from only the last few chats. Split off the
+    # pinned/sticky block first: the librarian never sees it as editable
+    # content; it's re-attached verbatim after.
     existing = await get_workspace_memory_doc(db, ws.id)
-    current_memory = (
+    full_memory = (
         (existing.content_text or "").strip() if existing is not None else ""
     )
+    pinned_inner, current_memory = split_pinned_memory(full_memory)
 
     parts: list[str] = []
     if current_memory:
         parts.append(
             "=== CURRENT WORKSPACE MEMORY (revise this; keep what still "
             "holds, supersede what changed) ===\n" + current_memory
+        )
+    if pinned_inner:
+        parts.append(
+            "=== PINNED FACTS (the user locked these; treat them as "
+            "authoritative, but DO NOT reproduce or modify them in your "
+            "output — they are preserved automatically) ===\n" + pinned_inner
         )
     if excerpts:
         parts.append(
@@ -2223,10 +2312,12 @@ async def regenerate_workspace_memory(
     if doc_sections:
         src_bits.append("the workspace's notes, sheets, canvases, and boards")
     source_desc = " and ".join(src_bits) or "this workspace"
+    # Re-attach the pinned block verbatim — the librarian never touched it.
+    memo_body = compose_with_pinned(memo, pinned_inner)
     body = (
         f"# Workspace Memory: {ws.title}\n\n"
         f"_Auto-maintained from {source_desc}. Turn this off in Settings._\n\n"
-        f"{memo}\n"
+        f"{memo_body}\n"
     )
 
     try:
@@ -2273,7 +2364,9 @@ async def maybe_refresh_workspace_memory(conversation_id: uuid.UUID) -> None:
         if conv is None or conv.workspace_id is None:
             return
         ws = await db.get(Workspace, conv.workspace_id)
-        if ws is None or not ws.auto_memory_enabled:
+        # Only the "auto" mode auto-maintains; "manual" and "off" never run
+        # the librarian on a chat finalize.
+        if ws is None or ws.memory_mode != "auto":
             return
 
         key = str(ws.id)

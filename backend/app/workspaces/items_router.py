@@ -62,6 +62,7 @@ from app.workspaces.schemas import (
     WorkspaceItemNode,
     WorkspaceItemResponse,
     WorkspaceItemUpdate,
+    WorkspaceMemoryAppendRequest,
     WorkspaceMemoryResponse,
     WorkspaceMemorySaveRequest,
 )
@@ -578,6 +579,7 @@ async def get_workspace_memory_endpoint(
         markdown=(uf.content_text or "") if uf is not None else "",
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
+        memory_mode=ws.memory_mode,
     )
 
 
@@ -614,6 +616,7 @@ async def save_workspace_memory_endpoint(
         markdown=(uf.content_text or "") if uf is not None else payload.markdown,
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
+        memory_mode=ws.memory_mode,
     )
 
 
@@ -657,6 +660,46 @@ async def regenerate_workspace_memory_endpoint(
         markdown=(uf.content_text or "") if uf is not None else "",
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
+        memory_mode=ws.memory_mode,
+    )
+
+
+@router.post(
+    "/{workspace_id}/memory/append", response_model=WorkspaceMemoryResponse
+)
+async def append_workspace_memory_endpoint(
+    workspace_id: uuid.UUID,
+    payload: WorkspaceMemoryAppendRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceMemoryResponse:
+    """"Save to workspace memory" — pin a chat snippet into the memory's
+    sticky block (created if needed). Pinned items survive librarian runs
+    verbatim. Requires write access; re-indexes off the request path."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    from app.workspaces.knowledge import (
+        append_to_workspace_memory,
+        get_workspace_memory_doc,
+        index_file_for_workspace,
+    )
+
+    file_id = await append_to_workspace_memory(db, ws=ws, text=payload.text)
+    if file_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Nothing to save to memory.",
+        )
+    background.add_task(index_file_for_workspace, ws.id, file_id, force=True)
+
+    uf = await get_workspace_memory_doc(db, ws.id)
+    return WorkspaceMemoryResponse(
+        exists=uf is not None,
+        markdown=(uf.content_text or "") if uf is not None else "",
+        updated_at=uf.updated_at if uf is not None else None,
+        auto_memory_enabled=ws.auto_memory_enabled,
+        memory_mode=ws.memory_mode,
     )
 
 

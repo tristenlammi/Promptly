@@ -126,8 +126,11 @@ class WorkspaceDetail(WorkspaceSummary):
     # ``viewer``. ``role`` (above) stays coarse (owner/collaborator) for
     # the list cards.
     access_role: str = "owner"
-    # Opt-in rolling workspace memory toggle (Phase 4).
+    # Opt-in rolling workspace memory toggle (Phase 4) — retained as a synced
+    # mirror of ``memory_mode == "auto"`` for older clients.
     auto_memory_enabled: bool = False
+    # Tri-state memory mode: "off" | "auto" | "manual" (the source of truth).
+    memory_mode: str = "off"
     # True when the workspace has an embedding provider configured so
     # semantic retrieval can actually run. Shown in the Files tab so
     # users understand why pinned files stay in full-dump mode.
@@ -173,6 +176,7 @@ class WorkspaceUpdate(BaseModel):
     default_model_id: str | None = Field(default=None, max_length=255)
     default_provider_id: uuid.UUID | None = None
     auto_memory_enabled: bool | None = None
+    memory_mode: Literal["off", "auto", "manual"] | None = None
     # Dedicated model for the workspace-memory librarian (creator's pick).
     # NULL/cleared falls back to the workspace default chat model.
     memory_model_id: str | None = Field(default=None, max_length=255)
@@ -365,9 +369,16 @@ class WorkspaceMemoryResponse(BaseModel):
     markdown: str
     updated_at: datetime | None = None
     auto_memory_enabled: bool
+    memory_mode: str = "off"
 
 
 class WorkspaceMemorySaveRequest(BaseModel):
     """A hand-edit of the workspace memory. Replaces the stored Markdown."""
 
     markdown: str = Field(max_length=40_000)
+
+
+class WorkspaceMemoryAppendRequest(BaseModel):
+    """A snippet to pin into the workspace memory ("save to memory")."""
+
+    text: str = Field(min_length=1, max_length=8000)

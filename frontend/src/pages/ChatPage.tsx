@@ -37,7 +37,10 @@ import {
 } from "@/hooks/useConversations";
 import type { AttachedFile } from "@/components/chat/AttachmentPickerModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useWorkspace } from "@/hooks/useWorkspaces";
+import {
+  useWorkspace,
+  useAppendWorkspaceMemory,
+} from "@/hooks/useWorkspaces";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { useStreamingChat } from "@/hooks/useStreamingChat";
 import { useResearch } from "@/hooks/useResearch";
@@ -276,6 +279,23 @@ export function ChatPage({
   const { data: chatWorkspace } = useWorkspace(chatWorkspaceId);
   const wsDefaultModelId = chatWorkspace?.default_model_id ?? null;
   const wsDefaultProviderId = chatWorkspace?.default_provider_id ?? null;
+  // "Save to workspace memory" replaces the account-memory Remember inside a
+  // workspace — but only when the workspace's memory isn't switched off.
+  const appendWorkspaceMemory = useAppendWorkspaceMemory(chatWorkspaceId ?? "");
+  const handleSaveToWorkspaceMemory = useCallback(
+    async (text: string) => {
+      if (!chatWorkspaceId) return;
+      try {
+        await appendWorkspaceMemory.mutateAsync(text);
+        toast.success("Saved to workspace memory");
+      } catch {
+        toast.error("Couldn't save to workspace memory");
+      }
+    },
+    [chatWorkspaceId, appendWorkspaceMemory]
+  );
+  const canSaveToWorkspaceMemory =
+    Boolean(chatWorkspaceId) && chatWorkspace?.memory_mode !== "off";
   useEffect(() => {
     if (!id) {
       useModelStore.getState().applyDefault();
@@ -1041,8 +1061,14 @@ export function ChatPage({
               onFeedback={id && isOwner ? handleMessageFeedback : undefined}
               onSelectVersion={id ? handleSelectVersion : undefined}
               // Workspaces are a self-contained zone — their chats shouldn't
-              // push into the account-level personal memory. Hide "Remember".
+              // push into the account-level personal memory. Hide the account
+              // "Remember" and offer "Save to workspace memory" instead.
               hideRemember={Boolean(conversation?.workspace_id)}
+              onRememberToWorkspace={
+                canSaveToWorkspaceMemory
+                  ? handleSaveToWorkspaceMemory
+                  : undefined
+              }
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">

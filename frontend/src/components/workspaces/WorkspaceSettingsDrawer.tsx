@@ -29,7 +29,7 @@ import { WorkspaceMembersPanel } from "@/components/workspaces/WorkspaceMembersP
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
-import type { WorkspaceDetail } from "@/api/workspaces";
+import type { WorkspaceDetail, WorkspaceMemoryMode } from "@/api/workspaces";
 import {
   useUpdateWorkspace,
   usePinWorkspaceFile,
@@ -733,10 +733,9 @@ function SettingsTab({
     return () => clearTimeout(t);
   }, [saveState]);
 
-  const toggleAutoMemory = async () => {
-    await update.mutateAsync({
-      auto_memory_enabled: !workspace.auto_memory_enabled,
-    });
+  const setMemoryMode = async (mode: WorkspaceMemoryMode) => {
+    if (mode === workspace.memory_mode) return;
+    await update.mutateAsync({ memory_mode: mode });
   };
 
   const isArchived = Boolean(workspace.archived_at);
@@ -797,26 +796,45 @@ function SettingsTab({
       {canEdit && (
         <section className="space-y-3 border-t border-[var(--border)] pt-6">
           <h3 className="text-sm font-semibold">Workspace memory</h3>
-          <label className="flex items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={workspace.auto_memory_enabled}
-              onChange={toggleAutoMemory}
+          <div className="flex flex-wrap items-center gap-2">
+            <MemoryModeSelector
+              value={workspace.memory_mode}
+              onChange={(m) => void setMemoryMode(m)}
               disabled={update.isPending}
-              className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
             />
-            <span>
-              <span className="font-medium text-[var(--text)]">
-                Keep a rolling workspace memory
-              </span>
-              <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
-                When on, a pinned <strong>Workspace Memory.md</strong> file is
-                auto-maintained from the workspace's most recently active chat,
-                so other chats pick up the gist. Off by default — distinct from
-                the manual "Save summary to workspace".
-              </span>
-            </span>
-          </label>
+            {update.isPending && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />
+            )}
+          </div>
+          <p className="text-xs text-[var(--text-muted)]">
+            {workspace.memory_mode === "off" ? (
+              <>
+                <span className="font-medium text-[var(--text)]">Off</span> — no
+                workspace memory. The pinned{" "}
+                <strong>Workspace Memory.md</strong> isn't maintained or used in
+                chats.
+              </>
+            ) : workspace.memory_mode === "manual" ? (
+              <>
+                <span className="font-medium text-[var(--text)]">
+                  Self-managed
+                </span>{" "}
+                — the memory is used in every chat, but only you change it: edit
+                it below, <strong>Save to memory</strong> from a chat message, or
+                hit <strong>Regenerate</strong>. It's never rewritten on its own.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-[var(--text)]">Auto</span> — a
+                pinned <strong>Workspace Memory.md</strong> is auto-maintained
+                from recent chats and the workspace's notes, sheets, and boards,
+                so other chats pick up the gist. Pinned items you{" "}
+                <strong>Save</strong> are kept verbatim.
+              </>
+            )}
+          </p>
+          {workspace.memory_mode !== "off" && (
+            <>
           <WorkspaceModelField
             modelId={memModelId}
             providerId={memProviderId}
@@ -875,6 +893,8 @@ function SettingsTab({
             workspaceId={workspace.id}
             canEdit={canEdit}
           />
+            </>
+          )}
         </section>
       )}
 
@@ -915,6 +935,68 @@ function SettingsTab({
           </p>
         </section>
       )}
+    </div>
+  );
+}
+
+const MEMORY_MODE_OPTIONS: {
+  value: WorkspaceMemoryMode;
+  label: string;
+  title: string;
+}[] = [
+  { value: "off", label: "Off", title: "No workspace memory" },
+  {
+    value: "auto",
+    label: "Auto",
+    title: "Auto-maintained from chats and the workspace's docs",
+  },
+  {
+    value: "manual",
+    label: "Self-managed",
+    title: "Used in chats, but only you change it",
+  },
+];
+
+/** Segmented Off / Auto / Self-managed control — mirrors the account memory
+ *  toggle so the two memory systems feel consistent. */
+function MemoryModeSelector({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: WorkspaceMemoryMode;
+  onChange: (v: WorkspaceMemoryMode) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Workspace memory mode"
+      className="inline-flex rounded-input border border-[var(--border)] p-0.5"
+    >
+      {MEMORY_MODE_OPTIONS.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            disabled={disabled}
+            title={opt.title}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              "rounded-[1.25rem] px-2.5 py-1 text-xs font-medium transition",
+              "disabled:cursor-not-allowed disabled:opacity-60",
+              active
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1054,9 +1136,10 @@ function WorkspaceMemoryEditor({
         <div className="space-y-2 border-t border-[var(--border)] px-3 py-3">
           {!data?.exists && !isLoading && (
             <p className="text-xs text-[var(--text-muted)]">
-              No memory yet. It's created automatically after the first chat
-              once <strong>Keep a rolling workspace memory</strong> is on — or
-              you can write the initial memory here and save.
+              No memory yet. In <strong>Auto</strong> it's created after the
+              first chat; in <strong>Self-managed</strong> use{" "}
+              <strong>Regenerate</strong>, <strong>Save to memory</strong> from a
+              chat, or just write it here and save.
             </p>
           )}
           <textarea
@@ -1120,8 +1203,10 @@ function WorkspaceMemoryEditor({
               <p className="text-[11px] text-[var(--text-muted)]">
                 <strong>Regenerate</strong> distils the workspace's recent chats
                 into a fresh memory (merging with what's here). Hand-edits you{" "}
-                <strong>Save</strong> may still be rewritten on the next run if
-                chats contradict them.
+                <strong>Save</strong> may be rewritten on the next run if chats
+                contradict them — anything inside the{" "}
+                <code className="rounded bg-[var(--hover)] px-1">📌 Pinned</code>{" "}
+                block is kept verbatim and never auto-changed.
               </p>
             </>
           )}

@@ -74,8 +74,10 @@ export interface WorkspaceDetail extends WorkspaceSummary {
   /** Caller's fine-grained permission. ``viewer`` is read-only;
    *  ``editor``/``owner`` can edit. */
   access_role: "owner" | "editor" | "viewer";
-  /** Opt-in rolling workspace memory. */
+  /** Opt-in rolling workspace memory (legacy mirror of ``memory_mode``). */
   auto_memory_enabled: boolean;
+  /** Tri-state memory mode: "off" | "auto" | "manual". */
+  memory_mode: WorkspaceMemoryMode;
   /** True when the workspace has an embedding provider configured.
    *  False → files stay in full-dump mode regardless of size;
    *  the Files tab shows an onboarding nudge when this is false. */
@@ -135,11 +137,14 @@ export interface SpreadsheetData {
 /** The workspace's rolling memory doc, as maintained by the librarian and
  *  optionally hand-edited. ``exists`` is false until the first auto-run or
  *  manual save creates it. */
+export type WorkspaceMemoryMode = "off" | "auto" | "manual";
+
 export interface WorkspaceMemory {
   exists: boolean;
   markdown: string;
   updated_at: string | null;
   auto_memory_enabled: boolean;
+  memory_mode: WorkspaceMemoryMode;
 }
 
 /** A board's coloured label, defined once per board and referenced by id
@@ -387,6 +392,7 @@ export interface UpdateWorkspacePayload {
   default_model_id?: string | null;
   default_provider_id?: string | null;
   auto_memory_enabled?: boolean;
+  memory_mode?: WorkspaceMemoryMode;
   memory_model_id?: string | null;
   memory_provider_id?: string | null;
 }
@@ -553,6 +559,15 @@ export const workspacesApi = {
   async regenerateMemory(id: string): Promise<WorkspaceMemory> {
     const { data } = await apiClient.post<WorkspaceMemory>(
       `/workspaces/${id}/memory/regenerate`
+    );
+    return data;
+  },
+
+  /** Pin a snippet into the workspace memory ("save to memory"). */
+  async appendMemory(id: string, text: string): Promise<WorkspaceMemory> {
+    const { data } = await apiClient.post<WorkspaceMemory>(
+      `/workspaces/${id}/memory/append`,
+      { text }
     );
     return data;
   },

@@ -245,6 +245,18 @@ export function useRegenerateWorkspaceMemory(id: string) {
   });
 }
 
+export function useAppendWorkspaceMemory(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => workspacesApi.appendMemory(id, text),
+    onSuccess: (data) => {
+      qc.setQueryData(["workspaces", "memory", id], data);
+      qc.invalidateQueries({ queryKey: KEYS.detail(id) });
+      qc.invalidateQueries({ queryKey: ["workspaces", "map", id] });
+    },
+  });
+}
+
 
 // ---------------------------------------------------------------------
 // Task list — first-class, project-level to-dos

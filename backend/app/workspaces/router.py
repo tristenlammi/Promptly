@@ -381,6 +381,7 @@ async def get_workspace(
         indexing_count=stats.indexing_count,
         access_role=access_role,
         auto_memory_enabled=ws.auto_memory_enabled,
+        memory_mode=ws.memory_mode,
         embeddings_configured=stats.embeddings_configured,
         files_folder_id=files_folder_id,
     )
@@ -430,8 +431,13 @@ async def update_workspace(
         await _validate_default_model(new_provider, new_model, user, db)
         ws.default_model_id = new_model
         ws.default_provider_id = new_provider
-    if "auto_memory_enabled" in sent and payload.auto_memory_enabled is not None:
+    # ``memory_mode`` is the source of truth; keep the legacy boolean synced.
+    if "memory_mode" in sent and payload.memory_mode is not None:
+        ws.memory_mode = payload.memory_mode
+        ws.auto_memory_enabled = payload.memory_mode == "auto"
+    elif "auto_memory_enabled" in sent and payload.auto_memory_enabled is not None:
         ws.auto_memory_enabled = payload.auto_memory_enabled
+        ws.memory_mode = "auto" if payload.auto_memory_enabled else "off"
     # Dedicated memory model — validated as a pair only when actually set;
     # clearing both falls back to the workspace default chat model.
     if "memory_model_id" in sent or "memory_provider_id" in sent:

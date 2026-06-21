@@ -74,6 +74,10 @@ interface ChatWindowProps {
    *  workspace chats, which are a self-contained zone that shouldn't feed
    *  the user's personal account memory. */
   hideRemember?: boolean;
+  /** Workspace chats: save a message into the *workspace* memory instead of
+   *  the account memory. When set, the message "Remember" action calls this
+   *  (no modal) rather than opening the account RememberModal. */
+  onRememberToWorkspace?: (content: string) => Promise<void> | void;
 }
 
 export function ChatWindow({
@@ -89,6 +93,7 @@ export function ChatWindow({
   onFeedback,
   onSelectVersion,
   hideRemember = false,
+  onRememberToWorkspace,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
   const activeId = useChatStore((s) => s.activeId);
@@ -349,7 +354,11 @@ export function ChatWindow({
               siblingIds={m.sibling_ids ?? undefined}
               onSelectVersion={onSelectVersion}
               onRemember={
-                hideRemember ? undefined : (text) => setRememberText(text)
+                onRememberToWorkspace
+                  ? (text) => void onRememberToWorkspace(text)
+                  : hideRemember
+                    ? undefined
+                    : (text) => setRememberText(text)
               }
             />
           );
