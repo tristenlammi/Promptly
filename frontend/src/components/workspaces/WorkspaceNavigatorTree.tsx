@@ -584,7 +584,7 @@ function TreeNode({
           {isContextItem && contextOn && (
             <span
               title="Used as workspace context"
-              className="inline-flex shrink-0 items-center text-emerald-500"
+              className="inline-flex shrink-0 items-center text-[var(--accent)]"
             >
               <Zap className="h-3 w-3" />
             </span>
