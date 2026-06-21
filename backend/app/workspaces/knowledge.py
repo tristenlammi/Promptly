@@ -461,9 +461,20 @@ async def index_note_for_workspace(
             await _set_note_index_status(
                 db, item_id=item_id, status="embedding"
             )
+            # Index the note's *title* alongside its body, from the clean
+            # ``content_text`` (HTML stripped) rather than the raw HTML blob.
+            # Embedding the title is what lets a query like "the golden
+            # retriever names I listed" match a note titled "Golden retriever
+            # name" whose body is just the bare names — without it, in a large
+            # (retrieval-mode) workspace that tiny chunk never reaches top-k.
+            note_title = (item.title or "").strip()
+            note_body = (file.content_text or "").strip()
+            embed_text = (
+                f"{note_title}\n\n{note_body}" if note_title else note_body
+            )
             try:
-                chunks, embeddings = await embed_file_to_chunks(
-                    file,
+                chunks, embeddings = await embed_text_to_chunks(
+                    embed_text,
                     provider=cfg.provider,
                     model_id=cfg.model_id,
                     dim=cfg.dim,
