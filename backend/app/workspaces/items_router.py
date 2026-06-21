@@ -78,6 +78,7 @@ _DEFAULT_NOTE_TITLE = "Untitled note"
 _DEFAULT_FOLDER_TITLE = "New folder"
 _DEFAULT_CANVAS_TITLE = "Untitled canvas"
 _DEFAULT_BOARD_TITLE = "Board"
+_DEFAULT_NOTEBOOK_TITLE = "Notebook"
 
 
 def _strip_doc_ext(name: str) -> str:
@@ -122,17 +123,34 @@ async def _next_position(
 
 
 async def _validate_parent(
-    db: AsyncSession, workspace_id: uuid.UUID, parent_id: uuid.UUID | None
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    child_kind: str | None = None,
 ) -> None:
-    """A parent (when given) must be a *folder* item in this workspace —
-    you can't nest a note inside another note."""
+    """A parent (when given) must be a *folder* or a *notebook* (container)
+    in this workspace. Folders organise the tree; a notebook holds pages
+    (its child items render as tabs). A notebook can't hold folders or
+    nested notebooks (v1: no recursion)."""
     if parent_id is None:
         return
     parent = await _load_item(db, workspace_id, parent_id)
+    if parent.kind == "container":
+        if child_kind == "container":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A notebook can't contain another notebook.",
+            )
+        if child_kind == "folder":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A notebook holds pages, not folders.",
+            )
+        return
     if parent.kind != "folder":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Items can only be nested inside folders.",
+            detail="Items can only be nested inside folders or notebooks.",
         )
 
 
@@ -302,26 +320,27 @@ async def create_workspace_item(
     or an orphan document/canvas."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    await _validate_parent(db, ws.id, payload.parent_id)
+    await _validate_parent(db, ws.id, payload.parent_id, payload.kind)
 
     position = await _next_position(db, ws.id, payload.parent_id)
     title = (payload.title or "").strip()
 
-    if payload.kind in ("folder", "board"):
-        # Both are tree-only nodes with no backing Drive entity. A board's
-        # tasks reference it via ``workspace_tasks.board_item_id``; deleting
-        # the item cascades them.
+    if payload.kind in ("folder", "board", "container"):
+        # All three are tree-only nodes with no backing Drive entity. A
+        # board's tasks reference it via ``workspace_tasks.board_item_id``; a
+        # container (notebook) holds its pages as child items. Deleting the
+        # row cascades its children/tasks via the self/board FKs.
+        default_title = {
+            "folder": _DEFAULT_FOLDER_TITLE,
+            "board": _DEFAULT_BOARD_TITLE,
+            "container": _DEFAULT_NOTEBOOK_TITLE,
+        }[payload.kind]
         item = WorkspaceItem(
             workspace_id=ws.id,
             parent_id=payload.parent_id,
             kind=payload.kind,
             ref_id=None,
-            title=title
-            or (
-                _DEFAULT_FOLDER_TITLE
-                if payload.kind == "folder"
-                else _DEFAULT_BOARD_TITLE
-            ),
+            title=title or default_title,
             position=position,
         )
         db.add(item)

@@ -11,6 +11,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  Layers,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -82,14 +83,19 @@ export function WorkspaceNavigatorTree({
   const mainTree = removePinned(tree);
 
   const handleCreate = async (
-    kind: "folder" | "note" | "canvas" | "board" | "sheet",
+    kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
     // A freshly-created note / canvas / sheet should open straight away.
     // Folders just appear in place. We synthesise a node so the pane can
     // open the editor without waiting for the tree refetch.
-    if (kind === "note" || kind === "canvas" || kind === "sheet") {
+    if (
+      kind === "note" ||
+      kind === "canvas" ||
+      kind === "sheet" ||
+      kind === "container"
+    ) {
       onSelect({
         id: item.id,
         kind: item.kind,
@@ -153,6 +159,7 @@ export function WorkspaceNavigatorTree({
             onNewCanvas={() => handleCreate("canvas", null)}
             onNewBoard={() => handleCreate("board", null)}
             onNewSheet={() => handleCreate("sheet", null)}
+            onNewNotebook={() => handleCreate("container", null)}
           />
         )}
       </div>
@@ -374,7 +381,7 @@ function TreeNode({
   onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
   onCreateInFolder: (
-    kind: "folder" | "note" | "canvas" | "board" | "sheet",
+    kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
     parentId: string
   ) => void;
 }) {
@@ -611,6 +618,7 @@ function TreeNode({
             onNewCanvas={() => onCreateInFolder("canvas", node.id)}
             onNewBoard={() => onCreateInFolder("board", node.id)}
             onNewSheet={() => onCreateInFolder("sheet", node.id)}
+            onNewNotebook={() => onCreateInFolder("container", node.id)}
             pinned={isPinned}
             onTogglePin={handleTogglePin}
             onOpenToSide={
@@ -673,6 +681,8 @@ function NodeIcon({
       return <Columns3 className={cls} />;
     case "sheet":
       return <Table2 className={cls} />;
+    case "container":
+      return <Layers className={cls} />;
     case "note":
     default:
       return <FileText className={cls} />;
@@ -695,6 +705,7 @@ function NodeActions({
   onNewCanvas,
   onNewBoard,
   onNewSheet,
+  onNewNotebook,
   pinned,
   onTogglePin,
   onOpenToSide,
@@ -711,6 +722,7 @@ function NodeActions({
   onNewCanvas: () => void;
   onNewBoard: () => void;
   onNewSheet: () => void;
+  onNewNotebook: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
@@ -837,6 +849,14 @@ function NodeActions({
                       onNewSheet();
                     }}
                   />
+                  <MenuItem
+                    icon={<Layers className="h-3.5 w-3.5" />}
+                    label="New notebook"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onNewNotebook();
+                    }}
+                  />
                 </>
               )}
               {contextState && onToggleContext && (
@@ -935,6 +955,7 @@ function NewMenu({
   onNewCanvas,
   onNewBoard,
   onNewSheet,
+  onNewNotebook,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
@@ -943,6 +964,7 @@ function NewMenu({
   onNewCanvas: () => void;
   onNewBoard: () => void;
   onNewSheet: () => void;
+  onNewNotebook: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1016,6 +1038,14 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewSheet();
+              }}
+            />
+            <MenuItem
+              icon={<Layers className="h-3.5 w-3.5" />}
+              label="New notebook"
+              onClick={() => {
+                setOpen(false);
+                onNewNotebook();
               }}
             />
           </div>

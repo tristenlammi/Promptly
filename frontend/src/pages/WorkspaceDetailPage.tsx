@@ -17,12 +17,15 @@ import {
   ArrowLeft,
   FileText,
   FolderX,
+  Columns3,
   Home,
+  Layers,
   Link2,
   Loader2,
   Plus,
   Search,
   Settings,
+  Shapes,
   Table2,
   Share2,
   Upload,
@@ -68,15 +71,14 @@ import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverview
 import { WorkspaceSettingsDrawer } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
-import type { DocumentPage, WorkspaceItemNode } from "@/api/workspaces";
+import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
   useArchiveWorkspace,
   useBulkRemoveConversationsFromWorkspace,
-  useCreateDocumentPage,
-  useDeleteDocumentPage,
-  useDocumentPages,
+  useCreateWorkspaceItem,
+  useDeleteWorkspaceItem,
   useItemBacklinks,
-  useUpdateDocumentPage,
+  useUpdateWorkspaceItem,
   useWorkspace,
   useWorkspaceConversations,
   useWorkspaceTree,
@@ -525,7 +527,8 @@ function WorkspaceMainPane({
       node.kind === "canvas" ||
       node.kind === "chat" ||
       node.kind === "board" ||
-      node.kind === "sheet")
+      node.kind === "sheet" ||
+      node.kind === "container")
   ) {
     return (
       <WorkspaceItemView
@@ -825,6 +828,16 @@ function WorkspaceItemView({
       </div>
     );
   }
+  if (node.kind === "container") {
+    return (
+      <WorkspaceNotebookPane
+        node={node}
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+        onOpenItem={onOpenItem}
+      />
+    );
+  }
   return null;
 }
 
@@ -850,59 +863,26 @@ function WorkspaceNotePane({
   onOpenItem: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
 }) {
-  // A note is a multi-page document: fetch its pages and render a tab strip.
-  // The note's own ``ref_id`` still points at the first ("primary") page, so
-  // a single-page note behaves exactly as it did before pages existed.
-  const { data: pages } = useDocumentPages(workspaceId, node.id);
-  const createPage = useCreateDocumentPage(workspaceId, node.id);
-  const updatePage = useUpdateDocumentPage(workspaceId, node.id);
-  const deletePage = useDeleteDocumentPage(workspaceId, node.id);
-
-  const [activePageId, setActivePageId] = useState<string | null>(null);
-  // Choose the active page when pages load / the note changes: keep the
-  // current one if it still exists, else prefer the primary page (the one
-  // the tree node points at), else the first.
-  useEffect(() => {
-    if (!pages || pages.length === 0) {
-      setActivePageId(null);
-      return;
-    }
-    setActivePageId((cur) => {
-      if (cur && pages.some((p) => p.id === cur)) return cur;
-      const primary = pages.find((p) => p.ref_id === node.ref_id);
-      return (primary ?? pages[0]).id;
-    });
-  }, [pages, node.ref_id]);
-
-  const activePage = pages?.find((p) => p.id === activePageId) ?? null;
-  // The document the editor loads: the active page's backing doc, falling
-  // back to the note's own ref_id until pages resolve so the first paint
-  // isn't blank.
-  const activeRefId = activePage?.ref_id ?? node.ref_id;
-
   const [file, setFile] = useState<FileItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const updateItem = useUpdateWorkspaceItem(workspaceId);
+  // Track the title we last reflected into the tree so repeated content
+  // saves (which also fire onFileUpdated) don't re-PATCH on every keystroke.
+  const syncedTitleRef = useRef(node.title);
 
-  // Track the title we last reflected so repeated content saves (which also
-  // fire onFileUpdated) don't re-PATCH on every keystroke.
-  const syncedTitleRef = useRef<string>("");
-  // Renaming inside the editor renames the page's Drive file; mirror that
-  // onto the page title (the backend keeps the tree node aligned when it's
-  // the primary page).
-  const syncPageTitle = useCallback(
+  // Renaming a note in the editor renames its Drive file but not the
+  // navigator item — keep the rail label in lockstep by syncing the item
+  // title (extension stripped) whenever the document's name changes.
+  const syncNoteTitle = useCallback(
     (f: FileItem) => {
-      if (!activePage || !canEdit) return;
+      if (!canEdit) return;
       const name = stripDocExt(f.filename).trim();
-      if (
-        name &&
-        name !== activePage.title &&
-        name !== syncedTitleRef.current
-      ) {
+      if (name && name !== syncedTitleRef.current) {
         syncedTitleRef.current = name;
-        updatePage.mutate({ pageId: activePage.id, payload: { title: name } });
+        updateItem.mutate({ itemId: node.id, payload: { title: name } });
       }
     },
-    [activePage, canEdit, updatePage]
+    [node.id, canEdit, updateItem]
   );
 
   // Workspace tree → flat list of linkable targets for the ``[[``
@@ -954,145 +934,72 @@ function WorkspaceNotePane({
     [linkables, onOpenItem]
   );
 
-  // Load the active page's document. Re-runs when the active page changes
-  // (switching tabs swaps the document + its collab room).
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setFile(null);
-    syncedTitleRef.current = activePage?.title ?? "";
-    // Sheet pages render their own editor (WorkspaceSheetPane) and manage
-    // their own state — they aren't Drive documents, so skip getFile.
-    if (activePage && activePage.kind !== "richtext") {
-      return;
-    }
-    if (!activeRefId) {
-      if (pages && pages.length === 0) {
-        setError("This document has no pages.");
-      }
+    syncedTitleRef.current = node.title;
+    if (!node.ref_id) {
+      setError("This note has no underlying document.");
       return;
     }
     filesApi
-      .getFile(activeRefId)
+      .getFile(node.ref_id)
       .then((f) => {
         if (cancelled) return;
         setFile(f);
-        syncPageTitle(f);
+        syncNoteTitle(f);
       })
       .catch((err) => {
         if (cancelled) return;
         const detail =
           (err as { response?: { data?: { detail?: string } } })?.response?.data
-            ?.detail ?? "Couldn't open this page.";
+            ?.detail ?? "Couldn't open this note.";
         setError(detail);
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRefId]);
+  }, [node.id, node.ref_id]);
 
-  const handleAddPage = useCallback(
-    async (kind: "richtext" | "sheet") => {
-      try {
-        const created = await createPage.mutateAsync({ kind });
-        setActivePageId(created.id);
-      } catch {
-        // Surfaced by the mutation error toast; nothing to do here.
-      }
-    },
-    [createPage]
-  );
+  if (error) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
+        <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      </div>
+    );
+  }
 
-  const handleDeletePage = useCallback(
-    async (pageId: string) => {
-      const ok = await confirm({
-        title: "Delete page",
-        message: "Permanently delete this page?",
-        confirmLabel: "Delete",
-        danger: true,
-      });
-      if (!ok) return;
-      const remaining = (pages ?? []).filter((p) => p.id !== pageId);
-      deletePage.mutate(pageId, {
-        onSuccess: () => {
-          if (activePageId === pageId) {
-            setActivePageId(remaining[0]?.id ?? null);
-          }
-        },
-      });
-    },
-    [pages, activePageId, deletePage]
-  );
+  if (!file) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
+        <span className="inline-flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Opening “{node.title || "note"}”…
+        </span>
+      </div>
+    );
+  }
 
-  // Inline editor fills the pane (rail + nav stay visible). A page tab strip
-  // sits on top; the click-capture wrapper turns wiki-link anchors into
-  // inline navigation, and the backlinks strip sits below.
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <DocumentPageTabs
-        pages={pages ?? []}
-        activePageId={activePageId}
-        canEdit={canEdit}
-        adding={createPage.isPending}
-        onSelect={setActivePageId}
-        onAdd={handleAddPage}
-        onRename={(pageId, title) =>
-          updatePage.mutate({ pageId, payload: { title } })
-        }
-        onDelete={handleDeletePage}
-      />
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
       <div
         className="flex min-h-0 flex-1 flex-col"
         onClickCapture={handleEditorClick}
       >
-        {activePage?.kind === "sheet" && activeRefId ? (
-          <Suspense
-            fallback={
-              <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading spreadsheet…
-                </span>
-              </div>
-            }
-          >
-            <WorkspaceSheetPane
-              key={activeRefId}
-              workspaceId={workspaceId}
-              sheetId={activeRefId}
-              canEdit={canEdit}
-            />
-          </Suspense>
-        ) : error ? (
-          <div className="flex flex-1 items-center justify-center px-6 py-10">
-            <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-              {error}
-            </div>
-          </div>
-        ) : !file ? (
-          <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
-            <span className="inline-flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Opening “{activePage?.title || node.title || "note"}”…
-            </span>
-          </div>
-        ) : (
-          // ``key`` on the active doc id remounts the editor when switching
-          // pages so each page connects to its own collab room cleanly.
-          <DocumentEditorModal
-            key={activeRefId ?? "none"}
-            file={file}
-            inline
-            onClose={onClose}
-            onFileUpdated={(f) => {
-              setFile(f);
-              syncPageTitle(f);
-            }}
-            wikiLink={wikiLink}
-          />
-        )}
+        <DocumentEditorModal
+          file={file}
+          inline
+          onClose={onClose}
+          onFileUpdated={(f) => {
+            setFile(f);
+            syncNoteTitle(f);
+          }}
+          wikiLink={wikiLink}
+        />
       </div>
       <BacklinksPanel
         workspaceId={workspaceId}
@@ -1103,15 +1010,201 @@ function WorkspaceNotePane({
   );
 }
 
+/** Kinds a notebook page can be (chat is deferred to a later phase). */
+type NotebookPageKind = "note" | "sheet" | "canvas" | "board";
+
+const NOTEBOOK_ADD_KINDS: { kind: NotebookPageKind; label: string }[] = [
+  { kind: "note", label: "Note" },
+  { kind: "sheet", label: "Sheet" },
+  { kind: "canvas", label: "Canvas" },
+  { kind: "board", label: "Board" },
+];
+
+function notebookPageIcon(kind: string) {
+  switch (kind) {
+    case "sheet":
+      return Table2;
+    case "canvas":
+      return Shapes;
+    case "board":
+      return Columns3;
+    default:
+      return FileText;
+  }
+}
+
+/** Recursive lookup of a tree node by id (the selected snapshot can go stale
+ *  after pages are added; panes re-derive from the live tree with this). */
+function findNodeById(
+  nodes: WorkspaceItemNode[],
+  id: string
+): WorkspaceItemNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    const found = findNodeById(n.children, id);
+    if (found) return found;
+  }
+  return null;
+}
+
 /**
- * Page tab strip for a multi-page document. Each tab switches the active
- * page; double-click renames (editors only); the × deletes (when >1 page);
- * "+" appends a new page. A single-page doc still shows its one tab + "+",
- * which is how the multi-page affordance is discovered.
+ * A Notebook: a container whose child items render as a tab strip. Each tab
+ * dispatches to the normal per-kind pane (note / sheet / canvas / board), so a
+ * single notebook can hold a mix of everything. Pages are real child items —
+ * created, renamed, and deleted through the same item API as the tree — so
+ * RAG, collab, and delete all work per-page with no special plumbing.
  */
-function DocumentPageTabs({
+function WorkspaceNotebookPane({
+  node,
+  workspaceId,
+  canEdit,
+  onOpenItem,
+}: {
+  node: WorkspaceItemNode;
+  workspaceId: string;
+  canEdit: boolean;
+  onOpenItem: (node: WorkspaceItemNode) => void;
+}) {
+  // Read the live tree so newly added / renamed / deleted pages appear — the
+  // ``node`` passed down is a snapshot taken when the notebook was selected.
+  const { data: tree } = useWorkspaceTree(workspaceId);
+  const container = useMemo(
+    () => findNodeById(tree ?? [], node.id) ?? node,
+    [tree, node]
+  );
+  const pages = container.children ?? [];
+
+  const create = useCreateWorkspaceItem(workspaceId);
+  const updateItem = useUpdateWorkspaceItem(workspaceId);
+  const del = useDeleteWorkspaceItem(workspaceId);
+
+  const [activeId, setActiveId] = useState<string | null>(null);
+  useEffect(() => {
+    if (pages.length === 0) {
+      setActiveId(null);
+      return;
+    }
+    setActiveId((cur) =>
+      cur && pages.some((p) => p.id === cur) ? cur : pages[0].id
+    );
+  }, [pages]);
+
+  const active = pages.find((p) => p.id === activeId) ?? null;
+
+  const addPage = useCallback(
+    async (kind: NotebookPageKind) => {
+      try {
+        const item = await create.mutateAsync({ kind, parent_id: node.id });
+        setActiveId(item.id);
+      } catch {
+        // Surfaced by the mutation error toast.
+      }
+    },
+    [create, node.id]
+  );
+
+  const deletePage = useCallback(
+    async (pageId: string) => {
+      const ok = await confirm({
+        title: "Delete page",
+        message: "Permanently delete this page?",
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
+      const remaining = pages.filter((p) => p.id !== pageId);
+      del.mutate(pageId, {
+        onSuccess: () => {
+          if (activeId === pageId) setActiveId(remaining[0]?.id ?? null);
+        },
+      });
+    },
+    [pages, activeId, del]
+  );
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <NotebookTabs
+        pages={pages}
+        activeId={activeId}
+        canEdit={canEdit}
+        adding={create.isPending}
+        onSelect={setActiveId}
+        onAdd={addPage}
+        onRename={(pageId, title) =>
+          updateItem.mutate({ itemId: pageId, payload: { title } })
+        }
+        onDelete={deletePage}
+      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        {active ? (
+          <WorkspaceItemView
+            key={active.id}
+            node={active}
+            workspaceId={workspaceId}
+            onOpenItem={onOpenItem}
+            onClose={() => {}}
+            canEdit={canEdit}
+          />
+        ) : (
+          <NotebookEmptyState
+            canEdit={canEdit}
+            adding={create.isPending}
+            onAdd={addPage}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NotebookEmptyState({
+  canEdit,
+  adding,
+  onAdd,
+}: {
+  canEdit: boolean;
+  adding: boolean;
+  onAdd: (kind: NotebookPageKind) => void;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center">
+      <Layers className="h-8 w-8 text-[var(--text-muted)]" />
+      <div className="text-sm text-[var(--text-muted)]">
+        This notebook is empty.
+        {canEdit ? " Add its first page:" : ""}
+      </div>
+      {canEdit && (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {NOTEBOOK_ADD_KINDS.map(({ kind, label }) => {
+            const Icon = notebookPageIcon(kind);
+            return (
+              <button
+                key={kind}
+                type="button"
+                disabled={adding}
+                onClick={() => onAdd(kind)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-50"
+              >
+                <Icon className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tab strip for a Notebook's pages (child items). The scrollable tab list is
+ * isolated in its own ``overflow-x-auto`` container so the "+" add menu — a
+ * sibling outside that container — is never clipped.
+ */
+function NotebookTabs({
   pages,
-  activePageId,
+  activeId,
   canEdit,
   adding,
   onSelect,
@@ -1119,92 +1212,96 @@ function DocumentPageTabs({
   onRename,
   onDelete,
 }: {
-  pages: DocumentPage[];
-  activePageId: string | null;
+  pages: WorkspaceItemNode[];
+  activeId: string | null;
   canEdit: boolean;
   adding: boolean;
-  onSelect: (pageId: string) => void;
-  onAdd: (kind: "richtext" | "sheet") => void;
-  onRename: (pageId: string, title: string) => void;
-  onDelete: (pageId: string) => void;
+  onSelect: (id: string) => void;
+  onAdd: (kind: NotebookPageKind) => void;
+  onRename: (id: string, title: string) => void;
+  onDelete: (id: string) => void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
-  if (pages.length === 0) return null;
+  if (pages.length === 0 && !canEdit) return null;
 
-  const commitRename = (pageId: string) => {
+  const commitRename = (id: string) => {
     const next = draftTitle.trim();
-    const cur = pages.find((p) => p.id === pageId)?.title ?? "";
-    if (next && next !== cur) onRename(pageId, next);
+    const cur = pages.find((p) => p.id === id)?.title ?? "";
+    if (next && next !== cur) onRename(id, next);
     setRenamingId(null);
   };
 
-  const pick = (kind: "richtext" | "sheet") => {
+  const pick = (kind: NotebookPageKind) => {
     setAddOpen(false);
     onAdd(kind);
   };
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] px-2 py-1">
-      {pages.map((p) => {
-        const active = p.id === activePageId;
-        const Icon = p.kind === "sheet" ? Table2 : FileText;
-        if (renamingId === p.id) {
+    <div className="flex items-center gap-1 border-b border-[var(--border)] px-2 py-1">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        {pages.map((p) => {
+          const active = p.id === activeId;
+          const Icon = notebookPageIcon(p.kind);
+          if (renamingId === p.id) {
+            return (
+              <input
+                key={p.id}
+                autoFocus
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                onBlur={() => commitRename(p.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename(p.id);
+                  if (e.key === "Escape") setRenamingId(null);
+                }}
+                className="min-w-[6rem] rounded-md border border-[var(--accent)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+              />
+            );
+          }
           return (
-            <input
+            <div
               key={p.id}
-              autoFocus
-              value={draftTitle}
-              onChange={(e) => setDraftTitle(e.target.value)}
-              onBlur={() => commitRename(p.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRename(p.id);
-                if (e.key === "Escape") setRenamingId(null);
-              }}
-              className="min-w-[6rem] rounded-md border border-[var(--accent)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
-            />
-          );
-        }
-        return (
-          <div
-            key={p.id}
-            className={cn(
-              "group inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition",
-              active
-                ? "bg-[var(--accent)]/15 text-[var(--text)]"
-                : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-            )}
-          >
-            <button
-              type="button"
-              onClick={() => onSelect(p.id)}
-              onDoubleClick={() => {
-                if (!canEdit) return;
-                setDraftTitle(p.title);
-                setRenamingId(p.id);
-              }}
-              className="inline-flex max-w-[12rem] items-center gap-1.5 truncate"
-              title={canEdit ? "Click to open · double-click to rename" : p.title}
+              className={cn(
+                "group inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition",
+                active
+                  ? "bg-[var(--accent)]/15 text-[var(--text)]"
+                  : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+              )}
             >
-              <Icon className="h-3 w-3 shrink-0 opacity-70" />
-              <span className="truncate">{p.title || "Untitled"}</span>
-            </button>
-            {canEdit && pages.length > 1 && (
               <button
                 type="button"
-                onClick={() => onDelete(p.id)}
-                className="opacity-0 transition group-hover:opacity-100"
-                aria-label="Delete page"
-                title="Delete page"
+                onClick={() => onSelect(p.id)}
+                onDoubleClick={() => {
+                  if (!canEdit) return;
+                  setDraftTitle(p.title);
+                  setRenamingId(p.id);
+                }}
+                className="inline-flex max-w-[12rem] items-center gap-1.5 truncate"
+                title={
+                  canEdit ? "Click to open · double-click to rename" : p.title
+                }
               >
-                <X className="h-3 w-3" />
+                <Icon className="h-3 w-3 shrink-0 opacity-70" />
+                <span className="truncate">{p.title || "Untitled"}</span>
               </button>
-            )}
-          </div>
-        );
-      })}
+              {canEdit && pages.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(p.id)}
+                  className="opacity-0 transition group-hover:opacity-100"
+                  aria-label="Delete page"
+                  title="Delete page"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
       {canEdit && (
         <div className="relative shrink-0">
           <button
@@ -1225,7 +1322,6 @@ function DocumentPageTabs({
           </button>
           {addOpen && (
             <>
-              {/* click-away backdrop */}
               {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
               <div
                 className="fixed inset-0 z-10"
@@ -1233,26 +1329,23 @@ function DocumentPageTabs({
               />
               <div
                 role="menu"
-                className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+                className="absolute right-0 top-full z-20 mt-1 min-w-[10rem] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => pick("richtext")}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-                >
-                  <FileText className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                  Text page
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => pick("sheet")}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-                >
-                  <Table2 className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                  Spreadsheet
-                </button>
+                {NOTEBOOK_ADD_KINDS.map(({ kind, label }) => {
+                  const Icon = notebookPageIcon(kind);
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => pick(kind)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                    >
+                      <Icon className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}
