@@ -21,6 +21,7 @@ import {
   Layers,
   Link2,
   Loader2,
+  MessageSquare,
   Plus,
   Search,
   Settings,
@@ -1007,14 +1008,15 @@ function WorkspaceNotePane({
   );
 }
 
-/** Kinds a notebook page can be (chat is deferred to a later phase). */
-type NotebookPageKind = "note" | "sheet" | "canvas" | "board";
+/** Kinds a notebook page can be. */
+type NotebookPageKind = "note" | "sheet" | "canvas" | "board" | "chat";
 
 const NOTEBOOK_ADD_KINDS: { kind: NotebookPageKind; label: string }[] = [
   { kind: "note", label: "Note" },
   { kind: "sheet", label: "Sheet" },
   { kind: "canvas", label: "Canvas" },
   { kind: "board", label: "Board" },
+  { kind: "chat", label: "Chat" },
 ];
 
 function notebookPageIcon(kind: string) {
@@ -1025,6 +1027,8 @@ function notebookPageIcon(kind: string) {
       return Shapes;
     case "board":
       return Columns3;
+    case "chat":
+      return MessageSquare;
     default:
       return FileText;
   }

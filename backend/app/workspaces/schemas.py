@@ -279,7 +279,9 @@ class WorkspaceItemCreate(BaseModel):
     ``Canvases``). ``kind='board'`` creates a Kanban board (tree-only; its
     tasks reference it). ``title`` is optional (kind-specific default)."""
 
-    kind: Literal["folder", "note", "canvas", "board", "sheet", "container"]
+    kind: Literal[
+        "folder", "note", "canvas", "board", "sheet", "container", "chat"
+    ]
     parent_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)
 

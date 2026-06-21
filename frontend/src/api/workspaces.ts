@@ -305,7 +305,7 @@ export interface WorkspaceTaskUpdatePayload {
 
 
 export interface CreateWorkspaceItemPayload {
-  kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container";
+  kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container" | "chat";
   parent_id?: string | null;
   title?: string;
 }

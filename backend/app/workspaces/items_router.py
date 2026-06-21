@@ -258,11 +258,25 @@ async def get_workspace_tree(
     )
     tree = _serialize_tree(items)
 
-    # Synthesise chat nodes from the workspace's conversations. They
-    # carry no item row (Phase 1) — the frontend opens them by ref_id.
-    # Archived chats drop to the workspace's Archive section.
-    convs = list(
+    # Synthesise chat nodes from the workspace's conversations. Top-level
+    # chats carry no item row — the frontend opens them by ref_id. Chats that
+    # are *notebook pages* DO have a backing ``kind='chat'`` item (rendered as
+    # a tab inside their container), so exclude those here to avoid listing
+    # them twice.
+    page_chat_ids = set(
         (
+            await db.execute(
+                select(WorkspaceItem.ref_id).where(
+                    WorkspaceItem.workspace_id == ws.id,
+                    WorkspaceItem.kind == "chat",
+                    WorkspaceItem.ref_id.is_not(None),
+                )
+            )
+        ).scalars()
+    )
+    convs = [
+        c
+        for c in (
             await db.execute(
                 select(Conversation)
                 .where(
@@ -272,7 +286,8 @@ async def get_workspace_tree(
                 .order_by(Conversation.updated_at.desc())
             )
         ).scalars()
-    )
+        if c.id not in page_chat_ids
+    ]
     for idx, c in enumerate(convs):
         tree.append(
             WorkspaceItemNode(
@@ -384,6 +399,35 @@ async def create_workspace_item(
             kind="sheet",
             ref_id=sheet.id,
             title=sheet_title,
+            position=position,
+        )
+        db.add(item)
+    elif payload.kind == "chat":
+        # A chat *page* inside a notebook. Unlike top-level chats (which are
+        # synthesised at read time from conversations), a chat page is a real
+        # child item whose backing entity is a Conversation. Only valid as a
+        # notebook page — top-level chats use the normal chat-create path.
+        if payload.parent_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Chats can only be created as a page inside a notebook.",
+            )
+        chat_title = title or "New chat"
+        conv = Conversation(
+            user_id=user.id,
+            workspace_id=ws.id,
+            title=chat_title,
+            model_id=ws.default_model_id,
+            provider_id=ws.default_provider_id,
+        )
+        db.add(conv)
+        await db.flush()  # assign conv.id before the item links to it
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=payload.parent_id,
+            kind="chat",
+            ref_id=conv.id,
+            title=chat_title,
             position=position,
         )
         db.add(item)
@@ -920,6 +964,12 @@ async def delete_workspace_item(
                     if sf is not None and sf.trashed_at is None:
                         sf.trashed_at = now
                 await db.delete(sheet)
+        elif it.kind == "chat" and it.ref_id is not None:
+            # A chat page — delete the backing conversation (and its messages,
+            # which cascade off the conversation FK).
+            conv = await db.get(Conversation, it.ref_id)
+            if conv is not None:
+                await db.delete(conv)
         elif it.kind == "canvas" and it.ref_id is not None:
             # Trash the backing text file and drop the canvas row (its
             # chunks cascade off the file delete; the canvas isn't a
