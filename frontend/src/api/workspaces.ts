@@ -8,6 +8,7 @@
 
 import { apiClient } from "./client";
 import type { ConversationSummary } from "@/api/types";
+import type { CollabTokenResponse } from "@/api/documents";
 
 export interface WorkspaceFilePin {
   file_id: string;
@@ -591,6 +592,17 @@ export const workspacesApi = {
     const { data } = await apiClient.put<SpreadsheetData>(
       `/workspaces/${id}/spreadsheets/${sheetId}`,
       payload
+    );
+    return data;
+  },
+
+  /** Mint the short-lived collab JWT for a sheet's ``sheet:<id>`` Yjs room. */
+  async getSheetCollabToken(
+    id: string,
+    sheetId: string
+  ): Promise<CollabTokenResponse> {
+    const { data } = await apiClient.get<CollabTokenResponse>(
+      `/workspaces/${id}/spreadsheets/${sheetId}/collab-token`
     );
     return data;
   },

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CircleAlert, Eraser, Loader2 } from "lucide-react";
+import { Check, CircleAlert, Eraser, Loader2, Users, Wifi, WifiOff } from "lucide-react";
 import { Workbook, type WorkbookInstance } from "@fortune-sheet/react";
 import type { Sheet } from "@fortune-sheet/core";
 import "@fortune-sheet/react/dist/index.css";
@@ -8,6 +8,8 @@ import "@/styles/fortune-sheet.css";
 
 import { workspacesApi } from "@/api/workspaces";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { useSheetCollabProvider } from "./useSheetCollabProvider";
+import { useSheetCollab } from "./useSheetCollab";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -153,10 +155,25 @@ export function WorkspaceSheetPane({
       aliveRef.current = false;
     };
   }, []);
+
   // Fortune-sheet's ``onChange`` data argument is unreliable — the cell being
   // edited often isn't committed into it, so saving that produces an empty
   // grid. Read the live workbook via the ref at save time instead.
   const workbookRef = useRef<WorkbookInstance | null>(null);
+
+  // Live collaboration — binds the workbook to a ``sheet:<id>`` Y.Doc. Edits
+  // sync peer-to-peer via Hocuspocus; the debounced PUT below still runs to
+  // keep the DB snapshot + RAG text fresh (the collab server doesn't decode
+  // the sheet schema). Collab is best-effort: if it can't connect, the sheet
+  // keeps working single-user off the snapshot save.
+  const collab = useSheetCollabProvider(workspaceId, sheetId);
+  const { onLocalChange, clearAll, peers } = useSheetCollab({
+    workbookRef,
+    ydoc: collab.ydoc,
+    provider: collab.provider,
+    user: collab.user,
+    readOnly: !canEdit,
+  });
 
   // The last ``onChange`` snapshot that actually had cells. Fortune-sheet
   // emits a spurious *empty* workbook while tearing down on navigate-away;
@@ -274,6 +291,9 @@ export function WorkspaceSheetPane({
   const handleChange = useCallback(
     (next: Sheet[]) => {
       if (!canEdit) return;
+      // Broadcast the edit to peers immediately (cheap diff vs. last sync);
+      // remote echoes are suppressed inside the binding.
+      onLocalChange(next);
       latest.current = next;
       // Remember the last snapshot that had cells, so a save during teardown
       // (when the live workbook reads empty) still writes the real data.
@@ -284,7 +304,7 @@ export function WorkspaceSheetPane({
         persist(readSheets() ?? next);
       }, SAVE_DEBOUNCE_MS);
     },
-    [canEdit, readSheets, persist]
+    [canEdit, readSheets, persist, onLocalChange]
   );
 
   // Explicit "Clear sheet" — the one path allowed to persist an empty grid.
@@ -304,11 +324,12 @@ export function WorkspaceSheetPane({
     }
     latest.current = null;
     lastGoodRef.current = null;
+    clearAll(); // wipe the shared cell map so the clear reaches peers
     const blank: Sheet[] = [{ name: "Sheet1" }];
     setData(blank);
     setResetKey((k) => k + 1); // force a fresh, empty Workbook mount
     void saveWorkbook(blank); // explicit empty save (bypasses the empty guard)
-  }, [saveWorkbook]);
+  }, [saveWorkbook, clearAll]);
 
   if (error) {
     return (
@@ -337,6 +358,8 @@ export function WorkspaceSheetPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={{ height: "100%" }}>
       <div className="flex shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1">
+        <CollabStatus status={collab.status} peers={peers} />
+        <span className="mx-1 h-3 w-px bg-[var(--border)]" />
         <SaveStatus state={saveState} />
         {canEdit && (
           <button
@@ -361,6 +384,52 @@ export function WorkspaceSheetPane({
         />
       </div>
     </div>
+  );
+}
+
+function CollabStatus({
+  status,
+  peers,
+}: {
+  status: "connecting" | "connected" | "disconnected";
+  peers: number;
+}) {
+  if (status === "connected") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-1 text-[11px] text-[var(--text-muted)]"
+        title={
+          peers > 0
+            ? `Live — ${peers} other ${peers === 1 ? "person" : "people"} editing`
+            : "Live — changes sync in real time"
+        }
+      >
+        {peers > 0 ? (
+          <>
+            <Users className="h-3 w-3 text-emerald-500" />
+            <span className="text-emerald-500">{peers + 1}</span>
+          </>
+        ) : (
+          <Wifi className="h-3 w-3 text-emerald-500" />
+        )}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1 text-[11px] text-[var(--text-muted)]"
+      title={
+        status === "connecting"
+          ? "Connecting to live collaboration…"
+          : "Offline — your edits save but won't sync live"
+      }
+    >
+      {status === "connecting" ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <WifiOff className="h-3 w-3" />
+      )}
+    </span>
   );
 }
 
