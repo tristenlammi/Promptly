@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Check, CircleAlert, Eraser, Loader2 } from "lucide-react";
 import { Workbook, type WorkbookInstance } from "@fortune-sheet/react";
 import type { Sheet } from "@fortune-sheet/core";
 import "@fortune-sheet/react/dist/index.css";
@@ -7,6 +7,9 @@ import "@fortune-sheet/react/dist/index.css";
 import "@/styles/fortune-sheet.css";
 
 import { workspacesApi } from "@/api/workspaces";
+import { confirm } from "@/components/shared/ConfirmDialog";
+
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 // Fortune-sheet wants at least one named sheet; seed one when a spreadsheet
 // page has never been saved (``data`` is null).
@@ -137,8 +140,19 @@ export function WorkspaceSheetPane({
 }) {
   const [data, setData] = useState<Sheet[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  // Bumped to force a fresh Workbook mount after an explicit "Clear sheet".
+  const [resetKey, setResetKey] = useState(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<Sheet[] | null>(null);
+  // Guards state updates from in-flight saves after unmount.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   // Fortune-sheet's ``onChange`` data argument is unreliable — the cell being
   // edited often isn't committed into it, so saving that produces an empty
   // grid. Read the live workbook via the ref at save time instead.
@@ -172,33 +186,56 @@ export function WorkspaceSheetPane({
     return best;
   }, []);
 
+  // Low-level save with a status report (guarded against post-unmount state
+  // updates). Saves whatever it's given — the empty-grid guard lives in
+  // ``persist``; an explicit "Clear sheet" calls this directly to bypass it.
+  const saveWorkbook = useCallback(
+    (sheets: Sheet[]) => {
+      const celldataSheets = toCelldata(sheets);
+      if (aliveRef.current) setSaveState("saving");
+      return workspacesApi
+        .saveSpreadsheet(workspaceId, sheetId, {
+          data: celldataSheets,
+          content_text: flattenSheets(celldataSheets),
+        })
+        .then(() => {
+          if (aliveRef.current) setSaveState("saved");
+        })
+        .catch(() => {
+          if (aliveRef.current) setSaveState("error");
+        });
+    },
+    [workspaceId, sheetId]
+  );
+
   const persist = useCallback(
     (sheets: Sheet[]) => {
       // Never autosave an empty workbook. Fortune-sheet fires an empty
       // ``onChange`` both as a mount echo (every time the editor opens) and
       // while tearing down on navigate-away; persisting either one clobbers
       // the real data with a blank grid. The only legit "all empty" is a
-      // brand-new untouched sheet, which has nothing worth saving anyway.
-      // (Clearing individual cells among others still persists — only an
-      // all-zero grid is rejected. To truly blank a sheet, delete it.)
+      // brand-new untouched sheet (nothing worth saving) or an explicit
+      // "Clear sheet" (which goes through ``saveWorkbook`` directly).
       if (countCells(sheets) <= 0) return;
-      // Persist in ``celldata`` form so the sheet reloads correctly.
-      const celldataSheets = toCelldata(sheets);
-      void workspacesApi
-        .saveSpreadsheet(workspaceId, sheetId, {
-          data: celldataSheets,
-          content_text: flattenSheets(celldataSheets),
-        })
-        .catch(() => {});
+      void saveWorkbook(sheets);
     },
-    [workspaceId, sheetId]
+    [saveWorkbook]
   );
+
+  // Let the "Saved" / "Save failed" tick fade back to nothing.
+  useEffect(() => {
+    if (saveState !== "saved" && saveState !== "error") return;
+    const t = setTimeout(() => setSaveState("idle"), 2200);
+    return () => clearTimeout(t);
+  }, [saveState]);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setData(null);
+    setSaveState("idle");
     latest.current = null;
+    lastGoodRef.current = null;
     workspacesApi
       .getSpreadsheet(workspaceId, sheetId)
       .then((s) => {
@@ -250,6 +287,29 @@ export function WorkspaceSheetPane({
     [canEdit, readSheets, persist]
   );
 
+  // Explicit "Clear sheet" — the one path allowed to persist an empty grid.
+  // Resets local edit-tracking, remounts a blank Workbook, and saves empty.
+  const handleClear = useCallback(async () => {
+    const ok = await confirm({
+      title: "Clear sheet",
+      message:
+        "Remove all content from this sheet? This can't be undone.",
+      confirmLabel: "Clear sheet",
+      danger: true,
+    });
+    if (!ok) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    latest.current = null;
+    lastGoodRef.current = null;
+    const blank: Sheet[] = [{ name: "Sheet1" }];
+    setData(blank);
+    setResetKey((k) => k + 1); // force a fresh, empty Workbook mount
+    void saveWorkbook(blank); // explicit empty save (bypasses the empty guard)
+  }, [saveWorkbook]);
+
   if (error) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10">
@@ -272,17 +332,62 @@ export function WorkspaceSheetPane({
   }
 
   // Fortune-sheet positions its grid absolutely, so the wrapper needs a
-  // concrete height — ``flex-1 min-h-0`` plus an explicit 100% height gives
-  // it one inside the pane's flex column.
+  // concrete height — the flex column (``height: 100%``) gives the grid
+  // container a real ``flex-1`` height below the thin status/actions bar.
   return (
-    <div className="relative min-h-0 flex-1" style={{ height: "100%" }}>
-      <Workbook
-        ref={workbookRef}
-        data={data}
-        onChange={handleChange}
-        allowEdit={canEdit}
-        lang="en"
-      />
+    <div className="flex min-h-0 flex-1 flex-col" style={{ height: "100%" }}>
+      <div className="flex shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1">
+        <SaveStatus state={saveState} />
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => void handleClear()}
+            title="Clear all content from this sheet"
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <Eraser className="h-3.5 w-3.5" />
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        <Workbook
+          key={resetKey}
+          ref={workbookRef}
+          data={data}
+          onChange={handleChange}
+          allowEdit={canEdit}
+          lang="en"
+        />
+      </div>
     </div>
   );
+}
+
+function SaveStatus({ state }: { state: SaveState }) {
+  if (state === "saving") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-[var(--text-muted)]">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  if (state === "saved") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-emerald-500">
+        <Check className="h-3 w-3" />
+        Saved
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-red-500">
+        <CircleAlert className="h-3 w-3" />
+        Save failed
+      </span>
+    );
+  }
+  return null;
 }
