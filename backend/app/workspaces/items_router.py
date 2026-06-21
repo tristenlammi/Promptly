@@ -24,6 +24,7 @@ that router's surface.
 """
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -35,11 +36,15 @@ from fastapi import (
     Response,
     status,
 )
+from jose import jwt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
+from app.auth.utils import JWT_ALGORITHM
+from app.config import get_settings
+from app.files.schemas import CollabTokenResponse, CollabTokenUser
 from app.chat.models import (
     Conversation,
     Spreadsheet,
@@ -52,7 +57,10 @@ from app.files.documents_router import create_blank_document
 from app.files.models import UserFile
 from app.files.safety import sanitize_filename
 from app.files.system_folders import get_or_create_subfolder
-from app.workspaces.canvas_router import create_canvas_with_item
+from app.workspaces.canvas_router import (
+    _color_for_user,
+    create_canvas_with_item,
+)
 from app.workspaces.schemas import (
     SpreadsheetResponse,
     SpreadsheetSaveRequest,
@@ -539,6 +547,59 @@ async def save_spreadsheet(
 
         background.add_task(index_sheet_for_workspace, ws.id, sheet_item.id)
     return SpreadsheetResponse.model_validate(sheet)
+
+
+# Match the document/canvas collab token lifetime so the frontend's refresh
+# scheduling is identical across all three editor types.
+_SHEET_TOKEN_TTL_SECONDS = 5 * 60
+
+
+def _mint_sheet_token(
+    *, sheet_id: uuid.UUID, user: User, perm: str
+) -> tuple[str, int]:
+    """A short-lived HS256 JWT the collab server validates for ``sheet:<id>``
+    rooms — mirrors the canvas token, with ``type='sheet'``/``sheet_id``."""
+    settings = get_settings()
+    now = int(time.time())
+    exp = now + _SHEET_TOKEN_TTL_SECONDS
+    payload = {
+        "sub": str(user.id),
+        "type": "sheet",
+        "sheet_id": str(sheet_id),
+        "perm": perm,
+        "name": user.username,
+        "color": _color_for_user(user.id),
+        "iat": now,
+        "exp": exp,
+        "jti": uuid.uuid4().hex,
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return token, exp
+
+
+@router.get(
+    "/{workspace_id}/spreadsheets/{sheet_id}/collab-token",
+    response_model=CollabTokenResponse,
+)
+async def get_sheet_collab_token(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CollabTokenResponse:
+    """Mint the collab JWT for a sheet's ``sheet:<id>`` Yjs room. Viewers get
+    a read-only token; editors get write."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
+    perm = "read" if access_role == "viewer" else "write"
+    token, exp = _mint_sheet_token(sheet_id=sheet.id, user=user, perm=perm)
+    return CollabTokenResponse(
+        token=token,
+        expires_at=exp,
+        user=CollabTokenUser(
+            id=user.id, name=user.username, color=_color_for_user(user.id)
+        ),
+    )
 
 
 # ---------------------------------------------------------------------

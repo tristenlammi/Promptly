@@ -70,6 +70,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CANVAS_PREFIX = "canvas:";
+const SHEET_PREFIX = "sheet:";
 
 function parseRoom(name) {
   if (typeof name !== "string") {
@@ -79,6 +80,11 @@ function parseRoom(name) {
     const id = name.slice(CANVAS_PREFIX.length);
     if (!UUID_RE.test(id)) throw new Error(`Invalid canvas id: ${id}`);
     return { kind: "canvas", id };
+  }
+  if (name.startsWith(SHEET_PREFIX)) {
+    const id = name.slice(SHEET_PREFIX.length);
+    if (!UUID_RE.test(id)) throw new Error(`Invalid sheet id: ${id}`);
+    return { kind: "sheet", id };
   }
   if (!UUID_RE.test(name)) {
     throw new Error(`Invalid document id: ${name}`);
@@ -165,8 +171,12 @@ const server = new Server({
         // Table + key column are constants derived from the parsed kind
         // (never user input), so interpolating them is safe.
         const table =
-          kind === "canvas" ? "workspace_canvas" : "document_state";
-        const idCol = kind === "canvas" ? "id" : "file_id";
+          kind === "canvas"
+            ? "workspace_canvas"
+            : kind === "sheet"
+              ? "spreadsheets"
+              : "document_state";
+        const idCol = kind === "doc" ? "file_id" : "id";
         const { rows } = await pool.query(
           `SELECT yjs_update FROM ${table} WHERE ${idCol} = $1`,
           [id]
@@ -197,14 +207,15 @@ const server = new Server({
       store: async ({ documentName, state }) => {
         const { kind, id } = parseRoom(documentName);
         console.log(`[collab] store: writing ${state.length} bytes for ${documentName}`);
-        if (kind === "canvas") {
-          // The backend seeds the workspace_canvas row at creation with
-          // a NOT NULL workspace_id/title, so this is a plain UPDATE — an
-          // upsert would have to re-supply those columns. No HTML
-          // snapshot: canvases have no rendered form (text for RAG is
-          // pushed separately by the client to /api/canvas/:id/text).
+        if (kind === "canvas" || kind === "sheet") {
+          // Both are seeded at creation with NOT NULL columns, so this is a
+          // plain UPDATE (an upsert would have to re-supply them). No HTML
+          // snapshot: neither has a rendered form. Text for RAG is pushed
+          // separately by the client (canvas → /api/canvas/:id/text,
+          // sheet → the spreadsheet save endpoint).
+          const table = kind === "canvas" ? "workspace_canvas" : "spreadsheets";
           await pool.query(
-            `UPDATE workspace_canvas
+            `UPDATE ${table}
                SET yjs_update = $2, version = version + 1, updated_at = NOW()
              WHERE id = $1`,
             [id, Buffer.from(state)]
@@ -247,11 +258,17 @@ const server = new Server({
     }
 
     // Each room kind has its own token shape: documents mint
-    // ``type=collab``/``document_id``; canvases ``type=canvas``/``canvas_id``.
+    // ``type=collab``/``document_id``; canvases ``type=canvas``/``canvas_id``;
+    // sheets ``type=sheet``/``sheet_id``.
     if (kind === "canvas") {
       if (payload.type !== "canvas") throw new Error("Wrong token type");
       if (payload.canvas_id !== id) {
         throw new Error("Token does not match canvas");
+      }
+    } else if (kind === "sheet") {
+      if (payload.type !== "sheet") throw new Error("Wrong token type");
+      if (payload.sheet_id !== id) {
+        throw new Error("Token does not match sheet");
       }
     } else {
       if (payload.type !== "collab") throw new Error("Wrong token type");

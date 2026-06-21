@@ -644,6 +644,16 @@ class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
     # celldata, ...}]``. NULL until the first save → the client seeds a
     # blank sheet.
     data: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # Full merged Y.Doc state for live collaboration, keyed by the
+    # ``sheet:<id>`` collab room (mirrors :class:`WorkspaceCanvas`). Seeded
+    # empty so the collab Database extension has a row to upsert; the first
+    # session starts from a fresh Y.Doc when this is empty.
+    yjs_update: Mapped[bytes] = mapped_column(
+        LargeBinary, nullable=False, default=b""
+    )
+    version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
     # Flattened cell text for RAG, pushed by the client on save (mirrors
     # ``WorkspaceCanvas.content_text``).
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
