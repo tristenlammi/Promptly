@@ -788,12 +788,49 @@ function SettingsTab({
               setMemProviderId(p);
             }}
           />
-          <p className="text-xs text-[var(--text-muted)]">
-            Choose which model maintains the memory — an API model or a local
-            Ollama model. Leave on the default if you're unsure (machines that
-            can't run Ollama should pick an API model). Saved with{" "}
-            <strong>Save changes</strong> above.
-          </p>
+          <div className="space-y-2 text-xs text-[var(--text-muted)]">
+            <p>
+              This model reads recent chats and rewrites the memory file in the
+              background, so good judgment and low cost matter more than speed.
+              Which to pick:
+            </p>
+            <ul className="space-y-1.5">
+              <li className="flex gap-2">
+                <span className="font-semibold text-[var(--accent)]">
+                  Cost-effective
+                </span>
+                <span>
+                  <span className="font-medium text-[var(--text)]">
+                    (recommended)
+                  </span>{" "}
+                  — a fast, cheap model like Claude Haiku, Gemini Flash, or
+                  GPT-4o mini. The sweet spot: it runs often without the cost
+                  adding up.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="font-semibold text-[var(--text)]">
+                  Higher-end
+                </span>
+                <span>
+                  — a frontier model (Claude Opus / Sonnet, GPT-4o) when memory
+                  accuracy is critical and the extra spend is worth it.
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="font-semibold text-[var(--text)]">Local</span>
+                <span>
+                  — a capable Ollama model (8B+, e.g. Llama 3.1 8B) for zero
+                  cost and full privacy. Needs a machine that can run it well;
+                  smaller models distill less reliably.
+                </span>
+              </li>
+            </ul>
+            <p>
+              Leave on the default if you're unsure. Saved with{" "}
+              <strong>Save changes</strong> above.
+            </p>
+          </div>
         </section>
       )}
 
