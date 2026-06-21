@@ -9,6 +9,7 @@ import {
 
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
+  useWorkspaceMap,
   useWorkspaceOverview,
   useWorkspaceTasks,
 } from "@/hooks/useWorkspaces";
@@ -33,6 +34,14 @@ export function WorkspaceOverviewPane({
 }) {
   const { data: overview } = useWorkspaceOverview(workspaceId);
   const { data: workspaceTasks } = useWorkspaceTasks(workspaceId);
+  const { data: mapData } = useWorkspaceMap(workspaceId);
+  // Drop the map's "## Workspace contents" header + intro (the panel below
+  // supplies its own) and show just the catalog tree.
+  const mapTree = (mapData?.markdown ?? "")
+    .split("\n\n")
+    .slice(1)
+    .join("\n\n")
+    .trim();
 
   const open = (
     partial: Pick<WorkspaceItemNode, "id" | "kind" | "ref_id" | "title">
@@ -93,6 +102,22 @@ export function WorkspaceOverviewPane({
       <div className="mt-8">
         <WorkspaceFilesPanel workspaceId={workspaceId} canEdit={canEdit} />
       </div>
+
+      {/* Workspace map — the catalog every chat sees */}
+      {mapTree && (
+        <section className="mt-8">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Workspace map
+          </h2>
+          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+            The catalog every chat sees, so the AI knows what exists and where.
+            Updates automatically as you add, rename, or remove items.
+          </p>
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text)]">
+            {mapTree}
+          </pre>
+        </section>
+      )}
 
       {/* Secondary: checkboxes found inside notes (rollup) */}
       {tasks.length > 0 && (

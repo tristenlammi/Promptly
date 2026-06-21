@@ -527,6 +527,24 @@ async def save_spreadsheet(
 
 
 # ---------------------------------------------------------------------
+# Workspace map — the deterministic catalog injected into chat context
+# ---------------------------------------------------------------------
+@router.get("/{workspace_id}/map")
+async def get_workspace_map_endpoint(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """The workspace's structural map (Markdown) — the same catalog injected
+    into every chat's context. Surfaced so the user can see what the AI sees."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    from app.workspaces.knowledge import build_workspace_map
+
+    md = await build_workspace_map(db, ws.id)
+    return {"markdown": md or ""}
+
+
+# ---------------------------------------------------------------------
 # Read one item (e.g. a board's config / label registry)
 # ---------------------------------------------------------------------
 @router.get(

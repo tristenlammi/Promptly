@@ -509,6 +509,15 @@ export const workspacesApi = {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
   },
 
+  /** The workspace's structural map (Markdown) — the same catalog injected
+   *  into chat context. */
+  async map(id: string): Promise<{ markdown: string }> {
+    const { data } = await apiClient.get<{ markdown: string }>(
+      `/workspaces/${id}/map`
+    );
+    return data;
+  },
+
   // --- Spreadsheet pages (single-user persistence) ---------------------
   async getSpreadsheet(
     id: string,

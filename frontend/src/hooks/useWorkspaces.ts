@@ -198,6 +198,16 @@ export function useWorkspaceOverview(id: string | undefined) {
   });
 }
 
+/** The workspace structural map (the catalog injected into chat context),
+ *  surfaced so the user can see what the AI sees. */
+export function useWorkspaceMap(id: string | undefined) {
+  return useQuery({
+    queryKey: id ? ["workspaces", "map", id] : ["workspaces", "map", "_"],
+    queryFn: () => workspacesApi.map(id as string),
+    enabled: Boolean(id),
+  });
+}
+
 
 // ---------------------------------------------------------------------
 // Task list — first-class, project-level to-dos
