@@ -283,14 +283,10 @@ export function ChatPage({
   // workspace — but only when the workspace's memory isn't switched off.
   const appendWorkspaceMemory = useAppendWorkspaceMemory(chatWorkspaceId ?? "");
   const handleSaveToWorkspaceMemory = useCallback(
+    // Throws on failure so the modal can surface the error inline.
     async (text: string) => {
       if (!chatWorkspaceId) return;
-      try {
-        await appendWorkspaceMemory.mutateAsync(text);
-        toast.success("Saved to workspace memory");
-      } catch {
-        toast.error("Couldn't save to workspace memory");
-      }
+      await appendWorkspaceMemory.mutateAsync(text);
     },
     [chatWorkspaceId, appendWorkspaceMemory]
   );

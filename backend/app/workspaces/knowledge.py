@@ -2046,6 +2046,93 @@ async def append_to_workspace_memory(
     return await save_workspace_memory(db, ws=ws, content_md=new_md)
 
 
+_REMEMBER_SYSTEM_PROMPT = (
+    "You maintain a workspace's living 'Workspace Memory' — a compact, "
+    "accurate Markdown record of what's been established. You are given the "
+    "CURRENT memory (which may be empty) and a single FACT the user has "
+    "explicitly flagged to remember. Integrate that fact into the memory:\n"
+    "- Treat it as a confirmed, durable user statement (high signal).\n"
+    "- Decide WHERE it belongs and place it there; merge with or supersede any "
+    "related existing entry instead of duplicating; tighten the wording.\n"
+    "- PRESERVE everything else in the current memory that still holds.\n\n"
+    "OUTPUT (Markdown only, no preamble or meta-commentary):\n"
+    "- `## Workspace overview` — one or two sentences: the project's goal.\n"
+    "- `## Durable facts` — bullets of always-true things. Omit if none.\n"
+    "- `## Decisions` — bullets of concrete choices. Omit if none.\n"
+    "- `## Open questions` — bullets of unresolved threads. Omit if none.\n"
+    "- `## Next steps` — bullets of upcoming actions. Omit if none.\n\n"
+    "RULES: third person; merge and deduplicate; never keep contradictions; "
+    "under 700 words; no commentary about being a summary."
+)
+
+
+async def integrate_into_workspace_memory(
+    db: AsyncSession, *, ws: Workspace, text: str
+) -> uuid.UUID | None:
+    """LLM-mediated "remember this": hand a user-flagged snippet to the memory
+    model, which decides how and where to fold it into the memory document
+    (right section, merge/supersede, tighten wording). Falls back to a verbatim
+    pinned append when no memory model is resolvable or the call fails, so the
+    fact is never lost. Returns the file id to (re)index."""
+    from app.models_config.provider import ChatMessage, model_router
+
+    snippet = " ".join((text or "").split())
+    if not snippet:
+        return None
+
+    mem_provider_id = ws.memory_provider_id or ws.default_provider_id
+    mem_model_id = ws.memory_model_id or ws.default_model_id
+    if not mem_provider_id or not mem_model_id:
+        return await append_to_workspace_memory(db, ws=ws, text=text)
+    provider = await db.get(ModelProvider, mem_provider_id)
+    if provider is None or not provider.enabled:
+        return await append_to_workspace_memory(db, ws=ws, text=text)
+
+    existing = await get_workspace_memory_doc(db, ws.id)
+    full = (existing.content_text or "").strip() if existing is not None else ""
+    pinned_inner, current = split_pinned_memory(full)
+
+    parts = ["=== CURRENT WORKSPACE MEMORY ===\n" + (current or "(empty)")]
+    if pinned_inner:
+        parts.append(
+            "=== PINNED (preserved separately; do NOT reproduce these) ===\n"
+            + pinned_inner
+        )
+    parts.append(
+        "=== FACT TO REMEMBER (the user explicitly clicked 'remember' on "
+        "this) ===\n" + snippet
+    )
+    merged_input = "\n\n".join(parts)
+
+    try:
+        chunks: list[str] = []
+        async for token in model_router.stream_chat(
+            provider=provider,
+            model_id=mem_model_id,
+            messages=[ChatMessage(role="user", content=merged_input)],
+            system=_REMEMBER_SYSTEM_PROMPT,
+            temperature=0.2,
+            max_tokens=1500,
+        ):
+            chunks.append(token)
+        memo = "".join(chunks).strip()
+    except Exception:  # noqa: BLE001 - provider or any failure → fall back
+        logger.debug("workspace-memory: remember integrate failed for %s", ws.id)
+        return await append_to_workspace_memory(db, ws=ws, text=text)
+
+    if not memo:
+        return await append_to_workspace_memory(db, ws=ws, text=text)
+
+    # Re-attach the pinned block verbatim and persist over the existing doc.
+    memo_body = compose_with_pinned(memo, pinned_inner)
+    body = (
+        f"# Workspace Memory: {ws.title}\n\n"
+        f"_Maintained from this workspace's chats, documents, and saved "
+        f"notes._\n\n{memo_body}\n"
+    )
+    return await save_workspace_memory(db, ws=ws, content_md=body)
+
+
 # How many recently-active conversations to pull for cross-chat merging.
 # Enough to capture meaningful divergence without blowing the summary
 # model's context. The most recent conversation is always included

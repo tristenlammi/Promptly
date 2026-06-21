@@ -13,6 +13,7 @@ import {
 } from "./CompactedSummaryRow";
 import { MessageBubble, type RegenerateOverride } from "./MessageBubble";
 import { RememberModal } from "./RememberModal";
+import { WorkspaceRememberModal } from "./WorkspaceRememberModal";
 import { StreamErrorCard } from "./StreamErrorCard";
 import { ThinkingBubble } from "./ThinkingBubble";
 
@@ -354,11 +355,9 @@ export function ChatWindow({
               siblingIds={m.sibling_ids ?? undefined}
               onSelectVersion={onSelectVersion}
               onRemember={
-                onRememberToWorkspace
-                  ? (text) => void onRememberToWorkspace(text)
-                  : hideRemember
-                    ? undefined
-                    : (text) => setRememberText(text)
+                onRememberToWorkspace || !hideRemember
+                  ? (text) => setRememberText(text)
+                  : undefined
               }
             />
           );
@@ -411,13 +410,21 @@ export function ChatWindow({
         </button>
       )}
 
-      {/* Phase 3.3 — "Remember this" modal */}
-      {rememberText !== null && (
-        <RememberModal
-          initialText={rememberText}
-          onClose={() => setRememberText(null)}
-        />
-      )}
+      {/* "Remember this" modal — workspace chats route to the workspace
+          memory (agent-mediated); everywhere else to account memory. */}
+      {rememberText !== null &&
+        (onRememberToWorkspace ? (
+          <WorkspaceRememberModal
+            initialText={rememberText}
+            onSave={(t) => Promise.resolve(onRememberToWorkspace(t))}
+            onClose={() => setRememberText(null)}
+          />
+        ) : (
+          <RememberModal
+            initialText={rememberText}
+            onClose={() => setRememberText(null)}
+          />
+        ))}
     </div>
   );
 }

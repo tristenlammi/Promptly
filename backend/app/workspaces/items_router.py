@@ -674,18 +674,19 @@ async def append_workspace_memory_endpoint(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceMemoryResponse:
-    """"Save to workspace memory" — pin a chat snippet into the memory's
-    sticky block (created if needed). Pinned items survive librarian runs
-    verbatim. Requires write access; re-indexes off the request path."""
+    """"Save to workspace memory" — hand a user-flagged snippet to the memory
+    model, which decides how and where to fold it into the memory document
+    (falling back to a verbatim pinned append if no model is available).
+    Requires write access; re-indexes off the request path."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     from app.workspaces.knowledge import (
-        append_to_workspace_memory,
         get_workspace_memory_doc,
         index_file_for_workspace,
+        integrate_into_workspace_memory,
     )
 
-    file_id = await append_to_workspace_memory(db, ws=ws, text=payload.text)
+    file_id = await integrate_into_workspace_memory(db, ws=ws, text=payload.text)
     if file_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
