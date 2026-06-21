@@ -73,6 +73,7 @@ from app.workspaces.shares import (
 )
 from app.chat.schemas import ConversationSummary
 from app.workspaces.knowledge import (
+    WORKSPACE_MEMORY_SOURCE_KIND,
     delete_workspace_file_chunks,
     index_file_for_workspace,
     reindex_workspace,
@@ -330,6 +331,11 @@ async def get_workspace(
             context_enabled=pin.context_enabled,
         )
         for pin, uf in files_q.all()
+        # The auto-maintained Workspace Memory.md stays pinned (that's how it
+        # reaches chat context) but is hidden from the user-managed Pinned
+        # files list — it has its own editor in Settings → Workspace memory,
+        # and shouldn't be separately editable, unpinnable, or deletable here.
+        if uf.source_kind != WORKSPACE_MEMORY_SOURCE_KIND
     ]
     summary = await _summary_with_rollups(ws, db, user)
     stats = await workspace_context_stats(
