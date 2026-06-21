@@ -29,6 +29,40 @@ function cellText(cell: unknown): string {
   return val == null ? "" : String(val).trim();
 }
 
+/**
+ * Normalise sheets to Fortune-sheet's sparse ``celldata`` form, which is what
+ * ``<Workbook data>`` initialises its grid from. ``getAllSheets()`` hands back
+ * cells in the dense ``data`` matrix instead — persisting that produces a sheet
+ * that reloads blank (the matrix is ignored on init). So we convert the matrix
+ * to ``celldata`` (and drop the matrix to avoid ambiguity) for both save and
+ * load. Sheets already carrying ``celldata`` pass through untouched.
+ */
+function toCelldata(sheets: Sheet[]): Sheet[] {
+  return sheets.map((s) => {
+    const sheet = s as {
+      celldata?: { r: number; c: number; v: unknown }[];
+      data?: unknown[][];
+      [k: string]: unknown;
+    };
+    if (Array.isArray(sheet.celldata) && sheet.celldata.length) {
+      const { data: _drop, ...rest } = sheet;
+      return rest as unknown as Sheet;
+    }
+    const grid = sheet.data;
+    if (!Array.isArray(grid)) return s;
+    const celldata: { r: number; c: number; v: unknown }[] = [];
+    for (let r = 0; r < grid.length; r++) {
+      const row = grid[r];
+      if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        if (row[c] != null) celldata.push({ r, c, v: row[c] });
+      }
+    }
+    const { data: _drop, ...rest } = sheet;
+    return { ...rest, celldata } as unknown as Sheet;
+  });
+}
+
 /** Debug: count non-empty cells across a workbook (celldata + dense grid). */
 function countCells(sheets: Sheet[] | null | undefined): number {
   if (!sheets) return -1;
@@ -148,10 +182,12 @@ export function WorkspaceSheetPane({
       // (Clearing individual cells among others still persists — only an
       // all-zero grid is rejected. To truly blank a sheet, delete it.)
       if (countCells(sheets) <= 0) return;
+      // Persist in ``celldata`` form so the sheet reloads correctly.
+      const celldataSheets = toCelldata(sheets);
       void workspacesApi
         .saveSpreadsheet(workspaceId, sheetId, {
-          data: sheets,
-          content_text: flattenSheets(sheets),
+          data: celldataSheets,
+          content_text: flattenSheets(celldataSheets),
         })
         .catch(() => {});
     },
@@ -168,7 +204,9 @@ export function WorkspaceSheetPane({
       .then((s) => {
         if (cancelled) return;
         const sheets = (s.data as Sheet[] | null) ?? null;
-        setData(sheets && sheets.length ? sheets : DEFAULT_SHEET);
+        setData(
+          sheets && sheets.length ? toCelldata(sheets) : DEFAULT_SHEET
+        );
       })
       .catch((err) => {
         if (cancelled) return;
