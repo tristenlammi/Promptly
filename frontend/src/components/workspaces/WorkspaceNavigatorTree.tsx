@@ -449,13 +449,14 @@ function TreeNode({
 
   const isFolder = node.kind === "folder";
   const isChat = node.kind === "chat";
-  // Notes, canvases, boards, and chats can feed the workspace RAG context,
-  // so they get the "Use as workspace context" toggle. Notes/canvases/boards
+  // Notes, canvases, boards, sheets, and chats can feed the workspace RAG
+  // context, so they get the "Use as workspace context" toggle. Documents
   // default ON; chats default OFF (scratch space until opted in).
   const isContextItem =
     node.kind === "note" ||
     node.kind === "canvas" ||
     node.kind === "board" ||
+    node.kind === "sheet" ||
     node.kind === "container" ||
     isChat;
   const contextOn = isChat
