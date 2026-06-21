@@ -184,10 +184,10 @@ export function WorkspaceNavigatorTree({
               type="button"
               onClick={onHome}
               className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition",
-                atHome
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--accent)]/90 text-white hover:bg-[var(--accent)]"
+                "flex flex-1 items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:bg-[var(--accent)]/90",
+                // Always solid orange — a constant anchor users can fall back
+                // to when they lose their place in the tree.
+                atHome && "ring-2 ring-[var(--accent)]/40"
               )}
               title="Workspace home — overview, board, and recent items"
             >
