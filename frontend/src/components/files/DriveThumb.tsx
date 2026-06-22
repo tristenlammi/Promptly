@@ -9,6 +9,18 @@ function isImageFile(file?: FileItem): boolean {
   return !!file && (file.mime_type || "").toLowerCase().startsWith("image/");
 }
 
+function isPdfFile(file?: FileItem): boolean {
+  if (!file) return false;
+  const mime = (file.mime_type || "").toLowerCase();
+  const name = (file.filename || "").toLowerCase();
+  return mime === "application/pdf" || name.endsWith(".pdf");
+}
+
+/** Anything the server can render a thumbnail for (images + PDF first page). */
+function isThumbnailable(file?: FileItem): boolean {
+  return isImageFile(file) || isPdfFile(file);
+}
+
 /**
  * Square thumbnail tile for the Drive grid. For image files it lazily
  * fetches the server-resized thumbnail (authed blob → object URL) once
@@ -25,13 +37,14 @@ export function DriveThumb({
   folder?: FolderItem;
   className?: string;
 }) {
-  const image = isImageFile(file);
+  const thumbable = isThumbnailable(file);
+  const isPdf = isPdfFile(file);
   const ref = useRef<HTMLDivElement | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (!image || !file) return;
+    if (!thumbable || !file) return;
     const el = ref.current;
     if (!el) return;
     let cancelled = false;
@@ -66,9 +79,9 @@ export function DriveThumb({
       io.disconnect();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [image, file?.id]);
+  }, [thumbable, file?.id]);
 
-  if (!image || failed) {
+  if (!thumbable || failed) {
     return (
       <div className={cn("flex items-center justify-center", className)}>
         <DriveItemIcon file={file} folder={folder} className="h-10 w-10" />
@@ -85,7 +98,16 @@ export function DriveThumb({
       )}
     >
       {url ? (
-        <img src={url} alt="" className="h-full w-full object-cover" />
+        // PDFs render top-aligned so the page header (title) shows; photos
+        // centre-crop the way a drive's photo grid does.
+        <img
+          src={url}
+          alt=""
+          className={cn(
+            "h-full w-full",
+            isPdf ? "object-cover object-top" : "object-cover"
+          )}
+        />
       ) : (
         <DriveItemIcon file={file} className="h-10 w-10 opacity-30" />
       )}

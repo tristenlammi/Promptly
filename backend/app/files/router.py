@@ -43,6 +43,7 @@ from fastapi import (
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import and_, delete as sa_delete, func, nullslast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1324,26 +1325,64 @@ async def download_file(
     )
 
 
+def _render_thumb_bytes(path, is_pdf: bool) -> bytes:
+    """Render a 320px JPEG thumbnail for an image or a PDF's first page.
+
+    Synchronous + blocking (Pillow / PDFium), so callers offload it to a
+    thread. PDFs render via ``pypdfium2`` (a pure-wheel PDFium binding —
+    no system libs), which lets a folder of generated reports read like a
+    real drive instead of a wall of identical PDF icons.
+    """
+    from io import BytesIO
+
+    from PIL import Image, ImageOps
+
+    buf = BytesIO()
+    if is_pdf:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            # scale 2.0 ≈ 144 DPI — plenty for a 320px tile, cheap to render.
+            im = pdf[0].render(scale=2.0).to_pil().convert("RGB")
+        finally:
+            pdf.close()
+        im.thumbnail((320, 320))
+        im.save(buf, format="JPEG", quality=80)
+    else:
+        with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im)  # honour camera orientation
+            im.draft("RGB", (512, 512))  # fast partial decode for big JPEGs
+            im = im.convert("RGB")
+            im.thumbnail((320, 320))
+            im.save(buf, format="JPEG", quality=80)
+    return buf.getvalue()
+
+
 @router.get("/{file_id}/thumbnail")
 async def file_thumbnail(
     file_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """Return a small, downscaled JPEG preview of an image file.
+    """Return a small, downscaled JPEG preview of an image or PDF file.
 
-    Powers the Drive grid's thumbnails so a folder of photos reads like
-    a real drive rather than a wall of generic icons. Only images are
-    thumbnailed; anything else gets a 415 and the client falls back to a
-    type icon. Generated on the fly (Pillow draft-decode keeps it cheap)
-    and marked privately cacheable so re-renders hit the browser cache
-    rather than re-hitting the server.
+    Powers the Drive grid's thumbnails so a folder of photos / documents
+    reads like a real drive rather than a wall of generic icons. Images
+    and PDFs (first page) are thumbnailed; anything else gets a 415 and
+    the client falls back to a type icon. Rendering is offloaded to a
+    thread and marked privately cacheable so re-renders hit the browser
+    cache rather than re-hitting the server.
     """
     row = await _load_readable_file(db, file_id, user)
-    if not (row.mime_type or "").lower().startswith("image/"):
+    mime = (row.mime_type or "").lower()
+    name = (row.filename or "").lower()
+    is_image = mime.startswith("image/")
+    is_pdf = mime == "application/pdf" or name.endswith(".pdf")
+    if not (is_image or is_pdf):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Not an image",
+            detail="No thumbnail for this file type",
         )
     path = absolute_path(row.storage_path)
     if not path.exists():
@@ -1353,33 +1392,19 @@ async def file_thumbnail(
     # Strong validator so the browser can revalidate cheaply: blob is
     # immutable, so id + size is enough to key the cache.
     etag = f'"thumb-{row.id}-{row.size_bytes}"'
-    from io import BytesIO
 
     try:
-        from PIL import Image, ImageOps
-    except Exception:  # pragma: no cover - Pillow is a hard dep
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Thumbnailing unavailable",
-        )
-
-    try:
-        with Image.open(path) as im:
-            im = ImageOps.exif_transpose(im)  # honour camera orientation
-            im.draft("RGB", (512, 512))  # fast partial decode for big JPEGs
-            im = im.convert("RGB")
-            im.thumbnail((320, 320))
-            buf = BytesIO()
-            im.save(buf, format="JPEG", quality=80)
+        content = await run_in_threadpool(_render_thumb_bytes, path, is_pdf)
     except Exception:
-        # Corrupt / unsupported image payloads shouldn't 500 the grid.
+        # Corrupt / unsupported payloads shouldn't 500 the grid — let the
+        # client fall back to a type icon.
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Could not render thumbnail",
         )
 
     return Response(
-        content=buf.getvalue(),
+        content=content,
         media_type="image/jpeg",
         headers={
             "Cache-Control": "private, max-age=86400",
