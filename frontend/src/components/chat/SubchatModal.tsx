@@ -32,13 +32,17 @@ interface SubchatModalProps {
   onInsert: (text: string) => void;
 }
 
-const WIDTH = 384;
+const DEFAULT_W = 384;
+const MIN_W = 300;
+const MIN_H = 240;
+
+type Corner = "nw" | "ne" | "sw" | "se";
 
 /**
- * Floating, draggable Subchat window. A throwaway side-conversation that
- * inherits the parent thread's full context (server-side) without writing
- * back into it. Streams via {@link useSubchatStream} on isolated local
- * state so it never disturbs the main chat.
+ * Floating, draggable + resizable Subchat window. A throwaway side-
+ * conversation that inherits the parent thread's full context (server-
+ * side) without writing back into it. Streams via {@link useSubchatStream}
+ * on isolated local state so it never disturbs the main chat.
  */
 export function SubchatModal({
   subchat,
@@ -52,43 +56,142 @@ export function SubchatModal({
     useSubchatStream(subchat.id);
   const [draft, setDraft] = useState("");
 
-  // ---- Drag state ----
-  // Initial position: docked to the right, vertically centred-ish, with a
-  // safe fallback when window isn't available (SSR / tests).
+  // ---- Geometry (position + size) ----
+  // Docked to the right, vertically centred-ish, with a safe fallback
+  // when window isn't available (SSR / tests).
   const [pos, setPos] = useState(() => {
     if (typeof window === "undefined") return { x: 80, y: 80 };
     return {
-      x: Math.max(16, window.innerWidth - WIDTH - 32),
+      x: Math.max(16, window.innerWidth - DEFAULT_W - 32),
       y: Math.max(16, Math.round(window.innerHeight * 0.12)),
     };
   });
-  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const [size, setSize] = useState(() => {
+    if (typeof window === "undefined") return { w: DEFAULT_W, h: 600 };
+    return { w: DEFAULT_W, h: Math.min(720, Math.round(window.innerHeight * 0.82)) };
+  });
 
+  // ---- Drag (move) ----
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
   const onDragStart = useCallback(
     (e: React.PointerEvent) => {
-      // Ignore drags that start on a button inside the header.
-      if ((e.target as HTMLElement).closest("button")) return;
+      // Ignore drags that start on a button or a resize handle.
+      const t = e.target as HTMLElement;
+      if (t.closest("button") || t.dataset.resize) return;
       dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
     [pos.x, pos.y]
   );
-  const onDragMove = useCallback((e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const maxX = window.innerWidth - WIDTH - 8;
-    const maxY = window.innerHeight - 80;
-    setPos({
-      x: Math.min(Math.max(8, e.clientX - d.dx), Math.max(8, maxX)),
-      y: Math.min(Math.max(8, e.clientY - d.dy), Math.max(8, maxY)),
-    });
-  }, []);
+  const onDragMove = useCallback(
+    (e: React.PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const maxX = window.innerWidth - size.w - 8;
+      const maxY = window.innerHeight - 80;
+      setPos({
+        x: Math.min(Math.max(8, e.clientX - d.dx), Math.max(8, maxX)),
+        y: Math.min(Math.max(8, e.clientY - d.dy), Math.max(8, maxY)),
+      });
+    },
+    [size.w]
+  );
   const onDragEnd = useCallback((e: React.PointerEvent) => {
     dragRef.current = null;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
       /* pointer already released */
+    }
+  }, []);
+
+  // ---- Resize (corners) ----
+  const resizeRef = useRef<{
+    corner: Corner;
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+    px: number;
+    py: number;
+  } | null>(null);
+
+  const onResizeStart = useCallback(
+    (corner: Corner) => (e: React.PointerEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      resizeRef.current = {
+        corner,
+        sx: e.clientX,
+        sy: e.clientY,
+        sw: size.w,
+        sh: size.h,
+        px: pos.x,
+        py: pos.y,
+      };
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [size.w, size.h, pos.x, pos.y]
+  );
+
+  const onResizeMove = useCallback((e: React.PointerEvent) => {
+    const r = resizeRef.current;
+    if (!r) return;
+    const dx = e.clientX - r.sx;
+    const dy = e.clientY - r.sy;
+    const east = r.corner === "ne" || r.corner === "se";
+    const west = r.corner === "nw" || r.corner === "sw";
+    const south = r.corner === "sw" || r.corner === "se";
+    const north = r.corner === "nw" || r.corner === "ne";
+
+    let w = r.sw;
+    let h = r.sh;
+    let x = r.px;
+    let y = r.py;
+
+    if (east) w = r.sw + dx;
+    if (west) {
+      w = r.sw - dx;
+      x = r.px + dx;
+    }
+    if (south) h = r.sh + dy;
+    if (north) {
+      h = r.sh - dy;
+      y = r.py + dy;
+    }
+
+    // Enforce minimums (when dragging a top/left edge, keep the opposite
+    // edge pinned by adjusting the position back).
+    if (w < MIN_W) {
+      if (west) x -= MIN_W - w;
+      w = MIN_W;
+    }
+    if (h < MIN_H) {
+      if (north) y -= MIN_H - h;
+      h = MIN_H;
+    }
+    // Keep inside the viewport.
+    if (x < 8) {
+      if (west) w += x - 8;
+      x = 8;
+    }
+    if (y < 8) {
+      if (north) h += y - 8;
+      y = 8;
+    }
+    w = Math.min(w, window.innerWidth - x - 8);
+    h = Math.min(h, window.innerHeight - y - 8);
+
+    setSize({ w, h });
+    setPos({ x, y });
+  }, []);
+
+  const onResizeEnd = useCallback((e: React.PointerEvent) => {
+    resizeRef.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
     }
   }, []);
 
@@ -118,16 +221,31 @@ export function SubchatModal({
 
   const hasTurns = messages.length > 0 || streaming;
 
+  // Shared classes for a resize handle. ``data-resize`` lets the header's
+  // drag detector ignore pointer-downs that land on a handle.
+  const handle = (corner: Corner, cls: string, cursor: string) => (
+    <div
+      data-resize="1"
+      onPointerDown={onResizeStart(corner)}
+      onPointerMove={onResizeMove}
+      onPointerUp={onResizeEnd}
+      className={cn("absolute z-10 h-4 w-4", cls)}
+      style={{ cursor, touchAction: "none" }}
+    />
+  );
+
   return (
     <div
       role="dialog"
       aria-label="Subchat"
-      className="fixed z-[60] flex flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
+      className="fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"
       style={{
         left: pos.x,
         top: pos.y,
-        width: WIDTH,
-        maxHeight: "min(72vh, 640px)",
+        width: size.w,
+        height: size.h,
+        maxHeight: "calc(100vh - 16px)",
+        maxWidth: "calc(100vw - 16px)",
       }}
     >
       {/* Header / drag handle */}
@@ -135,7 +253,8 @@ export function SubchatModal({
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
         onPointerUp={onDragEnd}
-        className="flex cursor-grab items-center gap-2 rounded-t-xl border-b border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 active:cursor-grabbing"
+        style={{ touchAction: "none" }}
+        className="flex shrink-0 cursor-grab items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 active:cursor-grabbing"
       >
         <MessagesSquare className="h-4 w-4 shrink-0 text-[var(--accent)]" />
         <div className="min-w-0 flex-1">
@@ -151,7 +270,7 @@ export function SubchatModal({
         <button
           type="button"
           onClick={onKeep}
-          className="inline-flex h-7 items-center gap-1 rounded-full border border-[var(--border)] px-2 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--border)] px-2 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
           title="Keep this subchat as a permanent chat"
         >
           <Save className="h-3 w-3" />
@@ -160,7 +279,7 @@ export function SubchatModal({
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--bg)] hover:text-[var(--text)]"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--bg)] hover:text-[var(--text)]"
           aria-label="Close subchat (discards it)"
           title="Close — discards this subchat"
         >
@@ -168,10 +287,12 @@ export function SubchatModal({
         </button>
       </div>
 
-      {/* Transcript */}
+      {/* Transcript. ``min-h-0`` lets it scroll inside the flex column;
+          ``min-w-0`` + break rules below stop long tokens from forcing
+          horizontal overflow instead of wrapping. */}
       <div
         ref={bodyRef}
-        className="flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm"
+        className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm"
       >
         {!hasTurns && (
           <div className="flex h-full flex-col items-center justify-center gap-1 px-4 py-8 text-center text-xs text-[var(--text-muted)]">
@@ -183,14 +304,14 @@ export function SubchatModal({
 
         {messages.map((m) =>
           m.role === "user" ? (
-            <div key={m.id} className="flex justify-end">
-              <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-[var(--accent)] px-3 py-1.5 text-white">
+            <div key={m.id} className="flex min-w-0 justify-end">
+              <div className="max-w-[85%] overflow-hidden whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-[var(--accent)] px-3 py-1.5 text-white [overflow-wrap:anywhere]">
                 {m.content}
               </div>
             </div>
           ) : (
-            <div key={m.id} className="group flex flex-col gap-1">
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1.5 prose-pre:my-2">
+            <div key={m.id} className="group flex min-w-0 flex-col gap-1">
+              <div className="prose prose-sm min-w-0 max-w-none break-words dark:prose-invert prose-p:my-1.5 prose-pre:my-2 prose-pre:overflow-x-auto [overflow-wrap:anywhere]">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {m.content}
                 </ReactMarkdown>
@@ -212,7 +333,7 @@ export function SubchatModal({
 
         {/* In-flight assistant reply */}
         {streaming && (
-          <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1.5 prose-pre:my-2">
+          <div className="prose prose-sm min-w-0 max-w-none break-words dark:prose-invert prose-p:my-1.5 prose-pre:my-2 prose-pre:overflow-x-auto [overflow-wrap:anywhere]">
             {streamingContent ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {streamingContent}
@@ -228,7 +349,7 @@ export function SubchatModal({
         {error && (
           <div
             role="alert"
-            className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-600 dark:text-red-400"
+            className="break-words rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-600 dark:text-red-400"
           >
             {error}
           </div>
@@ -236,7 +357,7 @@ export function SubchatModal({
       </div>
 
       {/* Composer */}
-      <div className="border-t border-[var(--border)] p-2">
+      <div className="shrink-0 border-t border-[var(--border)] p-2">
         <div className="flex items-end gap-2">
           <textarea
             value={draft}
@@ -251,7 +372,7 @@ export function SubchatModal({
             placeholder="Ask the subchat…"
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
-            className="max-h-32 min-h-[38px] flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
+            className="max-h-32 min-h-[38px] min-w-0 flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2.5 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
           />
           {streaming ? (
             <button
@@ -279,6 +400,23 @@ export function SubchatModal({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Resize handles — one per corner. The SE handle carries a subtle
+          visible grip; the rest are invisible but grabbable. */}
+      {handle("nw", "left-0 top-0", "nwse-resize")}
+      {handle("ne", "right-0 top-0", "nesw-resize")}
+      {handle("sw", "bottom-0 left-0", "nesw-resize")}
+      <div
+        data-resize="1"
+        onPointerDown={onResizeStart("se")}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeEnd}
+        className="absolute bottom-0 right-0 z-10 flex h-4 w-4 items-end justify-end p-0.5"
+        style={{ cursor: "nwse-resize", touchAction: "none" }}
+        aria-label="Resize"
+      >
+        <span className="h-2 w-2 rounded-br border-b-2 border-r-2 border-[var(--text-muted)]/50" />
       </div>
     </div>
   );
