@@ -37,6 +37,7 @@ import {
 } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
+import { DriveDetailsPanel } from "@/components/files/DriveDetailsPanel";
 import { DriveFolderTree } from "@/components/files/DriveFolderTree";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
@@ -306,6 +307,18 @@ export function FilesPage({
     file_ids: [...selFiles],
     folder_ids: [...selFolders],
   });
+
+  // The single selected item (file or folder), or null when zero / many
+  // are selected. Drives the right-hand details pane.
+  const detailFile =
+    selectionCount === 1 && selFiles.size === 1
+      ? data?.files.find((f) => selFiles.has(f.id)) ?? null
+      : null;
+  const detailFolder =
+    selectionCount === 1 && selFolders.size === 1
+      ? data?.folders.find((f) => selFolders.has(f.id)) ?? null
+      : null;
+  const hasDetail = !!detailFile || !!detailFolder;
 
   useEffect(() => {
     setSelFiles(new Set());
@@ -674,16 +687,20 @@ export function FilesPage({
             </div>
           )}
 
-          <DriveSelectionBar
-            count={selectionCount}
-            busy={bulkBusy}
-            onClear={clearSelection}
-            onDownload={() => void handleBulkDownload()}
-            onStar={() => void handleBulkStar(true)}
-            onUnstar={() => void handleBulkStar(false)}
-            onMove={writable ? () => setBulkMoveOpen(true) : undefined}
-            onTrash={() => void handleBulkTrash()}
-          />
+          {/* Multi-select uses the top action bar; a single selection
+              uses the right-hand details pane instead. */}
+          {selectionCount > 1 && (
+            <DriveSelectionBar
+              count={selectionCount}
+              busy={bulkBusy}
+              onClear={clearSelection}
+              onDownload={() => void handleBulkDownload()}
+              onStar={() => void handleBulkStar(true)}
+              onUnstar={() => void handleBulkStar(false)}
+              onMove={writable ? () => setBulkMoveOpen(true) : undefined}
+              onTrash={() => void handleBulkTrash()}
+            />
+          )}
 
           {data && (
             <ContentGrid
@@ -719,6 +736,71 @@ export function FilesPage({
           )}
         </div>
         </div>
+
+        {/* Right-hand details pane for a single selection. Desktop-only;
+            on mobile a single selection still uses the top action bar. */}
+        {hasDetail && (
+          <aside className="hidden w-72 shrink-0 overflow-hidden border-l border-[var(--border)] bg-[var(--surface)] lg:block">
+            <DriveDetailsPanel
+              file={detailFile}
+              folder={detailFolder}
+              writable={writable}
+              onClose={clearSelection}
+              onOpen={() => {
+                if (detailFolder) {
+                  navigateToFolder(detailFolder.id);
+                } else if (detailFile) {
+                  if (isDocumentFile(detailFile) && !detailFile.trashed_at) {
+                    setEditingDoc(detailFile);
+                  } else {
+                    setPreview(detailFile);
+                  }
+                }
+              }}
+              onDownload={
+                detailFile ? () => void downloadAuthed(detailFile) : undefined
+              }
+              onShare={() => {
+                if (detailFolder) {
+                  setShareGrantsFor({
+                    kind: "folder",
+                    id: detailFolder.id,
+                    name: detailFolder.name,
+                  });
+                } else if (detailFile) {
+                  setShareGrantsFor({
+                    kind: "file",
+                    id: detailFile.id,
+                    name: detailFile.filename,
+                    supportsEdit: isDocumentFile(detailFile),
+                  });
+                }
+              }}
+              onMove={() => {
+                if (detailFolder) {
+                  openMoveModal({
+                    open: true,
+                    kind: "folder",
+                    id: detailFolder.id,
+                    name: detailFolder.name,
+                    currentParentId: detailFolder.parent_id,
+                  });
+                } else if (detailFile) {
+                  openMoveModal({
+                    open: true,
+                    kind: "file",
+                    id: detailFile.id,
+                    name: detailFile.filename,
+                    currentParentId: detailFile.folder_id,
+                  });
+                }
+              }}
+              onStar={() => void handleBulkStar(true)}
+              onUnstar={() => void handleBulkStar(false)}
+              onTrash={() => void handleBulkTrash()}
+            />
+          </aside>
+        )}
       </div>
 
       {moveModal && (
