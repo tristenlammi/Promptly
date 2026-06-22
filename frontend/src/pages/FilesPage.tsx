@@ -37,6 +37,7 @@ import {
 } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
+import { DriveFolderTree } from "@/components/files/DriveFolderTree";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
@@ -267,6 +268,13 @@ export function FilesPage({
       /* storage unavailable (private mode) — non-fatal */
     }
   }, [viewMode]);
+  // Bumped after a folder mutation so the persistent folder-tree rail
+  // reloads its top level. ``refreshAll`` pairs it with the browse refetch.
+  const [treeVersion, setTreeVersion] = useState(0);
+  const refreshAll = useCallback(() => {
+    void refetch();
+    setTreeVersion((v) => v + 1);
+  }, [refetch]);
   // Drive stage 5: the single "Share" row action opens the
   // peer-to-peer grants modal. Public link sharing has been retired
   // from the UI.
@@ -528,13 +536,27 @@ export function FilesPage({
       />
       <DriveSubNav />
 
-      <div
-        className="promptly-scroll relative flex-1 overflow-y-auto"
-        onDragEnter={handlePageDragOver}
-        onDragOver={handlePageDragOver}
-        onDragLeave={handlePageDragLeave}
-        onDrop={handlePageDrop}
-      >
+      <div className="flex min-h-0 flex-1">
+        {/* Persistent folder-tree rail — the two-pane "navigate the
+            hierarchy without drilling through breadcrumbs" affordance that
+            makes Files read like a real drive. Desktop-only; on mobile the
+            breadcrumb + sub-nav carry navigation. */}
+        <aside className="promptly-scroll hidden w-60 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface)]/30 lg:block">
+          <DriveFolderTree
+            scope={scope}
+            currentFolderId={folderId}
+            onNavigate={navigateToFolder}
+            version={treeVersion}
+          />
+        </aside>
+
+        <div
+          className="promptly-scroll relative flex-1 overflow-y-auto"
+          onDragEnter={handlePageDragOver}
+          onDragOver={handlePageDragOver}
+          onDragLeave={handlePageDragLeave}
+          onDrop={handlePageDrop}
+        >
         {externalDragOver && (
           <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 backdrop-blur-[1px]">
             <div className="flex flex-col items-center gap-2 rounded-card border-2 border-dashed border-[var(--accent)] bg-[var(--surface)] px-8 py-6 shadow-lg">
@@ -587,7 +609,7 @@ export function FilesPage({
                 <FolderActions
                   scope={scope}
                   parentId={folderId}
-                  onChanged={() => refetch()}
+                  onChanged={refreshAll}
                 />
               )}
             </div>
@@ -695,6 +717,7 @@ export function FilesPage({
               onShare={setShareGrantsFor}
             />
           )}
+        </div>
         </div>
       </div>
 
