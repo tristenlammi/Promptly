@@ -252,6 +252,99 @@ def assert_url_is_safe(url: str) -> str:
 
 
 # --------------------------------------------------------------------
+# Provider base_url validation (narrower than assert_url_is_safe)
+# --------------------------------------------------------------------
+# Hostnames that front a cloud instance-metadata service. Always refused
+# for a model-provider base_url even though a *private* address is fine —
+# the metadata endpoint is never a model server, only an SSRF
+# credential-theft target.
+_METADATA_HOSTNAMES = frozenset(
+    {
+        "metadata.google.internal",
+        "metadata.goog",
+    }
+)
+
+
+def _ip_is_metadata(ip: ipaddress._BaseAddress) -> bool:
+    """True for the link-local range that hosts cloud IMDS.
+
+    169.254.169.254 (AWS / Azure / GCP) and the whole 169.254/16 +
+    fe80::/10 link-local space. Loopback and ordinary private ranges are
+    deliberately *not* flagged here — self-hosted model servers live
+    there.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return _ip_is_metadata(ip.ipv4_mapped)
+    if ip.is_link_local:
+        return True
+    if isinstance(ip, ipaddress.IPv4Address) and int(ip) >> 16 == (169 << 8) | 254:
+        return True
+    return False
+
+
+def assert_provider_url_safe(url: str, *, resolve: bool = True) -> str:
+    """Validate an admin-supplied model-provider ``base_url``.
+
+    Looser than :func:`assert_url_is_safe`: loopback / private / docker
+    addresses are **allowed**, because self-hosted model servers (Ollama,
+    LM Studio, vLLM) legitimately live there and the default Ollama
+    provider points at ``http://localhost:11434``. What it refuses:
+
+    * non-http(s) schemes;
+    * cloud instance-metadata endpoints — the link-local 169.254/16 +
+      fe80::/10 range and the known IMDS hostnames.
+
+    This closes the gap where a compromised admin token could repoint a
+    provider at ``http://169.254.169.254/latest/meta-data/…`` and read the
+    instance's IAM credentials back through the "test connection" /
+    list-models responses.
+
+    ``resolve=True`` (create/update time) also runs DNS and refuses a
+    hostname that resolves to a metadata IP. ``resolve=False`` (the hot
+    request path) checks only literals + hostnames so we never block the
+    async event loop on ``getaddrinfo``.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+        raise UnsafeURLError(
+            "bad_scheme",
+            f"Only http(s) provider URLs are allowed (got {parsed.scheme!r})",
+        )
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        raise UnsafeURLError("bad_url", "Provider URL has no hostname")
+
+    if hostname in _METADATA_HOSTNAMES:
+        raise UnsafeURLError(
+            "blocked_metadata",
+            f"Refusing a provider URL pointing at the metadata service ({hostname!r})",
+        )
+
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        if _ip_is_metadata(literal):
+            raise UnsafeURLError(
+                "blocked_metadata",
+                f"Refusing a provider URL pointing at the metadata service ({hostname!r})",
+            )
+        return url
+
+    if resolve:
+        for ip in _resolve_all(hostname):
+            if _ip_is_metadata(ip):
+                raise UnsafeURLError(
+                    "blocked_metadata",
+                    f"Refusing {hostname!r} — it resolves to the metadata service",
+                )
+    return url
+
+
+# --------------------------------------------------------------------
 # HTTP wrapper
 # --------------------------------------------------------------------
 async def safe_fetch(
@@ -374,6 +467,7 @@ __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "ResponseTooLargeError",
     "UnsafeURLError",
+    "assert_provider_url_safe",
     "assert_url_is_safe",
     "safe_fetch",
 ]

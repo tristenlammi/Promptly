@@ -121,7 +121,25 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
 
     @property
     def is_locked(self) -> bool:
-        return self.locked_at is not None
+        """True if a brute-force lockout is currently in force.
+
+        Lockouts auto-expire ``LOCKOUT_COOLDOWN_MINUTES`` after ``locked_at``
+        (0 = never, i.e. permanent until an admin unlock). The stale
+        ``locked_at`` row isn't cleared here — the next login attempt (or an
+        admin unlock) does that. This property only stops an already-expired
+        lock from refusing live requests in ``get_current_user``.
+        """
+        if self.locked_at is None:
+            return False
+        from app.config import get_settings
+
+        cooldown = get_settings().LOCKOUT_COOLDOWN_MINUTES
+        if cooldown <= 0:
+            return True
+        from datetime import datetime, timedelta, timezone
+
+        expires_at = self.locked_at + timedelta(minutes=cooldown)
+        return datetime.now(timezone.utc) < expires_at
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r} role={self.role}>"

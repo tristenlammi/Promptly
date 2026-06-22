@@ -15,6 +15,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
@@ -27,6 +28,7 @@ from app.models_config.provider import (
     ProviderError,
     model_router,
 )
+from app.net.safe_fetch import UnsafeURLError, assert_provider_url_safe
 from app.models_config.schemas import (
     AvailableModel,
     ProviderCreate,
@@ -37,6 +39,24 @@ from app.models_config.schemas import (
 from app.models_config.service import encrypt_api_key, provider_to_response
 
 router = APIRouter()
+
+
+async def _validate_base_url(raw: str | None) -> None:
+    """Reject a provider ``base_url`` that targets a cloud metadata endpoint.
+
+    Loopback / private hosts stay allowed (self-hosted model servers). DNS
+    resolution runs in a thread so it can't stall the event loop. Raises a
+    400 on refusal.
+    """
+    if not raw:
+        return
+    try:
+        await run_in_threadpool(assert_provider_url_safe, raw, resolve=True)
+    except UnsafeURLError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsafe base_url: {e}",
+        ) from e
 
 
 async def _get_owned_provider(
@@ -96,6 +116,8 @@ async def create_provider(
             detail=f"Provider type {payload.type!r} requires an api_key",
         )
 
+    await _validate_base_url(str(payload.base_url) if payload.base_url else None)
+
     provider = ModelProvider(
         user_id=user.id,
         name=payload.name,
@@ -139,6 +161,7 @@ async def update_provider(
     if payload.name is not None:
         provider.name = payload.name
     if payload.base_url is not None:
+        await _validate_base_url(str(payload.base_url))
         provider.base_url = str(payload.base_url)
     if payload.api_key is not None:
         if payload.api_key.strip() == "":

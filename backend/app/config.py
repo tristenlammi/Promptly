@@ -47,6 +47,20 @@ class Settings(BaseSettings):
     # cookies are never sent cross-site.
     COOKIE_SAMESITE: str = "strict"
 
+    # ---- Host-header allowlist ----
+    # Optional Starlette TrustedHostMiddleware allowlist. Empty (default)
+    # disables the app-layer check: the reverse proxy is the primary Host
+    # guard, and internal docker service-to-service calls (collab→backend
+    # snapshot, healthchecks) use container hostnames a naive allowlist
+    # would wrongly reject. Set to a comma list of public hostnames to
+    # additionally enforce Host validation at the app layer — loopback and
+    # the internal ``backend`` service name are always permitted on top.
+    TRUSTED_HOSTS: str = ""
+
+    @property
+    def trusted_hosts_list(self) -> list[str]:
+        return [h.strip() for h in self.TRUSTED_HOSTS.split(",") if h.strip()]
+
     # ---- MFA cookies ----
     # Cookie that carries the trusted-device token. Bound to /api so it
     # never leaks to the SPA or to third parties. The value itself is a
@@ -55,9 +69,19 @@ class Settings(BaseSettings):
 
     # ---- Account lockout ----
     # Number of consecutive failed logins before the account is locked.
-    # Reset to 0 on a successful login. Lockout is permanent until an
-    # admin unlocks (matches the product spec).
+    # Reset to 0 on a successful login.
     LOCKOUT_THRESHOLD: int = 5
+    # How long a brute-force lockout stays in force before it auto-expires
+    # on the next login attempt. A non-zero cooldown is what stops the
+    # lockout from doubling as a denial-of-service lever: because login
+    # accepts a username/email and any authenticated user can enumerate
+    # handles via the share directory, a permanent lock would let anyone
+    # freeze any account (admins included) with LOCKOUT_THRESHOLD bad
+    # submissions. 15 minutes is the OWASP-recommended default. Set to 0
+    # to restore the old permanent-until-admin-unlock behaviour. An admin
+    # can always unlock early via POST /api/admin/users/{id}/unlock, and a
+    # genuinely malicious account should be hard-``disabled`` instead.
+    LOCKOUT_COOLDOWN_MINUTES: int = 15
 
     # ---- MFA ----
     # Issuer string baked into the otpauth:// URI shown to authenticator
@@ -280,14 +304,19 @@ class Settings(BaseSettings):
             self, "DEV_MODE", False
         ):
             domain = (getattr(self, "DOMAIN", "") or "").strip().lower()
-            is_local = (
-                domain == ""
-                or "localhost" in domain
-                or "127.0.0.1" in domain
-                or "::1" in domain
-                or domain.startswith("192.168.")
-                or domain.startswith("10.")
-            )
+            # Exact host match (not substring — ``localhost.evil.com`` must
+            # NOT pass) plus a real private-IP check so a hostname like
+            # ``10.evil.com`` can't masquerade as the 10/8 range.
+            host_only = domain.split(":", 1)[0]
+            is_local = host_only in {"", "localhost", "127.0.0.1", "::1"}
+            if not is_local:
+                import ipaddress
+
+                try:
+                    ip = ipaddress.ip_address(host_only)
+                    is_local = ip.is_private or ip.is_loopback
+                except ValueError:
+                    is_local = False
             if not is_local:
                 errors.append(
                     "SINGLE_USER_MODE=true with a public DOMAIN "

@@ -68,6 +68,7 @@ from openai import AsyncOpenAI, OpenAIError
 
 from app.auth.utils import decrypt_secret
 from app.models_config.models import ModelProvider
+from app.net.safe_fetch import UnsafeURLError, assert_provider_url_safe
 
 logger = logging.getLogger("promptly.modelrouter")
 
@@ -417,9 +418,25 @@ def _api_key_for(provider: ModelProvider) -> str:
 
 
 def _resolve_base_url(provider: ModelProvider) -> str:
-    """Return the effective base URL for a provider, no trailing slash."""
+    """Return the effective base URL for a provider, no trailing slash.
+
+    Every outbound provider call funnels through here, so it's also the
+    last-line SSRF guard against the cloud metadata endpoint for any
+    provider row that predates create-time validation. The check is
+    literal-only (``resolve=False``) so it never blocks the async event
+    loop on DNS — create/update-time validation in the router does the
+    full resolving check. Loopback / private hosts stay allowed so
+    self-hosted model servers keep working.
+    """
     if provider.base_url:
-        return provider.base_url.rstrip("/")
+        url = provider.base_url.rstrip("/")
+        try:
+            assert_provider_url_safe(url, resolve=False)
+        except UnsafeURLError as e:
+            raise ProviderError(
+                f"Provider {provider.name!r} has an unsafe base_url: {e}"
+            ) from e
+        return url
     default = DEFAULT_BASE_URLS.get(provider.type)
     if not default:
         raise ProviderError(

@@ -105,6 +105,14 @@ async def semantic_search_messages(
     """
     if not conv_ids:
         return []
+    # ``cfg.dim`` is interpolated into the column name and the vector cast
+    # below, so it must never be attacker-influenced. In practice every
+    # ``EmbeddingConfig`` is built by ``get_embedding_config`` which already
+    # rejects any dim outside ``SUPPORTED_DIMS`` — this assertion keeps that
+    # SQL-injection guarantee local to the query instead of relying on a
+    # caller invariant.
+    if cfg.dim not in SUPPORTED_DIMS:
+        raise ValueError(f"Unsupported embedding dim for search: {cfg.dim!r}")
     column = f"embedding_{cfg.dim}"
     # Optional created_at range — mirrors the FTS path so a hybrid search
     # with a date filter doesn't leak out-of-range semantic hits.

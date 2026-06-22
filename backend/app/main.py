@@ -151,6 +151,20 @@ async def _capture_unhandled_error(request: Request, exc: Exception) -> JSONResp
         headers={"X-Request-ID": get_request_id() or ""},
     )
 
+# Optional Host-header allowlist. Off unless the operator sets
+# ``TRUSTED_HOSTS`` (the reverse proxy is the primary Host guard). When on,
+# we always also permit loopback + the internal ``backend`` service name so
+# docker healthchecks and inter-container calls (collab→backend snapshot)
+# aren't rejected.
+_trusted_hosts = settings.trusted_hosts_list
+if _trusted_hosts:
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[*_trusted_hosts, "localhost", "127.0.0.1", "backend"],
+    )
+
 # Request-context middleware first so the request id and route are
 # bound in contextvars before CORS / auth start logging.
 app.add_middleware(RequestContextMiddleware)

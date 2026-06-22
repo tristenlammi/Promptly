@@ -33,6 +33,7 @@ from app.auth.audit import (
     EVENT_LOGOUT,
     EVENT_REFRESH_REJECTED,
     EVENT_TOKEN_REFRESH,
+    EVENT_UNLOCK,
     record_event,
     request_meta,
 )
@@ -383,6 +384,23 @@ async def login(
     # ----------------------------------------------------------------
     password_ok = verify_password(payload.password, user.password_hash)
 
+    # A brute-force lockout whose cooldown has elapsed is auto-cleared here
+    # so the user (or anyone whose account was frozen by a malicious
+    # five-attempt spray) recovers on their next attempt without an admin
+    # round-trip. ``is_locked`` is the cooldown-aware predicate; a stale
+    # ``locked_at`` with ``is_locked`` False means the window has passed.
+    if user.locked_at is not None and not user.is_locked:
+        user.locked_at = None
+        user.failed_login_attempts = 0
+        await record_event(
+            db,
+            request=request,
+            event_type=EVENT_UNLOCK,
+            user_id=user.id,
+            identifier=ident,
+            detail="auto after lockout cooldown",
+        )
+
     if user.disabled:
         await _record_login_failure(
             db,
@@ -397,7 +415,7 @@ async def login(
             detail=GENERIC_AUTH_FAIL_DETAIL,
         )
 
-    if user.locked_at is not None:
+    if user.is_locked:
         await _record_login_failure(
             db,
             request,
@@ -570,7 +588,7 @@ async def refresh(
     # fresh access tokens.
     if (
         user.disabled
-        or user.locked_at is not None
+        or user.is_locked
         or token_tv != user.token_version
     ):
         _clear_refresh_cookie(response)
@@ -583,7 +601,7 @@ async def refresh(
                 "disabled"
                 if user.disabled
                 else "locked"
-                if user.locked_at is not None
+                if user.is_locked
                 else "token_version_mismatch"
             ),
         )
