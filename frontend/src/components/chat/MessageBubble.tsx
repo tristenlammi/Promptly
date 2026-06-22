@@ -377,6 +377,16 @@ const LATEX_SIGNAL = /[\\^_{}]/;
  * literal dollars while genuine inline math ($x^2$, $\text{m}^2$) is left
  * for KaTeX. Fenced/inline code and ``$$…$$`` display math are split out
  * first so we never rewrite dollars inside them.
+ *
+ * Two subtleties the span regex handles:
+ *  - ``\$`` (an escaped dollar) is allowed *inside* a span, so a real
+ *    equation that prints a literal dollar ("$… \$3.26/day$") is matched
+ *    whole instead of being cut at the ``\$``.
+ *  - For those real-math spans we rewrite the inner ``\$`` to ``\char"24``
+ *    (the dollar glyph, with no ``$`` character). Otherwise remark-math
+ *    treats the ``$`` in ``\$`` as the *closing* delimiter, leaving KaTeX
+ *    a truncated fragment that renders as a red error — the classic
+ *    "$ … \$3.26 … $" breakage in cost/finance answers.
  */
 function protectCurrencyDollars(markdown: string): string {
   return markdown
@@ -384,8 +394,10 @@ function protectCurrencyDollars(markdown: string): string {
     .map((seg, i) => {
       // Odd indices are the captured code / display-math segments.
       if (i % 2 === 1) return seg;
-      return seg.replace(/\$([^$\n]*?)\$/g, (whole, inner) =>
-        LATEX_SIGNAL.test(inner) ? whole : "\\$" + inner + "\\$",
+      return seg.replace(/\$((?:\\\$|[^$\n])*?)\$/g, (_whole, inner) =>
+        LATEX_SIGNAL.test(inner)
+          ? "$" + inner.replace(/\\\$/g, '\\char"24 ') + "$"
+          : "\\$" + inner + "\\$",
       );
     })
     .join("");
