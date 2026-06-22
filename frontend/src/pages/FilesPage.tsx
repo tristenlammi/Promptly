@@ -564,7 +564,7 @@ export function FilesPage({
         </aside>
 
         <div
-          className="promptly-scroll relative flex-1 overflow-y-auto"
+          className="promptly-scroll relative min-w-0 flex-1 overflow-y-auto"
           onDragEnter={handlePageDragOver}
           onDragOver={handlePageDragOver}
           onDragLeave={handlePageDragLeave}
