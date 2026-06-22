@@ -141,7 +141,7 @@ export function TrashPage() {
       <DriveSubNav />
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-6 py-6">
+        <div className="w-full px-6 py-6">
           {isLoading && (
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}

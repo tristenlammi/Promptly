@@ -14,6 +14,33 @@ export function humanSize(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+/** Short, human-readable file-kind label for the Drive list's "Kind"
+ *  column (e.g. "PDF", "Image", "Doc", "Markdown"). Derived from the
+ *  mime type + extension + source_kind so it reads like a real drive's
+ *  type column rather than a raw mime string. */
+export function kindLabel(file: FileItem): string {
+  const mime = (file.mime_type || "").toLowerCase();
+  const name = (file.filename || "").toLowerCase();
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+
+  if (file.source_kind === "document") return "Doc";
+  if (mime.startsWith("image/")) return "Image";
+  if (mime === "application/pdf" || ext === "pdf") return "PDF";
+  if (mime.startsWith("video/")) return "Video";
+  if (mime.startsWith("audio/")) return "Audio";
+  if (/^(zip|tar|gz|tgz|rar|7z)$/.test(ext)) return "Archive";
+  if (mime === "text/markdown" || ext === "md" || ext === "markdown")
+    return "Markdown";
+  if (mime === "text/csv" || ext === "csv") return "CSV";
+  if (mime === "application/json" || ext === "json") return "JSON";
+  if (mime === "text/html" || ext === "html" || ext === "htm") return "HTML";
+  if (mime === "image/svg+xml" || ext === "svg") return "SVG";
+  if (mime.startsWith("text/")) return "Text";
+  // Fall back to the uppercased extension ("DOCX", "XLSX") or a generic
+  // label when there's nothing useful to show.
+  return ext ? ext.toUpperCase() : "File";
+}
+
 export function extractError(e: unknown): string {
   if (typeof e === "object" && e && "response" in e) {
     const resp = (e as { response?: { data?: { detail?: unknown } } }).response;

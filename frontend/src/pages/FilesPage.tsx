@@ -49,6 +49,7 @@ import {
   extractError,
   formatRelativeTime,
   humanSize,
+  kindLabel,
 } from "@/components/files/helpers";
 import { DriveItemIcon } from "@/components/files/DriveItemIcon";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
@@ -547,7 +548,7 @@ export function FilesPage({
             </div>
           </div>
         )}
-        <div className="mx-auto w-full max-w-4xl px-4 py-4 md:px-6 md:py-6">
+        <div className="w-full px-4 py-4 md:px-6 md:py-6">
           {/* Drive stage 5 — the legacy "My files / Shared pool" scope
               toggle was retired here. Switching between owned files
               and the peer-to-peer Shared view now happens via the
@@ -575,7 +576,12 @@ export function FilesPage({
               {viewMode === "grid" && (
                 <GridSizeSlider value={gridTile} onChange={setGridTile} />
               )}
-              <SortControl sort={sort} onChange={setSort} />
+              {/* Grid view has no column headers, so it keeps the sort
+                  dropdown. List view sorts via its clickable column
+                  headers, so the dropdown is redundant there and hidden. */}
+              {viewMode === "grid" && (
+                <SortControl sort={sort} onChange={setSort} />
+              )}
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {writable && (
                 <FolderActions
@@ -1291,11 +1297,14 @@ function ContentGrid({
   }
 
   return (
-    <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+    <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
       {/* Column header — clickable to sort, giving the list a tabular,
-          drive-like read. Columns hide on small screens so the row
-          collapses to name-only. */}
-      <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+          drive-like read. ``sticky`` pins it to the top of the scroll
+          viewport so rows scroll under it (Finder/Drive behaviour); the
+          parent card therefore must NOT set ``overflow-hidden`` (it would
+          clip the sticky positioning). Columns hide on small screens so
+          the row collapses to name-only. */}
+      <div className="sticky top-0 z-10 flex items-center gap-3 rounded-t-card border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
         {/* Spacer matching the checkbox on user-folder rows. */}
         <span className="w-5 shrink-0" aria-hidden />
         <SortHeader
@@ -1305,6 +1314,8 @@ function ContentGrid({
           sort={sort}
           onSort={onSort}
         />
+        {/* Kind isn't a sort key, so it's a static label. */}
+        <span className="hidden w-24 shrink-0 lg:block">Kind</span>
         <SortHeader
           className="hidden w-28 shrink-0 lg:block"
           label="Modified"
@@ -1701,8 +1712,11 @@ function FolderRow({
         )}
       </button>
 
-      {/* Modified column to line up with file rows; folders have no
-          size so that column stays blank. */}
+      {/* Kind / Modified columns line up with file rows; folders have
+          no size so that column stays blank. */}
+      <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--text-muted)] lg:block">
+        Folder
+      </span>
       <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
         {folder.updated_at ? formatRelativeTime(folder.updated_at) : ""}
       </span>
@@ -1995,6 +2009,9 @@ function FileRow({
 
       {/* Tabular columns — desktop only; on mobile the name carries
           the row and the metadata is reachable via preview. */}
+      <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--text-muted)] lg:block">
+        {kindLabel(file)}
+      </span>
       <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
         {file.updated_at ? formatRelativeTime(file.updated_at) : ""}
       </span>

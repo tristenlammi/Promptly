@@ -22,6 +22,7 @@ import {
   downloadAuthed,
   formatRelativeTime,
   humanSize,
+  kindLabel,
 } from "./helpers";
 
 /** Actions surfaced as context-menu entries on a Drive list row. */
@@ -113,6 +114,9 @@ export function DriveFileRow({
       </button>
 
       {/* Tabular columns — desktop only, matching the browse view. */}
+      <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--text-muted)] lg:block">
+        {kindLabel(file)}
+      </span>
       <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
         {file.updated_at ? formatRelativeTime(file.updated_at) : ""}
       </span>
@@ -213,8 +217,11 @@ export function DriveFolderRow({
         </span>
       </button>
 
-      {/* Modified column to line up with file rows; folders have no
-          size so that column stays blank. */}
+      {/* Kind / Modified columns line up with file rows; folders have
+          no size so that column stays blank. */}
+      <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--text-muted)] lg:block">
+        Folder
+      </span>
       <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
         {folder.updated_at ? formatRelativeTime(folder.updated_at) : ""}
       </span>
@@ -534,6 +541,7 @@ export function DriveColumnsHeader() {
   return (
     <div className="flex items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
       <span className="flex-1">Name</span>
+      <span className="hidden w-24 shrink-0 lg:block">Kind</span>
       <span className="hidden w-28 shrink-0 lg:block">Modified</span>
       <span className="hidden w-16 shrink-0 text-right sm:block">Size</span>
       <span className="w-8 shrink-0" aria-hidden />
