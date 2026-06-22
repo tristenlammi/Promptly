@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -276,6 +276,15 @@ export function FilesPage({
     void refetch();
     setTreeVersion((v) => v + 1);
   }, [refetch]);
+
+  // Right-click-empty-space menu (New folder / Upload) — the drive-native
+  // way to act on the current folder without aiming at a row.
+  const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [showNewFolderPage, setShowNewFolderPage] = useState(false);
+  const createFolderPage = useCreateFolder();
+  const pageFileInputRef = useRef<HTMLInputElement | null>(null);
   // Drive stage 5: the single "Share" row action opens the
   // peer-to-peer grants modal. Public link sharing has been retired
   // from the UI.
@@ -320,28 +329,81 @@ export function FilesPage({
       : null;
   const hasDetail = !!detailFile || !!detailFolder;
 
+  // Anchor for shift-click range selection — the last item toggled
+  // without shift. A ref so the toggle callbacks stay stable.
+  const selAnchorRef = useRef<{ kind: "file" | "folder"; id: string } | null>(
+    null
+  );
+
   useEffect(() => {
     setSelFiles(new Set());
     setSelFolders(new Set());
+    selAnchorRef.current = null;
   }, [folderId, scope]);
 
+  // The user-selectable items in display order (system folders aren't
+  // selectable). Drives shift-click range math.
+  const orderedSelectable = useMemo(
+    () => [
+      ...(data?.folders ?? [])
+        .filter((f) => !f.system_kind)
+        .map((f) => ({ kind: "folder" as const, id: f.id })),
+      ...(data?.files ?? []).map((f) => ({ kind: "file" as const, id: f.id })),
+    ],
+    [data]
+  );
+
+  // Add every item between the anchor and ``to`` (inclusive) to the
+  // selection. Falls back to a plain toggle when there's no valid anchor.
+  const selectRangeTo = useCallback(
+    (to: { kind: "file" | "folder"; id: string }) => {
+      const anchor = selAnchorRef.current;
+      const list = orderedSelectable;
+      const ai = anchor
+        ? list.findIndex((x) => x.kind === anchor.kind && x.id === anchor.id)
+        : -1;
+      const bi = list.findIndex((x) => x.kind === to.kind && x.id === to.id);
+      if (ai < 0 || bi < 0) return false;
+      const [lo, hi] = ai < bi ? [ai, bi] : [bi, ai];
+      const range = list.slice(lo, hi + 1);
+      setSelFiles((prev) => {
+        const next = new Set(prev);
+        range.forEach((x) => x.kind === "file" && next.add(x.id));
+        return next;
+      });
+      setSelFolders((prev) => {
+        const next = new Set(prev);
+        range.forEach((x) => x.kind === "folder" && next.add(x.id));
+        return next;
+      });
+      return true;
+    },
+    [orderedSelectable]
+  );
+
   const toggleFile = useCallback(
-    (id: string) =>
+    (id: string, shift = false) => {
+      if (shift && selectRangeTo({ kind: "file", id })) return;
+      selAnchorRef.current = { kind: "file", id };
       setSelFiles((prev) => {
         const next = new Set(prev);
         next.has(id) ? next.delete(id) : next.add(id);
         return next;
-      }),
-    []
+      });
+    },
+    [selectRangeTo]
   );
   const toggleFolder = useCallback(
-    (id: string) =>
+    (id: string, shift = false) => {
+      if (shift && selectRangeTo({ kind: "folder", id })) return;
+      selAnchorRef.current = { kind: "folder", id };
       setSelFolders((prev) => {
         const next = new Set(prev);
         next.has(id) ? next.delete(id) : next.add(id);
         return next;
-      }),
-    []
+      });
+    },
+    [selectRangeTo]
   );
   const clearSelection = useCallback(() => {
     setSelFiles(new Set());
@@ -540,6 +602,27 @@ export function FilesPage({
     void refetch();
   };
 
+  // Right-click anywhere in the content pane that isn't a row → offer the
+  // folder-level actions. Rows keep their own context menu (we bail when
+  // the click lands inside an <li> or an interactive control).
+  const handleContentContextMenu = (e: React.MouseEvent) => {
+    if (!writable) return;
+    const t = e.target as HTMLElement;
+    if (t.closest("li, button, input, a, [role='menu']")) return;
+    e.preventDefault();
+    setEmptyMenu({ x: e.clientX, y: e.clientY });
+  };
+  const handleEmptyUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    startUploads({ files, scope, folderId });
+    toast.info(
+      `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`
+    );
+    refreshAll();
+  };
+
   return (
     <>
       <TopNav
@@ -569,6 +652,7 @@ export function FilesPage({
           onDragOver={handlePageDragOver}
           onDragLeave={handlePageDragLeave}
           onDrop={handlePageDrop}
+          onContextMenu={handleContentContextMenu}
         >
         {externalDragOver && (
           <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 backdrop-blur-[1px]">
@@ -802,6 +886,43 @@ export function FilesPage({
           </aside>
         )}
       </div>
+
+      {/* Right-click-empty-space menu + its hidden upload input and
+          page-level New folder modal. */}
+      <input
+        ref={pageFileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleEmptyUpload}
+      />
+      <ContextMenu
+        open={emptyMenu !== null}
+        x={emptyMenu?.x ?? 0}
+        y={emptyMenu?.y ?? 0}
+        onClose={() => setEmptyMenu(null)}
+        items={[
+          {
+            icon: <FolderPlus className="h-3.5 w-3.5" />,
+            label: "New folder",
+            onClick: () => setShowNewFolderPage(true),
+          },
+          {
+            icon: <Upload className="h-3.5 w-3.5" />,
+            label: "Upload files",
+            onClick: () => pageFileInputRef.current?.click(),
+          },
+        ]}
+      />
+      <NewFolderModal
+        open={showNewFolderPage}
+        onClose={() => setShowNewFolderPage(false)}
+        onSubmit={async (name) => {
+          await createFolderPage.mutateAsync({ scope, name, parentId: folderId });
+          refreshAll();
+          setShowNewFolderPage(false);
+        }}
+      />
 
       {moveModal && (
         <MoveItemModal
@@ -1293,8 +1414,8 @@ function ContentGrid({
   gridTile: number;
   selFiles: Set<string>;
   selFolders: Set<string>;
-  onToggleFile: (id: string) => void;
-  onToggleFolder: (id: string) => void;
+  onToggleFile: (id: string, shift: boolean) => void;
+  onToggleFolder: (id: string, shift: boolean) => void;
   onOpenFolder: (id: string | null) => void;
   onDropOnFolder: (
     targetFolderId: string | null,
@@ -1342,7 +1463,7 @@ function ContentGrid({
       currentFolderId={currentFolderId}
       selected={selFolders.has(f.id)}
       selectionActive={selFiles.size + selFolders.size > 0}
-      onToggleSelect={() => onToggleFolder(f.id)}
+      onToggleSelect={(shift) => onToggleFolder(f.id, shift)}
       onOpen={() => onOpenFolder(f.id)}
       onDropOnFolder={onDropOnFolder}
       onOpenMove={onOpenMove}
@@ -1361,7 +1482,7 @@ function ContentGrid({
       writable={data.writable}
       selected={selFiles.has(f.id)}
       selectionActive={selFiles.size + selFolders.size > 0}
-      onToggleSelect={() => onToggleFile(f.id)}
+      onToggleSelect={(shift) => onToggleFile(f.id, shift)}
       onOpenMove={onOpenMove}
       onPreview={() => onPreview(f)}
       onShare={() =>
@@ -1508,6 +1629,52 @@ function SortHeader({
   );
 }
 
+/** In-place filename editor for a Drive list row. Enter or blur commits a
+ *  changed name; Escape cancels. A guard ref stops Enter→blur double-firing
+ *  the commit. */
+function InlineRenameField({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const doneRef = useRef(false);
+  const commit = () => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    const t = value.trim();
+    if (t && t !== initial) onCommit(t);
+    else onCancel();
+  };
+  return (
+    <input
+      // eslint-disable-next-line jsx-a11y/no-autofocus
+      autoFocus
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          doneRef.current = true;
+          onCancel();
+        }
+      }}
+      onBlur={commit}
+      className="min-w-0 flex-1 rounded border border-[var(--accent)] bg-[var(--bg)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
+    />
+  );
+}
+
 function FolderRow({
   folder,
   scope,
@@ -1529,7 +1696,7 @@ function FolderRow({
   currentFolderId: string | null;
   selected: boolean;
   selectionActive: boolean;
-  onToggleSelect: () => void;
+  onToggleSelect: (shift: boolean) => void;
   onOpen: () => void;
   onDropOnFolder: (
     targetFolderId: string | null,
@@ -1550,6 +1717,14 @@ function FolderRow({
   const trashFolder = useTrashFolder();
   const starFolder = useStarFolder();
   const unstarFolder = useUnstarFolder();
+  // List view renames in place; grid keeps the modal (tiles are too small
+  // for a comfortable inline field).
+  const [editing, setEditing] = useState(false);
+  const commitRename = (name: string) => {
+    setEditing(false);
+    if (name !== folder.name)
+      void renameFolder.mutateAsync({ id: folder.id, name, scope });
+  };
 
   const isSystem = folder.system_kind != null;
   const userCanMutate = writable && !isSystem;
@@ -1579,7 +1754,10 @@ function FolderRow({
         {
           icon: <Pencil className="h-3.5 w-3.5" />,
           label: "Rename",
-          onClick: () => setRename({ open: true, value: folder.name }),
+          onClick: () =>
+            layout === "grid"
+              ? setRename({ open: true, value: folder.name })
+              : setEditing(true),
           disabled: !writable,
         },
         {
@@ -1793,6 +1971,16 @@ function FolderRow({
       ) : (
         <span className="w-5 shrink-0" aria-hidden />
       )}
+      {editing ? (
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <DriveItemIcon folder={folder} />
+          <InlineRenameField
+            initial={folder.name}
+            onCommit={commitRename}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
+      ) : (
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
@@ -1816,6 +2004,7 @@ function FolderRow({
           </span>
         )}
       </button>
+      )}
 
       {/* Kind / Modified columns line up with file rows; folders have
           no size so that column stays blank. */}
@@ -1885,7 +2074,7 @@ function FileRow({
   writable: boolean;
   selected: boolean;
   selectionActive: boolean;
-  onToggleSelect: () => void;
+  onToggleSelect: (shift: boolean) => void;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: () => void;
   onShare: () => void;
@@ -1901,6 +2090,13 @@ function FileRow({
   const trashFile = useTrashFile();
   const starFile = useStarFile();
   const unstarFile = useUnstarFile();
+  // List view renames in place; grid keeps the modal.
+  const [editing, setEditing] = useState(false);
+  const commitRename = (name: string) => {
+    setEditing(false);
+    if (name !== file.filename)
+      void renameFile.mutateAsync({ id: file.id, filename: name, scope });
+  };
 
   const mutationItems: ContextMenuItem[] = [
     {
@@ -1935,7 +2131,10 @@ function FileRow({
     {
       icon: <Pencil className="h-3.5 w-3.5" />,
       label: "Rename",
-      onClick: () => setRename({ open: true, value: file.filename }),
+      onClick: () =>
+        layout === "grid"
+          ? setRename({ open: true, value: file.filename })
+          : setEditing(true),
       disabled: !writable,
     },
     {
@@ -2099,18 +2298,29 @@ function FileRow({
           onToggle={onToggleSelect}
         />
       )}
-      <button
-        onClick={onPreview}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-      >
-        <DriveItemIcon file={file} />
-        <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
-          <span className="truncate">{file.filename}</span>
-          {file.starred_at && (
-            <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
-          )}
-        </span>
-      </button>
+      {editing ? (
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <DriveItemIcon file={file} />
+          <InlineRenameField
+            initial={file.filename}
+            onCommit={commitRename}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
+      ) : (
+        <button
+          onClick={onPreview}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <DriveItemIcon file={file} />
+          <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+            <span className="truncate">{file.filename}</span>
+            {file.starred_at && (
+              <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
+            )}
+          </span>
+        </button>
+      )}
 
       {/* Tabular columns — desktop only; on mobile the name carries
           the row and the metadata is reachable via preview. */}
@@ -2177,7 +2387,7 @@ function SelectCheckbox({
 }: {
   checked: boolean;
   active: boolean;
-  onToggle: () => void;
+  onToggle: (shift: boolean) => void;
   className?: string;
 }) {
   return (
@@ -2188,7 +2398,7 @@ function SelectCheckbox({
       aria-label={checked ? "Deselect item" : "Select item"}
       onClick={(e) => {
         e.stopPropagation();
-        onToggle();
+        onToggle(e.shiftKey);
       }}
       className={cn(
         "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
