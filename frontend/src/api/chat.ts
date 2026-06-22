@@ -513,11 +513,12 @@ export const chatApi = {
    *  including ``messageId``; the new chat is owned by the caller. */
   async branch(
     conversationId: string,
-    messageId: string
+    messageId: string,
+    opts?: { ephemeral?: boolean }
   ): Promise<ConversationSummary> {
     const { data } = await apiClient.post<ConversationSummary>(
       `/chat/conversations/${conversationId}/branch`,
-      { message_id: messageId }
+      { message_id: messageId, ephemeral: opts?.ephemeral ?? false }
     );
     return data;
   },

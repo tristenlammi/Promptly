@@ -46,6 +46,13 @@ interface ComposerState {
   // persisted (partialize only writes ``drafts``).
   focusNonce: number;
   requestComposerFocus: () => void;
+  // Subchat → "Insert into chat". Bumped to ask the mounted ``InputBar``
+  // to append ``insertText`` to its current draft and focus. Transient
+  // (partialize only writes ``drafts``), mirroring the focus-nonce
+  // pattern so we don't have to make the textarea a controlled prop.
+  insertNonce: number;
+  insertText: string;
+  requestComposerInsert: (text: string) => void;
 }
 
 /** Text-only shape written to localStorage, with a TTL stamp. */
@@ -76,6 +83,13 @@ export const useComposerStore = create<ComposerState>()(
       focusNonce: 0,
       requestComposerFocus: () =>
         set((state) => ({ focusNonce: state.focusNonce + 1 })),
+      insertNonce: 0,
+      insertText: "",
+      requestComposerInsert: (text) =>
+        set((state) => ({
+          insertText: text,
+          insertNonce: state.insertNonce + 1,
+        })),
     }),
     {
       name: "promptly.composer-drafts",

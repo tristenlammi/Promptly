@@ -23,6 +23,7 @@ import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { StreamingAnnouncer } from "@/components/chat/StreamingAnnouncer";
 import { InputBar } from "@/components/chat/InputBar";
+import { SubchatModal } from "@/components/chat/SubchatModal";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ConversationInstructionsButton } from "@/components/chat/ConversationInstructionsButton";
 import { MemoryConversationButton } from "@/components/chat/MemoryConversationButton";
@@ -52,6 +53,7 @@ import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import type {
   ChatMessage,
   ConversationDetail,
+  ConversationSummary,
   ReasoningEffort,
   TemporaryMode,
   WebSearchMode,
@@ -147,6 +149,10 @@ export function ChatPage({
   // Phase 9 — per-conversation memory capture pause.
   const [memoryCapturePaused, setMemoryCapturePaused] = useState(false);
 
+  // Subchat — the active floating side-conversation (an ephemeral branch),
+  // or null when closed.
+  const [subchat, setSubchat] = useState<ConversationSummary | null>(null);
+
   // Phase 11 — Deep Research.
   const [researchDialogOpen, setResearchDialogOpen] = useState(false);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
@@ -196,6 +202,55 @@ export function ChatPage({
     },
     [branchMutation, id, navigate]
   );
+
+  // ---- Subchat ----------------------------------------------------------
+  // Open a floating side-conversation that inherits this thread's full
+  // context. Implemented as an *ephemeral* branch from the latest message:
+  // the backend copies the history (so the model has full context) but the
+  // chat is hidden from the sidebar and swept after 24h unless kept.
+  const openSubchat = useCallback(async () => {
+    if (!id || subchat) return;
+    const msgs = useChatStore.getState().messages;
+    const forkPoint = msgs[msgs.length - 1];
+    if (!forkPoint) return;
+    try {
+      const sc = await chatApi.branch(id, forkPoint.id, { ephemeral: true });
+      setSubchat(sc);
+    } catch (err) {
+      console.error("Failed to open subchat", err);
+    }
+  }, [id, subchat]);
+
+  // Discard: delete the ephemeral conversation (best-effort) and close.
+  const closeSubchat = useCallback(() => {
+    const sc = subchat;
+    setSubchat(null);
+    if (sc) {
+      void chatApi.remove(sc.id).catch(() => {
+        /* sweeper backstop cleans it up if this fails */
+      });
+    }
+  }, [subchat]);
+
+  // Keep: promote the subchat to a permanent chat, then navigate to it so
+  // it surfaces in the sidebar as a branched chat.
+  const keepSubchat = useCallback(async () => {
+    const sc = subchat;
+    if (!sc) return;
+    setSubchat(null);
+    try {
+      await chatApi.update(sc.id, { temporary_mode: null });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      navigate(`/chat/${sc.id}`);
+    } catch (err) {
+      console.error("Failed to keep subchat", err);
+    }
+  }, [subchat, queryClient, navigate]);
+
+  // Drop a subchat answer into the main composer.
+  const insertFromSubchat = useCallback((text: string) => {
+    useComposerStore.getState().requestComposerInsert(text);
+  }, []);
   // Owner-only share affordance: collaborators see neither the
   // button nor the dialog. Falls open whenever role isn't explicitly
   // collaborator (default-owner for legacy chats without the field).
@@ -1104,6 +1159,7 @@ export function ChatPage({
               onToolsChange={handleToolsChange}
               onResearch={() => setResearchDialogOpen(true)}
               onVoiceMode={() => setVoiceModeOpen(true)}
+              onSubchat={id && hasMessages ? openSubchat : undefined}
               footer={footerText}
               autoFocus
               currentConversationId={id ?? null}
@@ -1142,6 +1198,19 @@ export function ChatPage({
           Renders into the same DOM tree but its fixed positioning takes
           it out of normal flow; null when no file is selected. */}
       <PdfEditorPanel />
+
+      {/* Subchat — floating, draggable side-conversation. Mounted only
+          while open; the hook resets/aborts on unmount. */}
+      {subchat && (
+        <SubchatModal
+          subchat={subchat}
+          parentTitle={conversation?.title ?? null}
+          modelName={selectedModel?.display_name ?? null}
+          onClose={closeSubchat}
+          onKeep={keepSubchat}
+          onInsert={insertFromSubchat}
+        />
+      )}
 
       {/* Voice mode (Phase 2) — hands-free conversational overlay. Mounted
           only while open so all teardown lives in its unmount cleanup. */}

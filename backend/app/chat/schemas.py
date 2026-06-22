@@ -340,9 +340,16 @@ class BranchConversationRequest(BaseModel):
     collaborator forking a shared chat creates their own private
     branch by default), with the same model/provider defaults as
     the source so the next reply uses the familiar setup.
+
+    ``ephemeral`` turns the branch into a **Subchat**: a throwaway
+    side-conversation that inherits the thread's full context but is
+    created ``temporary_mode="ephemeral"`` — hidden from the sidebar and
+    swept after 24h unless the user explicitly keeps it (PATCH the chat
+    with ``temporary_mode=null``). Drives the floating Subchat modal.
     """
 
     message_id: uuid.UUID
+    ephemeral: bool = False
 
 
 class ConversationSearchHit(BaseModel):

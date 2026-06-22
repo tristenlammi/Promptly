@@ -9,6 +9,7 @@ import {
 import {
   ArrowUp,
   AudioLines,
+  MessagesSquare,
   Brain,
   Check,
   Eye,
@@ -86,6 +87,10 @@ interface InputBarProps {
   /** Voice mode (Phase 2) — open the hands-free voice conversation
    *  overlay. Only provided on the main chat surface. */
   onVoiceMode?: () => void;
+  /** Open a Subchat — a floating, throwaway side-conversation that
+   *  inherits this thread's context. Only provided on the main chat
+   *  surface once the conversation has at least one message. */
+  onSubchat?: () => void;
   /**
    * Focus the textarea on mount. Use on surfaces where the student's
    * primary intent is to type — chat / study pages — so the user can
@@ -138,6 +143,7 @@ export function InputBar({
   workspaceId = null,
   onResearch,
   onVoiceMode,
+  onSubchat,
   newlineOnEnter = false,
   showEnhance = true,
 }: InputBarProps) {
@@ -376,6 +382,28 @@ export function InputBar({
       el.focus();
     }
   }, [focusNonce, disabled]);
+
+  // Subchat → "Insert into chat": append the chosen answer to the current
+  // draft (blank line separator when there's already text), then focus.
+  // Mirrors the focus-nonce pattern so the textarea stays uncontrolled.
+  const insertNonce = useComposerStore((s) => s.insertNonce);
+  useEffect(() => {
+    if (insertNonce === 0) return;
+    const text = useComposerStore.getState().insertText;
+    if (!text) return;
+    setValue((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      try {
+        el.focus({ preventScroll: true });
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+      } catch {
+        el.focus();
+      }
+    });
+  }, [insertNonce]);
 
   // ----------------------------------------------------------------
   // Upload helper — dropped files & paste-uploads share this path so the
@@ -1054,6 +1082,29 @@ export function InputBar({
                     className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"}
                   />
                   {!isMobile && <span className="font-medium">Talk</span>}
+                </button>
+              )}
+              {onSubchat && (
+                <button
+                  type="button"
+                  onClick={onSubchat}
+                  disabled={disabled || streaming}
+                  className={cn(
+                    "inline-flex items-center rounded-full border transition",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    "border-[var(--border)] text-[var(--text-muted)]",
+                    "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
+                    isMobile
+                      ? "h-9 w-9 justify-center"
+                      : "h-8 gap-1.5 px-2.5 text-xs"
+                  )}
+                  aria-label="Subchat — ask a tangent without touching this thread"
+                  title="Subchat — ask a tangent without touching this thread"
+                >
+                  <MessagesSquare
+                    className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"}
+                  />
+                  {!isMobile && <span className="font-medium">Subchat</span>}
                 </button>
               )}
               <ComposerMoreMenu

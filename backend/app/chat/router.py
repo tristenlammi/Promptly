@@ -1272,7 +1272,12 @@ async def branch_conversation(
 
     now = datetime.now(timezone.utc)
     base_title = (src.title or "").strip() or fallback_title(history[-1].content)
-    branch_title = f"Branch: {base_title}"[:255]
+    # Subchats (``ephemeral``) read as "Subchat: …" and are born temporary;
+    # ordinary branches read as "Branch: …" and persist. A subchat is a
+    # top-level chat (no ``workspace_id``) because temporary chats can't
+    # live in a workspace — the copied history is the context that matters.
+    prefix = "Subchat" if payload.ephemeral else "Branch"
+    branch_title = f"{prefix}: {base_title}"[:255]
 
     branch = Conversation(
         user_id=user.id,
@@ -1284,6 +1289,11 @@ async def branch_conversation(
         parent_conversation_id=src.id,
         parent_message_id=fork_msg.id,
         branched_at=now,
+        # Ephemeral branch = Subchat: hidden from the sidebar, swept after
+        # 24h unless kept. The 24h backstop matches create_conversation's
+        # ephemeral path; the frontend also deletes proactively on close.
+        temporary_mode="ephemeral" if payload.ephemeral else None,
+        expires_at=(now + timedelta(hours=24)) if payload.ephemeral else None,
     )
     db.add(branch)
     await db.flush()  # need branch.id for the message rows
