@@ -26,6 +26,7 @@ from app.models_config.provider import (
     KEYLESS_PROVIDER_TYPES,
     SUPPORTED_PROVIDER_TYPES,
     ProviderError,
+    _known_context_window,
     model_router,
 )
 from app.net.safe_fetch import UnsafeURLError, assert_provider_url_safe
@@ -332,7 +333,12 @@ async def list_available_models_for(
                     provider_type=provider.type,  # type: ignore[arg-type]
                     model_id=model_id,
                     display_name=m.get("display_name") or model_id,
-                    context_window=m.get("context_window"),
+                    # Prefer the catalog value (OpenRouter ships one); fall
+                    # back to the known-window map so OpenAI/Gemini/DeepSeek
+                    # direct providers get a gauge instead of nothing —
+                    # without needing the admin to re-fetch the catalog.
+                    context_window=m.get("context_window")
+                    or _known_context_window(provider.type, model_id),
                     supports_vision=bool(m.get("supports_vision", False)),
                     supports_image_output=bool(
                         m.get("supports_image_output", False)
@@ -410,7 +416,8 @@ async def list_available_models_for(
                 provider_type=base_provider.type,  # type: ignore[arg-type]
                 model_id=f"custom:{cm.id}",
                 display_name=cm.display_name,
-                context_window=(base_entry or {}).get("context_window"),
+                context_window=(base_entry or {}).get("context_window")
+                or _known_context_window(base_provider.type, cm.base_model_id),
                 supports_vision=bool((base_entry or {}).get("supports_vision", False)),
                 supports_image_output=bool(
                     (base_entry or {}).get("supports_image_output", False)

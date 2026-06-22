@@ -52,12 +52,23 @@ export function ContextWindowPill({
   const [open, setOpen] = useState(false);
 
   const budget = useMemo(() => {
-    const msgs = messages.map((m) => ({ role: m.role, content: m.content }));
+    const msgs = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      promptTokens: m.prompt_tokens,
+      completionTokens: m.completion_tokens,
+    }));
     if (isStreaming && streamingContent) {
       // Fold the in-flight assistant stream into the count so the
       // pill updates live as the model replies — otherwise the user
-      // only sees the jump after the stream resolves.
-      msgs.push({ role: "assistant", content: streamingContent });
+      // only sees the jump after the stream resolves. No token data
+      // yet, so it's estimated until the turn lands.
+      msgs.push({
+        role: "assistant",
+        content: streamingContent,
+        promptTokens: null,
+        completionTokens: null,
+      });
     }
     return computeContextBudget({ messages: msgs });
   }, [messages, streamingContent, isStreaming]);
@@ -157,7 +168,7 @@ export function ContextWindowPill({
 
             <div className="mt-3 space-y-1 text-[11px]">
               <Row
-                label="Chat history"
+                label={budget.measured ? "Context used" : "Chat history"}
                 value={budget.historyTokens}
               />
               <Row
@@ -172,8 +183,9 @@ export function ContextWindowPill({
             </div>
 
             <div className="mt-3 border-t border-[var(--border)] pt-2 text-[10px] text-[var(--text-muted)]">
-              Estimated — actual token counts vary by model. The pill
-              turns amber at 60% and red at 85%.
+              {budget.measured
+                ? "Based on the last turn's actual token usage (includes system prompt, memory, and attachments). The pill turns amber at 60% and red at 85%."
+                : "Estimated — actual token counts vary by model. The pill turns amber at 60% and red at 85%."}
             </div>
 
             {onCompact && (

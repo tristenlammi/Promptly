@@ -575,6 +575,12 @@ def _known_context_window(provider_type: str, model_id: str) -> int | None:
     guess at. Users with local stacks can set a default in
     ``modelfile`` overrides later if we want to surface it.
 
+    OpenAI / Gemini / DeepSeek don't return a context length on their
+    ``/models`` endpoints either, so we map the well-documented public
+    windows by id substring. The values are the model's *advertised* API
+    context window — close enough for a soft gauge and far better than
+    hiding the indicator entirely (the previous behaviour).
+
     Return ``None`` when we genuinely don't know — never fabricate a
     number. The pill treats ``None`` as "no indicator"."""
     mid = model_id.lower()
@@ -591,7 +597,43 @@ def _known_context_window(provider_type: str, model_id: str) -> int | None:
         ):
             return 200_000
         return None
-    # Everyone else populates context_window from the API catalog.
+    if provider_type == "openai":
+        # Order matters — check the most specific ids first.
+        if "gpt-4.1" in mid:
+            return 1_047_576
+        if "gpt-4o" in mid or "chatgpt-4o" in mid:
+            return 128_000
+        if (
+            "gpt-4-turbo" in mid
+            or "gpt-4-0125" in mid
+            or "gpt-4-1106" in mid
+            or "gpt-4-vision" in mid
+        ):
+            return 128_000
+        # o-series reasoning models (o1 / o3 / o4): 200k window.
+        if "o1" in mid or "o3" in mid or "o4" in mid:
+            return 200_000
+        if "gpt-4" in mid:
+            return 8_192  # base GPT-4
+        if "gpt-3.5" in mid:
+            return 16_385
+        return None
+    if provider_type == "gemini":
+        if "1.5-pro" in mid:
+            return 2_000_000
+        if "1.5-flash" in mid or "2.0" in mid or "2.5" in mid:
+            return 1_000_000
+        if "gemini-pro" in mid or "1.0" in mid:
+            return 32_000
+        return None
+    if provider_type == "deepseek":
+        # deepseek-chat / deepseek-reasoner both expose a 64k API window.
+        if "deepseek" in mid:
+            return 64_000
+        return None
+    # Ollama / openai_compatible: the real window is the runtime ``num_ctx``,
+    # which we can't know from here — leave it ``None`` so the pill hides
+    # rather than showing a misleading capability max.
     return None
 
 

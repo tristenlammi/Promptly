@@ -34,6 +34,12 @@ export function estimateTokens(text: string | null | undefined): number {
 export interface MessageLike {
   role: string;
   content: string | null | undefined;
+  /** Real input-token count the provider reported for the request that
+   *  produced this (assistant) message. Lets the budget anchor to ground
+   *  truth instead of the char heuristic. */
+  promptTokens?: number | null;
+  /** Real output-token count for this (assistant) message. */
+  completionTokens?: number | null;
 }
 
 /** Aggregate a conversation's messages into a single token estimate.
@@ -64,6 +70,10 @@ export interface ContextBudget {
   historyTokens: number;
   responseReserveTokens: number;
   totalTokens: number;
+  /** True when ``totalTokens`` is anchored to a real provider token count
+   *  (the last assistant turn) rather than a pure char-heuristic estimate.
+   *  Drives the tooltip's "actual vs estimated" wording. */
+  measured: boolean;
 }
 
 /** Build a full breakdown of token usage for a conversation.
@@ -71,14 +81,62 @@ export interface ContextBudget {
  *  Used by the TopNav pill to render its hover tooltip without
  *  re-walking the message list multiple times. The ``totalTokens``
  *  is what gets compared to the model's context window; the
- *  component parts are shown in the tooltip for transparency. */
+ *  component parts are shown in the tooltip for transparency.
+ *
+ *  Accuracy: when any assistant message carries a provider-reported
+ *  ``promptTokens``, we anchor on the most recent one. That number is
+ *  the *real* input size for that turn — it already includes the system
+ *  prompt, injected memory, workspace RAG, tool definitions and image
+ *  tokens, none of which the char heuristic can see. We then add the
+ *  assistant's own reply plus anything typed after it (estimated) to get
+ *  the size the next request would send. Without a measured turn (first
+ *  message, or pre-metrics history) we fall back to the pure estimate. */
 export function computeContextBudget(
   input: ContextBudgetInput
 ): ContextBudget {
+  const msgs = input.messages;
+  const responseReserveTokens = input.responseReserveTokens ?? 600;
+
+  let anchorIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (
+      m.role === "assistant" &&
+      typeof m.promptTokens === "number" &&
+      m.promptTokens > 0
+    ) {
+      anchorIdx = i;
+      break;
+    }
+  }
+
+  if (anchorIdx >= 0) {
+    const a = msgs[anchorIdx];
+    // Real input for that turn + the assistant's own reply (real if we
+    // have it, else estimated) + every message after the anchor.
+    let history =
+      (a.promptTokens ?? 0) +
+      (typeof a.completionTokens === "number"
+        ? a.completionTokens
+        : estimateTokens(a.content));
+    for (let i = anchorIdx + 1; i < msgs.length; i++) {
+      history += PER_MESSAGE_OVERHEAD + estimateTokens(msgs[i].content);
+    }
+    // System + pinned files are already baked into the anchor's
+    // promptTokens, so they're not added again here.
+    return {
+      systemTokens: 0,
+      pinnedFilesTokens: 0,
+      historyTokens: history,
+      responseReserveTokens,
+      totalTokens: history + responseReserveTokens,
+      measured: true,
+    };
+  }
+
   const systemTokens = estimateTokens(input.systemPrompt);
   const pinnedFilesTokens = estimateTokens(input.pinnedFilesText);
-  const historyTokens = estimateMessagesTokens(input.messages);
-  const responseReserveTokens = input.responseReserveTokens ?? 600;
+  const historyTokens = estimateMessagesTokens(msgs);
   return {
     systemTokens,
     pinnedFilesTokens,
@@ -89,6 +147,7 @@ export function computeContextBudget(
       pinnedFilesTokens +
       historyTokens +
       responseReserveTokens,
+    measured: false,
   };
 }
 

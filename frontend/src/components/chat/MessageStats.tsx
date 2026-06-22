@@ -1,4 +1,4 @@
-import { Clock, Coins, Cpu, Info, Zap } from "lucide-react";
+import { Clock, Coins, Cpu, Gauge, Info, Zap } from "lucide-react";
 
 import { cn } from "@/utils/cn";
 import { USD_TO_AUD, formatAud } from "@/utils/currency";
@@ -51,13 +51,36 @@ export function MessageStats({
   const total = formatMs(totalMs);
   const prompt = formatTokens(promptTokens);
   const completion = formatTokens(completionTokens);
+
+  // Generation speed = response tokens / the time spent generating them.
+  // We exclude time-to-first-token (the model's "thinking"/queue latency)
+  // so this reflects decode throughput, not end-to-end latency; fall back
+  // to total time when ttft isn't available.
+  const genMs =
+    typeof totalMs === "number" &&
+    typeof ttftMs === "number" &&
+    totalMs > ttftMs
+      ? totalMs - ttftMs
+      : totalMs;
+  const speed =
+    typeof completionTokens === "number" &&
+    completionTokens > 0 &&
+    typeof genMs === "number" &&
+    genMs > 0
+      ? completionTokens / (genMs / 1000)
+      : null;
+  const speedLabel =
+    speed != null && Number.isFinite(speed)
+      ? `${speed >= 100 ? Math.round(speed) : speed.toFixed(1)} tok/s`
+      : null;
   const cost =
     typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd > 0
       ? formatAud(costUsd)
       : null;
 
   // If we have literally nothing to show, skip the UI entirely.
-  if (!ttft && !total && !prompt && !completion && !cost) return null;
+  if (!ttft && !total && !prompt && !completion && !cost && !speedLabel)
+    return null;
 
   const rows: Array<{
     icon: React.ReactNode;
@@ -92,6 +115,13 @@ export function MessageStats({
       value: completion,
     });
   }
+  if (speedLabel) {
+    rows.push({
+      icon: <Gauge className="h-3 w-3" />,
+      label: "Speed",
+      value: speedLabel,
+    });
+  }
   if (cost) {
     rows.push({
       icon: (
@@ -107,6 +137,7 @@ export function MessageStats({
     total && `total ${total}`,
     prompt && `${prompt} prompt tokens`,
     completion && `${completion} response tokens`,
+    speedLabel && `speed ${speedLabel}`,
     cost && `cost ${cost}`,
   ]
     .filter(Boolean)

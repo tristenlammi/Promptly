@@ -40,7 +40,12 @@ export function ContextWarningBanner({ conversationId, onCompact }: Props) {
   const [dismissedAtPct, setDismissedAtPct] = useState<number | null>(null);
 
   const budget = useMemo(() => {
-    const msgs = messages.map((m) => ({ role: m.role, content: m.content }));
+    const msgs = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      promptTokens: m.prompt_tokens,
+      completionTokens: m.completion_tokens,
+    }));
     return computeContextBudget({ messages: msgs });
   }, [messages]);
 
