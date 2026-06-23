@@ -924,16 +924,18 @@ class ModelRouter:
             else:
                 payload_messages.append(m)
 
-        # ``reasoning_content`` is a DeepSeek-only field — it's required
-        # on tool-call multi-turn DeepSeek conversations (the API 400s
-        # without it) and at-best ignored / at-worst rejected by every
-        # other provider's strict schema validator. Strip it from
-        # every outbound message for non-DeepSeek providers so an
-        # admin swapping the provider on a thinking-mode conversation
-        # doesn't break the stream. The companion ``thinking`` /
-        # ``reasoning_effort`` ``extra_body`` block below is already
-        # DeepSeek-gated the same way.
-        if provider.type != "deepseek":
+        # ``reasoning_content`` is required on thinking-mode tool-call turns
+        # for DeepSeek (the API 400s with "must be passed back" without it)
+        # and at-best ignored / at-worst rejected by every other model's
+        # strict schema validator. DeepSeek reaches us via the direct
+        # ``deepseek`` provider AND through OpenRouter / openai_compatible
+        # proxies (ids like ``deepseek/deepseek-r1``), so gate on the
+        # *model*, not the provider type — otherwise an OpenRouter-hosted
+        # DeepSeek turn loses its reasoning and the API rejects the follow-up.
+        keeps_reasoning = (
+            provider.type == "deepseek" or "deepseek" in model_id.lower()
+        )
+        if not keeps_reasoning:
             for msg in payload_messages:
                 msg.pop("reasoning_content", None)
 
@@ -1057,7 +1059,14 @@ class ModelRouter:
                 # without conflating it with the user-visible content
                 # buffer. Other providers never emit this field so the
                 # ``getattr`` returns None and the branch is a no-op.
-                reasoning_token = getattr(delta, "reasoning_content", None)
+                # DeepSeek's native field is ``reasoning_content``; OpenRouter
+                # (and some openai-compat proxies) normalise the same channel
+                # to ``reasoning``. Read both so thinking text is captured —
+                # and so it can be replayed on DeepSeek tool-call follow-ups
+                # instead of being silently lost on the OpenRouter path.
+                reasoning_token = getattr(
+                    delta, "reasoning_content", None
+                ) or getattr(delta, "reasoning", None)
                 if reasoning_token:
                     yield ReasoningDelta(text=reasoning_token)
 

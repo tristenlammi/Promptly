@@ -26,6 +26,7 @@ from app.models_config.provider import (
     KEYLESS_PROVIDER_TYPES,
     SUPPORTED_PROVIDER_TYPES,
     ProviderError,
+    _detect_reasoning_by_id,
     _known_context_window,
     model_router,
 )
@@ -343,9 +344,15 @@ async def list_available_models_for(
                     supports_image_output=bool(
                         m.get("supports_image_output", False)
                     ),
+                    # Fall back to id-based detection when the catalog didn't
+                    # tag reasoning — so a DeepSeek/o-series/Claude-4/Gemini
+                    # thinking model added to an OpenRouter/compat provider
+                    # still surfaces the Effort control (and is handled as a
+                    # reasoning model) instead of silently hiding it.
                     supports_native_reasoning=bool(
                         m.get("supports_native_reasoning", False)
-                    ),
+                    )
+                    or _detect_reasoning_by_id(provider.type, model_id),
                 )
             )
 
@@ -422,9 +429,11 @@ async def list_available_models_for(
                 supports_image_output=bool(
                     (base_entry or {}).get("supports_image_output", False)
                 ),
+                # Same id-based reasoning fallback as the base-model loop.
                 supports_native_reasoning=bool(
                     (base_entry or {}).get("supports_native_reasoning", False)
-                ),
+                )
+                or _detect_reasoning_by_id(base_provider.type, cm.base_model_id),
                 is_custom=True,
                 custom_model_id=cm.id,
                 base_display_name=base_label,
