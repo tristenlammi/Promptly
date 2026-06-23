@@ -120,6 +120,7 @@ class MessageResponse(BaseModel):
                         "completion_tokens",
                         "ttft_ms",
                         "total_ms",
+                        "model_id",
                         "author_user_id",
                         "edited_at",
                         "feedback",
