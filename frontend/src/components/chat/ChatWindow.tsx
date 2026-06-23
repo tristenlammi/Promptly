@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
+import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 import type { ConversationParticipant } from "@/api/types";
 
@@ -290,6 +291,21 @@ export function ChatWindow({
     return map;
   }, [participants]);
 
+  // Resolve a message's raw ``model_id`` to a friendly display name so the
+  // stats popover (and the ‹2/3› version pager) can show which model made
+  // each reply. Falls back to the raw id if the model is no longer listed.
+  const availableModels = useModelStore((s) => s.available);
+  const modelNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of availableModels) map.set(m.model_id, m.display_name);
+    return map;
+  }, [availableModels]);
+  const resolveModelLabel = useCallback(
+    (id: string | null | undefined): string | null =>
+      id ? modelNameById.get(id) ?? id : null,
+    [modelNameById]
+  );
+
   return (
     <div ref={scrollRef} className="promptly-scroll relative flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl">
@@ -313,6 +329,7 @@ export function ChatWindow({
               ttftMs={m.ttft_ms}
               totalMs={m.total_ms}
               costUsd={m.cost_usd}
+              modelLabel={resolveModelLabel(m.model_id)}
               truncated={m.truncated}
               authorUserId={m.author_user_id}
               authorLookup={authorLookup}

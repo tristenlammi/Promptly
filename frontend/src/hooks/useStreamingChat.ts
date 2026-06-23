@@ -110,6 +110,7 @@ interface SSEPayload {
   completion_tokens?: number | null;
   ttft_ms?: number | null;
   total_ms?: number | null;
+  model_id?: string | null;
   cost_usd?: number | null;
   // ``true`` when the upstream stopped because it hit the output-token
   // ceiling (finish_reason "length") rather than finishing naturally —
@@ -407,6 +408,7 @@ export function useStreamingChat(): UseStreamingChatResult {
               completion_tokens: data.completion_tokens ?? null,
               ttft_ms: data.ttft_ms ?? null,
               total_ms: data.total_ms ?? null,
+              model_id: data.model_id ?? null,
               cost_usd: data.cost_usd ?? null,
               truncated: data.truncated ?? false,
             };

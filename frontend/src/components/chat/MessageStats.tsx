@@ -1,4 +1,4 @@
-import { Clock, Coins, Cpu, Gauge, Info, Zap } from "lucide-react";
+import { Box, Clock, Coins, Cpu, Gauge, Info, Zap } from "lucide-react";
 
 import { cn } from "@/utils/cn";
 import { USD_TO_AUD, formatAud } from "@/utils/currency";
@@ -9,6 +9,10 @@ interface MessageStatsProps {
   ttftMs?: number | null;
   totalMs?: number | null;
   costUsd?: number | null;
+  /** Friendly name of the model that produced this reply (already
+   *  resolved by the caller from the raw model id). Shown first so the
+   *  version pager doubles as a model comparison. */
+  modelLabel?: string | null;
   className?: string;
 }
 
@@ -45,6 +49,7 @@ export function MessageStats({
   ttftMs,
   totalMs,
   costUsd,
+  modelLabel,
   className,
 }: MessageStatsProps) {
   const ttft = formatMs(ttftMs);
@@ -78,8 +83,20 @@ export function MessageStats({
       ? formatAud(costUsd)
       : null;
 
+  const model = typeof modelLabel === "string" && modelLabel.trim()
+    ? modelLabel.trim()
+    : null;
+
   // If we have literally nothing to show, skip the UI entirely.
-  if (!ttft && !total && !prompt && !completion && !cost && !speedLabel)
+  if (
+    !ttft &&
+    !total &&
+    !prompt &&
+    !completion &&
+    !cost &&
+    !speedLabel &&
+    !model
+  )
     return null;
 
   const rows: Array<{
@@ -87,6 +104,13 @@ export function MessageStats({
     label: string;
     value: string;
   }> = [];
+  if (model) {
+    rows.push({
+      icon: <Box className="h-3 w-3" />,
+      label: "Model",
+      value: model,
+    });
+  }
   if (ttft) {
     rows.push({
       icon: <Zap className="h-3 w-3" />,
@@ -133,6 +157,7 @@ export function MessageStats({
   }
 
   const summary = [
+    model && `model ${model}`,
     ttft && `thought ${ttft}`,
     total && `total ${total}`,
     prompt && `${prompt} prompt tokens`,

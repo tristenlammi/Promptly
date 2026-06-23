@@ -590,6 +590,10 @@ export interface ChatMessage {
   completion_tokens?: number | null;
   ttft_ms?: number | null;
   total_ms?: number | null;
+  /** Which model produced this assistant reply (raw id; resolved to a
+   *  friendly name in the UI). Stamped per turn, so each regenerated
+   *  sibling version carries its own — drives "made with X" in the stats. */
+  model_id?: string | null;
   /** Total dollar cost reported by the provider (model + paid tools).
    *  Floats; ``null`` when the provider didn't surface a cost. */
   cost_usd?: number | null;

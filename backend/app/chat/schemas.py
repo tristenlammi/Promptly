@@ -51,6 +51,9 @@ class MessageResponse(BaseModel):
     completion_tokens: int | None = None
     ttft_ms: int | None = None
     total_ms: int | None = None
+    # Which model produced this assistant row (raw id; the frontend maps it
+    # to a friendly name). Lets the version pager show the model per reply.
+    model_id: str | None = None
     # Per-message dollar cost (completion + paid tools) — exposed as a
     # float so the frontend doesn't need to know about the integer
     # micros storage. ``None`` for non-assistant rows and any

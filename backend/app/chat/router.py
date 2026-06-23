@@ -4868,6 +4868,9 @@ async def _stream_generator(
                 ttft_ms=ttft_ms,
                 total_ms=total_ms,
                 cost_usd_micros=cost_micros,
+                # Stamp the exact model used for *this* turn (regenerate
+                # builds a fresh ctx, so each version records its own).
+                model_id=ctx["model_id"],
             )
             db.add(assistant)
             await db.flush()
@@ -5045,6 +5048,9 @@ async def _stream_generator(
                 "completion_tokens": completion_tokens,
                 "ttft_ms": ttft_ms,
                 "total_ms": total_ms,
+                # The model that produced this reply, so the version pager
+                # can show it without waiting for a reload.
+                "model_id": ctx["model_id"],
                 # Per-message dollar cost (provider completion + any
                 # paid tools that ran on this turn). Floats are fine
                 # over the wire — micros stays a server-side detail.

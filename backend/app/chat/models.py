@@ -796,6 +796,12 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which model produced this (assistant) row — stamped per turn, so each
+    # regenerated sibling version records its own model. Lets the UI show
+    # "made with X" as the user flicks the ‹2/3› version pager. Raw model id
+    # string (the frontend resolves a friendly name); NULL on user/system
+    # rows and on assistant rows from before this was tracked.
+    model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Total spend on this single message (completion + tool invocations)
     # in USD micros. ``None`` for messages whose provider didn't report
     # a cost or for non-assistant rows.

@@ -124,6 +124,8 @@ interface MessageBubbleProps {
   ttftMs?: number | null;
   totalMs?: number | null;
   costUsd?: number | null;
+  /** Friendly model name for the stats popover (resolved by the caller). */
+  modelLabel?: string | null;
   /** Set on the just-streamed assistant reply when the upstream hit
    *  its output-token ceiling and the text is cut off mid-thought.
    *  Renders a subtle "response was cut off" hint with a regenerate
@@ -780,6 +782,7 @@ function MessageBubbleImpl({
   ttftMs,
   totalMs,
   costUsd,
+  modelLabel,
   truncated,
   messageId,
   authorUserId,
@@ -868,6 +871,7 @@ function MessageBubbleImpl({
       completionTokens != null ||
       ttftMs != null ||
       totalMs != null ||
+      (typeof modelLabel === "string" && modelLabel.trim() !== "") ||
       (costUsd != null && costUsd > 0));
   // Edit affordance is shown for both user and assistant rows so the
   // owner can either rewrite-and-resend (user turn) or hand-correct
@@ -1056,6 +1060,7 @@ function MessageBubbleImpl({
               ttftMs={ttftMs}
               totalMs={totalMs}
               costUsd={costUsd}
+              modelLabel={modelLabel}
             />
           )}
           {editedAt && !streaming && (
