@@ -630,12 +630,20 @@ def _known_context_window(provider_type: str, model_id: str) -> int | None:
     number. The pill treats ``None`` as "no indicator"."""
     mid = model_id.lower()
     if provider_type == "anthropic":
-        # All Claude-3* and Claude-4* sizes (sonnet / opus / haiku)
-        # use a 200k window; older claude-2.x was 100k/200k but we
-        # don't surface those anymore.
+        # Claude 4.x (opus/sonnet/haiku 4 + point releases like 4.6 / 4.8)
+        # ship a 1M-token context window at standard pricing as of 2026.
+        # Verified against anthropic.com/news/1m-context + the models docs.
+        if (
+            "claude-opus-4" in mid
+            or "claude-sonnet-4" in mid
+            or "claude-haiku-4" in mid
+            or "claude-4" in mid
+        ):
+            return 1_000_000
+        # Claude 3.x (and bare family ids) — 200k. Bare names default low
+        # so we never over-state a window and risk silent truncation.
         if (
             "claude-3" in mid
-            or "claude-4" in mid
             or "claude-sonnet" in mid
             or "claude-opus" in mid
             or "claude-haiku" in mid
@@ -672,12 +680,14 @@ def _known_context_window(provider_type: str, model_id: str) -> int | None:
             return 32_000
         return None
     if provider_type == "deepseek":
-        # DeepSeek's hosted API advertises a 128k context window across its
-        # current chat + reasoner + V4 models. (64k was the original V3/R1
-        # launch window — long since extended, so don't cap modern models
-        # there.) Hosted-only, so everyone is on the current window.
+        # DeepSeek V4 (deepseek-v4-pro / deepseek-v4-flash) exposes a 1M
+        # context window, and the legacy deepseek-chat / deepseek-reasoner
+        # ids now route to V4-flash — so all current hosted models get 1M.
+        # (64k was the V3/R1 launch window; 128k was the V3.2 era; 1M is
+        # the default across DeepSeek's services as of 2026.) Verified
+        # against api-docs.deepseek.com.
         if "deepseek" in mid:
-            return 128_000
+            return 1_048_576
         return None
     # Ollama / openai_compatible: the real window is the runtime ``num_ctx``,
     # which we can't know from here — leave it ``None`` so the pill hides
