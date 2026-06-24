@@ -53,9 +53,10 @@ class SystemKind(str, Enum):
     # / move); the per-workspace folders + their Notes/Canvases/Files
     # subfolders inside it are ordinary, fully-editable folders.
     WORKSPACES_ROOT = "workspaces_root"
-    # Phase 12 — lazy-seeded when a user connects their first email account.
-    # Hidden from the Files page when email_mode == "off".
-    EMAIL_ATTACHMENTS = "email_attachments"
+    # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
+    # seeded on first email-account connect. Email/calendar integration was
+    # removed, and migration ``0106_remove_email_attachments_folder`` deletes
+    # the leftover rows, so the kind is gone.
 
 
 DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
@@ -63,7 +64,6 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.GENERATED_ROOT: "Generated Files",
     SystemKind.GENERATED_FILES: "Files",
     SystemKind.GENERATED_MEDIA: "Media",
-    SystemKind.EMAIL_ATTACHMENTS: "Email Attachments",
     SystemKind.WORKSPACES_ROOT: "Workspaces",
 }
 
@@ -162,15 +162,6 @@ async def ensure_generated_media(db: AsyncSession, user: User) -> FileFolder:
     return await _ensure(
         db, user.id, SystemKind.GENERATED_MEDIA, parent_id=root.id
     )
-
-
-async def ensure_email_attachments(db: AsyncSession, user: User) -> FileFolder:
-    """Folder where email attachment files are saved.
-
-    Lazy — only called when a user connects an email account, not at
-    registration. This keeps the folder out of non-email users' drives.
-    """
-    return await _ensure(db, user.id, SystemKind.EMAIL_ATTACHMENTS)
 
 
 async def ensure_workspaces_root(db: AsyncSession, user: User) -> FileFolder:
