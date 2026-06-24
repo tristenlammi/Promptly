@@ -672,9 +672,12 @@ def _known_context_window(provider_type: str, model_id: str) -> int | None:
             return 32_000
         return None
     if provider_type == "deepseek":
-        # deepseek-chat / deepseek-reasoner both expose a 64k API window.
+        # DeepSeek's hosted API advertises a 128k context window across its
+        # current chat + reasoner + V4 models. (64k was the original V3/R1
+        # launch window — long since extended, so don't cap modern models
+        # there.) Hosted-only, so everyone is on the current window.
         if "deepseek" in mid:
-            return 64_000
+            return 128_000
         return None
     # Ollama / openai_compatible: the real window is the runtime ``num_ctx``,
     # which we can't know from here — leave it ``None`` so the pill hides
