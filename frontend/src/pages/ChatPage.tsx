@@ -916,6 +916,23 @@ export function ChatPage({
     }
   }, [id, queryClient]);
 
+  // Auto-compaction path (opt-in, fired by the context pill at ~90%).
+  // No confirm dialog — enabling the setting *is* the consent — but we
+  // still toast so the shortened history isn't a silent surprise. Errors
+  // are swallowed quietly: an auto-compact that can't run yet (too little
+  // history, provider hiccup) shouldn't nag the user with a red toast.
+  const handleAutoCompact = useCallback(async () => {
+    if (!id) return;
+    try {
+      await chatApi.compact(id);
+      await queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      toast.success("Auto-compacted to free up context");
+    } catch {
+      // Best-effort — the manual button (with its error toast) remains.
+    }
+  }, [id, queryClient]);
+
   // "Keep this chat" — promote the current temporary chat to a permanent
   // one. Clears the temporary lifecycle server-side (and the sweeper
   // deadline) so it survives navigation and stops counting down. Only
@@ -1041,6 +1058,7 @@ export function ChatPage({
               <ContextWindowPill
                 conversationId={id ?? null}
                 onCompact={id ? handleCompact : undefined}
+                onAutoCompact={id ? handleAutoCompact : undefined}
               />
             )}
             <ModelSelector compact={isMobile} />

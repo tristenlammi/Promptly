@@ -40,16 +40,61 @@ from app.models_config.provider import (
 
 logger = logging.getLogger("promptly.chat.compaction")
 
-# Keep the first 2 and last 8 verbatim. Covers the "intro + goal" at
-# the top and the "what we're working on right now" at the bottom
-# without risking losing the thread of the current discussion.
+# Keep the first 2 verbatim — they set the scene (the user's opening
+# question + initial clarification) and anchor the rest of the chat.
 _KEEP_HEAD: Final[int] = 2
-_KEEP_TAIL: Final[int] = 8
+
+# The live tail is chosen by *token budget*, not a fixed message count:
+# keeping a fixed N messages frees almost nothing when those N happen to
+# be huge (long code blocks, pasted logs). Instead we keep recent
+# messages until their running token estimate fills this budget. Always
+# keep at least ``_MIN_KEEP_TAIL`` (the current Q&A) and never more than
+# ``_MAX_KEEP_TAIL`` (bounds a tail of many tiny messages).
+_DEFAULT_KEEP_TAIL_TOKENS: Final[int] = 4000
+_MIN_KEEP_TAIL: Final[int] = 2
+_MAX_KEEP_TAIL: Final[int] = 40
 
 # Minimum compactable size — below this, the operation is a no-op.
 # No point compressing 3 messages into a 1-message summary; you'd
 # lose more fidelity than you'd save.
 _MIN_TO_COMPACT: Final[int] = 4
+
+
+def _estimate_tokens(text: str | None) -> int:
+    """Cheap char/4 token estimate — the same heuristic the chunker and
+    the workspace RAG packer use. Good enough to pick a split point."""
+    if not text:
+        return 0
+    return max(0, len(text) // 4)
+
+
+def _select_tail_count(
+    rows: list[Message], *, keep_tail_tokens: int, head_count: int
+) -> int:
+    """Number of trailing messages to keep verbatim, chosen by token
+    budget rather than a fixed count.
+
+    Walks from the newest message backwards, keeping messages while the
+    running token total stays within ``keep_tail_tokens``. Always keeps
+    at least ``_MIN_KEEP_TAIL`` so the current exchange survives, and
+    never exceeds ``_MAX_KEEP_TAIL``.
+    """
+    available = len(rows) - head_count
+    if available <= _MIN_KEEP_TAIL:
+        return max(0, available)
+    kept = 0
+    acc = 0
+    for m in reversed(rows[head_count:]):
+        if kept >= _MAX_KEEP_TAIL:
+            break
+        tok = _estimate_tokens(m.content)
+        # Past the floor, stop once one more message would blow the
+        # budget — but never drop below the floor on token grounds.
+        if kept >= _MIN_KEEP_TAIL and acc + tok > keep_tail_tokens:
+            break
+        acc += tok
+        kept += 1
+    return min(kept, available)
 
 # Prefix we stamp onto the summary so the frontend can detect a
 # compaction-generated system row and render it with the "Compacted
@@ -105,14 +150,19 @@ async def compact_conversation(
     llm_provider: ModelProvider,
     llm_model_id: str,
     db: AsyncSession,
+    keep_tail_tokens: int = _DEFAULT_KEEP_TAIL_TOKENS,
 ) -> CompactionResult:
     """Summarise the middle of ``conversation`` in place.
+
+    The kept tail is sized by ``keep_tail_tokens`` (token-aware) rather
+    than a fixed message count, so compaction frees meaningful space even
+    when the most recent messages are large.
 
     Caller is expected to have already validated authorisation on
     ``conversation``. The DB session is committed before returning
     so the deletes + insert land atomically.
     """
-    rows = (
+    rows = list(
         (
             await db.execute(
                 select(Message)
@@ -124,17 +174,22 @@ async def compact_conversation(
         .all()
     )
     total = len(rows)
-    # Nothing to compact if we can't even squeeze out the min middle
-    # slice after reserving head+tail.
-    if total <= _KEEP_HEAD + _KEEP_TAIL + _MIN_TO_COMPACT - 1:
+    head_count = min(_KEEP_HEAD, total)
+    # Cheap early-out before the (token-aware) tail walk: even with the
+    # smallest possible tail there must be room for a worthwhile middle.
+    if total < head_count + _MIN_KEEP_TAIL + _MIN_TO_COMPACT:
         raise CompactionError(
             f"Not enough history to compact — need at least "
-            f"{_KEEP_HEAD + _KEEP_TAIL + _MIN_TO_COMPACT} messages, got {total}."
+            f"{head_count + _MIN_KEEP_TAIL + _MIN_TO_COMPACT} messages, "
+            f"got {total}."
         )
 
-    head = rows[:_KEEP_HEAD]
-    tail = rows[-_KEEP_TAIL:]
-    middle = rows[_KEEP_HEAD : total - _KEEP_TAIL]
+    tail_count = _select_tail_count(
+        rows, keep_tail_tokens=keep_tail_tokens, head_count=head_count
+    )
+    head = rows[:head_count]
+    tail = rows[total - tail_count :] if tail_count else []
+    middle = rows[head_count : total - tail_count] if tail_count else rows[head_count:]
     if len(middle) < _MIN_TO_COMPACT:
         raise CompactionError(
             "Middle slice is too short to meaningfully compact."

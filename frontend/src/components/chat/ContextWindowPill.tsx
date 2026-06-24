@@ -1,8 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Gauge, Scissors } from "lucide-react";
 
 import { useSelectedModel } from "@/store/modelStore";
 import { useChatStore } from "@/store/chatStore";
+import {
+  AUTO_COMPACT_REARM,
+  AUTO_COMPACT_THRESHOLD,
+  useAutoCompactStore,
+} from "@/store/autoCompactStore";
 import {
   computeContextBudget,
   formatTokens,
@@ -36,20 +41,29 @@ interface Props {
    *  to compress history. Undefined disables the action (e.g. in
    *  compare mode or on brand-new unsaved chats). */
   onCompact?: () => void;
+  /** No-confirm compaction used by the opt-in auto-compact trigger.
+   *  Undefined disables auto-compaction (e.g. unsaved chats). */
+  onAutoCompact?: () => void;
   compact?: boolean;
 }
 
 export function ContextWindowPill({
   conversationId,
   onCompact,
+  onAutoCompact,
   compact: mobileCompact,
 }: Props) {
   const model = useSelectedModel();
   const messages = useChatStore((s) => s.messages);
   const streamingContent = useChatStore((s) => s.streamingContent);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const autoCompactEnabled = useAutoCompactStore((s) => s.enabled);
+  const toggleAutoCompact = useAutoCompactStore((s) => s.toggle);
 
   const [open, setOpen] = useState(false);
+  // Guards the auto-compact trigger so a single high-usage episode fires
+  // exactly once; re-armed when usage falls back below the rearm floor.
+  const autoFiredRef = useRef(false);
 
   const budget = useMemo(() => {
     const msgs = messages.map((m) => ({
@@ -72,6 +86,38 @@ export function ContextWindowPill({
     }
     return computeContextBudget({ messages: msgs });
   }, [messages, streamingContent, isStreaming]);
+
+  // Opt-in auto-compaction: when enabled, fire the no-confirm compact the
+  // moment usage crosses the threshold. Never mid-stream (compacting a
+  // live turn would corrupt it), never below the message floor the
+  // backend needs, and once per high-usage episode (re-armed when usage
+  // drops back under the rearm floor after a successful compaction).
+  useEffect(() => {
+    const window = model?.context_window;
+    if (!autoCompactEnabled || !onAutoCompact || isStreaming || !window) {
+      return;
+    }
+    const ratio = budget.totalTokens / window;
+    if (ratio < AUTO_COMPACT_REARM) {
+      autoFiredRef.current = false;
+      return;
+    }
+    if (
+      ratio >= AUTO_COMPACT_THRESHOLD &&
+      !autoFiredRef.current &&
+      messages.length >= 8
+    ) {
+      autoFiredRef.current = true;
+      onAutoCompact();
+    }
+  }, [
+    autoCompactEnabled,
+    onAutoCompact,
+    isStreaming,
+    model,
+    budget,
+    messages.length,
+  ]);
 
   // Hide when we have no model selected or the model lacks a known
   // context-window size. Displaying a guess would be worse than
@@ -218,6 +264,25 @@ export function ContextWindowPill({
                 <Scissors className="h-3 w-3" />
                 Compact conversation
               </button>
+            )}
+
+            {onAutoCompact && (
+              <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 text-[11px] text-[var(--text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={autoCompactEnabled}
+                  onChange={toggleAutoCompact}
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
+                />
+                <span>
+                  <span className="font-medium text-[var(--text)]">
+                    Auto-compact at {Math.round(AUTO_COMPACT_THRESHOLD * 100)}%
+                  </span>
+                  <br />
+                  Automatically summarise older messages once this chat
+                  fills up, so it never runs out of room.
+                </span>
+              </label>
             )}
           </div>
         </>
