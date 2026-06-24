@@ -37,6 +37,11 @@ interface Props {
 type Tab = "pick" | "upload";
 type MobileView = "home" | "browse";
 
+/** Max files attachable to a single message. Enough for a real batch
+ *  (a folder of screenshots, a set of docs) without letting someone
+ *  dump hundreds into one turn. */
+const MAX_ATTACHMENTS = 10;
+
 export function AttachmentPickerModal({
   open,
   onClose,
@@ -85,15 +90,25 @@ export function AttachmentPickerModal({
   };
 
   const onUploaded = (f: FileItem) => {
-    setSelected((prev) => ({
-      ...prev,
-      [f.id]: {
-        id: f.id,
-        filename: f.filename,
-        mime_type: f.mime_type,
-        size_bytes: f.size_bytes,
-      },
-    }));
+    setSelected((prev) => {
+      // Respect the per-message cap — an upload past the limit still
+      // lands in Drive (not lost), it just isn't auto-attached here.
+      if (
+        !prev[f.id] &&
+        alreadyAttached.length + Object.keys(prev).length >= MAX_ATTACHMENTS
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [f.id]: {
+          id: f.id,
+          filename: f.filename,
+          mime_type: f.mime_type,
+          size_bytes: f.size_bytes,
+        },
+      };
+    });
     // Desktop: flip back to the pick tab so the new upload sits
     // alongside anything already selected. Mobile: stay on the home
     // screen — the selection count in the footer is enough feedback.
@@ -101,6 +116,13 @@ export function AttachmentPickerModal({
   };
 
   const alreadyAttachedIds = new Set(alreadyAttached.map((a) => a.id));
+  // Slots left before the per-message cap; passed to the upload paths so
+  // a multi-select stops at the limit instead of uploading files it can't
+  // attach.
+  const remainingSlots = Math.max(
+    0,
+    MAX_ATTACHMENTS - alreadyAttached.length - Object.keys(selected).length
+  );
 
   return (
     <Modal
@@ -133,6 +155,7 @@ export function AttachmentPickerModal({
           alreadyAttachedIds={alreadyAttachedIds}
           selected={selected}
           setSelected={setSelected}
+          maxNew={remainingSlots}
         />
       ) : (
         <DesktopBody
@@ -142,6 +165,7 @@ export function AttachmentPickerModal({
           alreadyAttachedIds={alreadyAttachedIds}
           selected={selected}
           setSelected={setSelected}
+          maxNew={remainingSlots}
         />
       )}
     </Modal>
@@ -158,6 +182,7 @@ function DesktopBody({
   alreadyAttachedIds,
   selected,
   setSelected,
+  maxNew,
 }: {
   tab: Tab;
   onTabChange: (t: Tab) => void;
@@ -165,6 +190,7 @@ function DesktopBody({
   alreadyAttachedIds: Set<string>;
   selected: Record<string, AttachedFile>;
   setSelected: React.Dispatch<React.SetStateAction<Record<string, AttachedFile>>>;
+  maxNew: number;
 }) {
   return (
     <>
@@ -191,7 +217,7 @@ function DesktopBody({
           setSelected={setSelected}
         />
       ) : (
-        <UploadTab onUploaded={onUploaded} />
+        <UploadTab onUploaded={onUploaded} maxNew={maxNew} />
       )}
     </>
   );
@@ -210,6 +236,7 @@ function MobileBody({
   alreadyAttachedIds,
   selected,
   setSelected,
+  maxNew,
 }: {
   view: MobileView;
   onViewChange: (v: MobileView) => void;
@@ -218,6 +245,7 @@ function MobileBody({
   alreadyAttachedIds: Set<string>;
   selected: Record<string, AttachedFile>;
   setSelected: React.Dispatch<React.SetStateAction<Record<string, AttachedFile>>>;
+  maxNew: number;
 }) {
   if (view === "browse") {
     return (
@@ -243,6 +271,7 @@ function MobileBody({
       onUploaded={onUploaded}
       onCaptureAttach={onCaptureAttach}
       onBrowse={() => onViewChange("browse")}
+      maxNew={maxNew}
     />
   );
 }
@@ -502,10 +531,12 @@ function MobileHomeActions({
   onUploaded,
   onCaptureAttach,
   onBrowse,
+  maxNew,
 }: {
   onUploaded: (f: FileItem) => void;
   onCaptureAttach: (f: FileItem) => void;
   onBrowse: () => void;
+  maxNew: number;
 }) {
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const galleryRef = useRef<HTMLInputElement | null>(null);
@@ -513,35 +544,46 @@ function MobileHomeActions({
   const upload = useUploadFile();
   const [err, setErr] = useState<string | null>(null);
 
-  // Shared upload routine; ``onDone`` decides what happens after the
+  // Shared upload routine; ``onDone`` decides what happens after each
   // file lands — gallery/file picks add to the multi-select, the camera
-  // capture attaches-and-closes in one shot.
-  const uploadThen = async (
+  // capture attaches-and-closes in one shot. Uploads up to ``cap`` files
+  // sequentially so a multi-select of many photos/docs all attach.
+  const uploadAll = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    onDone: (f: FileItem) => void
+    onDone: (f: FileItem) => void,
+    cap: number
   ) => {
-    const file = e.target.files?.[0];
+    const picked = Array.from(e.target.files ?? []);
     // Reset so picking the same file twice in a row still fires change.
     e.target.value = "";
-    if (!file) return;
+    if (picked.length === 0) return;
     setErr(null);
-    try {
-      const result = await upload.mutateAsync({
-        scope: "mine",
-        file,
-        folderId: null,
-        route: "chat",
-      });
-      onDone(result);
-    } catch (e) {
-      setErr(extractError(e));
+    const files = picked.slice(0, Math.max(0, cap));
+    if (picked.length > files.length) {
+      setErr(
+        `You can attach up to ${MAX_ATTACHMENTS} files per message — the first ${files.length} were added.`
+      );
+    }
+    for (const file of files) {
+      try {
+        const result = await upload.mutateAsync({
+          scope: "mine",
+          file,
+          folderId: null,
+          route: "chat",
+        });
+        onDone(result);
+      } catch (err) {
+        setErr(extractError(err));
+      }
     }
   };
 
   const handlePick = (e: React.ChangeEvent<HTMLInputElement>) =>
-    uploadThen(e, onUploaded);
+    uploadAll(e, onUploaded, maxNew);
+  // Camera capture is always a single shot → cap of 1.
   const handleCapture = (e: React.ChangeEvent<HTMLInputElement>) =>
-    uploadThen(e, onCaptureAttach);
+    uploadAll(e, onCaptureAttach, 1);
 
   const busy = upload.isPending;
 
@@ -598,12 +640,14 @@ function MobileHomeActions({
         ref={galleryRef}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
         onChange={handlePick}
       />
       <input
         ref={fileRef}
         type="file"
+        multiple
         className="hidden"
         onChange={handlePick}
       />
@@ -663,32 +707,42 @@ function MobileActionRow({
 // --------------------------------------------------------------------
 function UploadTab({
   onUploaded,
+  maxNew,
 }: {
   onUploaded: (f: FileItem) => void;
+  maxNew: number;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const upload = useUploadFile();
   const [err, setErr] = useState<string | null>(null);
 
   const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const picked = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
+    if (picked.length === 0) return;
     setErr(null);
-    try {
-      const result = await upload.mutateAsync({
-        scope: "mine",
-        file,
-        folderId: null,
-        // Files uploaded from the chat picker always land in the
-        // owner's "Chat Uploads" system folder. (Drive stage 5
-        // retired the admin-only "save to shared pool" path; sharing
-        // is now per-resource via the Shared tab's grant modal.)
-        route: "chat",
-      });
-      onUploaded(result);
-    } catch (e) {
-      setErr(extractError(e));
+    const files = picked.slice(0, Math.max(0, maxNew));
+    if (picked.length > files.length) {
+      setErr(
+        `You can attach up to ${MAX_ATTACHMENTS} files per message — the first ${files.length} were added.`
+      );
+    }
+    for (const file of files) {
+      try {
+        const result = await upload.mutateAsync({
+          scope: "mine",
+          file,
+          folderId: null,
+          // Files uploaded from the chat picker always land in the
+          // owner's "Chat Uploads" system folder. (Drive stage 5
+          // retired the admin-only "save to shared pool" path; sharing
+          // is now per-resource via the Shared tab's grant modal.)
+          route: "chat",
+        });
+        onUploaded(result);
+      } catch (err) {
+        setErr(extractError(err));
+      }
     }
   };
 
@@ -712,16 +766,17 @@ function UploadTab({
           <Upload className="h-6 w-6 text-[var(--text-muted)]" />
         )}
         <span className="text-sm font-medium">
-          {upload.isPending ? "Uploading..." : "Choose a file to upload"}
+          {upload.isPending ? "Uploading..." : "Choose files to upload"}
         </span>
         <span className="text-xs text-[var(--text-muted)]">
-          Up to 40 MB
+          Up to {MAX_ATTACHMENTS} files · 40 MB each
         </span>
       </button>
 
       <input
         ref={inputRef}
         type="file"
+        multiple
         className="hidden"
         onChange={handlePick}
       />

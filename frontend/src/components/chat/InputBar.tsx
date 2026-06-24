@@ -431,6 +431,10 @@ export function InputBar({
         setPending((prev) => prev.filter((p) => p.tempId !== tempId));
         setAttachments((prev) => {
           if (prev.some((a) => a.id === result.id)) return prev;
+          // Cap at 10 attachments per message (matches the picker). A
+          // dropped file past the cap still lands in Drive; it just isn't
+          // auto-attached here.
+          if (prev.length >= 10) return prev;
           return [
             ...prev,
             {
