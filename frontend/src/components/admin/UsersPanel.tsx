@@ -10,9 +10,12 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
   Unlock,
+  Upload,
+  Download,
   User as UserIcon,
 } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -37,6 +40,8 @@ import {
   useUnlockUser,
   useUpdateAdminUser,
 } from "@/hooks/useAdminUsers";
+import { Modal } from "@/components/shared/Modal";
+import { adminApi, type UserImportResult } from "@/api/admin";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 import type { AdminUser } from "@/api/types";
@@ -65,6 +70,42 @@ export function UsersPanel() {
 
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const close = () => setModal({ kind: "closed" });
+
+  // ---- CSV export / import (H1) ----
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<UserImportResult | null>(
+    null
+  );
+
+  const handleExport = async () => {
+    try {
+      const blob = await adminApi.exportUsersCsv();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "promptly-users.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    setImporting(true);
+    try {
+      const result = await adminApi.importUsersCsv(file);
+      setImportResult(result);
+      void refetch();
+    } catch {
+      // non-fatal — surfaced by the axios interceptor
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const handleCreate = async (values: UserFormValues) => {
     await createUser.mutateAsync({
@@ -127,6 +168,9 @@ export function UsersPanel() {
 
   const lockedCount = (users ?? []).filter((u) => u.locked_at !== null).length;
   const disabledCount = (users ?? []).filter((u) => u.disabled).length;
+  const noMfaCount = (users ?? []).filter(
+    (u) => !u.mfa_enrolled_method
+  ).length;
 
   return (
     <>
@@ -142,16 +186,58 @@ export function UsersPanel() {
               {disabledCount} disabled
             </Pill>
           )}
+          {noMfaCount > 0 && (
+            <Pill tone="warn" icon={<ShieldAlert className="h-3 w-3" />}>
+              {noMfaCount} without MFA
+            </Pill>
+          )}
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          leftIcon={<Plus className="h-3.5 w-3.5" />}
-          onClick={() => setModal({ kind: "create" })}
-        >
-          Create user
-        </Button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleImportFile(f);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Download className="h-3.5 w-3.5" />}
+            onClick={() => void handleExport()}
+          >
+            Export CSV
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Upload className="h-3.5 w-3.5" />}
+            disabled={importing}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {importing ? "Importing…" : "Import CSV"}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<Plus className="h-3.5 w-3.5" />}
+            onClick={() => setModal({ kind: "create" })}
+          >
+            Create user
+          </Button>
+        </div>
       </div>
+
+      {importResult && (
+        <ImportResultModal
+          result={importResult}
+          onClose={() => setImportResult(null)}
+        />
+      )}
 
       {isLoading && (
         <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
@@ -380,40 +466,132 @@ function UserRow({
   );
 }
 
+function ImportResultModal({
+  result,
+  onClose,
+}: {
+  result: UserImportResult;
+  onClose: () => void;
+}) {
+  const copyAll = () => {
+    const text = result.created
+      .map((c) => `${c.email},${c.temp_password}`)
+      .join("\n");
+    void navigator.clipboard?.writeText(text);
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Import complete"
+      description={`Created ${result.created_count} user${result.created_count === 1 ? "" : "s"}, skipped ${result.skipped_count}.`}
+      widthClass="max-w-xl"
+      footer={
+        <Button variant="primary" size="sm" onClick={onClose}>
+          Done
+        </Button>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        {result.created.length > 0 && (
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                Temporary passwords (shown once)
+              </span>
+              <button
+                type="button"
+                onClick={copyAll}
+                className="text-xs text-[var(--accent)] hover:underline"
+              >
+                Copy all
+              </button>
+            </div>
+            <div className="max-h-60 overflow-y-auto rounded-md border border-[var(--border)]">
+              <table className="w-full text-xs">
+                <tbody>
+                  {result.created.map((c) => (
+                    <tr key={c.email} className="border-b border-[var(--border)] last:border-0">
+                      <td className="px-2 py-1.5">{c.email}</td>
+                      <td className="px-2 py-1.5 font-mono text-[var(--text-muted)]">
+                        {c.temp_password}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-1.5 text-[11px] text-[var(--text-muted)]">
+              Each user must change their password on first login. These
+              passwords aren't stored — copy them now.
+            </p>
+          </div>
+        )}
+        {result.skipped.length > 0 && (
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Skipped
+            </span>
+            <ul className="mt-1 space-y-0.5 text-xs text-[var(--text-muted)]">
+              {result.skipped.map((s, i) => (
+                <li key={`${s.email}-${i}`}>
+                  Row {s.row}: {s.email || "(no email)"} — {s.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function StatusBadges({ user }: { user: AdminUser }) {
   const isLocked = user.locked_at !== null;
-  if (user.disabled) {
-    return (
-      <Pill tone="danger" icon={<Ban className="h-3 w-3" />}>
-        Disabled
-      </Pill>
-    );
-  }
-  if (isLocked) {
-    return (
-      <Pill tone="danger" icon={<Lock className="h-3 w-3" />}>
-        Locked
-      </Pill>
-    );
-  }
-  if (user.failed_login_attempts > 0) {
-    return (
-      <Pill tone="warn" icon={<Lock className="h-3 w-3" />}>
-        {user.failed_login_attempts} failed
-      </Pill>
-    );
-  }
-  if (user.must_change_password) {
-    return (
-      <Pill tone="warn" icon={<KeyRound className="h-3 w-3" />}>
-        Must change password
-      </Pill>
-    );
-  }
-  return (
+  const primary = user.disabled ? (
+    <Pill tone="danger" icon={<Ban className="h-3 w-3" />}>
+      Disabled
+    </Pill>
+  ) : isLocked ? (
+    <Pill tone="danger" icon={<Lock className="h-3 w-3" />}>
+      Locked
+    </Pill>
+  ) : user.failed_login_attempts > 0 ? (
+    <Pill tone="warn" icon={<Lock className="h-3 w-3" />}>
+      {user.failed_login_attempts} failed
+    </Pill>
+  ) : user.must_change_password ? (
+    <Pill tone="warn" icon={<KeyRound className="h-3 w-3" />}>
+      Must change password
+    </Pill>
+  ) : (
     <Pill tone="success" icon={<CheckCircle2 className="h-3 w-3" />}>
       Active
     </Pill>
+  );
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {primary}
+      {/* MFA enrollment — surfaced so an admin can see who's unprotected. */}
+      {user.mfa_enrolled_method ? (
+        <span
+          className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)]"
+          title={`MFA: ${user.mfa_enrolled_method}${user.mfa_enrolled_at ? ` · enrolled ${new Date(user.mfa_enrolled_at).toLocaleDateString()}` : ""}`}
+        >
+          <ShieldCheck className="h-3 w-3 text-emerald-500" />
+          MFA
+        </span>
+      ) : (
+        <span
+          className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400"
+          title="No second factor enrolled"
+        >
+          <ShieldAlert className="h-3 w-3" />
+          No MFA
+        </span>
+      )}
+    </div>
   );
 }
 

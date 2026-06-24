@@ -15,6 +15,13 @@ import type {
   UserRole,
 } from "./types";
 
+export interface UserImportResult {
+  created_count: number;
+  skipped_count: number;
+  created: { email: string; temp_password: string }[];
+  skipped: { row: number; email: string; reason: string }[];
+}
+
 export interface CreateUserPayload {
   email: string;
   username: string;
@@ -164,6 +171,27 @@ export const adminApi = {
   },
   async deleteUser(id: string): Promise<void> {
     await apiClient.delete(`/admin/users/${id}`);
+  },
+
+  /** Download all users as a CSV blob (no secrets). */
+  async exportUsersCsv(): Promise<Blob> {
+    const { data } = await apiClient.get("/admin/users/export", {
+      responseType: "blob",
+    });
+    return data as Blob;
+  },
+
+  /** Bulk-create users from a CSV file. Returns per-row results incl. the
+   *  one-time temp passwords for newly created accounts. */
+  async importUsersCsv(file: File): Promise<UserImportResult> {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await apiClient.post<UserImportResult>(
+      "/admin/users/import",
+      form,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return data;
   },
 
   // ---------------- Per-user security actions ----------------

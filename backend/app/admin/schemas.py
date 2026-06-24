@@ -32,6 +32,12 @@ class AdminUserResponse(BaseModel):
     last_login_at: datetime | None = None
     last_login_ip: str | None = None
 
+    # ----- MFA enrollment (admin visibility) -----
+    # NULL method = the user has NOT enrolled any second factor. Lets an
+    # admin see at a glance who's unprotected and nudge them.
+    mfa_enrolled_method: str | None = None
+    mfa_enrolled_at: datetime | None = None
+
     # ----- Quota overrides (Phase 3) -----
     # NULL on any of these means "use the org-wide default from
     # app_settings". Admins may set 0 to revoke a user's spend

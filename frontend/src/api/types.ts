@@ -151,6 +151,12 @@ export interface AdminUser {
   last_login_at: string | null;
   last_login_ip: string | null;
 
+  // ----- MFA enrollment (admin visibility) -----
+  /** Enrolled second-factor method (e.g. "totp", "email"), or null if the
+   *  user has NOT set up MFA. */
+  mfa_enrolled_method: string | null;
+  mfa_enrolled_at: string | null;
+
   // ----- Quota overrides (Phase 3) -----
   // `null` on any of these means "use the org-wide default from
   // `app_settings`". A number — including 0 — is a hard per-user cap.

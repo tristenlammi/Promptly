@@ -5,10 +5,23 @@ Non-admin callers get a 403.
 """
 from __future__ import annotations
 
+import csv
+import io
+import logging
+import secrets
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +56,7 @@ from app.files.system_folders import seed_system_folders
 from app.models_config.models import ModelProvider
 
 router = APIRouter()
+logger = logging.getLogger("promptly.admin")
 
 # Analytics + observability live in their own modules to keep this
 # file focused on user/account management. Both routers share the
@@ -104,6 +118,160 @@ async def create_user(
     await seed_system_folders(db, user)
     await db.commit()
     return AdminUserResponse.model_validate(user)
+
+
+# --------------------------------------------------------------------
+# Bulk export / import (CSV)
+# --------------------------------------------------------------------
+_EXPORT_COLUMNS = [
+    "email",
+    "username",
+    "role",
+    "disabled",
+    "mfa_enrolled_method",
+    "mfa_enrolled_at",
+    "last_login_at",
+    "created_at",
+    "daily_token_budget",
+    "monthly_token_budget",
+    "storage_cap_bytes",
+]
+
+
+@router.get("/users/export")
+async def export_users_csv(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> Response:
+    """Download every user as a CSV (no secrets — passwords/MFA secrets
+    are never exported). Suitable for an offline audit or re-import."""
+    users = (
+        await db.execute(select(User).order_by(User.created_at.asc()))
+    ).scalars().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_EXPORT_COLUMNS)
+    for u in users:
+        writer.writerow(
+            [
+                u.email,
+                u.username,
+                u.role,
+                "true" if u.disabled else "false",
+                u.mfa_enrolled_method or "",
+                u.mfa_enrolled_at.isoformat() if u.mfa_enrolled_at else "",
+                u.last_login_at.isoformat() if u.last_login_at else "",
+                u.created_at.isoformat() if u.created_at else "",
+                u.daily_token_budget if u.daily_token_budget is not None else "",
+                u.monthly_token_budget
+                if u.monthly_token_budget is not None
+                else "",
+                u.storage_cap_bytes if u.storage_cap_bytes is not None else "",
+            ]
+        )
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=promptly-users.csv"},
+    )
+
+
+_IMPORT_MAX_ROWS = 1000
+
+
+@router.post("/users/import", status_code=status.HTTP_200_OK)
+async def import_users_csv(
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict:
+    """Bulk-create users from a CSV with an ``email`` column (plus optional
+    ``username`` / ``role``).
+
+    A temporary password is generated for every new account and returned
+    once in the response so the admin can distribute it; the user is forced
+    to change it on first login. Existing emails/usernames are skipped, not
+    overwritten — import never mutates an existing account.
+    """
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded.")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if reader.fieldnames is None or "email" not in [
+        (f or "").strip().lower() for f in reader.fieldnames
+    ]:
+        raise HTTPException(
+            status_code=400, detail="CSV needs at least an 'email' column."
+        )
+
+    # Normalise header lookup (case-insensitive).
+    def _get(row: dict, key: str) -> str:
+        for k, v in row.items():
+            if (k or "").strip().lower() == key:
+                return (v or "").strip()
+        return ""
+
+    created: list[dict] = []
+    skipped: list[dict] = []
+    rows = list(reader)
+    if len(rows) > _IMPORT_MAX_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many rows (max {_IMPORT_MAX_ROWS}).",
+        )
+
+    for i, row in enumerate(rows):
+        email = _get(row, "email").lower()
+        if not email or "@" not in email:
+            skipped.append({"row": i + 2, "email": email, "reason": "invalid email"})
+            continue
+        username = _get(row, "username") or email.split("@")[0]
+        role = (_get(row, "role") or "user").lower()
+        if role not in ("user", "admin"):
+            role = "user"
+
+        temp_password = secrets.token_urlsafe(12)
+        user = User(
+            email=email,
+            username=username,
+            password_hash=hash_password(temp_password),
+            role=role,
+            settings={},
+            must_change_password=True,
+        )
+        db.add(user)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            skipped.append(
+                {"row": i + 2, "email": email, "reason": "email or username exists"}
+            )
+            continue
+        await db.refresh(user)
+        try:
+            await seed_system_folders(db, user)
+            await db.commit()
+        except Exception:  # noqa: BLE001 — folder glitch must not fail the import
+            await db.rollback()
+        created.append({"email": email, "temp_password": temp_password})
+
+    logger.info(
+        "Admin %s imported users: created=%d skipped=%d",
+        admin.id,
+        len(created),
+        len(skipped),
+    )
+    return {
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "created": created,
+        "skipped": skipped,
+    }
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserResponse)
