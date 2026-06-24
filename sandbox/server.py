@@ -34,6 +34,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -45,6 +46,17 @@ app = FastAPI(title="Promptly Sandbox", docs_url=None, redoc_url=None)
 # ---- Tunables (overridable via env) --------------------------------
 SCRATCH_ROOT = Path(os.environ.get("SANDBOX_SCRATCH", "/sandbox/run"))
 SECRET = os.environ.get("SANDBOX_SECRET", "")
+
+# ---- Persistent sessions -------------------------------------------
+# When a job carries a ``session_id``, its working directory survives
+# across calls (under SESSIONS_ROOT) so a script can build a CSV in one
+# call and read it in the next. These dirs live in the same tmpfs as the
+# throwaway jobs, so they're memory-backed, bounded, and cleared on a
+# container restart — exactly right for short-lived conversation state.
+# They're pruned by idle-TTL and a max-count cap so the tmpfs can't fill.
+SESSIONS_ROOT = SCRATCH_ROOT / "sessions"
+SESSION_TTL_S = int(os.environ.get("SANDBOX_SESSION_TTL_S", str(6 * 3600)))
+MAX_SESSIONS = int(os.environ.get("SANDBOX_MAX_SESSIONS", "200"))
 
 # Wall-clock ceiling regardless of what the caller asks for.
 MAX_TIMEOUT_S = int(os.environ.get("SANDBOX_MAX_TIMEOUT_S", "60"))
@@ -73,21 +85,29 @@ _RETURN_EXTS = {
     ".xlsx", ".xls", ".parquet",
 }
 
+# Image extensions we treat as "charts" for the autosave fallback.
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
 # Appended after the user's code so a script that builds matplotlib
 # figures but forgets to ``savefig`` still produces visible charts. We
-# only kick in when the script saved NO image files itself — otherwise
-# an explicit ``plt.savefig('chart.png')`` that leaves the figure open
-# would get duplicated as ``figure_1.png``. Wrapped in a broad except so
-# it can never turn a successful run into a failure.
-_AUTOSAVE_EPILOGUE = """
+# only kick in when the script saved NO *new* image file itself —
+# otherwise an explicit ``plt.savefig('chart.png')`` that leaves the
+# figure open would get duplicated as ``figure_1.png``. The ``%r`` is
+# the set of images that already existed before this run (non-empty only
+# for persistent sessions) so pre-existing charts don't suppress a fresh
+# autosave. Wrapped in a broad except so it can never turn a successful
+# run into a failure.
+_AUTOSAVE_EPILOGUE_TMPL = """
 
 # --- Promptly: auto-save unsaved matplotlib figures (fallback only) ---
 try:
     import glob as _glob
+    _existing = set(%r)
     _imgs = []
     for _pat in ("*.png", "*.jpg", "*.jpeg", "*.svg", "*.webp", "*.gif"):
         _imgs += _glob.glob(_pat)
-    if not _imgs:
+    _new = [i for i in _imgs if i not in _existing]
+    if not _new:
         import matplotlib.pyplot as _plt  # noqa
         for _i, _n in enumerate(_plt.get_fignums()):
             _plt.figure(_n).savefig(
@@ -107,6 +127,10 @@ class ExecuteRequest(BaseModel):
     code: str = Field(min_length=1)
     files: list[InputFile] = Field(default_factory=list)
     timeout_s: int | None = None
+    # Optional persistence key (the backend passes the conversation id).
+    # When set, the working directory survives across calls so files
+    # created in one run are readable in the next. Absent → throwaway.
+    session_id: str | None = None
 
 
 class OutputFile(BaseModel):
@@ -166,6 +190,62 @@ def _safe_name(name: str) -> str:
     return "".join(c for c in base if c not in '/\\:*?"<>|') or "input"
 
 
+def _safe_session_id(sid: str) -> str:
+    """Reduce a session id to a single safe directory name.
+
+    Conversation ids are UUIDs (already safe), but we sanitise defensively
+    so a hostile caller can't traverse out of SESSIONS_ROOT. Keep only
+    alphanumerics, dash and underscore; bound the length.
+    """
+    cleaned = "".join(c for c in (sid or "") if c.isalnum() or c in "-_")
+    return cleaned[:128] or "default"
+
+
+def _prune_sessions() -> None:
+    """Bound tmpfs use: drop idle sessions past the TTL, then evict the
+    oldest if we're still over the count cap. Best-effort — pruning must
+    never break a job."""
+    try:
+        if not SESSIONS_ROOT.exists():
+            return
+        now = time.time()
+        dirs = [p for p in SESSIONS_ROOT.iterdir() if p.is_dir()]
+        # TTL sweep (by last-modified — we touch the dir on each use).
+        for p in dirs:
+            try:
+                if now - p.stat().st_mtime > SESSION_TTL_S:
+                    shutil.rmtree(p, ignore_errors=True)
+            except OSError:
+                pass
+        # Count cap — evict oldest beyond MAX_SESSIONS.
+        live = [p for p in SESSIONS_ROOT.iterdir() if p.is_dir()]
+        if len(live) > MAX_SESSIONS:
+            live.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0)
+            for p in live[: len(live) - MAX_SESSIONS]:
+                shutil.rmtree(p, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _snapshot(workdir: Path) -> dict[str, tuple[int, int]]:
+    """Map of ``name -> (mtime_ns, size)`` for the top-level files in a
+    dir. Used to diff a persistent session before/after a run so only
+    files created or changed *this* run are returned (reading an existing
+    file must not re-emit it)."""
+    state: dict[str, tuple[int, int]] = {}
+    try:
+        for p in workdir.iterdir():
+            if p.is_file():
+                try:
+                    st = p.stat()
+                    state[p.name] = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return state
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -192,7 +272,34 @@ def execute(
     timeout = max(1, min(timeout, MAX_TIMEOUT_S))
 
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
-    workdir = Path(tempfile.mkdtemp(prefix="job-", dir=str(SCRATCH_ROOT)))
+
+    # Persistent session vs throwaway job. Persistent dirs survive across
+    # calls so the model can build a file in one run and read it in the
+    # next; throwaway jobs get a fresh dir wiped in ``finally``.
+    persistent = bool(req.session_id)
+    if persistent:
+        _prune_sessions()
+        SESSIONS_ROOT.mkdir(parents=True, exist_ok=True)
+        workdir = SESSIONS_ROOT / _safe_session_id(req.session_id or "")
+        workdir.mkdir(parents=True, exist_ok=True)
+        # Bump mtime so idle-TTL pruning treats this as recently used.
+        try:
+            os.utime(workdir, None)
+        except OSError:
+            pass
+    else:
+        workdir = Path(tempfile.mkdtemp(prefix="job-", dir=str(SCRATCH_ROOT)))
+
+    # Snapshot pre-existing files so we only return what THIS run created
+    # or changed (a persistent session may already hold files from earlier
+    # calls; reading them must not re-emit them).
+    pre_state = _snapshot(workdir) if persistent else {}
+    pre_images = sorted(
+        n for n in pre_state if os.path.splitext(n)[1].lower() in _IMAGE_EXTS
+    )
+    # Bound before the try so the finally can reference it even if input
+    # materialisation raises before the script is written.
+    script_name: str | None = None
 
     try:
         # ---- Materialise input files ----
@@ -213,10 +320,13 @@ def execute(
             input_names.add(safe)
 
         # ---- Write the script ----
-        script_name = "_promptly_main.py"
+        # Unique per call so two runs sharing a persistent session dir
+        # can't clobber each other's source mid-flight.
+        script_name = f"_promptly_main_{uuid.uuid4().hex}.py"
         input_names.add(script_name)
         (workdir / script_name).write_text(
-            req.code + _AUTOSAVE_EPILOGUE, encoding="utf-8"
+            req.code + (_AUTOSAVE_EPILOGUE_TMPL % (pre_images,)),
+            encoding="utf-8",
         )
 
         # ---- Run it ----
@@ -283,6 +393,16 @@ def execute(
             ext = path.suffix.lower()
             if ext not in _RETURN_EXTS:
                 continue
+            # In a persistent session, only return files this run created
+            # or modified — skip ones carried over unchanged from an
+            # earlier call (reading a CSV must not re-attach it).
+            if persistent:
+                try:
+                    st = path.stat()
+                except OSError:
+                    continue
+                if pre_state.get(path.name) == (st.st_mtime_ns, st.st_size):
+                    continue
             try:
                 data = path.read_bytes()
             except OSError:
@@ -317,4 +437,14 @@ def execute(
             outputs=outputs,
         )
     finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+        # Throwaway jobs are wiped immediately; persistent session dirs
+        # are kept for the next call and reaped later by _prune_sessions.
+        if not persistent:
+            shutil.rmtree(workdir, ignore_errors=True)
+        elif script_name:
+            # Clean up just this run's script so it doesn't accumulate or
+            # leak back as an "input" name on the next call's snapshot.
+            try:
+                (workdir / script_name).unlink(missing_ok=True)
+            except OSError:
+                pass

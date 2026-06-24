@@ -11,3 +11,9 @@ matplotlib==3.10.0
 openpyxl==3.1.5
 python-dateutil==2.9.0.post0
 tabulate==0.9.0
+# Richer plotting — seaborn (statistical matplotlib), plus plotly and
+# altair for interactive charts the model saves as self-contained HTML
+# (returned as artifacts). No kaleido/orca: HTML export needs no browser.
+seaborn==0.13.2
+plotly==5.24.1
+altair==5.5.0

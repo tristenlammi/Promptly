@@ -404,8 +404,10 @@ services:
     #   * On the internal-only ``sandbox-net`` (no internet, and no
     #     access to Postgres / Redis / Ollama, which live on ``promptly``).
     #   * Read-only root filesystem; the ONLY writable path is an
-    #     in-memory tmpfs scratch that's wiped per job. No host or user
-    #     data volumes are mounted.
+    #     in-memory tmpfs scratch. Throwaway jobs are wiped immediately;
+    #     per-conversation session dirs persist there across calls (build
+    #     a file, read it next call) and are reaped by idle-TTL + a count
+    #     cap. Cleared on restart. No host or user data volumes mounted.
     #   * All Linux capabilities dropped, no privilege escalation, PID
     #     and memory caps. The worker process itself runs as non-root.
     build:

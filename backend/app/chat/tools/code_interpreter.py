@@ -87,24 +87,31 @@ class CodeInterpreterTool(Tool):
         "user explicitly asks to run code, compute a specific calculation "
         "with numbers they have provided, process/transform an uploaded data "
         "file (CSV, Excel, JSON, etc.), or generate a chart from actual data. "
-        "pandas, numpy, matplotlib, and openpyxl are available. "
-        "The sandbox has NO internet access and is reset after every run. "
+        "pandas, numpy, matplotlib, seaborn, plotly, altair, and openpyxl are "
+        "available. The sandbox has NO internet access. Files you create "
+        "PERSIST across calls within this conversation, so you can build a "
+        "file (e.g. a cleaned CSV) in one call and read it back in the next "
+        "without regenerating it. "
         "Files the user attached to this message are in the working directory "
         "under their original filename (e.g. pd.read_csv('data.csv')). "
-        "Save charts with matplotlib (plt.savefig('chart.png')) to attach "
-        "them inline. Use print() for any results you want to see. "
+        "Save charts with matplotlib (plt.savefig('chart.png')); for "
+        "interactive plots use plotly (fig.write_html('chart.html')) or "
+        "altair (chart.save('chart.html')) and the file is attached. "
+        "Use print() for any results you want to see. "
         "Do NOT call this for general advice, recommendations, explanations, "
         "conversational answers, or anything you can answer directly in text "
         "— even if the topic involves numbers or health/fitness."
     )
     prompt_hint = (
-        "Run Python in a secure sandbox (pandas/numpy/matplotlib available, "
-        "no internet). Call this only when the user explicitly asks to run "
-        "code, crunch a specific dataset they uploaded, or generate a chart "
-        "from data. Do NOT use it to answer conversational questions, give "
-        "advice, or perform simple mental-math estimates — reply in text "
-        "for those. Uploaded files are in the working directory by filename; "
-        "save plots with plt.savefig('name.png') to attach them."
+        "Run Python in a secure sandbox (pandas/numpy/matplotlib/seaborn/"
+        "plotly/altair available, no internet). Call this only when the user "
+        "explicitly asks to run code, crunch a specific dataset they uploaded, "
+        "or generate a chart from data. Do NOT use it to answer conversational "
+        "questions, give advice, or perform simple mental-math estimates — "
+        "reply in text for those. Uploaded files are in the working directory "
+        "by filename; files you create persist across calls in this "
+        "conversation. Save plots with plt.savefig('name.png') (or "
+        "fig.write_html('name.html') for interactive plotly/altair) to attach."
     )
     parameters: dict[str, Any] = {
         "type": "object",
@@ -187,6 +194,10 @@ class CodeInterpreterTool(Tool):
                         "code": code,
                         "files": payload_files,
                         "timeout_s": timeout_s,
+                        # Persist the working dir across calls within this
+                        # conversation so the model can build a file in one
+                        # run and read it in the next.
+                        "session_id": str(ctx.conversation_id),
                     },
                 )
         except httpx.HTTPError as e:
