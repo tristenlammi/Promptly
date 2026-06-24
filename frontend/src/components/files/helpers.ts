@@ -41,6 +41,21 @@ export function kindLabel(file: FileItem): string {
   return ext ? ext.toUpperCase() : "File";
 }
 
+/** User-facing file name for the Drive list / details / previews.
+ *
+ *  Native Drive Documents (TipTap + Y.js) are physically stored as
+ *  ``*.html`` blobs, but that extension is an implementation detail —
+ *  the Kind column already says "Doc". Strip the trailing ``.html`` /
+ *  ``.htm`` for documents so the user sees a clean title ("Tasklist"),
+ *  while genuinely uploaded files keep their real extension. */
+export function displayFileName(file: FileItem): string {
+  const name = file.filename || "";
+  if (file.source_kind === "document") {
+    return name.replace(/\.html?$/i, "");
+  }
+  return name;
+}
+
 export function extractError(e: unknown): string {
   if (typeof e === "object" && e && "response" in e) {
     const resp = (e as { response?: { data?: { detail?: unknown } } }).response;

@@ -966,11 +966,11 @@ export function ChatPage({
   // model-name reassurance they had before Phase D1.
   const footerText =
     webSearchMode === "always"
-      ? "Web search: Always — every reply will run a search and cite sources."
+      ? "Web search: Always"
       : webSearchMode === "auto"
-        ? "Web search: Auto — the model decides when current info is needed."
+        ? "Web search: Auto"
         : selectedModel
-          ? `Active model: ${selectedModel.display_name}`
+          ? selectedModel.display_name
           : "";
 
   return (

@@ -1169,7 +1169,7 @@ export function InputBar({
             ) : allowAttachments ? (
               <span>
                 {footer}
-                {footer ? " · " : ""}Drop files here to attach
+                {footer ? " · " : ""}Drop files to attach
               </span>
             ) : (
               footer

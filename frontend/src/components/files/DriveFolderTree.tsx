@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Home, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Home, Loader2 } from "lucide-react";
 
 import { filesApi, type FileScope, type FolderItem } from "@/api/files";
 import { DriveItemIcon } from "./DriveItemIcon";
@@ -51,6 +51,11 @@ export function DriveFolderTree({
   const [roots, setRoots] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // System folders (Chat Uploads, Generated Files, Workspaces…) are
+  // tucked into a collapsed group at the bottom of the rail so the
+  // top level reads as *your* folders rather than echoing the content
+  // pane's full listing. Collapsed by default; opens on demand.
+  const [systemOpen, setSystemOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,7 +119,7 @@ export function DriveFolderTree({
       >
         <Home className="h-4 w-4 shrink-0" />
         <span className="truncate">
-          {scope === "mine" ? "My files" : "Shared with me"}
+          {scope === "mine" ? "Drive" : "Shared with me"}
         </span>
       </button>
 
@@ -130,16 +135,51 @@ export function DriveFolderTree({
       )}
 
       <ul>
-        {roots.map((n) => (
-          <TreeRow
-            key={n.folder.id}
-            node={n}
-            currentFolderId={currentFolderId}
-            onNavigate={onNavigate}
-            onToggle={toggle}
-          />
-        ))}
+        {roots
+          .filter((n) => !n.folder.system_kind)
+          .map((n) => (
+            <TreeRow
+              key={n.folder.id}
+              node={n}
+              currentFolderId={currentFolderId}
+              onNavigate={onNavigate}
+              onToggle={toggle}
+            />
+          ))}
       </ul>
+
+      {roots.some((n) => n.folder.system_kind) && (
+        <div className="mt-1">
+          <button
+            type="button"
+            onClick={() => setSystemOpen((o) => !o)}
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]"
+            aria-expanded={systemOpen}
+          >
+            {systemOpen ? (
+              <ChevronDown className="h-3 w-3 shrink-0" />
+            ) : (
+              <ChevronRight className="h-3 w-3 shrink-0" />
+            )}
+            System
+          </button>
+          {systemOpen && (
+            <ul>
+              {roots
+                .filter((n) => n.folder.system_kind)
+                .map((n) => (
+                  <TreeRow
+                    key={n.folder.id}
+                    node={n}
+                    currentFolderId={currentFolderId}
+                    onNavigate={onNavigate}
+                    onToggle={toggle}
+                  />
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
     </nav>
   );
 }

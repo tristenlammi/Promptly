@@ -81,6 +81,14 @@ export function ContextWindowPill({
     return null;
   }
 
+  // Hide on a brand-new, empty chat. With no messages the only thing
+  // the pill could show is the fixed system/response reserve, which
+  // reads as "why am I already using tokens?" before you've typed
+  // anything. Surface it once the conversation actually starts.
+  if (messages.length === 0 && !isStreaming) {
+    return null;
+  }
+
   const ctx = model.context_window;
   const ratio = Math.min(1, budget.totalTokens / ctx);
   const pct = Math.round(ratio * 100);

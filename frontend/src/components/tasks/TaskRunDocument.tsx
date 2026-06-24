@@ -56,7 +56,10 @@ export function TaskRunDocument({ run }: { run: TaskRun }) {
   const sources = (run.sources ?? []).filter((s) => s.url);
 
   return (
-    <article className="promptly-prose max-w-none">
+    // Cap long-form report text to a readable measure (~prose width) and
+    // centre it, rather than letting it run edge-to-edge across an
+    // ultrawide column where the line length hurts readability.
+    <article className="promptly-prose mx-auto max-w-3xl">
       {body}
       {sources.length > 0 && (
         <div className="mt-6 border-t border-[var(--border)] pt-3">

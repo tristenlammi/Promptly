@@ -55,11 +55,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isMobile = useIsMobile();
   const { isLoading: convLoading } = useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
-  const [invitesOpen, setInvitesOpen] = useState(false);
-  const { data: workspaceInvites } = useWorkspaceInvites();
-  // Pill shows the count of pending workspace invites (per-chat sharing
-  // was removed) so the user notices new workspace invites.
-  const inviteCount = workspaceInvites?.length ?? 0;
 
   // Workspace-scoped chats live exclusively inside their workspace's
   // detail page now — surfacing them again in the global sidebar
@@ -193,26 +188,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             />
           );
         })}
-        {/* Phase 4b: invites entry. Always rendered so the badge has a
-            stable place to sit; click opens a modal listing pending
-            invites the caller can accept or decline. */}
-        <button
-          type="button"
-          onClick={() => setInvitesOpen(true)}
-          className={cn(
-            "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition",
-            "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          )}
-          title="Conversation invites"
-        >
-          <Inbox className="h-4 w-4" />
-          <span>Invites</span>
-          {inviteCount > 0 && (
-            <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
-              {inviteCount}
-            </span>
-          )}
-        </button>
       </nav>
 
       {/* Search across all conversations. Activates a panel that
@@ -265,11 +240,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Footer */}
       <UserFooter />
-
-      <ShareInvitesPanel
-        open={invitesOpen}
-        onClose={() => setInvitesOpen(false)}
-      />
     </aside>
   );
 }
@@ -595,6 +565,12 @@ function UserFooter() {
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
+  // Invites live here (account area) rather than the primary nav — they're
+  // an account-level collaboration action, not a content surface. Always
+  // rendered so the pending-count badge has a stable home.
+  const [invitesOpen, setInvitesOpen] = useState(false);
+  const { data: workspaceInvites } = useWorkspaceInvites();
+  const inviteCount = workspaceInvites?.length ?? 0;
 
   const onLogout = async () => {
     try {
@@ -622,6 +598,22 @@ function UserFooter() {
       >
         <Archive className="h-4 w-4" />
         <span className="font-medium">Archive</span>
+      </button>
+      {/* Workspace invites — pending collaboration invites the user can
+          accept or decline. Click opens a modal listing them. */}
+      <button
+        onClick={() => setInvitesOpen(true)}
+        className="relative mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+        title="Workspace invites"
+        aria-label="Open workspace invites"
+      >
+        <Inbox className="h-4 w-4" />
+        <span className="font-medium">Invites</span>
+        {inviteCount > 0 && (
+          <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
+            {inviteCount}
+          </span>
+        )}
       </button>
       {/* Per-user account settings — every authenticated user gets one.
           Hosts chat-default preferences plus MFA / trusted devices. The
@@ -683,6 +675,10 @@ function UserFooter() {
         <span className="text-xs text-[var(--text-muted)]">Theme</span>
         <ThemeToggle />
       </div>
+      <ShareInvitesPanel
+        open={invitesOpen}
+        onClose={() => setInvitesOpen(false)}
+      />
     </div>
   );
 }

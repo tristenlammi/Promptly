@@ -19,6 +19,7 @@ import { GranteesPill } from "./GranteesPill";
 import { cn } from "@/utils/cn";
 
 import {
+  displayFileName,
   downloadAuthed,
   formatRelativeTime,
   humanSize,
@@ -97,7 +98,7 @@ export function DriveFileRow({
         <DriveItemIcon file={file} />
         <span className="flex min-w-0 flex-col">
           <span className="flex items-center gap-1.5 truncate text-sm">
-            <span className="truncate">{file.filename}</span>
+            <span className="truncate">{displayFileName(file)}</span>
             {file.starred_at && (
               <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
             )}

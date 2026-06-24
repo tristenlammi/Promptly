@@ -36,6 +36,12 @@ export function WorkspaceCard({
   // owner so the card still renders while TanStack refetches the
   // enriched shape.
   const isCollaborator = workspace.role === "collaborator";
+  // Deterministic per-workspace accent so cards are scannable at a
+  // glance — same workspace always gets the same hue. Purely cosmetic,
+  // derived client-side from the id (no backend field needed).
+  const hue = hueForId(workspace.id);
+  const accent = `hsl(${hue} 62% 52%)`;
+  const accentSoft = `hsl(${hue} 62% 52% / 0.14)`;
 
   return (
     <div
@@ -46,6 +52,12 @@ export function WorkspaceCard({
         isCollaborator && "border-[var(--accent)]/30"
       )}
     >
+      {/* Per-workspace identity strip along the top edge. */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-1"
+        style={{ backgroundColor: accent }}
+      />
       <button
         onClick={onOpen}
         className="absolute inset-0 rounded-card"
@@ -54,7 +66,10 @@ export function WorkspaceCard({
 
       <div className="pointer-events-none relative">
         <div className="flex items-start gap-2">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
+          <div
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+            style={{ backgroundColor: accentSoft, color: accent }}
+          >
             <FolderKanban className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
@@ -90,8 +105,12 @@ export function WorkspaceCard({
             ) : null}
           </div>
         </div>
+      </div>
 
-        <div className="mt-3 flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
+      {/* Stats + footer anchored to the card bottom so they line up
+          across cards regardless of whether a description is present. */}
+      <div className="relative mt-4 space-y-2">
+        <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-1">
             <MessageSquare className="h-3 w-3" />
             {workspace.conversation_count} chat
@@ -103,10 +122,9 @@ export function WorkspaceCard({
             {workspace.file_count === 1 ? "" : "s"}
           </span>
         </div>
-      </div>
 
-      <div className="relative mt-4 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-        <span>Updated {updated.toLocaleDateString()}</span>
+        <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+          <span>Updated {updated.toLocaleDateString()}</span>
         {!isCollaborator && (
           <div className="pointer-events-auto flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
             {isArchived && onUnarchive && (
@@ -143,9 +161,20 @@ export function WorkspaceCard({
             </IconActionButton>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
+}
+
+/** Stable hue (0–359) derived from a workspace id, so each workspace
+ *  gets a consistent identity colour without any backend field. */
+function hueForId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return h % 360;
 }
 
 function IconActionButton({

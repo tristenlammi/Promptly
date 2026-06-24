@@ -271,7 +271,6 @@ from app.app_settings.public_router import (  # noqa: E402
     router as workspace_defaults_router,
 )
 from app.auth.router import router as auth_router  # noqa: E402
-from app.chat.compare_router import router as chat_compare_router  # noqa: E402
 from app.workspaces.shares import invite_router as workspace_invite_router  # noqa: E402
 from app.workspaces.shares import router as workspace_shares_router  # noqa: E402
 from app.workspaces.router import router as workspaces_router  # noqa: E402
@@ -354,9 +353,6 @@ app.include_router(
 app.include_router(
     workspace_invite_router, prefix="/api", tags=["workspaces"]
 )
-# Compare router already defines its own ``/api/chat/compare`` prefix
-# so it slots in without a double-prefix here.
-app.include_router(chat_compare_router)
 app.include_router(models_router, prefix="/api/models", tags=["models"])
 # Custom Models — admin-curated assistants (personality + knowledge
 # library). Lives under the admin prefix so non-admins can't list

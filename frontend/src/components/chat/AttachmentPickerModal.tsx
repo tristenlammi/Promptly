@@ -352,7 +352,7 @@ function EmbeddedBrowser({
         >
           <Home className="h-3 w-3" />
           <span className="font-medium">
-            {scope === "mine" ? "My files" : "Shared"}
+            {scope === "mine" ? "Drive" : "Shared"}
           </span>
         </button>
         {(data?.breadcrumbs ?? []).map((c, i) => (

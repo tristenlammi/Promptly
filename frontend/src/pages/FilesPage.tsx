@@ -47,6 +47,7 @@ import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
 import { documentsApi } from "@/api/documents";
 import {
+  displayFileName,
   downloadAuthed,
   extractError,
   formatRelativeTime,
@@ -1055,7 +1056,7 @@ function Breadcrumbs({
     payload: DragPayload
   ) => Promise<DropOutcome>;
 }) {
-  const rootLabel = scope === "mine" ? "My files" : "Shared";
+  const rootLabel = scope === "mine" ? "Drive" : "Shared";
   return (
     <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm text-[var(--text-muted)]">
       <CrumbButton
@@ -2282,14 +2283,14 @@ function FileRow({
         <button
           onClick={onPreview}
           className="flex w-full flex-1 flex-col gap-2 text-left"
-          title={file.filename}
+          title={displayFileName(file)}
         >
           <DriveThumb
             file={file}
             className="aspect-square w-full rounded-md border border-[var(--border)]"
           />
           <span className="line-clamp-2 w-full break-words text-sm font-medium">
-            {file.filename}
+            {displayFileName(file)}
           </span>
           <span className="text-[10px] text-[var(--text-muted)]">
             {humanSize(file.size_bytes)}
@@ -2354,7 +2355,7 @@ function FileRow({
         >
           <DriveItemIcon file={file} />
           <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
-            <span className="truncate">{file.filename}</span>
+            <span className="truncate">{displayFileName(file)}</span>
             {file.starred_at && (
               <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
             )}

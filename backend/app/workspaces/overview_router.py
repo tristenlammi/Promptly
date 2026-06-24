@@ -53,6 +53,8 @@ class TaskRollupItem(BaseModel):
 class OverviewCounts(BaseModel):
     notes: int = 0
     canvases: int = 0
+    boards: int = 0
+    sheets: int = 0
     chats: int = 0
     files: int = 0
 
@@ -106,6 +108,8 @@ async def workspace_overview(
     counts = OverviewCounts(
         notes=await _count_kind("note"),
         canvases=await _count_kind("canvas"),
+        boards=await _count_kind("board"),
+        sheets=await _count_kind("sheet"),
         files=await _count_kind("file"),
         chats=int(
             await db.scalar(

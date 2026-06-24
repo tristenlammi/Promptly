@@ -1,11 +1,21 @@
+import { useState } from "react";
 import {
   CheckSquare,
+  ChevronRight,
   FileText,
   MessageSquare,
   Shapes,
   Sparkles,
   Square,
+  X,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// One-time (until manually dismissed) context-banner flag, shared across
+// every workspace — once the user understands that items become context,
+// they don't need reminding on each one.
+const CONTEXT_BANNER_KEY = "promptly.ws.contextBannerDismissed";
 
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
@@ -35,6 +45,13 @@ export function WorkspaceOverviewPane({
   const { data: overview } = useWorkspaceOverview(workspaceId);
   const { data: workspaceTasks } = useWorkspaceTasks(workspaceId);
   const { data: mapData } = useWorkspaceMap(workspaceId);
+  const [bannerDismissed, setBannerDismissed] = useState(
+    () => localStorage.getItem(CONTEXT_BANNER_KEY) === "1"
+  );
+  const dismissBanner = () => {
+    localStorage.setItem(CONTEXT_BANNER_KEY, "1");
+    setBannerDismissed(true);
+  };
   // Drop the map's "## Workspace contents" header + intro (the panel below
   // supplies its own) and show just the catalog tree.
   const mapTree = (mapData?.markdown ?? "")
@@ -66,9 +83,23 @@ export function WorkspaceOverviewPane({
   const isEmpty =
     (counts?.notes ?? 0) +
       (counts?.canvases ?? 0) +
+      (counts?.boards ?? 0) +
+      (counts?.sheets ?? 0) +
       (counts?.chats ?? 0) +
       (counts?.files ?? 0) ===
     0;
+  // Stat tiles cover every item kind that actually exists in this
+  // workspace — no misleading "0 Boards" on a workspace that has none,
+  // and nothing silently omitted on one that does. Open tasks is always
+  // shown as the headline action metric.
+  const contentStats = [
+    { label: "Notes", value: counts?.notes ?? 0 },
+    { label: "Canvases", value: counts?.canvases ?? 0 },
+    { label: "Boards", value: counts?.boards ?? 0 },
+    { label: "Sheets", value: counts?.sheets ?? 0 },
+    { label: "Files", value: counts?.files ?? 0 },
+    { label: "Chats", value: counts?.chats ?? 0 },
+  ].filter((s) => s.value > 0);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-6 py-8">
@@ -79,22 +110,31 @@ export function WorkspaceOverviewPane({
 
       {isEmpty && canEdit ? (
         <GettingStarted />
-      ) : (
-        <div className="mt-4 flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+      ) : !bannerDismissed ? (
+        <div className="relative mt-4 flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 pr-8 text-xs text-[var(--text-muted)]">
           <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
           <span>
             Everything you add here — notes, canvases, and files — becomes{" "}
             <span className="font-medium text-[var(--text)]">context</span> your
             chats can draw on. Toggle any item's ⚡ to include or exclude it.
           </span>
+          <button
+            type="button"
+            onClick={dismissBanner}
+            aria-label="Dismiss"
+            title="Dismiss"
+            className="absolute right-1.5 top-1.5 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
-      )}
+      ) : null}
 
-      {/* Counts */}
+      {/* Counts — every kind that exists, plus the open-tasks headline */}
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Notes" value={counts?.notes ?? 0} />
-        <StatCard label="Canvases" value={counts?.canvases ?? 0} />
-        <StatCard label="Chats" value={counts?.chats ?? 0} />
+        {contentStats.map((s) => (
+          <StatCard key={s.label} label={s.label} value={s.value} />
+        ))}
         <StatCard label="Open tasks" value={openTaskCount} accent />
       </div>
 
@@ -103,20 +143,24 @@ export function WorkspaceOverviewPane({
         <WorkspaceFilesPanel workspaceId={workspaceId} canEdit={canEdit} />
       </div>
 
-      {/* Workspace map — the catalog every chat sees */}
+      {/* Workspace map — the catalog every chat sees, rendered as a clean
+          collapsible tree (open by default) rather than a raw code block. */}
       {mapTree && (
-        <section className="mt-8">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        <details open className="group mt-8">
+          <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]">
+            <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
             Workspace map
-          </h2>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+          </summary>
+          <p className="mb-2 ml-4 mt-1 text-[11px] text-[var(--text-muted)]">
             The catalog every chat sees, so the AI knows what exists and where.
             Updates automatically as you add, rename, or remove items.
           </p>
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text)]">
-            {mapTree}
-          </pre>
-        </section>
+          <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm leading-relaxed text-[var(--text)] [&_a]:text-[var(--accent)] [&_a:hover]:underline [&_li]:my-0.5 [&_ul]:m-0 [&_ul]:list-none [&_ul]:p-0 [&_ul_ul]:ml-4 [&_ul_ul]:border-l [&_ul_ul]:border-[var(--border)] [&_ul_ul]:pl-3">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {mapTree}
+            </ReactMarkdown>
+          </div>
+        </details>
       )}
 
       {/* Secondary: checkboxes found inside notes (rollup) */}

@@ -189,7 +189,7 @@ export function MoveItemModal({
         >
           <Home className="h-4 w-4 text-[var(--text-muted)]" />
           <span className="font-medium">
-            {scope === "mine" ? "My files" : "Shared"} (root)
+            {scope === "mine" ? "Drive" : "Shared"} (root)
           </span>
           {rootIsCurrent && (
             <span className="ml-auto text-xs text-[var(--text-muted)]">

@@ -7,8 +7,6 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
 import { ChatPage } from "@/pages/ChatPage";
-import { ComparePage } from "@/pages/ComparePage";
-import { CompareArchivePage } from "@/pages/CompareArchivePage";
 import { FilesPage, SharedWithMePage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
@@ -204,18 +202,9 @@ export default function App() {
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/new" element={<Navigate to="/chat" replace />} />
-        {/* Compare routes live under /chat/compare so they slot into
-            the chat sidebar's "section" hierarchy without needing a
-            new top-level nav item. The bare ``/chat/compare`` entry
-            redirects to the archive so a click on the sidebar entry
-            always lands on a useful listing. */}
-        <Route
-          path="/chat/compare"
-          element={<Navigate to="/chat/compare/archive" replace />}
-        />
-        <Route path="/chat/compare/archive" element={<CompareArchivePage />} />
-        <Route path="/chat/compare/new" element={<ComparePage />} />
-        <Route path="/chat/compare/:id" element={<ComparePage />} />
+        {/* Compare mode was decommissioned (Phase 1 cleanup). Any stale
+            bookmark to the old /chat/compare* routes falls through to the
+            catch-all and redirects to /chat. */}
         <Route path="/chat/:id" element={<ChatPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />

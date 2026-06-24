@@ -215,6 +215,16 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
 class CompareGroup(UUIDPKMixin, TimestampMixin, Base):
     """A side-by-side model-comparison session.
 
+    DEPRECATED (Phase 1 cleanup): Compare mode was decommissioned — the
+    frontend surface and the ``/api/chat/compare`` router are gone, so
+    nothing creates new groups anymore. The model + ``compare_groups``
+    table + ``Conversation.compare_group_id`` are kept dormant rather
+    than dropped, because the sidebar / @-mention queries still filter
+    ``compare_group_id`` to hide any historical uncrowned columns. With
+    no creation path, those filters are harmless no-ops for new data.
+    A future migration can drop the table + column once the residual
+    filters in ``router.py`` are simplified away.
+
     One group bundles N (2–4) real ``conversations`` rows — one per
     column — and tracks which column the user ultimately "crowned".
     Before crowning, columns are equal peers; after crowning, the

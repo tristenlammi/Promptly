@@ -609,7 +609,8 @@ function TreeNode({
 
           {isContextItem && contextOn && (
             <span
-              title="Used as workspace context"
+              title="In this workspace's chat context — chats here can draw on it. Toggle via the ⋯ menu."
+              aria-label="Included in workspace context"
               className="inline-flex shrink-0 items-center text-[var(--accent)]"
             >
               <Zap className="h-3 w-3" />
@@ -617,7 +618,8 @@ function TreeNode({
           )}
           {isContextItem && !contextOn && (
             <span
-              title="Not used as workspace context"
+              title="Excluded from this workspace's chat context. Toggle via the ⋯ menu."
+              aria-label="Excluded from workspace context"
               className="inline-flex shrink-0 items-center text-[var(--text-muted)]"
             >
               <ZapOff className="h-3 w-3" />

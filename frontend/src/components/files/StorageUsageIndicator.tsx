@@ -1,4 +1,4 @@
-import { HardDrive, Infinity as InfinityIcon } from "lucide-react";
+import { HardDrive } from "lucide-react";
 
 import { useStorageQuota } from "@/hooks/useFiles";
 import { cn } from "@/utils/cn";
@@ -13,7 +13,7 @@ import { humanSize } from "./helpers";
  *
  * Three visual states:
  *   - Loading:   dimmed placeholder ("··")
- *   - Unlimited: "∞ Unlimited storage" (no bar)
+ *   - Unlimited: "1.2 GB used" with a drive icon (no bar, no cap)
  *   - Capped:    "1.2 GB of 10 GB" + progress bar; bar shifts to
  *                amber past 80% and red past 95% so the user gets
  *                a visual nudge before they hit a quota-reject.
@@ -59,7 +59,7 @@ export function StorageUsageIndicator({ className }: { className?: string }) {
     <>
       {/* Mobile variant — tiny pill with an icon + percentage only.
           Visible on phones where the sub-nav is already crowded
-          with tabs. Falls back to "∞" when the account has no cap. */}
+          with tabs. Uncapped accounts show the raw size used. */}
       <div
         className={cn(
           "inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)]/80 px-2 py-0.5 text-[11px] md:hidden",
@@ -67,11 +67,12 @@ export function StorageUsageIndicator({ className }: { className?: string }) {
         )}
         title={title}
       >
-        {uncapped ? (
-          <InfinityIcon className="h-3 w-3 text-[var(--text-muted)]" />
-        ) : (
-          <HardDrive className={cn("h-3 w-3", toneTextClass(tone))} />
-        )}
+        <HardDrive
+          className={cn(
+            "h-3 w-3",
+            uncapped ? "text-[var(--text-muted)]" : toneTextClass(tone)
+          )}
+        />
         <span className={cn("tabular-nums font-medium", toneTextClass(tone))}>
           {uncapped ? humanSize(data.used_bytes) : `${pctRounded}%`}
         </span>
@@ -87,7 +88,7 @@ export function StorageUsageIndicator({ className }: { className?: string }) {
       >
         {uncapped ? (
           <>
-            <InfinityIcon className="h-3 w-3 text-[var(--text-muted)]" />
+            <HardDrive className="h-3 w-3 text-[var(--text-muted)]" />
             <span className="tabular-nums text-[var(--text-muted)]">
               {humanSize(data.used_bytes)} used
             </span>

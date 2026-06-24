@@ -13,7 +13,12 @@ import type { FileItem, FolderItem } from "@/api/files";
 import { DriveItemIcon } from "./DriveItemIcon";
 import { DriveThumb } from "./DriveThumb";
 import { GranteesPill } from "./GranteesPill";
-import { formatRelativeTime, humanSize, kindLabel } from "./helpers";
+import {
+  displayFileName,
+  formatRelativeTime,
+  humanSize,
+  kindLabel,
+} from "./helpers";
 import { cn } from "@/utils/cn";
 
 /**
@@ -49,7 +54,7 @@ export function DriveDetailsPanel({
   onTrash: () => void;
 }) {
   const isFolder = !!folder;
-  const name = folder ? folder.name : (file?.filename ?? "");
+  const name = folder ? folder.name : file ? displayFileName(file) : "";
   const starred = folder ? !!folder.starred_at : !!file?.starred_at;
   const updatedAt = folder ? folder.updated_at : (file?.updated_at ?? null);
   const sharing = folder ? folder.sharing : file?.sharing;

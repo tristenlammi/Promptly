@@ -206,7 +206,14 @@ export interface WorkspaceTaskItem {
 
 /** Workspace landing-pane summary (counts + tasks rollup + recent). */
 export interface WorkspaceOverview {
-  counts: { notes: number; canvases: number; chats: number; files: number };
+  counts: {
+    notes: number;
+    canvases: number;
+    boards: number;
+    sheets: number;
+    chats: number;
+    files: number;
+  };
   tasks: WorkspaceTaskItem[];
   open_task_count: number;
   recent: {
