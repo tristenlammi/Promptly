@@ -207,13 +207,19 @@ export function TaskDetailPage() {
                         : "hover:bg-[var(--hover)]"
                     )}
                   >
-                    <span className="text-xs">{fmtDate(r.created_at)}</span>
-                    <span className="flex items-center gap-1.5">
+                    <span className="line-clamp-2 font-medium text-[var(--text)]">
+                      {r.title ||
+                        (r.status === "failed"
+                          ? "Run failed"
+                          : r.status === "success"
+                            ? "Untitled report"
+                            : "In progress…")}
+                    </span>
+                    <span className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
                       <RunStatusChip status={r.status} />
+                      <span>{fmtDate(r.created_at)}</span>
                       {r.trigger === "manual" && (
-                        <span className="text-[10px] text-[var(--text-muted)]">
-                          manual
-                        </span>
+                        <span className="text-[10px]">manual</span>
                       )}
                     </span>
                   </button>

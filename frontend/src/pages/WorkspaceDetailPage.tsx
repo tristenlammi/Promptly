@@ -67,6 +67,7 @@ const WorkspaceSheetPane = lazyWithRetry(
 );
 import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
+import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -1019,6 +1020,11 @@ function WorkspaceNotePane({
         workspaceId={workspaceId}
         itemId={node.id}
         onOpenItem={onOpenItem}
+      />
+      <ItemCommentsPanel
+        workspaceId={workspaceId}
+        itemId={node.id}
+        canEdit={canEdit}
       />
     </div>
   );

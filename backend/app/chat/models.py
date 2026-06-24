@@ -445,6 +445,39 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         )
 
 
+class WorkspaceItemComment(UUIDPKMixin, TimestampMixin, Base):
+    """A comment thread entry on a workspace item (Phase 6 — collab).
+
+    Flat (no threading) — a simple chronological discussion attached to a
+    note / canvas / board / sheet so collaborators can leave feedback
+    without editing the item itself. ``workspace_id`` is denormalised
+    alongside ``item_id`` so listing + access checks don't need a join
+    back through the item.
+    """
+
+    __tablename__ = "workspace_item_comments"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Author. ``SET NULL`` so deleting a user keeps the thread readable
+    # (rendered as "former member") rather than cascade-deleting history.
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<WorkspaceItemComment id={self.id} item={self.item_id}>"
+
+
 class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     """A first-class task on a workspace's shared task list.
 

@@ -89,6 +89,10 @@ class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):
         ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
+    # One-line title/summary derived from the output so runs are
+    # distinguishable in the rail (rather than a wall of identical dates).
+    title: Mapped[str | None] = mapped_column(String(140), nullable=True)
+
     # pending → running → success | failed
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending"

@@ -405,6 +405,15 @@ export interface UpdateWorkspacePayload {
   memory_provider_id?: string | null;
 }
 
+export interface WorkspaceItemComment {
+  id: string;
+  item_id: string;
+  body: string;
+  author_user_id: string | null;
+  author_name: string;
+  created_at: string;
+}
+
 export const workspacesApi = {
   async list(opts: { archived?: boolean } = {}): Promise<WorkspaceSummary[]> {
     const { data } = await apiClient.get<WorkspaceSummary[]>(
@@ -620,6 +629,41 @@ export const workspacesApi = {
       `/workspaces/${id}/items/${itemId}`
     );
     return data;
+  },
+
+  /** List comments on a workspace item (chronological). */
+  async listComments(
+    id: string,
+    itemId: string
+  ): Promise<WorkspaceItemComment[]> {
+    const { data } = await apiClient.get<WorkspaceItemComment[]>(
+      `/workspaces/${id}/items/${itemId}/comments`
+    );
+    return data;
+  },
+
+  /** Post a comment on a workspace item. */
+  async createComment(
+    id: string,
+    itemId: string,
+    body: string
+  ): Promise<WorkspaceItemComment> {
+    const { data } = await apiClient.post<WorkspaceItemComment>(
+      `/workspaces/${id}/items/${itemId}/comments`,
+      { body }
+    );
+    return data;
+  },
+
+  /** Delete a comment (author or workspace owner). */
+  async deleteComment(
+    id: string,
+    itemId: string,
+    commentId: string
+  ): Promise<void> {
+    await apiClient.delete(
+      `/workspaces/${id}/items/${itemId}/comments/${commentId}`
+    );
   },
 
   /** Replace a board item's config (label registry, etc.). */

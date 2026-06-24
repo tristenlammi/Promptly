@@ -78,6 +78,7 @@ class TaskRunSummary(BaseModel):
     id: uuid.UUID
     status: str
     trigger: str
+    title: str | None = None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -91,6 +92,7 @@ class TaskRunResponse(BaseModel):
     task_id: uuid.UUID
     status: str
     trigger: str
+    title: str | None = None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None

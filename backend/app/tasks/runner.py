@@ -55,6 +55,30 @@ _NIL_UUID = uuid.UUID(int=0)
 _MAX_OUTPUT_TOKENS = 8000
 
 
+def _derive_run_title(text: str | None) -> str | None:
+    """A short, distinguishing title from a run's Markdown output.
+
+    Prefers the first Markdown heading; otherwise the first non-empty
+    line. Stripped of markup and clipped to fit the column. Returns
+    ``None`` for empty output so the UI falls back to the date.
+    """
+    if not text:
+        return None
+    import re as _re
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # First heading wins; else first content line.
+        line = _re.sub(r"^#{1,6}\s+", "", line)  # strip heading hashes
+        line = _re.sub(r"[*_`>#]", "", line).strip()  # strip md emphasis
+        if not line:
+            continue
+        return line[:137] + "…" if len(line) > 138 else line
+    return None
+
+
 class TaskRunError(RuntimeError):
     """Controlled failure during a run — message is safe to store."""
 
@@ -358,6 +382,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 db=db,
             )
             run.output_markdown = text
+            run.title = _derive_run_title(text)
             run.sources = sources
             run.prompt_tokens = usage["prompt_tokens"] or None
             run.completion_tokens = usage["completion_tokens"] or None

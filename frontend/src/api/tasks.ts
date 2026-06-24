@@ -7,6 +7,7 @@ export interface TaskRunSummary {
   id: string;
   status: TaskRunStatus;
   trigger: "schedule" | "manual";
+  title: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
