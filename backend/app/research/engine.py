@@ -39,6 +39,7 @@ logger = logging.getLogger("promptly.research")
 # Constants
 # ---------------------------------------------------------------------------
 _NUM_SUBQUESTIONS = 5
+_NUM_REFINE_SUBQUESTIONS = 3     # focused follow-up pass when refining
 _SEARCH_RESULTS_PER_SQ = 6       # results fetched per sub-question
 _READS_PER_SQ = 2                 # max URL fetches per sub-question
 _MAX_CONTENT_CHARS = 3000         # chars of fetched content per source
@@ -101,6 +102,46 @@ Evidence ({source_count} sources across {angle_count} angles):
 
 Write the research report now."""
 
+# --- Refinement ("dig deeper") prompts -------------------------------------
+_REFINE_DECOMPOSE_PROMPT = """\
+A research report already exists on the topic: {query}
+
+The user now wants to dig deeper specifically on: {refinement}
+
+Produce exactly {n} focused sub-questions that target THIS refinement (not the \
+whole original topic), each with a concise search string.
+
+Output a JSON array with exactly {n} objects, nothing else:
+[
+  {{"question": "...", "search_query": "concise 4-6 word search string"}},
+  ...
+]"""
+
+_REFINE_SYNTHESIS_SYSTEM = """\
+You are revising an existing research report to go deeper on one aspect the user \
+asked about. Use the NEW evidence below (cite as [N]) together with the prior \
+report's existing findings.
+
+Format requirements:
+• Produce the FULL updated report — it REPLACES the previous one, so don't write a bare addendum.
+• Keep the prior report's structure and still-valid content; substantially expand the section(s) relevant to the refinement using the new evidence.
+• Start with ## Executive Summary; use ## headings (4-6 sections); add inline [N] citations for claims drawn from the new evidence.
+• Do NOT include a top-level # title and do NOT add a ## Sources section — sources are listed separately.
+• Total length: 700-1200 words. If the new evidence is thin, say so rather than padding."""
+
+_REFINE_SYNTHESIS_USER = """\
+Original research topic: {query}
+The user wants to dig deeper on: {refinement}
+
+PRIOR REPORT (to expand, not discard):
+{prior_report}
+
+NEW EVIDENCE ({source_count} sources across {angle_count} angles):
+
+{evidence_doc}
+
+Write the full updated report now, going deeper on the requested refinement."""
+
 # ---------------------------------------------------------------------------
 # SSE helper
 # ---------------------------------------------------------------------------
@@ -152,6 +193,54 @@ async def _decompose(
         return valid[:_NUM_SUBQUESTIONS] if valid else [{"question": query, "search_query": query}]
     except (ValueError, TypeError):
         return [{"question": query, "search_query": query}]
+
+
+async def _decompose_refine(
+    query: str,
+    refinement: str,
+    provider: ModelProvider,
+    model_id: str,
+) -> list[dict]:
+    """Break a refinement instruction into focused follow-up sub-questions."""
+    prompt = _REFINE_DECOMPOSE_PROMPT.format(
+        query=query, refinement=refinement, n=_NUM_REFINE_SUBQUESTIONS
+    )
+    chunks: list[str] = []
+    try:
+        async for event in model_router.stream_chat_events(
+            provider=provider,
+            model_id=model_id,
+            messages=[ChatMessage(role="user", content=prompt)],
+            temperature=0.3,
+            max_tokens=_FAST_MAX_TOKENS,
+        ):
+            if isinstance(event, TextDelta):
+                chunks.append(event.text)
+    except Exception:
+        logger.exception("Refine decompose failed")
+        return [{"question": refinement, "search_query": refinement}]
+
+    raw = "".join(chunks).strip()
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    start = raw.find("[")
+    end = raw.rfind("]")
+    if start == -1 or end == -1:
+        return [{"question": refinement, "search_query": refinement}]
+    try:
+        sqs = json.loads(raw[start : end + 1])
+        valid = [
+            sq for sq in sqs
+            if isinstance(sq, dict)
+            and sq.get("question")
+            and sq.get("search_query")
+        ]
+        return (
+            valid[:_NUM_REFINE_SUBQUESTIONS]
+            if valid
+            else [{"question": refinement, "search_query": refinement}]
+        )
+    except (ValueError, TypeError):
+        return [{"question": refinement, "search_query": refinement}]
 
 
 # ---------------------------------------------------------------------------
@@ -284,16 +373,32 @@ async def run_research(
     conv: Conversation,
     provider: ModelProvider,
     model_id: str,
+    refinement: str | None = None,
+    prior_report: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Async generator that yields SSE strings for the research stream."""
+    """Async generator that yields SSE strings for the research stream.
+
+    When ``refinement`` + ``prior_report`` are supplied, this runs a
+    focused follow-up pass ("dig deeper") instead of a full investigation:
+    fewer, refinement-targeted sub-questions, and a synthesis that expands
+    the prior report rather than writing one from scratch.
+    """
+    is_refine = bool(refinement and prior_report)
 
     async def _gen() -> AsyncGenerator[str, None]:  # noqa: C901 (complexity OK here)
         try:
             # ------------------------------------------------------------------
             # Step 1: Decompose
             # ------------------------------------------------------------------
-            yield _sse({"event": "research_start", "query": query})
-            subquestions = await _decompose(query, provider, model_id)
+            yield _sse(
+                {"event": "research_start", "query": query, "refine": is_refine}
+            )
+            if is_refine:
+                subquestions = await _decompose_refine(
+                    query, refinement or "", provider, model_id
+                )
+            else:
+                subquestions = await _decompose(query, provider, model_id)
             yield _sse({
                 "event": "research_decomposed",
                 "subquestions": [
@@ -455,12 +560,24 @@ async def run_research(
             source_count = len(all_sources)
             evidence_doc = _build_evidence_doc(evidence)
 
-            synth_user = _SYNTHESIS_USER.format(
-                query=query,
-                source_count=source_count,
-                angle_count=len(evidence),
-                evidence_doc=evidence_doc,
-            )
+            if is_refine:
+                synth_system = _REFINE_SYNTHESIS_SYSTEM
+                synth_user = _REFINE_SYNTHESIS_USER.format(
+                    query=query,
+                    refinement=refinement,
+                    prior_report=(prior_report or "")[:_MAX_EVIDENCE_CHARS],
+                    source_count=source_count,
+                    angle_count=len(evidence),
+                    evidence_doc=evidence_doc,
+                )
+            else:
+                synth_system = _SYNTHESIS_SYSTEM
+                synth_user = _SYNTHESIS_USER.format(
+                    query=query,
+                    source_count=source_count,
+                    angle_count=len(evidence),
+                    evidence_doc=evidence_doc,
+                )
 
             report_chunks: list[str] = []
             cost_usd = 0.0
@@ -471,7 +588,7 @@ async def run_research(
                 provider=provider,
                 model_id=model_id,
                 messages=[ChatMessage(role="user", content=synth_user)],
-                system=_SYNTHESIS_SYSTEM,
+                system=synth_system,
                 temperature=0.3,
                 max_tokens=_SYNTHESIS_MAX_TOKENS,
                 include_usage=True,
@@ -531,6 +648,10 @@ async def run_research(
                     source_kind=GeneratedKind.RENDERED_PDF.value,
                     source_file_id=md_row.id,
                 )
+                # Attach BOTH the PDF (polished, printable) and the Markdown
+                # (copy-paste / editable / shareable via the Files share-link).
+                # Non-PDF output is the E4 ask — the .md was always generated
+                # but previously only the PDF chip was surfaced.
                 attachment_snaps = [
                     {
                         "id": str(pdf_row.id),
@@ -539,7 +660,15 @@ async def run_research(
                         "size_bytes": pdf_row.size_bytes,
                         "source_kind": pdf_row.source_kind,
                         "source_file_id": str(pdf_row.source_file_id),
-                    }
+                    },
+                    {
+                        "id": str(md_row.id),
+                        "filename": md_row.filename,
+                        "mime_type": "text/markdown",
+                        "size_bytes": md_row.size_bytes,
+                        "source_kind": md_row.source_kind,
+                        "source_file_id": None,
+                    },
                 ]
                 logger.info(
                     "Research PDF generated pdf_id=%s bytes=%d",
@@ -555,10 +684,15 @@ async def run_research(
             # ------------------------------------------------------------------
             full_content = report_content
 
+            user_label = (
+                f"\U0001f52c **Deep Research — dig deeper:** {refinement}"
+                if is_refine
+                else f"\U0001f52c **Deep Research:** {query}"
+            )
             user_msg = Message(
                 conversation_id=conv.id,
                 role="user",
-                content=f"\U0001f52c **Deep Research:** {query}",
+                content=user_label,
                 parent_id=prev_leaf_id,
                 author_user_id=user.id,
             )

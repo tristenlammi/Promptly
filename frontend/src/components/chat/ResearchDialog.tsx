@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 
 import { Modal } from "@/components/shared/Modal";
+import { researchApi } from "@/api/research";
 import { cn } from "@/utils/cn";
 
 interface Props {
   open: boolean;
   /** Pre-filled from the current composer draft. */
   initialQuery: string;
+  /** Display name of the user's current chat model — shown as the
+   *  fallback when no dedicated research model is configured. */
+  fallbackModelName?: string | null;
   onStart: (query: string) => void;
   onClose: () => void;
 }
@@ -15,13 +19,40 @@ interface Props {
  * Phase 11 — Deep Research confirmation dialog.
  * Shows the topic, estimated scope, and lets the user start or cancel.
  */
-export function ResearchDialog({ open, initialQuery, onStart, onClose }: Props) {
+export function ResearchDialog({
+  open,
+  initialQuery,
+  fallbackModelName,
+  onStart,
+  onClose,
+}: Props) {
   const [query, setQuery] = useState(initialQuery);
+  const [modelName, setModelName] = useState<string | null>(null);
 
   // Sync query from the composer draft whenever the dialog opens.
   useEffect(() => {
     if (open) setQuery(initialQuery);
   }, [open, initialQuery]);
+
+  // Resolve which model the run will actually use, so the cost preview
+  // names it. Admin research model wins; otherwise the user's chat model.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    researchApi
+      .config()
+      .then((cfg) => {
+        if (!cancelled) {
+          setModelName(cfg.model_display ?? fallbackModelName ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setModelName(fallbackModelName ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, fallbackModelName]);
 
   const canStart = query.trim().length > 0;
 
@@ -92,9 +123,17 @@ export function ResearchDialog({ open, initialQuery, onStart, onClose }: Props) 
               </li>
             ))}
           </ol>
-          <div className="mt-2 border-t border-[var(--border)] pt-2 text-[11px]">
-            Estimated: ~60k tokens · usually A$0.04–0.20 depending on your model.
-            Actual cost shown in the report.
+          <div className="mt-2 space-y-0.5 border-t border-[var(--border)] pt-2 text-[11px]">
+            <div>
+              Runs on{" "}
+              <span className="font-medium text-[var(--text)]">
+                {modelName ?? "your selected chat model"}
+              </span>
+            </div>
+            <div>
+              Estimated: ~60k tokens · usually A$0.04–0.20 depending on the
+              model. Actual cost is shown in the finished report.
+            </div>
           </div>
         </div>
       </div>

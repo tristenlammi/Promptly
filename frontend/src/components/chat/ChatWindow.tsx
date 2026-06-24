@@ -53,6 +53,9 @@ interface ChatWindowProps {
    *  onto the same bubble. Only offered on the last assistant turn when
    *  it was cut off at the output limit. */
   onContinue?: (messageId: string) => Promise<void> | void;
+  /** "Dig deeper" on a research report — runs a focused refinement pass.
+   *  Surfaced only on assistant messages that are research reports. */
+  onDigDeeper?: (messageId: string) => void;
   /** Re-run the last turn after a stream error (same model). Surfaced
    *  as the "Try again" button on the error card. */
   onRetry?: () => void;
@@ -89,6 +92,7 @@ export function ChatWindow({
   onBranchFrom,
   onRegenerate,
   onContinue,
+  onDigDeeper,
   onRetry,
   onPickAnotherModel,
   onDelete,
@@ -348,6 +352,7 @@ export function ChatWindow({
                   ? (override) => onRegenerate(m.id, override)
                   : undefined
               }
+              onDigDeeper={onDigDeeper ? () => onDigDeeper(m.id) : undefined}
               onContinue={
                 m.id === lastRegenerableAssistantId && m.truncated && onContinue
                   ? () => onContinue(m.id)

@@ -7,6 +7,13 @@ export interface ResearchStartPayload {
   model_id: string;
 }
 
+export interface ResearchRefinePayload {
+  refinement: string;
+  provider_id: string;
+  model_id: string;
+  base_message_id: string;
+}
+
 export const researchApi = {
   /**
    * Start a deep research investigation. Returns a raw fetch Response
@@ -31,6 +38,26 @@ export const researchApi = {
     });
   },
 
+  /** Refine an existing report ("dig deeper"). Same SSE shape as
+   *  startStream — consume via useResearch().refineResearch. */
+  refineStream(
+    conversationId: string,
+    payload: ResearchRefinePayload
+  ): Promise<Response> {
+    const token = useAuthStore.getState().accessToken;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return fetch(`/api/conversations/${conversationId}/research/refine`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  },
+
   /** Classify whether a query warrants a proactive deep-research suggestion. */
   async classify(query: string): Promise<boolean> {
     const { data } = await apiClient.post<{ suggest: boolean }>(
@@ -38,5 +65,19 @@ export const researchApi = {
       { query }
     );
     return data.suggest;
+  },
+
+  /** Effective research model (admin-configured), for the pre-run preview.
+   *  ``model_display`` is null when research falls back to the user's
+   *  current chat model. */
+  async config(): Promise<{
+    configured: boolean;
+    model_display: string | null;
+  }> {
+    const { data } = await apiClient.get<{
+      configured: boolean;
+      model_display: string | null;
+    }>("/research/config");
+    return data;
   },
 };

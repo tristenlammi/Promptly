@@ -28,6 +28,7 @@ import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ConversationInstructionsButton } from "@/components/chat/ConversationInstructionsButton";
 import { MemoryConversationButton } from "@/components/chat/MemoryConversationButton";
 import { ResearchDialog } from "@/components/chat/ResearchDialog";
+import { RefineResearchDialog } from "@/components/chat/RefineResearchDialog";
 import { VoiceModeOverlay } from "@/components/chat/VoiceModeOverlay";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
@@ -156,7 +157,13 @@ export function ChatPage({
   // Phase 11 — Deep Research.
   const [researchDialogOpen, setResearchDialogOpen] = useState(false);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
-  const { startResearch, cancelResearch } = useResearch();
+  const { startResearch, refineResearch, cancelResearch } = useResearch();
+  // "Dig deeper" refinement target — the research report message id being
+  // expanded (the dialog owns the instruction draft).
+  const [refineTarget, setRefineTarget] = useState<string | null>(null);
+  const handleDigDeeper = useCallback((messageId: string) => {
+    setRefineTarget(messageId);
+  }, []);
   const researchStep = useResearchStore((s) => s.step);
   const researchConvId = useResearchStore((s) => s.conversationId);
   const researchRunning = id
@@ -1124,6 +1131,9 @@ export function ChatPage({
               onBranchFrom={id ? handleBranchFrom : undefined}
               onRegenerate={id && isOwner ? handleRegenerate : undefined}
               onContinue={id && isOwner ? handleContinue : undefined}
+              onDigDeeper={
+                id && isOwner && selectedModel ? handleDigDeeper : undefined
+              }
               onRetry={id && isOwner ? handleRetry : undefined}
               onPickAnotherModel={handlePickAnotherModel}
               onDelete={id && isOwner ? handleDeleteMessage : undefined}
@@ -1245,6 +1255,7 @@ export function ChatPage({
       <ResearchDialog
         open={researchDialogOpen}
         initialQuery={composerDraft}
+        fallbackModelName={selectedModel?.display_name ?? null}
         onClose={() => setResearchDialogOpen(false)}
         onStart={async (query) => {
           if (!selectedModel) return;
@@ -1271,6 +1282,20 @@ export function ChatPage({
             query,
             provider_id: selectedModel.provider_id,
             model_id: selectedModel.model_id,
+          });
+        }}
+      />
+
+      <RefineResearchDialog
+        open={!!refineTarget}
+        onClose={() => setRefineTarget(null)}
+        onSubmit={(refinement) => {
+          if (!id || !selectedModel || !refineTarget) return;
+          void refineResearch(id, {
+            refinement,
+            provider_id: selectedModel.provider_id,
+            model_id: selectedModel.model_id,
+            base_message_id: refineTarget,
           });
         }}
       />

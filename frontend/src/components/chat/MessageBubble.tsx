@@ -30,6 +30,7 @@ import {
   Brain,
   GitBranch,
   Image as ImageIcon,
+  Microscope,
   MoreHorizontal,
   PanelRight as PanelRightIcon,
   Pencil,
@@ -149,6 +150,9 @@ interface MessageBubbleProps {
    *  pick "Try a different model" → <model> from the chevron submenu.
    *  Resolves once the new stream has been kicked off. */
   onRegenerate?: (override: RegenerateOverride | null) => Promise<void> | void;
+  /** "Dig deeper" on a research report — runs a focused refinement pass.
+   *  Only wired for assistant messages that are research reports. */
+  onDigDeeper?: () => void;
   /** Phase 3.1 — resume a reply that was cut off at the output limit.
    *  When provided (only on a truncated last reply), the truncation
    *  banner shows a "Continue" button that streams more text onto the
@@ -792,6 +796,7 @@ function MessageBubbleImpl({
   editedAt,
   onBranch,
   onRegenerate,
+  onDigDeeper,
   onContinue,
   onDelete,
   onRemember,
@@ -807,6 +812,12 @@ function MessageBubbleImpl({
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const hasSources = !isUser && sources && sources.length > 0;
+  // A research report = an assistant message that produced a rendered PDF
+  // artefact. Only these get the "Dig deeper" refinement affordance.
+  const isResearchReport =
+    !isUser &&
+    !!attachments &&
+    attachments.some((a) => a.source_kind === "rendered_pdf");
   // Phase A1: assistant rows can carry attachments too (artefacts
   // produced by tool calls). The chip UI is identical across roles.
   const hasAttachments = !!attachments && attachments.length > 0;
@@ -1319,6 +1330,23 @@ function MessageBubbleImpl({
             )}
             {onRegenerate && !streaming && (
               <RegenerateControl onRegenerate={onRegenerate} />
+            )}
+            {onDigDeeper && isResearchReport && !streaming && (
+              <button
+                type="button"
+                onClick={() => onDigDeeper()}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
+                  "text-[var(--text-muted)] transition",
+                  "hover:bg-black/[0.04] hover:text-[var(--text)]",
+                  "dark:hover:bg-white/[0.06]"
+                )}
+                title="Dig deeper — run a focused follow-up on this report"
+                aria-label="Dig deeper on this report"
+              >
+                <Microscope className="h-3 w-3" />
+                {!isMobile && <span>Dig deeper</span>}
+              </button>
             )}
             {!isMobile && onBranch && !streaming && (
               <button
@@ -1904,8 +1932,15 @@ function ReasoningDisclosure({
 }
 
 function SourcesFooter({ sources }: { sources: Source[] }) {
+  // Open by default when there are many sources — a deep-research report
+  // (typically 10+) should show its evidence up front so it reads as
+  // trustable; a one-off web-search citation (1-3) stays tucked away.
+  const openByDefault = sources.length >= 5;
   return (
-    <details className="mt-3 rounded-card border border-[var(--border)] bg-black/[0.02] dark:bg-white/[0.03]">
+    <details
+      open={openByDefault}
+      className="mt-3 rounded-card border border-[var(--border)] bg-black/[0.02] dark:bg-white/[0.03]"
+    >
       <summary
         className={cn(
           "flex cursor-pointer list-none items-center gap-2 rounded-card px-3 py-2 text-xs",

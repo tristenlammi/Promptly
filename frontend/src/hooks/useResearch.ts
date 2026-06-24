@@ -1,7 +1,11 @@
 import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { researchApi, type ResearchStartPayload } from "@/api/research";
+import {
+  researchApi,
+  type ResearchRefinePayload,
+  type ResearchStartPayload,
+} from "@/api/research";
 import { useResearchStore } from "@/store/researchStore";
 
 /** Parse SSE lines of the form `data: {...}` */
@@ -39,18 +43,24 @@ export function useResearch() {
   const queryClient = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
 
-  const startResearch = useCallback(
-    async (conversationId: string, payload: ResearchStartPayload) => {
+  // Shared SSE driver for both a fresh investigation and a refinement —
+  // the stream shape is identical, only the endpoint + header label differ.
+  const run = useCallback(
+    async (
+      conversationId: string,
+      label: string,
+      getResp: () => Promise<Response>
+    ) => {
       // Cancel any in-flight research.
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
 
-      store.startResearch(conversationId, payload.query);
+      store.startResearch(conversationId, label);
 
       let resp: Response;
       try {
-        resp = await researchApi.startStream(conversationId, payload);
+        resp = await getResp();
       } catch (err) {
         store.setError("Failed to connect to research service.");
         return;
@@ -126,10 +136,26 @@ export function useResearch() {
     [store, queryClient]
   );
 
+  const startResearch = useCallback(
+    (conversationId: string, payload: ResearchStartPayload) =>
+      run(conversationId, payload.query, () =>
+        researchApi.startStream(conversationId, payload)
+      ),
+    [run]
+  );
+
+  const refineResearch = useCallback(
+    (conversationId: string, payload: ResearchRefinePayload) =>
+      run(conversationId, `Dig deeper: ${payload.refinement}`, () =>
+        researchApi.refineStream(conversationId, payload)
+      ),
+    [run]
+  );
+
   const cancelResearch = useCallback(() => {
     abortRef.current?.abort();
     store.reset();
   }, [store]);
 
-  return { startResearch, cancelResearch };
+  return { startResearch, refineResearch, cancelResearch };
 }
