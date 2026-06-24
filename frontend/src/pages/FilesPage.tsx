@@ -1433,6 +1433,11 @@ function ContentGrid({
     supportsEdit?: boolean;
   }) => void;
 }) {
+  // System folders are grouped into a collapsible section pinned at the
+  // bottom. Collapsed by default so they don't crowd the user's own
+  // content — they're rarely the thing the user came here to find.
+  const [systemOpen, setSystemOpen] = useState(false);
+
   const empty = data.folders.length === 0 && data.files.length === 0;
   if (empty) {
     return (
@@ -1508,14 +1513,30 @@ function ContentGrid({
         {fileRows}
         {systemFolderRows.length > 0 && (
           <>
-            {/* Full-width section divider before system folders. */}
-            <li className="col-span-full flex items-center gap-2 pt-1" aria-hidden>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                System
-              </span>
-              <span className="flex-1 border-t border-[var(--border)]" />
+            {/* Full-width collapsible divider before system folders. */}
+            <li className="col-span-full">
+              <button
+                type="button"
+                onClick={() => setSystemOpen((o) => !o)}
+                aria-expanded={systemOpen}
+                className="flex w-full items-center gap-2 pt-1 text-left"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform",
+                    systemOpen && "rotate-90"
+                  )}
+                />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                  System
+                </span>
+                <span className="text-[10px] tabular-nums text-[var(--text-muted)]/70">
+                  {systemFolderRows.length}
+                </span>
+                <span className="flex-1 border-t border-[var(--border)]" />
+              </button>
             </li>
-            {systemFolderRows}
+            {systemOpen && systemFolderRows}
           </>
         )}
       </ul>
@@ -1557,25 +1578,40 @@ function ContentGrid({
           sort={sort}
           onSort={onSort}
         />
-        {/* Spacer matching the row's trailing action cluster. */}
-        <span className="w-8 shrink-0" aria-hidden />
+        {/* Spacer matching the row's fixed-width trailing action slot. */}
+        <span className="w-16 shrink-0" aria-hidden />
       </div>
       <ul className="divide-y divide-[var(--border)]">
         {userFolderRows}
         {fileRows}
         {systemFolderRows.length > 0 && (
           <>
-            {/* Subtle section header to visually separate system-managed
-                folders (Chat Uploads, Generated Files, etc.) from the
-                user's own content. These folders can't be renamed or
-                trashed, so breaking them into their own section prevents
-                the UI from implying they can. */}
-            <li className="bg-[var(--bg)] px-3 py-1.5" aria-hidden>
-              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                System
-              </span>
+            {/* Collapsible section header separating system-managed folders
+                (Chat Uploads, Generated Files, etc.) from the user's own
+                content. Collapsed by default — these can't be renamed or
+                trashed, and are rarely what the user came to find. */}
+            <li>
+              <button
+                type="button"
+                onClick={() => setSystemOpen((o) => !o)}
+                aria-expanded={systemOpen}
+                className="flex w-full items-center gap-1.5 bg-[var(--bg)] px-3 py-1.5 text-left transition hover:bg-[var(--hover)]"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform",
+                    systemOpen && "rotate-90"
+                  )}
+                />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                  System
+                </span>
+                <span className="text-[10px] tabular-nums text-[var(--text-muted)]/70">
+                  {systemFolderRows.length}
+                </span>
+              </button>
             </li>
-            {systemFolderRows}
+            {systemOpen && systemFolderRows}
           </>
         )}
       </ul>
@@ -2039,17 +2075,19 @@ function FolderRow({
         />
       )}
 
-      {/* Row menu — only for user-owned folders. A spacer keeps the
-          right edge of each row aligned when the menu is absent. */}
-      {userCanMutate ? (
-        <RowMenu
-          open={menuOpen}
-          onOpenChange={setMenuOpen}
-          items={mutationItems}
-        />
-      ) : (
-        <span className="w-8 shrink-0" aria-hidden />
-      )}
+      {/* Fixed-width action slot — only user-owned folders get a menu, but
+          the slot is always reserved so Kind/Modified/Size stay aligned
+          with file rows (which carry a download button here) and the
+          column header. */}
+      <div className="flex w-16 shrink-0 items-center justify-end">
+        {userCanMutate && (
+          <RowMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            items={mutationItems}
+          />
+        )}
+      </div>
 
       {overlays}
     </li>
@@ -2291,12 +2329,14 @@ function FileRow({
         writable && "cursor-grab"
       )}
     >
-      {writable && (
+      {writable ? (
         <SelectCheckbox
           checked={selected}
           active={selectionActive}
           onToggle={onToggleSelect}
         />
+      ) : (
+        <span className="w-5 shrink-0" aria-hidden />
       )}
       {editing ? (
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -2334,17 +2374,8 @@ function FileRow({
         {humanSize(file.size_bytes)}
       </span>
 
-      <button
-        onClick={() => downloadAuthed(file)}
-        title="Download"
-        aria-label={`Download ${file.filename}`}
-        className="rounded-md p-1.5 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text)] group-hover:opacity-100"
-      >
-        <Download className="h-4 w-4" />
-      </button>
-
-      {/* Drive stage 5 — share-grants pill. Sits just left of the
-          row menu so it lines up with the same indicator on folder
+      {/* Drive stage 5 — share-grants pill. Sits just left of the fixed
+          action slot so it lines up with the same indicator on folder
           rows. Owner → pill opens the grants modal; grantee → read-
           only (same reason as FolderRow above). */}
       {file.sharing && (
@@ -2363,13 +2394,25 @@ function FileRow({
         />
       )}
 
-      {writable && (
-        <RowMenu
-          open={menuOpen}
-          onOpenChange={setMenuOpen}
-          items={mutationItems.filter((it) => !it.disabled)}
-        />
-      )}
+      {/* Fixed-width action slot — download + menu. Matches the folder
+          row + header width so Kind/Modified/Size line up across rows. */}
+      <div className="flex w-16 shrink-0 items-center justify-end gap-1">
+        <button
+          onClick={() => downloadAuthed(file)}
+          title="Download"
+          aria-label={`Download ${file.filename}`}
+          className="rounded-md p-1.5 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text)] group-hover:opacity-100"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+        {writable && (
+          <RowMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            items={mutationItems.filter((it) => !it.disabled)}
+          />
+        )}
+      </div>
 
       {overlays}
     </li>
