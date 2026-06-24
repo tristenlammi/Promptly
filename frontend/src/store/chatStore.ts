@@ -152,6 +152,9 @@ export interface StreamErrorMeta {
   /** Optional external URL the user can click through to resolve
    *  the issue (e.g. the OpenRouter privacy settings page). */
   helpUrl?: string | null;
+  /** Seconds to wait before retrying (rate-limit errors only) — drives
+   *  the error card's retry countdown. */
+  retryAfter?: number | null;
 }
 
 export const useChatStore = create<ChatState>((set) => ({

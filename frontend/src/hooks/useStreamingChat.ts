@@ -73,6 +73,10 @@ interface SSEPayload {
    *  underlying account/config issue. Rendered as a button in the
    *  classified error card. */
   error_help_url?: string;
+  /** Seconds to wait before retrying — set on ``rate_limited`` errors
+   *  when the provider returned a ``retry-after`` header. Drives the
+   *  card's retry countdown. */
+  retry_after?: number;
   message_id?: string;
   created_at?: string;
   stream_id?: string;
@@ -269,6 +273,7 @@ export function useStreamingChat(): UseStreamingChatResult {
                 code: data.error_code,
                 title: data.error_title ?? null,
                 helpUrl: data.error_help_url ?? null,
+                retryAfter: data.retry_after ?? null,
               }
             : null;
           store.setStreamError(data.error, meta);

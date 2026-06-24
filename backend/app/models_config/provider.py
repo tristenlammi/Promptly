@@ -116,7 +116,52 @@ KEYLESS_PROVIDER_TYPES: frozenset[str] = frozenset({"ollama"})
 
 
 class ProviderError(Exception):
-    """Raised when a provider request fails (auth, network, model unavailable)."""
+    """Raised when a provider request fails (auth, network, model unavailable).
+
+    Optionally carries the upstream HTTP ``status_code`` and a
+    ``retry_after`` (seconds, parsed from rate-limit headers) so the chat
+    layer can classify the failure (429 / 401 / 5xx) and render an
+    actionable card — with a retry countdown for rate limits — instead of
+    dumping the raw upstream string.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+
+def _openai_error_meta(exc: Exception) -> dict[str, Any]:
+    """Extract ``status_code`` + ``retry_after`` from an OpenAI SDK error.
+
+    ``APIStatusError`` subclasses (rate-limit, auth, server) carry a
+    numeric ``.status_code`` and the raw ``.response``; a 429 response
+    sets a ``retry-after`` header in seconds. Connection / timeout errors
+    carry neither, so callers fall back to message-string classification.
+    """
+    meta: dict[str, Any] = {}
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        meta["status_code"] = status
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        try:
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+        except Exception:  # noqa: BLE001 — defensive; never break error handling
+            raw = None
+        if raw:
+            try:
+                meta["retry_after"] = float(raw)
+            except (TypeError, ValueError):
+                pass
+    return meta
 
 
 # ====================================================================
@@ -1012,7 +1057,9 @@ class ModelRouter:
         try:
             stream = await client.chat.completions.create(**create_kwargs)
         except OpenAIError as e:
-            raise ProviderError(f"Upstream error starting stream: {e}") from e
+            raise ProviderError(
+                f"Upstream error starting stream: {e}", **_openai_error_meta(e)
+            ) from e
 
         try:
             async for chunk in stream:
@@ -1087,7 +1134,9 @@ class ModelRouter:
                 if finish_reason is not None:
                     yield FinishEvent(reason=finish_reason)
         except OpenAIError as e:
-            raise ProviderError(f"Upstream error during stream: {e}") from e
+            raise ProviderError(
+                f"Upstream error during stream: {e}", **_openai_error_meta(e)
+            ) from e
         finally:
             await client.close()
 

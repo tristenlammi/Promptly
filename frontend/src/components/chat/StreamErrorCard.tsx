@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { AlertCircle, ExternalLink, RotateCw, X } from "lucide-react";
 
 import type { StreamErrorMeta } from "@/store/chatStore";
@@ -39,6 +40,24 @@ export function StreamErrorCard({
   onRetry,
   onPickAnotherModel,
 }: Props) {
+  // Retry countdown for rate-limit errors: the provider told us how long
+  // to wait, so we tick it down and keep "Try again" disabled until it
+  // elapses (retrying sooner just earns another 429). No-op for every
+  // other class — ``retryAfter`` is null, so ``remaining`` stays 0.
+  const initialWait = meta?.retryAfter ?? null;
+  const [remaining, setRemaining] = useState(() =>
+    initialWait ? Math.ceil(initialWait) : 0
+  );
+  useEffect(() => {
+    if (!initialWait) return;
+    setRemaining(Math.ceil(initialWait));
+    const t = setInterval(() => {
+      setRemaining((r) => (r <= 1 ? 0 : r - 1));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [initialWait]);
+  const retryBlocked = remaining > 0;
+
   if (!meta) {
     return (
       <div
@@ -119,13 +138,15 @@ export function StreamErrorCard({
               <button
                 type="button"
                 onClick={onRetry}
+                disabled={retryBlocked}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
-                  "bg-[var(--accent)] text-white hover:opacity-90"
+                  "bg-[var(--accent)] text-white hover:opacity-90",
+                  retryBlocked && "cursor-not-allowed opacity-50 hover:opacity-50"
                 )}
               >
                 <RotateCw className="h-3 w-3" />
-                Try again
+                {retryBlocked ? `Try again in ${remaining}s` : "Try again"}
               </button>
             )}
             {meta.helpUrl && (
@@ -195,6 +216,30 @@ function describeClassifiedError(code: string): ClassifiedCopy {
         fallbackTitle: "One of your image attachments couldn't be read",
         explanation:
           "The provider rejected the image bytes — usually because the upload was truncated (common on spotty mobile connections) or the photo was saved in a format the model doesn't support. Try removing the attachment and uploading the image again. If it keeps failing, re-save or re-take the photo as a standard JPEG or PNG.",
+        helpLabel: "Learn more",
+      };
+
+    case "rate_limited":
+      return {
+        fallbackTitle: "Rate limited by the model provider",
+        explanation:
+          "The provider is throttling requests for this model — you've hit its rate or quota limit. Wait a moment and try again, or switch to a different model to keep going right now.",
+        helpLabel: "Learn more",
+      };
+
+    case "auth_failed":
+      return {
+        fallbackTitle: "The provider rejected the API key",
+        explanation:
+          "Authentication with the upstream provider failed — the API key is missing, invalid, expired, or lacks access to this model. Check the provider's key in Settings, then try again. (If you're not an admin, let yours know.)",
+        helpLabel: "Learn more",
+      };
+
+    case "provider_overloaded":
+      return {
+        fallbackTitle: "The model host hiccuped",
+        explanation:
+          "The provider hosting this model had a transient problem — it's overloaded, restarting, or briefly unreachable. This is on their end, not your request. Give it a few seconds and try again, or pick another model if it keeps happening.",
         helpLabel: "Learn more",
       };
 

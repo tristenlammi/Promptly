@@ -2805,15 +2805,24 @@ def _sse(data: dict) -> str:
 
 
 def _classify_upstream_error(
-    message: str, *, provider_type: str
+    message: str,
+    *,
+    provider_type: str,
+    status_code: int | None = None,
+    retry_after: float | None = None,
 ) -> dict[str, Any] | None:
     """Classify a ``ProviderError`` message into a structured error.
 
     Returns ``None`` for unclassified errors (caller renders the raw
     message as before). A non-None return is a dict of extra SSE
     fields — ``error_code`` + optional ``error_help_url`` +
-    ``error_title`` — that the frontend uses to pick a richer error
-    card (links, buttons, tone) instead of the default red banner.
+    ``error_title`` (+ ``retry_after`` for rate limits) — that the
+    frontend uses to pick a richer error card (links, buttons, retry
+    countdown, tone) instead of the default red banner.
+
+    Classification prefers the upstream HTTP ``status_code`` when we have
+    it (reliable) and falls back to distinctive message fragments for
+    transport errors that carry no status (timeouts, connection drops).
 
     Kept in the chat router rather than in ``provider.py`` because
     the classification is a *UX* concern (how do we want to talk to
@@ -2852,6 +2861,67 @@ def _classify_upstream_error(
         return {
             "error_code": "invalid_image_attachment",
             "error_title": "One of your image attachments couldn't be read",
+            "error_help_url": None,
+        }
+
+    # --- Generic, provider-agnostic classes (status-code first) --------
+    # Rate limited. Pass the retry countdown through when the provider
+    # told us how long to wait so the card can tick it down.
+    if (
+        status_code == 429
+        or "rate limit" in lowered
+        or "too many requests" in lowered
+        or "quota" in lowered
+    ):
+        out: dict[str, Any] = {
+            "error_code": "rate_limited",
+            "error_title": "Rate limited by the model provider",
+            "error_help_url": None,
+        }
+        if retry_after and retry_after > 0:
+            # Clamp to something sane — a stray header shouldn't strand
+            # the user behind a multi-hour countdown.
+            out["retry_after"] = min(float(retry_after), 300.0)
+        return out
+
+    # Auth / bad key. 401 (unauthorized) or 403 (forbidden) — by this
+    # point the OpenRouter-privacy 403 has already been matched above.
+    if (
+        status_code in (401, 403)
+        or "unauthorized" in lowered
+        or "authentication" in lowered
+        or ("api key" in lowered and (
+            "invalid" in lowered or "incorrect" in lowered or "no api key" in lowered
+        ))
+    ):
+        return {
+            "error_code": "auth_failed",
+            "error_title": "The provider rejected the API key",
+            "error_help_url": None,
+        }
+
+    # Provider overloaded / transient host hiccup — any 5xx, plus the
+    # distinctive capacity/engine strings (e.g. DeepInfra's "EngineCore
+    # encountered an issue") and bare transport failures that carry no
+    # status code at all.
+    if (
+        (status_code is not None and status_code >= 500)
+        or "overloaded" in lowered
+        or "capacity" in lowered
+        or "enginecore" in lowered
+        or "engine core" in lowered
+        or "service unavailable" in lowered
+        or "temporarily unavailable" in lowered
+        or "bad gateway" in lowered
+        or "gateway timeout" in lowered
+        or "timed out" in lowered
+        or "timeout" in lowered
+        or "connection error" in lowered
+        or "connection reset" in lowered
+    ):
+        return {
+            "error_code": "provider_overloaded",
+            "error_title": "The model host hiccuped",
             "error_help_url": None,
         }
 
@@ -4599,13 +4669,30 @@ async def _stream_generator(
             # genuinely empty after the model already burned through
             # at least one tool-call hop.
         except ProviderError as e:
-            logger.warning("Provider error on stream %s: %s", stream_id, e)
             # Classify the error so the frontend can render an
-            # actionable card (link to the upstream settings page,
-            # "Pick another model" button, etc.) instead of the raw
-            # upstream dump. Fallthrough is unclassified — renders as
-            # a plain red banner exactly like before.
-            classified = _classify_upstream_error(str(e), provider_type=provider.type)
+            # actionable card (retry countdown, link to the upstream
+            # settings page, "Pick another model" button, etc.) instead
+            # of the raw upstream dump. Fallthrough is unclassified —
+            # renders as a plain red banner exactly like before.
+            classified = _classify_upstream_error(
+                str(e),
+                provider_type=provider.type,
+                status_code=getattr(e, "status_code", None),
+                retry_after=getattr(e, "retry_after", None),
+            )
+            # Log the classified category alongside provider/model/status
+            # so error trends are visible in the logs (B3) — grep one
+            # ``error_class=`` line to spot a flaky provider or a bad key.
+            logger.warning(
+                "Provider error on stream %s: error_class=%s provider=%s "
+                "model=%s status=%s: %s",
+                stream_id,
+                (classified or {}).get("error_code", "unclassified"),
+                provider.type,
+                ctx.get("model_id"),
+                getattr(e, "status_code", None),
+                e,
+            )
             if classified is not None:
                 yield _sse({"error": str(e), **classified})
             else:
