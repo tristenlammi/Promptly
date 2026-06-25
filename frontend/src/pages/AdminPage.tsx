@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BarChart3, ScrollText, Settings, Settings2, Terminal, Users } from "lucide-react";
+import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Users } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
+import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
@@ -17,7 +18,8 @@ type TabId =
   | "console"
   | "audit"
   | "settings"
-  | "models";
+  | "models"
+  | "connectors";
 
 interface TabDef {
   id: TabId;
@@ -39,6 +41,13 @@ const TABS: TabDef[] = [
     icon: <Settings2 className="h-3.5 w-3.5" />,
     subtitle:
       "Connect LLM providers and pick which models are available in Chat and Study.",
+  },
+  {
+    id: "connectors",
+    label: "Connectors",
+    icon: <Plug className="h-3.5 w-3.5" />,
+    subtitle:
+      "Connect remote MCP servers so the AI can use their tools in chat.",
   },
   {
     id: "analytics",
@@ -102,6 +111,7 @@ export function AdminPage() {
           <div className="mt-5">
             {tab === "users" && <UsersPanel />}
             {tab === "models" && <ModelsPanel />}
+            {tab === "connectors" && <McpConnectorsPanel />}
             {tab === "analytics" && <AnalyticsPanel />}
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}
