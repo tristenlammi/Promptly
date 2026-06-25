@@ -3196,6 +3196,7 @@ async def _dispatch_tools(
     on_cost=None,  # noqa: ANN001 — callable: float -> None | None
     invocation_counts: dict[str, int] | None = None,
     per_tool_caps: dict[str, int] | None = None,
+    mcp_dispatch: dict[str, tuple[uuid.UUID, str]] | None = None,
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -3237,6 +3238,88 @@ async def _dispatch_tools(
             sse_yield({"event": "tool_started", "id": call_id, "name": name}),
             None,
         )
+
+        # MCP connector tools (Phase 10) dispatch to the external server
+        # rather than the native registry. Recognised by the per-turn
+        # ``mcp_dispatch`` map (advertised name -> (connector_id, real tool)).
+        mcp_target = mcp_dispatch.get(name) if mcp_dispatch else None
+        if mcp_target is not None:
+            try:
+                args = json.loads(raw_args) if raw_args.strip() else {}
+                if not isinstance(args, dict):
+                    raise TypeError("tool arguments must be a JSON object")
+            except (json.JSONDecodeError, TypeError) as e:
+                err_msg = f"Invalid tool arguments: {e}"
+                yield (
+                    sse_yield(
+                        {
+                            "event": "tool_finished",
+                            "id": call_id,
+                            "name": name,
+                            "ok": False,
+                            "error": err_msg,
+                        }
+                    ),
+                    {"role": "tool", "tool_call_id": call_id, "content": err_msg},
+                )
+                continue
+            connector_id, real_tool = mcp_target
+            try:
+                from app.mcp.service import call_connector_tool
+
+                content = await call_connector_tool(
+                    db,
+                    connector_id=connector_id,
+                    real_tool=real_tool,
+                    arguments=args,
+                )
+                await _audit_tool_event(
+                    db,
+                    request=request,
+                    user=user,
+                    event_type=EVENT_TOOL_INVOKED,
+                    tool_name=name,
+                    detail={"mcp": True},
+                )
+                yield (
+                    sse_yield(
+                        {
+                            "event": "tool_finished",
+                            "id": call_id,
+                            "name": name,
+                            "ok": True,
+                        }
+                    ),
+                    {"role": "tool", "tool_call_id": call_id, "content": content},
+                )
+            except Exception as e:  # noqa: BLE001 — McpError + anything else
+                err_msg = str(e) or "The connector call failed."
+                logger.info("MCP tool %s failed: %s", name, e)
+                await _audit_tool_event(
+                    db,
+                    request=request,
+                    user=user,
+                    event_type=EVENT_TOOL_FAILED,
+                    tool_name=name,
+                    detail={"mcp": True, "error": type(e).__name__},
+                )
+                yield (
+                    sse_yield(
+                        {
+                            "event": "tool_finished",
+                            "id": call_id,
+                            "name": name,
+                            "ok": False,
+                            "error": err_msg,
+                        }
+                    ),
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": f"Error: {err_msg}",
+                    },
+                )
+            continue
 
         tool = get_tool(name)
         if tool is None:
@@ -4059,6 +4142,35 @@ async def _stream_generator(
             list_openai_tools(enabled_categories) if enabled_categories else None
         )
 
+        # Phase 10 — external MCP connector tools, gated on the Tools toggle.
+        # Resolve the connectors available this turn (global + this chat's
+        # workspace), advertise their namespaced schemas, and keep a dispatch
+        # map so calls route back to the right server. Soft-fail — a connector
+        # problem must never abort the turn.
+        mcp_dispatch: dict[str, tuple[uuid.UUID, str]] = {}
+        if ctx.get("tools_enabled"):
+            try:
+                from app.mcp.service import (
+                    build_tools_from_connectors,
+                    connectors_for_turn,
+                )
+
+                _mcp_connectors = await connectors_for_turn(
+                    db, workspace_id=conv.workspace_id
+                )
+                if _mcp_connectors:
+                    _mcp_schemas, mcp_dispatch = build_tools_from_connectors(
+                        _mcp_connectors
+                    )
+                    if _mcp_schemas:
+                        tools_payload = (tools_payload or []) + _mcp_schemas
+            except Exception:
+                logger.exception(
+                    "MCP tool resolution failed (conversation_id=%s); "
+                    "proceeding without connectors",
+                    conv.id,
+                )
+
         # Phase P1 — workspace-level instructions are the baseline
         # system prompt. Tool-aware + personal-context prompts are
         # merged on top below, each taking precedence (since
@@ -4710,6 +4822,7 @@ async def _stream_generator(
                     on_cost=_record_tool_cost,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
+                    mcp_dispatch=mcp_dispatch,
                 ):
                     # Always forward the SSE event. ``tool_history_msg``
                     # is None for "started" pre-events (which have no

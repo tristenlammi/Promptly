@@ -131,6 +131,15 @@ bleach==6.1.0
 # pin; 2.0.65 leaves Pillow unconstrained.
 rembg[cpu]==2.0.65
 
+# ---- MCP (Phase 10 — Connectors) ----
+# Official Model Context Protocol SDK. We only use the *client* side
+# (streamable-HTTP transport) to connect out to remote MCP servers; the
+# server bits are unused. Pulls anyio / httpx-sse — already in the stack.
+# Pinned to 1.12.4 (the last release that accepts pydantic<2.11); 1.13+
+# requires pydantic>=2.11 which clashes with our pydantic==2.9.2 pin. The
+# streamable-HTTP client API we use is stable across 1.x.
+mcp==1.12.4
+
 # ---- Testing (dev-only; safe to leave installed in images) ----
 # Used by the study-gate regression tests (and any future automated
 # suite). Both are pure-Python with no system dependencies.
