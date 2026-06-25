@@ -11,6 +11,7 @@ import {
 
 import {
   mcpApi,
+  type ConnectorKind,
   type McpConnector,
   type McpToolInfo,
 } from "@/api/mcp";
@@ -19,13 +20,27 @@ import { Modal } from "@/components/shared/Modal";
 import { extractError } from "@/components/files/helpers";
 import { cn } from "@/utils/cn";
 
-/** One-click presets that prefill the form for known hosted-remote servers. */
-const PRESETS: { label: string; url: string; auth_header_name: string; hint: string }[] = [
+/** One-click presets that prefill the form. */
+const PRESETS: {
+  label: string;
+  kind: ConnectorKind;
+  url: string;
+  auth_header_name: string;
+  hint: string;
+}[] = [
   {
     label: "GitHub",
+    kind: "mcp",
     url: "https://api.githubcopilot.com/mcp/",
     auth_header_name: "Authorization",
     hint: "Paste a GitHub token as 'Bearer <token>'.",
+  },
+  {
+    label: "UniFi",
+    kind: "unifi",
+    url: "https://192.168.1.1",
+    auth_header_name: "X-API-KEY",
+    hint: "Your controller URL + a read-only UniFi Network API key (Settings → Integrations).",
   },
 ];
 
@@ -121,6 +136,7 @@ export function McpConnectorsPanel() {
                     <span className="font-medium text-[var(--text)]">
                       {c.name}
                     </span>
+                    {c.kind !== "mcp" && <Badge>{c.kind}</Badge>}
                     <Badge>{c.availability}</Badge>
                     {!c.enabled && <Badge tone="muted">disabled</Badge>}
                   </div>
@@ -230,7 +246,9 @@ function ConnectorForm({
 }) {
   const isEdit = connector !== null;
   const [name, setName] = useState(connector?.name ?? "");
+  const [kind, setKind] = useState<ConnectorKind>(connector?.kind ?? "mcp");
   const [url, setUrl] = useState(connector?.url ?? "");
+  const isUnifi = kind === "unifi";
   const [authHeader, setAuthHeader] = useState(
     connector?.auth_header_name ?? "Authorization"
   );
@@ -256,6 +274,7 @@ function ConnectorForm({
     try {
       const r = await mcpApi.test({
         url: url.trim(),
+        kind,
         auth_header_name: authHeader || null,
         auth_value: authValue || null,
       });
@@ -296,6 +315,7 @@ function ConnectorForm({
       } else {
         await mcpApi.create({
           name: name.trim(),
+          kind,
           url: url.trim(),
           auth_header_name: authHeader || null,
           auth_value: authValue || null,
@@ -342,6 +362,7 @@ function ConnectorForm({
                 type="button"
                 onClick={() => {
                   setName((n) => n || p.label);
+                  setKind(p.kind);
                   setUrl(p.url);
                   setAuthHeader(p.auth_header_name);
                 }}
@@ -361,28 +382,40 @@ function ConnectorForm({
             placeholder="GitHub"
           />
         </Field>
-        <Field label="Server URL (streamable-HTTP MCP endpoint)">
+        <Field
+          label={
+            isUnifi
+              ? "Controller URL"
+              : "Server URL (streamable-HTTP MCP endpoint)"
+          }
+        >
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             className={inputCls}
-            placeholder="https://…/mcp/"
+            placeholder={isUnifi ? "https://192.168.1.1" : "https://…/mcp/"}
           />
         </Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Auth header (optional)">
-            <input
-              value={authHeader}
-              onChange={(e) => setAuthHeader(e.target.value)}
-              className={inputCls}
-              placeholder="Authorization"
-            />
-          </Field>
+        <div className={cn("grid gap-2", isUnifi ? "grid-cols-1" : "grid-cols-2")}>
+          {!isUnifi && (
+            <Field label="Auth header (optional)">
+              <input
+                value={authHeader}
+                onChange={(e) => setAuthHeader(e.target.value)}
+                className={inputCls}
+                placeholder="Authorization"
+              />
+            </Field>
+          )}
           <Field
             label={
-              isEdit && connector?.has_auth
-                ? "Auth value (leave blank to keep)"
-                : "Auth value (optional)"
+              isUnifi
+                ? isEdit && connector?.has_auth
+                  ? "Read-only API key (leave blank to keep)"
+                  : "Read-only API key"
+                : isEdit && connector?.has_auth
+                  ? "Auth value (leave blank to keep)"
+                  : "Auth value (optional)"
             }
           >
             <input
@@ -390,7 +423,7 @@ function ConnectorForm({
               value={authValue}
               onChange={(e) => setAuthValue(e.target.value)}
               className={inputCls}
-              placeholder="Bearer …"
+              placeholder={isUnifi ? "UniFi API key" : "Bearer …"}
             />
           </Field>
         </div>

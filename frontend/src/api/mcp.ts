@@ -6,10 +6,13 @@ export interface McpToolInfo {
   annotations: Record<string, unknown>;
 }
 
+export type ConnectorKind = "mcp" | "unifi";
+
 export interface McpConnector {
   id: string;
   name: string;
   slug: string;
+  kind: ConnectorKind;
   url: string;
   has_auth: boolean;
   auth_header_name: string | null;
@@ -24,6 +27,7 @@ export interface McpConnector {
 export interface ConnectorCreatePayload {
   name: string;
   url: string;
+  kind?: ConnectorKind;
   auth_header_name?: string | null;
   auth_value?: string | null;
   availability?: "global" | "workspace";
@@ -79,6 +83,7 @@ export const mcpApi = {
   },
   async test(payload: {
     url: string;
+    kind?: ConnectorKind;
     auth_header_name?: string | null;
     auth_value?: string | null;
   }): Promise<TestResult> {

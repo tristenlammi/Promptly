@@ -153,6 +153,15 @@ def build_tools_from_connectors(
     return schemas, dispatch
 
 
+def _native_api_key(connector: McpConnector) -> str:
+    if not connector.auth_value_encrypted:
+        return ""
+    try:
+        return decrypt_secret(connector.auth_value_encrypted)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 async def call_connector_tool(
     db: AsyncSession,
     *,
@@ -160,10 +169,25 @@ async def call_connector_tool(
     real_tool: str,
     arguments: dict[str, Any],
 ) -> str:
-    """Invoke a tool on its connector. Raises :class:`McpError` on failure."""
+    """Invoke a tool on its connector. Raises :class:`McpError` on failure.
+
+    Routes by ``kind``: native connectors (UniFi/Omada) hit our first-party
+    client; ``mcp`` connectors speak the MCP protocol.
+    """
     connector = await db.get(McpConnector, connector_id)
     if connector is None or not connector.enabled:
         raise McpError("Connector is no longer available.")
+
+    if connector.kind == "unifi":
+        from app.mcp.unifi import UniFiError, call_unifi_tool
+
+        try:
+            return await call_unifi_tool(
+                connector.url, _native_api_key(connector), real_tool, arguments
+            )
+        except UniFiError as e:
+            raise McpError(str(e)) from e
+
     return await call_tool(
         connector.url,
         real_tool,
@@ -174,7 +198,23 @@ async def call_connector_tool(
 
 async def refresh_catalog(db: AsyncSession, connector: McpConnector) -> int:
     """Re-fetch + cache the connector's tool catalog. Returns the tool count.
-    Raises :class:`McpError` on connection failure."""
+    Raises :class:`McpError` on connection failure.
+
+    Native connectors have a *fixed* catalog — "refresh" just probes the
+    appliance to confirm reachability, then stamps the known tool set.
+    """
+    if connector.kind == "unifi":
+        from app.mcp.unifi import UNIFI_TOOLS, UniFiError, probe
+
+        try:
+            await probe(connector.url, _native_api_key(connector))
+        except UniFiError as e:
+            raise McpError(str(e)) from e
+        connector.tool_catalog = UNIFI_TOOLS
+        connector.tools_refreshed_at = datetime.now(timezone.utc)
+        await db.commit()
+        return len(UNIFI_TOOLS)
+
     tools = await fetch_tools(connector.url, headers=_auth_headers(connector))
     connector.tool_catalog = tools
     connector.tools_refreshed_at = datetime.now(timezone.utc)

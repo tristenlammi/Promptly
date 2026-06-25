@@ -34,7 +34,15 @@ class McpConnector(UUIDPKMixin, TimestampMixin, Base):
     # Stable slug derived from the name; used to namespace tools as
     # ``mcp__<slug>__<tool>`` so two servers can't collide. Unique.
     slug: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
-    # The streamable-HTTP MCP endpoint URL.
+    # Connector kind: 'mcp' (remote MCP server) | 'unifi' | 'omada' (native
+    # first-party connectors that call an appliance's official API directly).
+    # For native kinds the tool catalog is fixed and dispatch routes to our
+    # own client instead of the MCP protocol.
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="mcp", server_default="mcp"
+    )
+    # The endpoint URL: an MCP server URL (kind=mcp) or the appliance's
+    # console URL (kind=unifi/omada).
     url: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Optional single auth header (e.g. ``Authorization``). The value is

@@ -34,6 +34,7 @@ router = APIRouter()
 class ConnectorCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     url: str = Field(min_length=1, max_length=2000)
+    kind: str = "mcp"  # 'mcp' | 'unifi'
     auth_header_name: str | None = Field(default=None, max_length=64)
     auth_value: str | None = Field(default=None, max_length=4000)
     availability: str = "global"
@@ -61,6 +62,7 @@ class ConnectorResponse(BaseModel):
     id: uuid.UUID
     name: str
     slug: str
+    kind: str
     url: str
     has_auth: bool
     auth_header_name: str | None
@@ -77,6 +79,7 @@ def _to_response(c: McpConnector) -> ConnectorResponse:
         id=c.id,
         name=c.name,
         slug=c.slug,
+        kind=c.kind,
         url=c.url,
         has_auth=bool(c.auth_value_encrypted),
         auth_header_name=c.auth_header_name,
@@ -139,9 +142,12 @@ async def create_connector(
     admin: User = Depends(require_admin),
 ) -> ConnectorResponse:
     _valid_availability(payload.availability)
+    if payload.kind not in ("mcp", "unifi"):
+        raise HTTPException(status_code=400, detail="Unsupported connector kind")
     connector = McpConnector(
         name=payload.name.strip(),
         slug=await _unique_slug(db, payload.name),
+        kind=payload.kind,
         url=payload.url.strip(),
         auth_header_name=(payload.auth_header_name or None),
         auth_value_encrypted=(
@@ -235,6 +241,7 @@ async def refresh_connector(
 
 class TestRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
+    kind: str = "mcp"
     auth_header_name: str | None = Field(default=None, max_length=64)
     auth_value: str | None = Field(default=None, max_length=4000)
 
@@ -244,8 +251,28 @@ async def test_connection(
     payload: TestRequest,
     _: User = Depends(require_admin),
 ) -> dict:
-    """Probe a server without saving — returns the discovered tools or a
-    clean error so the admin can validate before creating the connector."""
+    """Probe a connector without saving — returns the tools (or a clean
+    error) so the admin can validate before creating it."""
+    if payload.kind == "unifi":
+        from app.mcp.unifi import UNIFI_TOOLS, UniFiError, probe
+
+        try:
+            count = await probe(payload.url.strip(), payload.auth_value or "")
+        except UniFiError as e:
+            return {"ok": False, "error": str(e), "tools": []}
+        return {
+            "ok": True,
+            "detail": f"Connected — {count} site(s).",
+            "tools": [
+                {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "annotations": t["annotations"],
+                }
+                for t in UNIFI_TOOLS
+            ],
+        }
+
     headers: dict[str, str] = {}
     if payload.auth_header_name and payload.auth_value:
         headers[payload.auth_header_name] = payload.auth_value
