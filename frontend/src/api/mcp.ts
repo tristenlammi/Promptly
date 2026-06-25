@@ -85,4 +85,31 @@ export const mcpApi = {
     const { data } = await apiClient.post<TestResult>("/admin/mcp/test", payload);
     return data;
   },
+
+  // ---- Workspace-scoped attachment (owner-managed) ----
+  async listWorkspaceConnectors(
+    workspaceId: string
+  ): Promise<WorkspaceConnector[]> {
+    const { data } = await apiClient.get<WorkspaceConnector[]>(
+      `/workspaces/${workspaceId}/connectors`
+    );
+    return data;
+  },
+  async setWorkspaceConnectors(
+    workspaceId: string,
+    connectorIds: string[]
+  ): Promise<void> {
+    await apiClient.put(`/workspaces/${workspaceId}/connectors`, {
+      connector_ids: connectorIds,
+    });
+  },
 };
+
+export interface WorkspaceConnector {
+  id: string;
+  name: string;
+  slug: string;
+  enabled: boolean;
+  tool_count: number;
+  attached: boolean;
+}

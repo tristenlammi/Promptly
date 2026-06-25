@@ -12,6 +12,7 @@ import {
   Gauge,
   Lightbulb,
   Loader2,
+  Plug,
   Plus,
   RefreshCw,
   Save,
@@ -26,6 +27,7 @@ import { Button } from "@/components/shared/Button";
 import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { WorkspaceMembersPanel } from "@/components/workspaces/WorkspaceMembersPanel";
+import { WorkspaceConnectorsTab } from "@/components/workspaces/WorkspaceConnectorsTab";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
@@ -51,7 +53,7 @@ function humanSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type Tab = "settings" | "files" | "members" | "usage";
+type Tab = "settings" | "files" | "members" | "usage" | "connectors";
 
 /**
  * Workspace settings drawer (Phase 1c).
@@ -180,6 +182,12 @@ export function WorkspaceSettingsContent({
             count={(workspace.collaborators?.length ?? 0) + 1}
           />
           <DrawerTab
+            active={tab === "connectors"}
+            onClick={() => setTab("connectors")}
+            icon={<Plug className="h-3.5 w-3.5" />}
+            label="Connectors"
+          />
+          <DrawerTab
             active={tab === "usage"}
             onClick={() => setTab("usage")}
             icon={<BarChart3 className="h-3.5 w-3.5" />}
@@ -211,6 +219,12 @@ export function WorkspaceSettingsContent({
               isOwner={isOwner}
               owner={workspace.owner}
               collaborators={workspace.collaborators ?? []}
+            />
+          )}
+          {tab === "connectors" && (
+            <WorkspaceConnectorsTab
+              workspaceId={workspace.id}
+              isOwner={isOwner}
             />
           )}
           {tab === "usage" && <UsageTab workspaceId={workspace.id} />}

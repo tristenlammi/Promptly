@@ -241,6 +241,10 @@ function ConnectorForm({
   const [testTools, setTestTools] = useState<McpToolInfo[] | null>(
     connector?.tools ?? null
   );
+  // Allow-list: a Set of permitted tool names, or null = "all allowed".
+  const [allowed, setAllowed] = useState<Set<string> | null>(
+    connector?.allowed_tools ? new Set(connector.allowed_tools) : null
+  );
   const [testErr, setTestErr] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -264,6 +268,17 @@ function ConnectorForm({
     }
   };
 
+  const allTools = testTools ?? [];
+  const isToolAllowed = (n: string) => allowed === null || allowed.has(n);
+  const toggleTool = (n: string) => {
+    const cur = allowed === null ? new Set(allTools.map((t) => t.name)) : new Set(allowed);
+    if (cur.has(n)) cur.delete(n);
+    else cur.add(n);
+    setAllowed(cur.size === allTools.length ? null : cur);
+  };
+  // null = all allowed (default); otherwise the explicit list.
+  const allowedPayload = allowed === null ? null : [...allowed];
+
   const save = async () => {
     setSaving(true);
     setErr(null);
@@ -276,6 +291,7 @@ function ConnectorForm({
           // Only send a new secret when the admin typed one.
           ...(authValue ? { auth_value: authValue } : {}),
           availability,
+          allowed_tools: allowedPayload,
         });
       } else {
         await mcpApi.create({
@@ -284,6 +300,7 @@ function ConnectorForm({
           auth_header_name: authHeader || null,
           auth_value: authValue || null,
           availability,
+          allowed_tools: allowedPayload,
         });
       }
       onSaved();
@@ -416,10 +433,41 @@ function ConnectorForm({
           )}
         </div>
         {testTools && testTools.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {testTools.map((t) => (
-              <ToolChip key={t.name} tool={t} allowed={null} />
-            ))}
+          <div>
+            <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+              Allowed tools ({allowed === null ? testTools.length : allowed.size}
+              /{testTools.length}) — untick to hide a tool from the model
+            </div>
+            <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1.5">
+              {testTools.map((t) => {
+                const destructive =
+                  t.annotations?.destructiveHint === true &&
+                  t.annotations?.readOnlyHint !== true;
+                return (
+                  <label
+                    key={t.name}
+                    className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
+                    title={t.description}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isToolAllowed(t.name)}
+                      onChange={() => toggleTool(t.name)}
+                      className="h-3 w-3 accent-[var(--accent)]"
+                    />
+                    {destructive ? (
+                      <ShieldAlert className="h-3 w-3 shrink-0 text-amber-500" />
+                    ) : (
+                      <ShieldCheck className="h-3 w-3 shrink-0 text-emerald-500" />
+                    )}
+                    <span className="font-mono text-[var(--text)]">{t.name}</span>
+                    <span className="truncate text-[var(--text-muted)]">
+                      {t.description}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
         {err && <p className="text-xs text-red-600 dark:text-red-400">{err}</p>}
