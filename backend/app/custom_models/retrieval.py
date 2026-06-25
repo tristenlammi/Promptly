@@ -203,6 +203,33 @@ async def retrieve_workspace_context(
     )
 
 
+async def retrieve_conversation_context(
+    db: AsyncSession,
+    *,
+    conversation_id: uuid.UUID,
+    query: str,
+    top_k: int = 6,
+) -> list[RetrievedChunk]:
+    """Top-K chunks most similar to ``query`` among a conversation's indexed
+    attachments (Phase 9). Same graceful-degradation contract as
+    :func:`retrieve_workspace_context` — returns ``[]`` on any failure."""
+    query = (query or "").strip()
+    if not query:
+        return []
+    resolved = await _resolve_query_vector(db, query)
+    if resolved is None:
+        return []
+    qvec_literal, dim = resolved
+    return await _similarity_search(
+        db,
+        scope_col="conversation_id",
+        scope_id=conversation_id,
+        qvec_literal=qvec_literal,
+        dim=dim,
+        k=top_k,
+    )
+
+
 async def retrieve_study_context(
     db: AsyncSession,
     *,

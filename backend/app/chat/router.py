@@ -1637,6 +1637,25 @@ async def send_message(
     await db.commit()
     await db.refresh(user_msg)
 
+    # Phase 9 — if the user opted to index large attachments for this chat,
+    # chunk + embed them now (synchronously, before the stream opens) so the
+    # very first reply can retrieve from them instead of inlining + truncating.
+    # Best-effort: any failure (or no embedder configured) falls back to the
+    # normal inline-preamble path.
+    if payload.index_attachments and attached_files:
+        try:
+            from app.chat.attachment_rag import (
+                index_attachments_for_conversation,
+            )
+
+            await index_attachments_for_conversation(
+                db, conversation_id=conv.id, files=attached_files
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "attachment indexing failed for conversation %s", conv.id
+            )
+
     # Collaborator activity on a shared chat → ping the owner so
     # they don't miss the new turn while they're elsewhere in the
     # app. Owner sends nothing to themselves. Kept best-effort; a
@@ -3723,6 +3742,35 @@ async def _stream_generator(
                     ] + list(existing)
                     per_message_attachments[triggering_user_msg_id] = merged
 
+        # ---- Conversation attachment RAG (Phase 9) ----
+        # If this chat has indexed attachments, retrieve the chunks relevant
+        # to this turn and inject them as a knowledge block; remember the
+        # indexed file ids so their full text isn't *also* inlined below
+        # (that's the whole point — retrieval replaces the 64 KB inline).
+        # Soft-fail like the workspace path — a retrieval hiccup must never
+        # abort the turn.
+        attachment_indexed_ids: set[uuid.UUID] = set()
+        attachment_rag_system: str | None = None
+        try:
+            from app.chat.attachment_rag import (
+                attachment_rag_block,
+                conversation_indexed_file_ids,
+            )
+
+            attachment_indexed_ids = await conversation_indexed_file_ids(
+                db, conv.id
+            )
+            if attachment_indexed_ids:
+                attachment_rag_system = await attachment_rag_block(
+                    db, conversation_id=conv.id, query=triggering_text or ""
+                )
+        except Exception:
+            logger.exception(
+                "attachment RAG gathering failed (conversation_id=%s); "
+                "proceeding without it",
+                conv.id,
+            )
+
         # ---- Vision relay (pre-history-build) ----
         # When the user's turn carries images AND the active chat model
         # can't read them natively AND an admin-configured relay is
@@ -3891,8 +3939,16 @@ async def _stream_generator(
             # already produced an assistant reply with the file context
             # baked in, so re-feeding the text would waste tokens.
             if is_triggering and attachments:
+                # Drop indexed attachments from the inline preamble — their
+                # content reaches the model via retrieval instead, so
+                # inlining (and truncating) them too would be wasteful.
+                preamble_files = (
+                    [a for a in attachments if a.id not in attachment_indexed_ids]
+                    if attachment_indexed_ids
+                    else attachments
+                )
                 preamble = build_attachment_preamble(
-                    attachments, vision_handles_images=vision_effective
+                    preamble_files, vision_handles_images=vision_effective
                 )
             else:
                 preamble = ""
@@ -4013,6 +4069,12 @@ async def _stream_generator(
         system_prompt: str | None = merge_system_prompt(
             workspace_system_prompt or "", PROMPTLY_BASE_PROMPT
         )
+        # Phase 9 — retrieved chunks from this chat's indexed attachments,
+        # injected as a knowledge block above the base guidelines.
+        if attachment_rag_system:
+            system_prompt = merge_system_prompt(
+                attachment_rag_system, system_prompt or ""
+            )
         # Account-wide custom system prompt. A global persona / standing
         # instruction the user set in Chat defaults that seeds EVERY new
         # chat. It's the broadest steer, so it sits *under* both the

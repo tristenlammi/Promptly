@@ -579,7 +579,7 @@ export function ChatPage({
     async (
       text: string,
       attachments: AttachedFile[] = [],
-      opts?: { voice?: boolean }
+      opts?: { voice?: boolean; indexAttachments?: boolean }
     ) => {
       if (!selectedModel) return;
 
@@ -657,6 +657,9 @@ export function ChatPage({
               ? reasoningEffort
               : undefined,
           attachment_ids: attachments.map((a) => a.id),
+          // Phase 9 — RAG-index the attachments for this chat instead of
+          // inlining them (set by the composer's overflow warning).
+          index_attachments: opts?.indexAttachments ?? false,
           tools_enabled: toolsEnabled,
           // Voice mode turns get shorter, spoken-style replies (backend
           // injects a brevity prompt + token backstop).

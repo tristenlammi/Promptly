@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -19,6 +20,7 @@ import {
   Globe,
   GlobeLock,
   Image as ImageIcon,
+  Layers,
   Loader2,
   Mic,
   Paperclip,
@@ -60,7 +62,11 @@ import {
 interface InputBarProps {
   disabled?: boolean;
   streaming?: boolean;
-  onSend: (text: string, attachments: AttachedFile[]) => void;
+  onSend: (
+    text: string,
+    attachments: AttachedFile[],
+    opts?: { indexAttachments?: boolean }
+  ) => void;
   onCancel?: () => void;
   placeholder?: string;
   /** Three-mode web-search picker (Phase D1). When omitted the picker
@@ -323,6 +329,36 @@ export function InputBar({
   const hasImageAttachment = attachments.some((a) =>
     (a.mime_type || "").toLowerCase().startsWith("image/")
   );
+
+  // Attachment-overflow estimate (Phase 9). Text/PDF attachments get
+  // inlined into the prompt (each capped at 64 KB ≈ 16k tokens). Roughly
+  // estimate the inlined token cost of the non-image attachments and warn
+  // when it would fill a big slice of the model's context window — at which
+  // point the user can index them for this chat (RAG) instead of inlining.
+  const INLINE_CAP_BYTES = 64 * 1024;
+  const attachmentOverflow = useMemo(() => {
+    const ctx = selectedModel?.context_window ?? 0;
+    if (!ctx) return null;
+    const textFiles = attachments.filter(
+      (a) => !(a.mime_type || "").toLowerCase().startsWith("image/")
+    );
+    if (textFiles.length === 0) return null;
+    const estTokens = Math.round(
+      textFiles.reduce(
+        (sum, a) => sum + Math.min(a.size_bytes, INLINE_CAP_BYTES),
+        0
+      ) / 4
+    );
+    const ratio = estTokens / ctx;
+    // Warn past ~40% of the window — enough headroom for the conversation
+    // + the reply still matters below that.
+    if (ratio < 0.4) return null;
+    return { estTokens, pct: Math.round(ratio * 100) };
+  }, [attachments, selectedModel?.context_window]);
+
+  // Whether to RAG-index the attachments on send (vs inline them). Defaults
+  // on — when overflow is detected, indexing is the recommended path.
+  const [indexAttachments, setIndexAttachments] = useState(true);
   const visionMismatch =
     hasImageAttachment && selectedModel !== null && !selectedModel.supports_vision;
   // Edge case: the admin pointed the relay at the *same* model the
@@ -601,7 +637,9 @@ export function InputBar({
     // Discard any in-progress recording on send — we don't want a
     // half-spoken clip transcribing into the next, already-sent turn.
     if (dictation.busy) dictation.cancel();
-    onSend(trimmed, attachments);
+    onSend(trimmed, attachments, {
+      indexAttachments: !!attachmentOverflow && indexAttachments,
+    });
     setValue("");
     setAttachments([]);
     setPending([]);
@@ -809,6 +847,42 @@ export function InputBar({
                 images. Pick a vision-capable model to have it actually
                 see your attachment.
               </span>
+            </div>
+          )}
+          {attachmentOverflow && (
+            <div
+              className={cn(
+                "flex flex-col gap-1.5 rounded-md px-2.5 py-1.5 text-[11px]",
+                "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              )}
+              role="status"
+            >
+              <div className="flex items-start gap-1.5">
+                <Layers className="mt-0.5 h-3 w-3 shrink-0" />
+                <span className="leading-snug">
+                  These attachments are large (~
+                  {Math.round(attachmentOverflow.estTokens / 1000)}k tokens —
+                  about {attachmentOverflow.pct}% of{" "}
+                  {selectedModel?.display_name ?? "the model"}'s context).
+                  Inlining them all would crowd out the conversation and cut
+                  long files off.
+                </span>
+              </div>
+              <label className="ml-4 flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={indexAttachments}
+                  onChange={(e) => setIndexAttachments(e.target.checked)}
+                  className="h-3 w-3 accent-[var(--accent)]"
+                />
+                <span className="font-medium text-[var(--text)]">
+                  Index for this chat
+                </span>
+                <span className="text-[var(--text-muted)]">
+                  — search them instead of pasting everything (recommended), or
+                  remove some above.
+                </span>
+              </label>
             </div>
           )}
           {showVisionRelay && (

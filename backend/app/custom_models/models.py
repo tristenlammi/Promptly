@@ -213,6 +213,14 @@ class KnowledgeChunk(Base):
         nullable=True,
         index=True,
     )
+    # Scope: conversation (Phase 9). Ephemeral per-chat attachment RAG —
+    # cascade-deletes with the conversation.
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     user_file_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("files.id", ondelete="CASCADE"),

@@ -285,6 +285,10 @@ class SendMessageRequest(BaseModel):
     # IDs of files from /api/files the user picked via the paperclip modal.
     # Each must be readable by the caller (their own or shared-pool files).
     attachment_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Phase 9 — when True, large attachments are chunked + embedded into a
+    # conversation-scoped RAG index instead of being inlined (and truncated)
+    # into the prompt. Retrieval then injects only the relevant chunks.
+    index_attachments: bool = False
     # Per-turn opt-in for AI tool calling (echo / attach_demo_file in
     # Phase A1; image gen / PDF authoring later). Off by default so an
     # ordinary chat doesn't pay the extra round-trip when no tool would

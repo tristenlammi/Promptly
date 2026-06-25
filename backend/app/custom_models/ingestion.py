@@ -60,6 +60,7 @@ _SCOPE_COLUMN = {
     "custom_model": "custom_model_id",
     "workspace": "workspace_id",
     "study_project": "study_project_id",
+    "conversation": "conversation_id",
 }
 
 

@@ -102,6 +102,9 @@ export interface SendMessagePayload {
   max_tokens?: number | null;
   /** IDs of files picked via the paperclip modal. */
   attachment_ids?: string[];
+  /** Phase 9 — RAG-index the attachments into a conversation-scoped store
+   *  instead of inlining them. Set by the composer's overflow warning. */
+  index_attachments?: boolean;
   /** Per-turn opt-in to expose the artefact tool catalog (PDF / image
    *  generation). Search tools (``web_search`` / ``fetch_url``) ride
    *  on ``web_search_mode``, not this flag. The backend defaults to
