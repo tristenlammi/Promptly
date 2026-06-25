@@ -124,6 +124,53 @@ async def _first_site_id(console_url: str, api_key: str) -> str:
     return str(_g(rows[0], "id", "_id", "name", default=""))
 
 
+async def _get_rows(
+    console_url: str, api_key: str, path: str, *, cap: int = 300
+) -> list[dict]:
+    """Paginated fetch — the integration API returns at most a page of
+    ``data`` per call. Walks ``offset`` until we have everything (or hit the
+    cap). Defensive: if the server ignores ``limit``/``offset`` it just
+    returns one page and we stop, so this can never loop forever."""
+    page = 200
+    collected: list[dict] = []
+    offset = 0
+    while len(collected) < cap:
+        sep = "&" if "?" in path else "?"
+        payload = await _get(
+            console_url, api_key, f"{path}{sep}limit={page}&offset={offset}"
+        )
+        batch = _rows(payload)
+        collected.extend(batch)
+        total = payload.get("totalCount") if isinstance(payload, dict) else None
+        if (
+            not batch
+            or len(batch) < page
+            or (total is not None and len(collected) >= total)
+        ):
+            break
+        offset += page
+    return collected
+
+
+def _raw_scalars(row: dict, used: set[str], limit: int = 6) -> list[str]:
+    """Fallback when our curated field names miss (UniFi field names vary by
+    version): surface a few of whatever scalar fields the row actually has,
+    so the model still gets real data instead of "?"."""
+    out: list[str] = []
+    for k, v in row.items():
+        if k in used or k.startswith("_"):
+            continue
+        if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+            continue
+        sval = str(v)
+        if not sval or len(sval) > 40:
+            continue
+        out.append(f"{k}={sval}")
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def probe(console_url: str, api_key: str) -> int:
     """Connection test — returns the site count. Raises UniFiError."""
     return len(_rows(await _get(console_url, api_key, "/sites")))
@@ -145,9 +192,15 @@ async def _tool_list_sites(console_url: str, api_key: str, _args: dict) -> str:
 
 async def _tool_list_clients(console_url: str, api_key: str, args: dict) -> str:
     site = args.get("site_id") or await _first_site_id(console_url, api_key)
-    rows = _rows(await _get(console_url, api_key, f"/sites/{site}/clients"))
+    rows = await _get_rows(console_url, api_key, f"/sites/{site}/clients")
     total = len(rows)
     out: list[str] = []
+    used = {
+        "name", "hostname", "displayName", "mac", "macAddress",
+        "ipAddress", "ip", "type", "connectionType",
+        "signal", "rssi", "signalStrength",
+        "uplinkDeviceName", "apName", "uplinkMac",
+    }
     for c in rows[:_MAX_ROWS]:
         name = _g(c, "name", "hostname", "displayName", "mac", "macAddress", default="?")
         ip = _g(c, "ipAddress", "ip", default="")
@@ -163,6 +216,8 @@ async def _tool_list_clients(console_url: str, api_key: str, args: dict) -> str:
             bits.append(f"signal {signal}")
         if uplink:
             bits.append(f"via {uplink}")
+        if len(bits) <= 1:  # curated keys missed — show what's actually there
+            bits.extend(_raw_scalars(c, used))
         out.append("- " + " · ".join(bits))
     head = f"{total} connected client(s)"
     if total > _MAX_ROWS:
@@ -172,8 +227,13 @@ async def _tool_list_clients(console_url: str, api_key: str, args: dict) -> str:
 
 async def _tool_list_devices(console_url: str, api_key: str, args: dict) -> str:
     site = args.get("site_id") or await _first_site_id(console_url, api_key)
-    rows = _rows(await _get(console_url, api_key, f"/sites/{site}/devices"))
+    rows = await _get_rows(console_url, api_key, f"/sites/{site}/devices")
     out: list[str] = []
+    used = {
+        "name", "model", "mac", "macAddress", "type", "deviceType",
+        "state", "status", "firmwareVersion", "version",
+        "numClients", "clientCount", "numSta",
+    }
     for d in rows[:_MAX_ROWS]:
         name = _g(d, "name", "model", "mac", "macAddress", default="?")
         model = _g(d, "model", default="")
@@ -192,6 +252,8 @@ async def _tool_list_devices(console_url: str, api_key: str, args: dict) -> str:
             bits.append(f"fw {fw}")
         if clients is not None:
             bits.append(f"{clients} clients")
+        if len(bits) <= 1:
+            bits.extend(_raw_scalars(d, used))
         out.append("- " + " · ".join(bits))
     return f"{len(rows)} device(s):\n" + "\n".join(out) if out else "No devices found."
 
