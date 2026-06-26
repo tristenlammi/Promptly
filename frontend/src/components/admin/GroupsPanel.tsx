@@ -260,6 +260,7 @@ function GroupEditModal({
       onClose={onClose}
       title={`Edit “${group.name}”`}
       widthClass="max-w-md"
+      dismissible={false}
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose}>

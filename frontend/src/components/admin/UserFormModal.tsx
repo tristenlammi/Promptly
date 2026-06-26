@@ -231,6 +231,7 @@ export function UserFormModal({
       title={title}
       description={description}
       widthClass="max-w-2xl"
+      dismissible={false}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
