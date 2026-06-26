@@ -42,6 +42,7 @@ import {
 } from "@/hooks/useAdminUsers";
 import { Modal } from "@/components/shared/Modal";
 import { adminApi, type UserImportResult } from "@/api/admin";
+import { groupsApi, type UserGroup } from "@/api/groups";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 import type { AdminUser } from "@/api/types";
@@ -70,6 +71,21 @@ export function UsersPanel() {
 
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const close = () => setModal({ kind: "closed" });
+
+  // Groups feed the user form's "role bundle" picker. Refetched when a
+  // form opens so newly-created groups appear without a page reload.
+  const [groups, setGroups] = useState<UserGroup[]>([]);
+  useEffect(() => {
+    if (modal.kind !== "create" && modal.kind !== "edit") return;
+    let alive = true;
+    groupsApi
+      .list()
+      .then((g) => alive && setGroups(g))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [modal.kind]);
 
   // ---- CSV export / import (H1) ----
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -114,6 +130,7 @@ export function UsersPanel() {
       password: values.password,
       role: values.role,
       allowed_models: values.allowed_models,
+      group_ids: values.group_ids,
       storage_cap_bytes: values.storage_cap_bytes,
       daily_token_budget: values.daily_token_budget,
       monthly_token_budget: values.monthly_token_budget,
@@ -128,6 +145,10 @@ export function UsersPanel() {
   const diffQuota = (next: number | null | undefined, prev: number | null) =>
     next === undefined ? undefined : next === prev ? undefined : next;
 
+  // Order-insensitive equality so an untouched group list isn't re-sent.
+  const sameStringSet = (a: string[], b: string[]) =>
+    a.length === b.length && new Set([...a, ...b]).size === a.length;
+
   const handleEdit = async (target: AdminUser, values: UserFormValues) => {
     await updateUser.mutateAsync({
       id: target.id,
@@ -138,6 +159,9 @@ export function UsersPanel() {
         password: values.password ? values.password : undefined,
         role: values.role !== target.role ? values.role : undefined,
         allowed_models: values.allowed_models,
+        group_ids: sameStringSet(values.group_ids, target.group_ids)
+          ? undefined
+          : values.group_ids,
         storage_cap_bytes: diffQuota(
           values.storage_cap_bytes,
           target.storage_cap_bytes
@@ -305,6 +329,7 @@ export function UsersPanel() {
         mode="create"
         pool={pool ?? []}
         poolLoading={poolLoading}
+        groups={groups}
         onClose={close}
         onSubmit={handleCreate}
       />
@@ -314,6 +339,7 @@ export function UsersPanel() {
         user={modal.kind === "edit" ? modal.user : null}
         pool={pool ?? []}
         poolLoading={poolLoading}
+        groups={groups}
         onClose={close}
         onSubmit={(values) =>
           modal.kind === "edit" ? handleEdit(modal.user, values) : Promise.resolve()

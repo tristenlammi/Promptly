@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Loader2, Search, ShieldCheck, User as UserIcon } from "lucide-react";
+import {
+  Loader2,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  User as UserIcon,
+  Users2,
+} from "lucide-react";
 import axios from "axios";
 
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
 import type { AdminModelOption, AdminUser, UserRole } from "@/api/types";
+import type { UserGroup } from "@/api/groups";
 
 export interface UserFormValues {
   email: string;
@@ -14,6 +22,8 @@ export interface UserFormValues {
   role: UserRole;
   /** `null` = full access to the admin-curated pool. */
   allowed_models: string[] | null;
+  /** Group memberships (role bundles — grant connectors + models). */
+  group_ids: string[];
   /**
    * Per-user quota overrides.
    * - `undefined` → omit from the request (server leaves unchanged).
@@ -37,6 +47,8 @@ interface UserFormModalProps {
   /** Admin's curated org-wide pool of models. */
   pool: AdminModelOption[];
   poolLoading: boolean;
+  /** All groups, so the admin can drop the user into role bundles. */
+  groups?: UserGroup[];
   onClose: () => void;
   /**
    * Commits the form. Resolve on success; throw to surface an error inline.
@@ -51,6 +63,7 @@ export function UserFormModal({
   user,
   pool,
   poolLoading,
+  groups = [],
   onClose,
   onSubmit,
 }: UserFormModalProps) {
@@ -60,6 +73,7 @@ export function UserFormModal({
   const [role, setRole] = useState<UserRole>("user");
   const [fullAccess, setFullAccess] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +104,7 @@ export function UserFormModal({
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
       setPicked(new Set(user.allowed_models ?? []));
+      setGroupIds(new Set(user.group_ids ?? []));
       setStorageCapGb(
         user.storage_cap_bytes === null
           ? ""
@@ -112,6 +127,7 @@ export function UserFormModal({
       setRole("user");
       setFullAccess(true);
       setPicked(new Set());
+      setGroupIds(new Set());
       setStorageCapGb("");
       setDailyTokens("");
       setMonthlyTokens("");
@@ -140,6 +156,15 @@ export function UserFormModal({
 
   const selectAll = () => setPicked(new Set(pool.map((m) => m.model_id)));
   const clearAll = () => setPicked(new Set());
+
+  // Distinct models the selected groups contribute (union), for the hint.
+  const groupModelCount = useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of groups) {
+      if (groupIds.has(g.id)) g.allowed_models.forEach((m) => ids.add(m));
+    }
+    return ids.size;
+  }, [groups, groupIds]);
 
   const canSubmit =
     email.trim().length > 0 &&
@@ -172,6 +197,7 @@ export function UserFormModal({
         // for UI clarity. Non-admin + full access → null; otherwise a list.
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
+        group_ids: Array.from(groupIds),
         storage_cap_bytes: storageBytes,
         daily_token_budget: parseQuota(dailyTokens),
         monthly_token_budget: parseQuota(monthlyTokens),
@@ -419,6 +445,64 @@ export function UserFormModal({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Groups (role bundles) — hidden for admins */}
+        {role === "user" && groups.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium text-[var(--text-muted)]">
+                Groups
+              </span>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                {groupModelCount > 0
+                  ? `+${groupModelCount} model${groupModelCount === 1 ? "" : "s"} granted`
+                  : `${groupIds.size} selected`}
+              </span>
+            </div>
+            <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+              A group grants its connectors and models to every member, on top
+              of the access set above.
+            </p>
+            <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-card border border-[var(--border)] p-1">
+              {groups.map((g) => {
+                const checked = groupIds.has(g.id);
+                return (
+                  <label
+                    key={g.id}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs transition",
+                      checked ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setGroupIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(g.id)) next.delete(g.id);
+                          else next.add(g.id);
+                          return next;
+                        })
+                      }
+                      className="h-3.5 w-3.5 accent-[var(--accent)]"
+                    />
+                    <Users2 className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                    <span className="font-medium text-[var(--text)]">
+                      {g.name}
+                    </span>
+                    {g.allowed_models.length > 0 && (
+                      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                        <Sparkles className="h-2.5 w-2.5" />
+                        {g.allowed_models.length}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
 

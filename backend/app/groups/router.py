@@ -27,15 +27,20 @@ class GroupResponse(BaseModel):
     id: uuid.UUID
     name: str
     members: list[GroupMember]
+    # Model ids this group grants every member (provider ids + custom:<uuid>).
+    allowed_models: list[str]
     created_at: datetime
 
 
 class GroupCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
+    allowed_models: list[str] = []
 
 
 class GroupUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
+    # Omit a field to leave it unchanged.
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    allowed_models: list[str] | None = None
 
 
 class SetMembersRequest(BaseModel):
@@ -59,6 +64,7 @@ async def _to_response(db: AsyncSession, g: UserGroup) -> GroupResponse:
         id=g.id,
         name=g.name,
         members=await _members(db, g.id),
+        allowed_models=list(g.allowed_models or []),
         created_at=g.created_at,
     )
 
@@ -82,7 +88,11 @@ async def create_group(
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> GroupResponse:
-    g = UserGroup(name=payload.name.strip(), created_by=admin.id)
+    g = UserGroup(
+        name=payload.name.strip(),
+        allowed_models=list(payload.allowed_models or []),
+        created_by=admin.id,
+    )
     db.add(g)
     try:
         await db.commit()
@@ -94,7 +104,7 @@ async def create_group(
 
 
 @router.patch("/{group_id}", response_model=GroupResponse)
-async def rename_group(
+async def update_group(
     group_id: uuid.UUID,
     payload: GroupUpdate,
     db: AsyncSession = Depends(get_db),
@@ -103,7 +113,10 @@ async def rename_group(
     g = await db.get(UserGroup, group_id)
     if g is None:
         raise HTTPException(status_code=404, detail="Group not found")
-    g.name = payload.name.strip()
+    if payload.name is not None:
+        g.name = payload.name.strip()
+    if payload.allowed_models is not None:
+        g.allowed_models = list(payload.allowed_models)
     try:
         await db.commit()
     except IntegrityError as e:

@@ -71,13 +71,67 @@ router.include_router(_observability_router)
 # --------------------------------------------------------------------
 # Users
 # --------------------------------------------------------------------
+async def _user_responses(
+    db: AsyncSession, users: list[User]
+) -> list[AdminUserResponse]:
+    """Build admin responses with each user's group memberships attached."""
+    from collections import defaultdict
+
+    from app.groups.models import UserGroupMember
+
+    ids = [u.id for u in users]
+    member_map: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    if ids:
+        rows = await db.execute(
+            select(UserGroupMember.user_id, UserGroupMember.group_id).where(
+                UserGroupMember.user_id.in_(ids)
+            )
+        )
+        for uid, gid in rows.all():
+            member_map[uid].append(gid)
+    out: list[AdminUserResponse] = []
+    for u in users:
+        resp = AdminUserResponse.model_validate(u)
+        resp.group_ids = member_map.get(u.id, [])
+        out.append(resp)
+    return out
+
+
+async def _user_response(db: AsyncSession, user: User) -> AdminUserResponse:
+    return (await _user_responses(db, [user]))[0]
+
+
+async def _sync_user_groups(
+    db: AsyncSession, user_id: uuid.UUID, group_ids: list[uuid.UUID]
+) -> None:
+    """Replace a user's group memberships with ``group_ids`` (valid ids only)."""
+    from sqlalchemy import delete as sa_delete
+
+    from app.groups.models import UserGroup, UserGroupMember
+
+    valid = set(
+        (
+            await db.execute(
+                select(UserGroup.id).where(UserGroup.id.in_(group_ids or []))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await db.execute(
+        sa_delete(UserGroupMember).where(UserGroupMember.user_id == user_id)
+    )
+    for gid in valid:
+        db.add(UserGroupMember(group_id=gid, user_id=user_id))
+
+
 @router.get("/users", response_model=list[AdminUserResponse])
 async def list_users(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> list[AdminUserResponse]:
     result = await db.execute(select(User).order_by(User.created_at.asc()))
-    return [AdminUserResponse.model_validate(u) for u in result.scalars().all()]
+    return await _user_responses(db, list(result.scalars().all()))
 
 
 @router.post(
@@ -117,7 +171,10 @@ async def create_user(
     # never blocks the user being created.
     await seed_system_folders(db, user)
     await db.commit()
-    return AdminUserResponse.model_validate(user)
+    if payload.group_ids:
+        await _sync_user_groups(db, user.id, payload.group_ids)
+        await db.commit()
+    return await _user_response(db, user)
 
 
 # --------------------------------------------------------------------
@@ -333,6 +390,9 @@ async def update_user(
     if "monthly_token_budget" in fields:
         target.monthly_token_budget = payload.monthly_token_budget
 
+    if "group_ids" in fields and payload.group_ids is not None:
+        await _sync_user_groups(db, target.id, payload.group_ids)
+
     try:
         await db.commit()
     except IntegrityError as e:
@@ -342,7 +402,7 @@ async def update_user(
             detail="Email or username already exists",
         ) from e
     await db.refresh(target)
-    return AdminUserResponse.model_validate(target)
+    return await _user_response(db, target)
 
 
 @router.delete(
@@ -415,7 +475,48 @@ async def model_pool(
                     context_window=m.get("context_window"),
                 )
             )
+
+    # Custom Models are assignable too — surface them as ``custom:<uuid>``
+    # options so an admin can grant a specific custom model to a user/group
+    # without also exposing its raw base model.
+    from app.custom_models.models import CustomModel  # local import: avoid cycle
+
+    provider_by_id = {p.id: p for p in await _pool_providers(actor, db)}
+    custom_rows = (
+        await db.execute(select(CustomModel).order_by(CustomModel.display_name))
+    ).scalars().all()
+    for cm in custom_rows:
+        base = provider_by_id.get(cm.base_provider_id)
+        if base is None:
+            continue
+        base_entry = next(
+            (m for m in (base.models or []) if m.get("id") == cm.base_model_id),
+            None,
+        )
+        rows.append(
+            AdminModelOption(
+                provider_id=base.id,
+                provider_name=base.name,
+                model_id=f"custom:{cm.id}",
+                display_name=cm.display_name,
+                context_window=(base_entry or {}).get("context_window"),
+                is_custom=True,
+                base_display_name=(base_entry or {}).get("display_name")
+                or cm.base_model_id,
+            )
+        )
     return rows
+
+
+async def _pool_providers(actor: User, db: AsyncSession):
+    """Enabled providers visible to ``actor`` (owned or system-wide)."""
+    result = await db.execute(
+        select(ModelProvider).where(
+            ((ModelProvider.user_id == actor.id) | (ModelProvider.user_id.is_(None)))
+            & (ModelProvider.enabled.is_(True))
+        )
+    )
+    return result.scalars().all()
 
 
 # --------------------------------------------------------------------

@@ -137,6 +137,8 @@ export interface AdminUser {
   username: string;
   role: UserRole;
   allowed_models: string[] | null;
+  /** Groups this user belongs to (role bundles — grant connectors + models). */
+  group_ids: string[];
   created_at: string;
 
   // ----- Security state (Phase 1) -----
@@ -412,6 +414,9 @@ export interface AdminModelOption {
   model_id: string;
   display_name: string;
   context_window?: number | null;
+  /** Custom Models surface here as model_id "custom:<uuid>". */
+  is_custom?: boolean;
+  base_display_name?: string | null;
 }
 
 // ---- Auth response — discriminated by ``status`` ----

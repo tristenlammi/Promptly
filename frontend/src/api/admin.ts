@@ -29,6 +29,8 @@ export interface CreateUserPayload {
   role: UserRole;
   /** null = full access to the admin-curated pool. */
   allowed_models: string[] | null;
+  /** Initial group memberships (role bundles). */
+  group_ids?: string[];
   /**
    * Per-user quota overrides. Pass `null` (or omit) to leave the
    * user on the org-wide default; pass a number — including 0 — to
@@ -50,6 +52,8 @@ export interface UpdateUserPayload {
    * to leave unchanged.
    */
   allowed_models?: string[] | null;
+  /** Omit to leave membership unchanged; send a list to replace it. */
+  group_ids?: string[];
   /**
    * Quota overrides: same tri-state as `allowed_models`. Omit to
    * leave unchanged, send `null` to revert to the org default, send

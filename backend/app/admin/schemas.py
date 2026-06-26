@@ -22,6 +22,8 @@ class AdminUserResponse(BaseModel):
     # NULL = full access to the admin-curated pool. Admins always have
     # full access regardless of this field.
     allowed_models: list[str] | None = None
+    # Groups this user belongs to (role bundles — grant connectors + models).
+    group_ids: list[uuid.UUID] = []
     created_at: datetime
 
     # ----- Security state (Phase 1) -----
@@ -269,6 +271,8 @@ class AdminUserCreate(BaseModel):
     # None = full access (to the admin-curated pool). Provide a list to
     # restrict. Empty list = no models.
     allowed_models: list[str] | None = None
+    # Initial group memberships (role bundles).
+    group_ids: list[uuid.UUID] = []
     # Per-user quota overrides. ``None`` (the default) leaves the user
     # on the org-wide settings; passing a number — including 0 — sets
     # an explicit override at create time.
@@ -297,6 +301,9 @@ class AdminUserUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=128)
     role: UserRole | None = None
     allowed_models: list[str] | None = None
+    # Omit to leave membership unchanged; send a (possibly empty) list to
+    # replace the user's group set.
+    group_ids: list[uuid.UUID] | None = None
 
     # Quota overrides. ``ge=0`` (not ``ge=1``) so an admin can park a
     # user at "no tokens" without disabling the whole account.
@@ -315,6 +322,10 @@ class AdminModelOption(BaseModel):
     model_id: str
     display_name: str
     context_window: int | None = None
+    # Custom Models surface here too (model_id = "custom:<uuid>") so they can
+    # be granted per-user / per-group; the flag lets the picker badge them.
+    is_custom: bool = False
+    base_display_name: str | None = None
 
 
 # --------------------------------------------------------------------
