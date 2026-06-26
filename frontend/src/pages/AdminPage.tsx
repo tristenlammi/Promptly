@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Users } from "lucide-react";
+import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Users, Users2 } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
+import { GroupsPanel } from "@/components/admin/GroupsPanel";
 import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
@@ -14,6 +15,7 @@ import { cn } from "@/utils/cn";
 
 type TabId =
   | "users"
+  | "groups"
   | "analytics"
   | "console"
   | "audit"
@@ -34,6 +36,13 @@ const TABS: TabDef[] = [
     label: "Users",
     icon: <Users className="h-3.5 w-3.5" />,
     subtitle: "Manage accounts, model access and per-user security state.",
+  },
+  {
+    id: "groups",
+    label: "Groups",
+    icon: <Users2 className="h-3.5 w-3.5" />,
+    subtitle:
+      "Bundle users into teams to scope connector access by identity.",
   },
   {
     id: "models",
@@ -110,6 +119,7 @@ export function AdminPage() {
           <Tabs current={tab} onChange={setTab} />
           <div className="mt-5">
             {tab === "users" && <UsersPanel />}
+            {tab === "groups" && <GroupsPanel />}
             {tab === "models" && <ModelsPanel />}
             {tab === "connectors" && <McpConnectorsPanel />}
             {tab === "analytics" && <AnalyticsPanel />}

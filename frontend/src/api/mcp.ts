@@ -17,12 +17,16 @@ export interface McpConnector {
   has_auth: boolean;
   auth_header_name: string | null;
   enabled: boolean;
-  availability: "global" | "workspace";
+  availability: ConnectorAvailability;
   allowed_tools: string[] | null;
+  group_ids: string[];
+  workspace_ids: string[];
   tools: McpToolInfo[];
   tools_refreshed_at: string | null;
   created_at: string;
 }
+
+export type ConnectorAvailability = "global" | "restricted";
 
 export interface ConnectorCreatePayload {
   name: string;
@@ -30,8 +34,10 @@ export interface ConnectorCreatePayload {
   kind?: ConnectorKind;
   auth_header_name?: string | null;
   auth_value?: string | null;
-  availability?: "global" | "workspace";
+  availability?: ConnectorAvailability;
   allowed_tools?: string[] | null;
+  group_ids?: string[];
+  workspace_ids?: string[];
 }
 
 export interface ConnectorUpdatePayload {
@@ -40,8 +46,16 @@ export interface ConnectorUpdatePayload {
   auth_header_name?: string | null;
   auth_value?: string | null;
   enabled?: boolean;
-  availability?: "global" | "workspace";
+  availability?: ConnectorAvailability;
   allowed_tools?: string[] | null;
+  group_ids?: string[];
+  workspace_ids?: string[];
+}
+
+export interface WorkspaceOption {
+  id: string;
+  title: string;
+  owner: string | null;
 }
 
 export interface TestResult {
@@ -88,6 +102,14 @@ export const mcpApi = {
     auth_value?: string | null;
   }): Promise<TestResult> {
     const { data } = await apiClient.post<TestResult>("/admin/mcp/test", payload);
+    return data;
+  },
+
+  // All workspaces (id + title + owner) — feeds the restricted-scope selector.
+  async listWorkspaceOptions(): Promise<WorkspaceOption[]> {
+    const { data } = await apiClient.get<WorkspaceOption[]>(
+      "/admin/mcp/workspaces"
+    );
     return data;
   },
 

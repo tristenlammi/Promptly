@@ -4156,7 +4156,9 @@ async def _stream_generator(
                 )
 
                 _mcp_connectors = await connectors_for_turn(
-                    db, workspace_id=conv.workspace_id
+                    db,
+                    user_id=user.id,
+                    workspace_id=conv.workspace_id,
                 )
                 if _mcp_connectors:
                     _mcp_schemas, mcp_dispatch = build_tools_from_connectors(

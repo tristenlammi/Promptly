@@ -4,8 +4,9 @@ An ``McpConnector`` is an admin-configured remote MCP server. Its discovered
 tool catalog is cached on the row; auth (if any) is a single HTTP header
 whose value is Fernet-encrypted at rest (same as provider API keys). The
 ``availability`` field decides who can use it: ``global`` (everyone) or
-``workspace`` (only workspaces it's attached to, via
-``workspace_mcp_connectors``). Groups arrive in a later phase.
+``restricted`` — reachable via the user groups it's granted to (identity
+scope, ``connector_groups``) and/or the workspaces it's attached to (context
+scope, ``workspace_mcp_connectors``).
 """
 from __future__ import annotations
 
@@ -86,7 +87,9 @@ class McpConnector(UUIDPKMixin, TimestampMixin, Base):
 
 
 class WorkspaceMcpConnector(Base):
-    """Join: which workspaces a ``workspace``-scoped connector is attached to."""
+    """Join: which workspaces a restricted connector is attached to
+    (context-based scope — its tools appear in chats inside those
+    workspaces)."""
 
     __tablename__ = "workspace_mcp_connectors"
 
@@ -96,5 +99,21 @@ class WorkspaceMcpConnector(Base):
     )
     connector_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("mcp_connectors.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class ConnectorGroup(Base):
+    """Join: which user groups a restricted connector is granted to
+    (identity-based scope — members can use its tools in any chat)."""
+
+    __tablename__ = "connector_groups"
+
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("mcp_connectors.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"),
         primary_key=True,
     )

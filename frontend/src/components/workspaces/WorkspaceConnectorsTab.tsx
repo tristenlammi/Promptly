@@ -73,7 +73,7 @@ export function WorkspaceConnectorsTab({
         <div className="rounded-card border border-dashed border-[var(--border)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
           <Plug className="mx-auto mb-2 h-5 w-5 opacity-50" />
           No workspace connectors available. An admin can add an MCP connector
-          with “workspace” availability.
+          with “restricted” availability and attach it to this workspace.
         </div>
       ) : (
         <ul className="space-y-1.5">

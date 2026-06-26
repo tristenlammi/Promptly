@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,11 @@ from app.auth.models import User
 from app.auth.utils import encrypt_secret
 from app.database import get_db
 from app.mcp.client import McpError, fetch_tools
-from app.mcp.models import McpConnector
+from app.mcp.models import (
+    ConnectorGroup,
+    McpConnector,
+    WorkspaceMcpConnector,
+)
 from app.mcp.service import refresh_catalog, slugify
 
 logger = logging.getLogger("promptly.mcp.router")
@@ -37,8 +41,12 @@ class ConnectorCreate(BaseModel):
     kind: str = "mcp"  # 'mcp' | 'unifi'
     auth_header_name: str | None = Field(default=None, max_length=64)
     auth_value: str | None = Field(default=None, max_length=4000)
-    availability: str = "global"
+    availability: str = "global"  # 'global' | 'restricted'
     allowed_tools: list[str] | None = None
+    # When restricted: which groups (identity) and workspaces (context) it
+    # reaches. Ignored when availability == 'global'.
+    group_ids: list[uuid.UUID] = []
+    workspace_ids: list[uuid.UUID] = []
 
 
 class ConnectorUpdate(BaseModel):
@@ -50,6 +58,9 @@ class ConnectorUpdate(BaseModel):
     enabled: bool | None = None
     availability: str | None = None
     allowed_tools: list[str] | None = None
+    # Omit to leave scoping unchanged; send (possibly empty) lists to replace.
+    group_ids: list[uuid.UUID] | None = None
+    workspace_ids: list[uuid.UUID] | None = None
 
 
 class ToolInfo(BaseModel):
@@ -69,12 +80,71 @@ class ConnectorResponse(BaseModel):
     enabled: bool
     availability: str
     allowed_tools: list[str] | None
+    group_ids: list[uuid.UUID]
+    workspace_ids: list[uuid.UUID]
     tools: list[ToolInfo]
     tools_refreshed_at: datetime | None
     created_at: datetime
 
 
-def _to_response(c: McpConnector) -> ConnectorResponse:
+async def _scope_ids(
+    db: AsyncSession, connector_id: uuid.UUID
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    groups = (
+        (
+            await db.execute(
+                select(ConnectorGroup.group_id).where(
+                    ConnectorGroup.connector_id == connector_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    workspaces = (
+        (
+            await db.execute(
+                select(WorkspaceMcpConnector.workspace_id).where(
+                    WorkspaceMcpConnector.connector_id == connector_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(groups), list(workspaces)
+
+
+async def _set_groups(
+    db: AsyncSession, connector_id: uuid.UUID, group_ids: list[uuid.UUID]
+) -> None:
+    await db.execute(
+        delete(ConnectorGroup).where(
+            ConnectorGroup.connector_id == connector_id
+        )
+    )
+    for gid in dict.fromkeys(group_ids):
+        db.add(ConnectorGroup(connector_id=connector_id, group_id=gid))
+
+
+async def _set_workspaces(
+    db: AsyncSession, connector_id: uuid.UUID, workspace_ids: list[uuid.UUID]
+) -> None:
+    await db.execute(
+        delete(WorkspaceMcpConnector).where(
+            WorkspaceMcpConnector.connector_id == connector_id
+        )
+    )
+    for wid in dict.fromkeys(workspace_ids):
+        db.add(
+            WorkspaceMcpConnector(connector_id=connector_id, workspace_id=wid)
+        )
+
+
+async def _to_response(
+    db: AsyncSession, c: McpConnector
+) -> ConnectorResponse:
+    group_ids, workspace_ids = await _scope_ids(db, c.id)
     return ConnectorResponse(
         id=c.id,
         name=c.name,
@@ -86,6 +156,8 @@ def _to_response(c: McpConnector) -> ConnectorResponse:
         enabled=c.enabled,
         availability=c.availability,
         allowed_tools=c.allowed_tools,
+        group_ids=group_ids,
+        workspace_ids=workspace_ids,
         tools=[
             ToolInfo(
                 name=t.get("name", ""),
@@ -112,12 +184,40 @@ async def _unique_slug(db: AsyncSession, name: str) -> str:
 
 
 def _valid_availability(v: str) -> str:
-    if v not in ("global", "workspace"):
-        raise HTTPException(status_code=400, detail="availability must be 'global' or 'workspace'")
+    if v not in ("global", "restricted"):
+        raise HTTPException(status_code=400, detail="availability must be 'global' or 'restricted'")
     return v
 
 
 # ----- Endpoints ---------------------------------------------------------
+class WorkspaceOption(BaseModel):
+    id: uuid.UUID
+    title: str
+    owner: str | None = None
+
+
+@router.get("/workspaces", response_model=list[WorkspaceOption])
+async def list_all_workspaces(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[WorkspaceOption]:
+    """Every workspace (id + title + owner) — feeds the connector scoping
+    selector so an admin can attach a restricted connector to specific
+    workspaces."""
+    from app.chat.models import Workspace
+
+    rows = (
+        await db.execute(
+            select(Workspace.id, Workspace.title, User.username)
+            .join(User, User.id == Workspace.user_id, isouter=True)
+            .order_by(Workspace.title.asc())
+        )
+    ).all()
+    return [
+        WorkspaceOption(id=r[0], title=r[1], owner=r[2]) for r in rows
+    ]
+
+
 @router.get("/connectors", response_model=list[ConnectorResponse])
 async def list_connectors(
     db: AsyncSession = Depends(get_db),
@@ -128,7 +228,7 @@ async def list_connectors(
         .scalars()
         .all()
     )
-    return [_to_response(c) for c in rows]
+    return [await _to_response(db, c) for c in rows]
 
 
 @router.post(
@@ -167,13 +267,18 @@ async def create_connector(
         raise HTTPException(status_code=409, detail="A connector with that name exists") from e
     await db.refresh(connector)
 
+    if payload.availability == "restricted":
+        await _set_groups(db, connector.id, payload.group_ids)
+        await _set_workspaces(db, connector.id, payload.workspace_ids)
+        await db.commit()
+
     # Best-effort initial tool discovery so the admin sees what they got.
     try:
         await refresh_catalog(db, connector)
         await db.refresh(connector)
     except McpError as e:
         logger.info("mcp create: catalog refresh failed for %s: %s", connector.slug, e)
-    return _to_response(connector)
+    return await _to_response(db, connector)
 
 
 @router.patch("/connectors/{connector_id}", response_model=ConnectorResponse)
@@ -203,9 +308,17 @@ async def update_connector(
         c.availability = _valid_availability(payload.availability)
     if payload.allowed_tools is not None:
         c.allowed_tools = payload.allowed_tools
+    if payload.group_ids is not None:
+        await _set_groups(db, c.id, payload.group_ids)
+    if payload.workspace_ids is not None:
+        await _set_workspaces(db, c.id, payload.workspace_ids)
+    # Going back to global drops any restricted scoping so it can't linger.
+    if c.availability == "global":
+        await _set_groups(db, c.id, [])
+        await _set_workspaces(db, c.id, [])
     await db.commit()
     await db.refresh(c)
-    return _to_response(c)
+    return await _to_response(db, c)
 
 
 @router.delete(

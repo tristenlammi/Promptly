@@ -282,6 +282,7 @@ from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa
 from app.workspaces.comments_router import router as workspace_comments_router  # noqa: E402
 from app.mcp.router import router as mcp_admin_router  # noqa: E402
 from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E402
+from app.groups.router import router as groups_admin_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
@@ -354,6 +355,10 @@ app.include_router(
 # Workspace owners attach workspace-scoped connectors to their workspace.
 app.include_router(
     mcp_workspace_router, prefix="/api/workspaces", tags=["mcp"]
+)
+# User groups (admin-managed teams; scope connectors by identity).
+app.include_router(
+    groups_admin_router, prefix="/api/admin/groups", tags=["groups"]
 )
 # Workspace share management endpoints — separate router so it can
 # be version-bumped independently of the core workspaces CRUD.

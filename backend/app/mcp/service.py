@@ -18,8 +18,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.utils import decrypt_secret
+from app.groups.models import UserGroupMember
 from app.mcp.client import McpError, call_tool, fetch_tools
-from app.mcp.models import McpConnector, WorkspaceMcpConnector
+from app.mcp.models import (
+    ConnectorGroup,
+    McpConnector,
+    WorkspaceMcpConnector,
+)
 
 logger = logging.getLogger("promptly.mcp.service")
 
@@ -74,10 +79,23 @@ def _auth_headers(connector: McpConnector) -> dict[str, str]:
 
 
 async def connectors_for_turn(
-    db: AsyncSession, *, workspace_id: uuid.UUID | None
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[McpConnector]:
-    """Enabled connectors available for this turn: every ``global`` one, plus
-    any ``workspace``-scoped ones attached to ``workspace_id``."""
+    """Enabled connectors available for this turn.
+
+    Three ways a connector reaches a turn (OR'd, de-duplicated):
+
+    * ``global`` — available to everyone, everywhere.
+    * ``restricted`` + attached to ``workspace_id`` — context scope: its
+      tools appear in chats inside that workspace.
+    * ``restricted`` + granted to a group ``user_id`` belongs to — identity
+      scope: the member can use its tools in any chat.
+    """
+    by_id: dict[uuid.UUID, McpConnector] = {}
+
     rows = (
         (
             await db.execute(
@@ -90,7 +108,9 @@ async def connectors_for_turn(
         .scalars()
         .all()
     )
-    out = list(rows)
+    for c in rows:
+        by_id[c.id] = c
+
     if workspace_id is not None:
         ws_rows = (
             (
@@ -102,7 +122,7 @@ async def connectors_for_turn(
                     )
                     .where(
                         McpConnector.enabled.is_(True),
-                        McpConnector.availability == "workspace",
+                        McpConnector.availability == "restricted",
                         WorkspaceMcpConnector.workspace_id == workspace_id,
                     )
                 )
@@ -110,8 +130,36 @@ async def connectors_for_turn(
             .scalars()
             .all()
         )
-        out.extend(ws_rows)
-    return out
+        for c in ws_rows:
+            by_id[c.id] = c
+
+    if user_id is not None:
+        grp_rows = (
+            (
+                await db.execute(
+                    select(McpConnector)
+                    .join(
+                        ConnectorGroup,
+                        ConnectorGroup.connector_id == McpConnector.id,
+                    )
+                    .join(
+                        UserGroupMember,
+                        UserGroupMember.group_id == ConnectorGroup.group_id,
+                    )
+                    .where(
+                        McpConnector.enabled.is_(True),
+                        McpConnector.availability == "restricted",
+                        UserGroupMember.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for c in grp_rows:
+            by_id[c.id] = c
+
+    return list(by_id.values())
 
 
 def build_tools_from_connectors(

@@ -1,7 +1,7 @@
-"""Workspace-owner API for attaching ``workspace``-scoped MCP connectors.
+"""Workspace-owner API for attaching ``restricted`` MCP connectors.
 
 Mounted under ``/api/workspaces``. Admins define connectors + mark them
-``availability="workspace"``; a workspace **owner** then chooses which of
+``availability="restricted"``; a workspace **owner** then chooses which of
 those to switch on for their workspace (writing the
 ``workspace_mcp_connectors`` join). Members can read the list.
 """
@@ -53,7 +53,7 @@ async def list_workspace_connectors(
         (
             await db.execute(
                 select(McpConnector).where(
-                    McpConnector.availability == "workspace"
+                    McpConnector.availability == "restricted"
                 )
             )
         )
@@ -101,7 +101,7 @@ async def set_workspace_connectors(
             await db.execute(
                 select(McpConnector.id).where(
                     McpConnector.id.in_(payload.connector_ids or []),
-                    McpConnector.availability == "workspace",
+                    McpConnector.availability == "restricted",
                 )
             )
         )

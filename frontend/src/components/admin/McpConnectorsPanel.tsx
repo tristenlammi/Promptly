@@ -11,10 +11,13 @@ import {
 
 import {
   mcpApi,
+  type ConnectorAvailability,
   type ConnectorKind,
   type McpConnector,
   type McpToolInfo,
+  type WorkspaceOption,
 } from "@/api/mcp";
+import { groupsApi, type UserGroup } from "@/api/groups";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { extractError } from "@/components/files/helpers";
@@ -137,7 +140,11 @@ export function McpConnectorsPanel() {
                       {c.name}
                     </span>
                     {c.kind !== "mcp" && <Badge>{c.kind}</Badge>}
-                    <Badge>{c.availability}</Badge>
+                    <Badge>
+                      {c.availability === "restricted"
+                        ? scopeLabel(c)
+                        : "global"}
+                    </Badge>
                     {!c.enabled && <Badge tone="muted">disabled</Badge>}
                   </div>
                   <div className="truncate text-xs text-[var(--text-muted)]">
@@ -253,9 +260,38 @@ function ConnectorForm({
     connector?.auth_header_name ?? "Authorization"
   );
   const [authValue, setAuthValue] = useState("");
-  const [availability, setAvailability] = useState<"global" | "workspace">(
+  const [availability, setAvailability] = useState<ConnectorAvailability>(
     connector?.availability ?? "global"
   );
+  // Restricted-scope targets (identity = groups, context = workspaces).
+  const [groupIds, setGroupIds] = useState<Set<string>>(
+    new Set(connector?.group_ids ?? [])
+  );
+  const [workspaceIds, setWorkspaceIds] = useState<Set<string>>(
+    new Set(connector?.workspace_ids ?? [])
+  );
+  const [groups, setGroups] = useState<UserGroup[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const [g, w] = await Promise.all([
+          groupsApi.list(),
+          mcpApi.listWorkspaceOptions(),
+        ]);
+        if (!alive) return;
+        setGroups(g);
+        setWorkspaces(w);
+      } catch {
+        // selector simply shows nothing if options can't load
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [testTools, setTestTools] = useState<McpToolInfo[] | null>(
     connector?.tools ?? null
   );
@@ -297,6 +333,11 @@ function ConnectorForm({
   };
   // null = all allowed (default); otherwise the explicit list.
   const allowedPayload = allowed === null ? null : [...allowed];
+  // Restricted scope is sent as concrete lists; global clears both.
+  const scopePayload =
+    availability === "restricted"
+      ? { group_ids: [...groupIds], workspace_ids: [...workspaceIds] }
+      : { group_ids: [], workspace_ids: [] };
 
   const save = async () => {
     setSaving(true);
@@ -311,6 +352,7 @@ function ConnectorForm({
           ...(authValue ? { auth_value: authValue } : {}),
           availability,
           allowed_tools: allowedPayload,
+          ...scopePayload,
         });
       } else {
         await mcpApi.create({
@@ -321,6 +363,7 @@ function ConnectorForm({
           auth_value: authValue || null,
           availability,
           allowed_tools: allowedPayload,
+          ...scopePayload,
         });
       }
       onSaved();
@@ -431,16 +474,55 @@ function ConnectorForm({
           <select
             value={availability}
             onChange={(e) =>
-              setAvailability(e.target.value as "global" | "workspace")
+              setAvailability(e.target.value as ConnectorAvailability)
             }
             className={inputCls}
           >
-            <option value="global">Global — all users</option>
-            <option value="workspace">
-              Workspace — only attached workspaces
+            <option value="global">Global — all users, everywhere</option>
+            <option value="restricted">
+              Restricted — selected groups &amp; workspaces
             </option>
           </select>
         </Field>
+
+        {availability === "restricted" && (
+          <div className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
+            <p className="text-xs text-[var(--text-muted)]">
+              Reachable by members of the chosen <strong>groups</strong>{" "}
+              (anywhere) and in chats inside the chosen{" "}
+              <strong>workspaces</strong>. Pick at least one.
+            </p>
+            <ScopePicker
+              label="Groups"
+              empty="No groups yet — create some in the Groups tab."
+              items={groups.map((g) => ({
+                id: g.id,
+                label: g.name,
+                hint:
+                  g.members.length === 1
+                    ? "1 member"
+                    : `${g.members.length} members`,
+              }))}
+              selected={groupIds}
+              onToggle={(id) =>
+                setGroupIds((s) => toggle(s, id))
+              }
+            />
+            <ScopePicker
+              label="Workspaces"
+              empty="No workspaces exist yet."
+              items={workspaces.map((w) => ({
+                id: w.id,
+                label: w.title,
+                hint: w.owner ?? undefined,
+              }))}
+              selected={workspaceIds}
+              onToggle={(id) =>
+                setWorkspaceIds((s) => toggle(s, id))
+              }
+            />
+          </div>
+        )}
 
         <div className="flex items-center gap-2 border-t border-[var(--border)] pt-2">
           <Button
@@ -506,6 +588,70 @@ function ConnectorForm({
         {err && <p className="text-xs text-red-600 dark:text-red-400">{err}</p>}
       </div>
     </Modal>
+  );
+}
+
+function toggle(set: Set<string>, id: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/** Short badge text summarising a restricted connector's scope. */
+function scopeLabel(c: McpConnector): string {
+  const g = c.group_ids.length;
+  const w = c.workspace_ids.length;
+  const parts: string[] = [];
+  if (g) parts.push(`${g} group${g === 1 ? "" : "s"}`);
+  if (w) parts.push(`${w} workspace${w === 1 ? "" : "s"}`);
+  return parts.length ? parts.join(" · ") : "restricted (none)";
+}
+
+function ScopePicker({
+  label,
+  empty,
+  items,
+  selected,
+  onToggle,
+}: {
+  label: string;
+  empty: string;
+  items: { id: string; label: string; hint?: string }[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+        {label} ({selected.size} selected)
+      </div>
+      {items.length === 0 ? (
+        <p className="px-1 py-1 text-xs text-[var(--text-muted)]/70">{empty}</p>
+      ) : (
+        <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1">
+          {items.map((it) => (
+            <label
+              key={it.id}
+              className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(it.id)}
+                onChange={() => onToggle(it.id)}
+                className="h-3 w-3 accent-[var(--accent)]"
+              />
+              <span className="text-[var(--text)]">{it.label}</span>
+              {it.hint && (
+                <span className="ml-auto text-[var(--text-muted)]/70">
+                  {it.hint}
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
