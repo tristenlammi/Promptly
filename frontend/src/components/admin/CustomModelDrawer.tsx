@@ -6,10 +6,10 @@ import {
   RefreshCw,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
+import { Modal } from "@/components/shared/Modal";
 import { useAvailableModels } from "@/hooks/useProviders";
 import {
   useAttachFiles,
@@ -45,42 +45,14 @@ export function CustomModelDrawer({
   onClose,
   modelId,
 }: CustomModelDrawerProps) {
-  // Esc-to-close.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
+  // Gate on ``open`` here so the inner component's data-fetch hooks only
+  // run while the dialog is mounted. The actual chrome is the shared
+  // ``Modal`` (centred, focus-trapped) rendered by ``CustomModelModal``.
   if (!open) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-40"
-      role="dialog"
-      aria-modal="true"
-      aria-label={modelId ? "Edit custom model" : "Create custom model"}
-    >
-      <button
-        type="button"
-        aria-label="Close drawer"
-        onClick={onClose}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-      />
-      <aside
-        className="absolute right-0 top-0 h-full w-full max-w-2xl overflow-hidden bg-[var(--surface)] text-[var(--text)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <DrawerContent modelId={modelId} onClose={onClose} />
-      </aside>
-    </div>
-  );
+  return <CustomModelModal modelId={modelId} onClose={onClose} />;
 }
 
-function DrawerContent({
+function CustomModelModal({
   modelId,
   onClose,
 }: {
@@ -182,35 +154,43 @@ function DrawerContent({
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
-        <div>
-          <h2 className="text-base font-semibold">
-            {!editing
-              ? "Create custom model"
-              : justCreated
-                ? "Add knowledge"
-                : "Edit custom model"}
-          </h2>
-          <p className="text-xs text-[var(--text-muted)]">
-            {!editing
-              ? "Give your assistant an identity and pick the base model it runs on."
-              : justCreated
-                ? "Model created. Attach files below to build its knowledge library, or close when done."
-                : "Changes to personality, base model, or retrieval settings take effect on the next message."}
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={onClose}
-          className="rounded-md p-1 text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </header>
-
-      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+    <Modal
+      open
+      onClose={onClose}
+      dismissible={false}
+      widthClass="max-w-2xl"
+      title={
+        !editing
+          ? "Create custom model"
+          : justCreated
+            ? "Add knowledge"
+            : "Edit custom model"
+      }
+      description={
+        !editing
+          ? "Give your assistant an identity and pick the base model it runs on."
+          : justCreated
+            ? "Model created. Attach files below to build its knowledge library, or close when done."
+            : "Changes to personality, base model, or retrieval settings take effect on the next message."
+      }
+      footer={
+        <>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            {editing ? "Done" : "Cancel"}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!canSave}
+            loading={create.isPending || update.isPending}
+            onClick={onSave}
+          >
+            {editing ? "Save changes" : "Create"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-5">
         <section className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             Identity
@@ -334,22 +314,7 @@ function DrawerContent({
           </div>
         )}
       </div>
-
-      <footer className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-5 py-3">
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          {editing ? "Done" : "Cancel"}
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={!canSave}
-          loading={create.isPending || update.isPending}
-          onClick={onSave}
-        >
-          {editing ? "Save changes" : "Create"}
-        </Button>
-      </footer>
-    </div>
+    </Modal>
   );
 }
 

@@ -21,6 +21,13 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   widthClass?: string; // Tailwind class(es) for max-width; default max-w-lg.
+  /**
+   * When false, the modal can only be dismissed via the explicit close
+   * button (the X / footer action) — clicking the backdrop and pressing
+   * Escape are ignored. Use for forms where an accidental outside-click
+   * would discard in-progress input. Defaults to true.
+   */
+  dismissible?: boolean;
 }
 
 export function Modal({
@@ -31,6 +38,7 @@ export function Modal({
   children,
   footer,
   widthClass = "max-w-lg",
+  dismissible = true,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -39,7 +47,7 @@ export function Modal({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        if (dismissible) onClose();
         return;
       }
       if (e.key !== "Tab") return;
@@ -110,11 +118,18 @@ export function Modal({
       aria-modal="true"
       aria-labelledby={title ? "modal-title" : undefined}
     >
-      <button
-        aria-label="Close dialog"
-        onClick={onClose}
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-      />
+      {dismissible ? (
+        <button
+          aria-label="Close dialog"
+          onClick={onClose}
+          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        />
+      ) : (
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        />
+      )}
       <div
         ref={dialogRef}
         tabIndex={-1}
