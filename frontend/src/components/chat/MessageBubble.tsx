@@ -34,6 +34,7 @@ import {
   MoreHorizontal,
   PanelRight as PanelRightIcon,
   Pencil,
+  Plug,
   Puzzle,
   RefreshCw,
   Square,
@@ -209,19 +210,25 @@ interface MessageBubbleProps {
 // Drive-file mentions (Phase 2.2). The optional ``file:`` prefix group
 // discriminates the two.
 const MENTION_TOKEN_RE =
-  /@\[([^\]\n]+?)\]\((file:)?([0-9a-fA-F-]{32,})\)/g;
+  /@\[([^\]\n]+?)\]\((file:|connector:)?([0-9a-fA-F-]{32,})\)/g;
 
 function rewriteMentionsForMarkdown(markdown: string): string {
   if (!markdown) return markdown;
-  // Replace chat mentions with ``[@title](promptly-mention:id)`` and
-  // file mentions with ``[@title](promptly-file:id)``. The zero-width
-  // space between ``@`` and title prevents Markdown parsers from
-  // collapsing adjacent tokens into one link.
+  // Replace chat mentions with ``[@title](promptly-mention:id)``, file
+  // mentions with ``[@title](promptly-file:id)`` and connector mentions
+  // with ``[@title](promptly-connector:id)``. The zero-width space between
+  // ``@`` and title prevents Markdown parsers from collapsing adjacent
+  // tokens into one link.
   return markdown.replace(
     MENTION_TOKEN_RE,
     (_m, title: string, prefix: string | undefined, id: string) => {
       const safe = title.replace(/[\[\]]/g, "");
-      const proto = prefix ? "promptly-file" : "promptly-mention";
+      const proto =
+        prefix === "file:"
+          ? "promptly-file"
+          : prefix === "connector:"
+            ? "promptly-connector"
+            : "promptly-mention";
       return `[@\u200B${safe}](${proto}:${id})`;
     }
   );
@@ -242,9 +249,13 @@ function renderMentionText(text: string): ReactNode {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index));
     }
-    if (match[2]) {
+    if (match[2] === "file:") {
       parts.push(
         <FileMentionChip key={`mention-${match.index}`} title={match[1]} />
+      );
+    } else if (match[2] === "connector:") {
+      parts.push(
+        <ConnectorMentionChip key={`mention-${match.index}`} title={match[1]} />
       );
     } else {
       parts.push(
@@ -310,6 +321,26 @@ function FileMentionChip({ title }: { title: string }) {
       title={`Referenced file: ${clean}`}
     >
       <FileText className="h-3 w-3" />
+      <span className="max-w-[14rem] truncate">{clean}</span>
+    </span>
+  );
+}
+
+/** Inline chip for a ``@[name](connector:id)`` token — the user
+ *  explicitly invoked an MCP connector's tools for that turn. Accent
+ *  styling (like the chat chip) signals it's an active capability, not
+ *  just passive context. Non-navigating. */
+function ConnectorMentionChip({ title }: { title: string }) {
+  const clean = (title || "").replace(/[\[\]]/g, "").trim() || "Connector";
+  return (
+    <span
+      className={cn(
+        "mx-[1px] inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 align-baseline text-[12px] font-medium leading-5",
+        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+      )}
+      title={`Connector invoked: ${clean}`}
+    >
+      <Plug className="h-3 w-3" />
       <span className="max-w-[14rem] truncate">{clean}</span>
     </span>
   );
@@ -588,6 +619,14 @@ const markdownComponents: Components = {
       );
       const title = raw.replace(/^@\u200B?/, "");
       return <FileMentionChip title={title} />;
+    }
+    if (typeof href === "string" && href.startsWith("promptly-connector:")) {
+      const raw = String(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (children as any)?.[0] ?? children ?? ""
+      );
+      const title = raw.replace(/^@\u200B?/, "");
+      return <ConnectorMentionChip title={title} />;
     }
     return (
       <a {...props} href={href} target="_blank" rel="noopener noreferrer">

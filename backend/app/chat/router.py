@@ -69,6 +69,7 @@ from app.chat.schemas import (
     EnhancePromptResponse,
     MentionCandidate,
     MentionCandidatesResponse,
+    MentionConnectorCandidate,
     MentionFileCandidate,
     MessageResponse,
     MessageFeedbackRequest,
@@ -81,6 +82,7 @@ from app.chat.schemas import (
 from app.chat.compaction import CompactionError, compact_conversation
 from app.chat.mentions import (
     build_file_mention_block,
+    extract_connector_mentions,
     build_reference_system_block,
     extract_file_mentions,
     extract_mentions,
@@ -795,11 +797,38 @@ async def list_mention_candidates(
             updated_at=c.updated_at,
         )
 
+    # Connectors the caller can invoke this turn (global + their grants +
+    # the workspace's restricted ones). Filtered by the query substring.
+    connector_candidates: list[MentionConnectorCandidate] = []
+    try:
+        from app.mcp.service import connectors_for_turn
+
+        conns = await connectors_for_turn(
+            db, user_id=user.id, workspace_id=workspace_id
+        )
+        for c in conns:
+            if q_norm and q_norm not in c.name.lower() and q_norm not in c.slug:
+                continue
+            connector_candidates.append(
+                MentionConnectorCandidate(
+                    id=c.id,
+                    name=c.name,
+                    slug=c.slug,
+                    kind=c.kind,
+                    tool_count=len(c.tool_catalog or []),
+                )
+            )
+            if len(connector_candidates) >= limit:
+                break
+    except Exception:  # noqa: BLE001 — autocomplete must never 500
+        logger.exception("connector mention candidates failed")
+
     return MentionCandidatesResponse(
         workspace_context_id=workspace_id,
         workspace_candidates=[to_candidate(c) for c in workspace_rows],
         recent_candidates=[to_candidate(c) for c in recent_rows],
         workspace_file_candidates=workspace_file_candidates,
+        connector_candidates=connector_candidates,
     )
 
 
@@ -4507,6 +4536,48 @@ async def _stream_generator(
                 if file_block:
                     system_prompt = merge_system_prompt(
                         file_block, system_prompt or ""
+                    )
+
+            # Connector @-mentions (Phase 10). ``@[name](connector:id)``
+            # explicitly invokes an MCP connector's tools for this turn —
+            # advertising them even when the Tools toggle is off, and nudging
+            # the model to use them. Only connectors the caller can actually
+            # reach (global + their grants + this chat's workspace) are honoured;
+            # ones already advertised by the Tools toggle aren't re-added.
+            connector_mentions = extract_connector_mentions(trig_row.content)
+            if connector_mentions:
+                try:
+                    from app.mcp.service import (
+                        build_tools_from_connectors,
+                        connectors_for_turn,
+                    )
+
+                    reachable = await connectors_for_turn(
+                        db, user_id=user.id, workspace_id=conv.workspace_id
+                    )
+                    wanted = {m.connector_id for m in connector_mentions}
+                    already = {cid for cid, _ in mcp_dispatch.values()}
+                    invoked = [c for c in reachable if c.id in wanted]
+                    fresh = [c for c in invoked if c.id not in already]
+                    if fresh:
+                        _schemas, _disp = build_tools_from_connectors(fresh)
+                        if _schemas:
+                            tools_payload = (tools_payload or []) + _schemas
+                            mcp_dispatch.update(_disp)
+                    if invoked:
+                        note = (
+                            "The user explicitly invoked these connectors via "
+                            "an @-mention: "
+                            + ", ".join(c.name for c in invoked)
+                            + ". Use their tools to answer this message."
+                        )
+                        system_prompt = merge_system_prompt(
+                            note, system_prompt or ""
+                        )
+                except Exception:
+                    logger.exception(
+                        "Connector mention resolution failed (conversation_id=%s)",
+                        conv.id,
                     )
 
         # ------------------------------------------------------------------

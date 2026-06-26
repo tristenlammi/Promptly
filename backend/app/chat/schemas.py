@@ -430,6 +430,16 @@ class MentionFileCandidate(BaseModel):
     kind: str = "file"
 
 
+class MentionConnectorCandidate(BaseModel):
+    """An MCP connector the caller can invoke via ``@[name](connector:id)``."""
+
+    id: uuid.UUID
+    name: str
+    slug: str
+    kind: str = "mcp"
+    tool_count: int = 0
+
+
 class MentionCandidatesResponse(BaseModel):
     """Response wrapper for ``GET /conversations/mention-candidates``.
 
@@ -447,6 +457,12 @@ class MentionCandidatesResponse(BaseModel):
     # Workspace files (notes/uploads/canvas texts). Populated only when a
     # ``workspace_id`` is supplied; empty otherwise.
     workspace_file_candidates: list[MentionFileCandidate] = Field(
+        default_factory=list
+    )
+    # MCP connectors the caller can invoke. Reachable = global + their
+    # grants + (when composing in a workspace) that workspace's restricted
+    # connectors.
+    connector_candidates: list[MentionConnectorCandidate] = Field(
         default_factory=list
     )
 

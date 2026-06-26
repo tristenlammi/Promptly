@@ -58,6 +58,13 @@ _FILE_MENTION_RE: Final[re.Pattern[str]] = re.compile(
     r"@\[([^\]\n]+?)\]\(file:([0-9a-fA-F-]{32,})\)"
 )
 
+# Connector mentions carry a ``connector:`` prefix — ``@[unifi](connector:id)``
+# — so a user can explicitly invoke an MCP connector's tools for a turn
+# (Phase 10). Same disjoint-prefix trick as files.
+_CONNECTOR_MENTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"@\[([^\]\n]+?)\]\(connector:([0-9a-fA-F-]{32,})\)"
+)
+
 # Soft ceiling on references per turn. Each one costs a DB lookup
 # plus potentially a summary-generation LLM call; letting the user
 # fan out to 20 chats in a single turn is mostly a foot-gun. If
@@ -237,6 +244,44 @@ def extract_file_mentions(text: str | None) -> list[FileMentionToken]:
     return out
 
 
+@dataclass(frozen=True)
+class ConnectorMentionToken:
+    """One parsed ``@[name](connector:id)`` occurrence (Phase 10)."""
+
+    title: str
+    connector_id: uuid.UUID
+    raw: str
+
+
+def extract_connector_mentions(text: str | None) -> list[ConnectorMentionToken]:
+    """Return the deduplicated connector mentions found in ``text``.
+
+    Same dedupe / cap / graceful-skip policy as the other extractors, for
+    ``@[name](connector:id)`` tokens.
+    """
+    if not text:
+        return []
+    seen: set[uuid.UUID] = set()
+    out: list[ConnectorMentionToken] = []
+    for m in _CONNECTOR_MENTION_RE.finditer(text):
+        title = m.group(1).strip()
+        try:
+            connector_id = uuid.UUID(m.group(2))
+        except (ValueError, TypeError):
+            continue
+        if connector_id in seen:
+            continue
+        seen.add(connector_id)
+        out.append(
+            ConnectorMentionToken(
+                title=title, connector_id=connector_id, raw=m.group(0)
+            )
+        )
+        if len(out) >= _MAX_MENTIONS_PER_TURN:
+            break
+    return out
+
+
 def build_file_mention_block(files: list) -> str | None:
     """Render referenced Drive files into a system-prompt block.
 
@@ -292,11 +337,13 @@ def build_reference_system_block(
 
 
 __all__ = [
+    "ConnectorMentionToken",
     "FileMentionToken",
     "MentionToken",
     "ResolvedReference",
     "build_file_mention_block",
     "build_reference_system_block",
+    "extract_connector_mentions",
     "extract_file_mentions",
     "extract_mentions",
     "resolve_mentions",

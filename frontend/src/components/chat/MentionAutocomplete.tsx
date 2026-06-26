@@ -5,9 +5,13 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { AtSign, FileText, FolderKanban, MessagesSquare } from "lucide-react";
+import { AtSign, FileText, FolderKanban, MessagesSquare, Plug } from "lucide-react";
 
-import { chatApi, type MentionCandidate } from "@/api/chat";
+import {
+  chatApi,
+  type MentionCandidate,
+  type MentionConnectorCandidate,
+} from "@/api/chat";
 import { filesApi } from "@/api/files";
 import { cn } from "@/utils/cn";
 
@@ -42,7 +46,8 @@ export interface MentionPickState {
  *  icon / navigation behaviour of the rendered chip. */
 type MentionRow =
   | { kind: "chat"; cand: MentionCandidate }
-  | { kind: "file"; file: MentionFile };
+  | { kind: "file"; file: MentionFile }
+  | { kind: "connector"; connector: MentionConnectorCandidate };
 
 /** Detect an active ``@``-mention trigger in ``text`` given the
  *  current caret position. Returns ``null`` if the caret isn't in
@@ -110,7 +115,8 @@ export function MentionAutocomplete({
     workspace: MentionCandidate[];
     recent: MentionCandidate[];
     files: MentionFile[];
-  }>({ workspace: [], recent: [], files: [] });
+    connectors: MentionConnectorCandidate[];
+  }>({ workspace: [], recent: [], files: [], connectors: [] });
   const [highlighted, setHighlighted] = useState(0);
   const [fetching, setFetching] = useState(false);
 
@@ -120,6 +126,10 @@ export function MentionAutocomplete({
       ...results.workspace.map((c) => ({ kind: "chat" as const, cand: c })),
       ...results.recent.map((c) => ({ kind: "chat" as const, cand: c })),
       ...results.files.map((f) => ({ kind: "file" as const, file: f })),
+      ...results.connectors.map((c) => ({
+        kind: "connector" as const,
+        connector: c,
+      })),
     ],
     [results]
   );
@@ -129,7 +139,7 @@ export function MentionAutocomplete({
   // both so the popover is useful the instant ``@`` is typed.
   useEffect(() => {
     if (!pick) {
-      setResults({ workspace: [], recent: [], files: [] });
+      setResults({ workspace: [], recent: [], files: [], connectors: [] });
       setHighlighted(0);
       return;
     }
@@ -189,6 +199,7 @@ export function MentionAutocomplete({
           : gfiles.status === "fulfilled"
             ? gfiles.value
             : [],
+        connectors: chatVal?.connector_candidates ?? [],
       });
       setHighlighted(0);
       setFetching(false);
@@ -203,14 +214,23 @@ export function MentionAutocomplete({
     (row: MentionRow) => {
       if (!pick) return;
       const title =
-        row.kind === "chat" ? row.cand.title : row.file.filename;
+        row.kind === "chat"
+          ? row.cand.title
+          : row.kind === "file"
+            ? row.file.filename
+            : row.connector.name;
       // Escape square brackets so they don't break the ``@[title](id)``
       // shape the resolver regex expects.
       const safeTitle = (title || "Untitled").replace(/\[/g, "(").replace(/\]/g, ")");
-      // Files carry a ``file:`` prefix on the id so the backend
-      // resolver (and the message-bubble chip renderer) can tell a
-      // file reference from a chat reference.
-      const id = row.kind === "chat" ? row.cand.id : `file:${row.file.id}`;
+      // Files carry a ``file:`` prefix and connectors a ``connector:``
+      // prefix so the backend resolver (and the chip renderer) can tell
+      // the three reference kinds apart.
+      const id =
+        row.kind === "chat"
+          ? row.cand.id
+          : row.kind === "file"
+            ? `file:${row.file.id}`
+            : `connector:${row.connector.id}`;
       const token = `@[${safeTitle}](${id})`;
       onInsert(token, pick);
     },
@@ -251,6 +271,7 @@ export function MentionAutocomplete({
 
   const empty = flat.length === 0 && !fetching;
   const fileOffset = results.workspace.length + results.recent.length;
+  const connectorOffset = fileOffset + results.files.length;
 
   return (
     <div
@@ -260,7 +281,7 @@ export function MentionAutocomplete({
     >
       <div
         role="listbox"
-        aria-label="Reference a chat or file"
+        aria-label="Reference a chat, file or connector"
         className={cn(
           "max-h-72 overflow-y-auto rounded-card border shadow-lg",
           "border-[var(--border)] bg-[var(--surface)]"
@@ -269,7 +290,7 @@ export function MentionAutocomplete({
         <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
           <AtSign className="h-3 w-3" />
           <span>
-            Reference a chat or file —{" "}
+            Reference a chat, file or connector —{" "}
             <span className="font-mono text-[var(--text)]">
               {pick.query ? `@${pick.query}` : "type to search"}
             </span>
@@ -321,6 +342,17 @@ export function MentionAutocomplete({
             highlighted={highlighted}
             setHighlighted={setHighlighted}
             onPick={(f) => insert({ kind: "file", file: f })}
+            textareaRef={textareaRef}
+          />
+        )}
+        {results.connectors.length > 0 && (
+          <ConnectorGroup
+            heading="Connectors"
+            connectors={results.connectors}
+            offset={connectorOffset}
+            highlighted={highlighted}
+            setHighlighted={setHighlighted}
+            onPick={(c) => insert({ kind: "connector", connector: c })}
             textareaRef={textareaRef}
           />
         )}
@@ -394,6 +426,74 @@ function CandidateGroup({
                   {c.workspace_title}
                 </span>
               )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+interface ConnectorGroupProps {
+  heading: string;
+  connectors: MentionConnectorCandidate[];
+  offset: number;
+  highlighted: number;
+  setHighlighted: (i: number) => void;
+  onPick: (c: MentionConnectorCandidate) => void;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+}
+
+function ConnectorGroup({
+  heading,
+  connectors,
+  offset,
+  highlighted,
+  setHighlighted,
+  onPick,
+  textareaRef,
+}: ConnectorGroupProps) {
+  const keepFocus = (e: React.MouseEvent) => {
+    e.preventDefault();
+    textareaRef.current?.focus();
+  };
+  return (
+    <div className="py-1">
+      <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        {heading}
+      </div>
+      {connectors.map((c, i) => {
+        const globalIndex = offset + i;
+        const active = globalIndex === highlighted;
+        return (
+          <button
+            key={c.id}
+            role="option"
+            aria-selected={active}
+            onMouseDown={keepFocus}
+            onClick={() => onPick(c)}
+            onMouseEnter={() => setHighlighted(globalIndex)}
+            className={cn(
+              "flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition",
+              active
+                ? "bg-[var(--accent)]/10 text-[var(--text)]"
+                : "text-[var(--text-muted)] hover:bg-[var(--accent)]/5 hover:text-[var(--text)]"
+            )}
+          >
+            <Plug
+              className={cn(
+                "mt-0.5 h-3.5 w-3.5 shrink-0",
+                active ? "text-[var(--accent)]" : "text-[var(--text-muted)]"
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-[var(--text)]">
+                {c.name}
+              </span>
+              <span className="mt-0.5 block truncate text-[10px] text-[var(--text-muted)]">
+                {c.tool_count} tool{c.tool_count === 1 ? "" : "s"}
+                {c.kind !== "mcp" ? ` · ${c.kind}` : ""}
+              </span>
             </span>
           </button>
         );

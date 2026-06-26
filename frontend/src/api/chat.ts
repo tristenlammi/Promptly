@@ -49,6 +49,15 @@ export interface MentionFileCandidate {
   kind: string; // 'note' | 'canvas' | 'file'
 }
 
+/** An MCP connector the user can invoke via ``@[name](connector:id)``. */
+export interface MentionConnectorCandidate {
+  id: string;
+  name: string;
+  slug: string;
+  kind: string; // 'mcp' | 'unifi' | …
+  tool_count: number;
+}
+
 export interface CreateConversationPayload {
   title?: string | null;
   model_id?: string | null;
@@ -406,12 +415,14 @@ export const chatApi = {
     workspace_candidates: MentionCandidate[];
     recent_candidates: MentionCandidate[];
     workspace_file_candidates: MentionFileCandidate[];
+    connector_candidates: MentionConnectorCandidate[];
   }> {
     const { data } = await apiClient.get<{
       workspace_context_id: string | null;
       workspace_candidates: MentionCandidate[];
       recent_candidates: MentionCandidate[];
       workspace_file_candidates: MentionFileCandidate[];
+      connector_candidates: MentionConnectorCandidate[];
     }>("/chat/conversations/mention-candidates", {
       params: {
         q: params.q ?? "",
