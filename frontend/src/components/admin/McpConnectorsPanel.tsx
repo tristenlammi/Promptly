@@ -18,6 +18,8 @@ import {
   type WorkspaceOption,
 } from "@/api/mcp";
 import { groupsApi, type UserGroup } from "@/api/groups";
+import { adminApi } from "@/api/admin";
+import type { AdminUser } from "@/api/types";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { extractError } from "@/components/files/helpers";
@@ -263,26 +265,33 @@ function ConnectorForm({
   const [availability, setAvailability] = useState<ConnectorAvailability>(
     connector?.availability ?? "global"
   );
-  // Restricted-scope targets (identity = groups, context = workspaces).
+  // Restricted-scope targets: identity = groups + named users; context =
+  // workspaces.
   const [groupIds, setGroupIds] = useState<Set<string>>(
     new Set(connector?.group_ids ?? [])
+  );
+  const [userIds, setUserIds] = useState<Set<string>>(
+    new Set(connector?.user_ids ?? [])
   );
   const [workspaceIds, setWorkspaceIds] = useState<Set<string>>(
     new Set(connector?.workspace_ids ?? [])
   );
   const [groups, setGroups] = useState<UserGroup[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([]);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
       try {
-        const [g, w] = await Promise.all([
+        const [g, u, w] = await Promise.all([
           groupsApi.list(),
+          adminApi.listUsers(),
           mcpApi.listWorkspaceOptions(),
         ]);
         if (!alive) return;
         setGroups(g);
+        setUsers(u);
         setWorkspaces(w);
       } catch {
         // selector simply shows nothing if options can't load
@@ -333,11 +342,15 @@ function ConnectorForm({
   };
   // null = all allowed (default); otherwise the explicit list.
   const allowedPayload = allowed === null ? null : [...allowed];
-  // Restricted scope is sent as concrete lists; global clears both.
+  // Restricted scope is sent as concrete lists; global clears them all.
   const scopePayload =
     availability === "restricted"
-      ? { group_ids: [...groupIds], workspace_ids: [...workspaceIds] }
-      : { group_ids: [], workspace_ids: [] };
+      ? {
+          group_ids: [...groupIds],
+          user_ids: [...userIds],
+          workspace_ids: [...workspaceIds],
+        }
+      : { group_ids: [], user_ids: [], workspace_ids: [] };
 
   const save = async () => {
     setSaving(true);
@@ -488,8 +501,8 @@ function ConnectorForm({
         {availability === "restricted" && (
           <div className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
             <p className="text-xs text-[var(--text-muted)]">
-              Reachable by members of the chosen <strong>groups</strong>{" "}
-              (anywhere) and in chats inside the chosen{" "}
+              Reachable by the chosen <strong>groups</strong> and{" "}
+              <strong>users</strong> (anywhere), and in chats inside the chosen{" "}
               <strong>workspaces</strong>. Pick at least one.
             </p>
             <ScopePicker
@@ -506,6 +519,20 @@ function ConnectorForm({
               selected={groupIds}
               onToggle={(id) =>
                 setGroupIds((s) => toggle(s, id))
+              }
+            />
+            <ScopePicker
+              label="Users"
+              empty="No users found."
+              searchable
+              items={users.map((u) => ({
+                id: u.id,
+                label: u.username,
+                hint: u.email,
+              }))}
+              selected={userIds}
+              onToggle={(id) =>
+                setUserIds((s) => toggle(s, id))
               }
             />
             <ScopePicker
@@ -601,9 +628,11 @@ function toggle(set: Set<string>, id: string): Set<string> {
 /** Short badge text summarising a restricted connector's scope. */
 function scopeLabel(c: McpConnector): string {
   const g = c.group_ids.length;
+  const u = c.user_ids.length;
   const w = c.workspace_ids.length;
   const parts: string[] = [];
   if (g) parts.push(`${g} group${g === 1 ? "" : "s"}`);
+  if (u) parts.push(`${u} user${u === 1 ? "" : "s"}`);
   if (w) parts.push(`${w} workspace${w === 1 ? "" : "s"}`);
   return parts.length ? parts.join(" · ") : "restricted (none)";
 }
@@ -614,41 +643,69 @@ function ScopePicker({
   items,
   selected,
   onToggle,
+  searchable,
 }: {
   label: string;
   empty: string;
   items: { id: string; label: string; hint?: string }[];
   selected: Set<string>;
   onToggle: (id: string) => void;
+  searchable?: boolean;
 }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shown =
+    searchable && q
+      ? items.filter(
+          (it) =>
+            it.label.toLowerCase().includes(q) ||
+            (it.hint?.toLowerCase().includes(q) ?? false)
+        )
+      : items;
   return (
     <div>
-      <div className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-        {label} ({selected.size} selected)
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-[var(--text-muted)]">
+          {label} ({selected.size} selected)
+        </span>
+        {searchable && items.length > 0 && (
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search…"
+            className="w-32 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[11px] text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          />
+        )}
       </div>
       {items.length === 0 ? (
         <p className="px-1 py-1 text-xs text-[var(--text-muted)]/70">{empty}</p>
       ) : (
         <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1">
-          {items.map((it) => (
-            <label
-              key={it.id}
-              className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(it.id)}
-                onChange={() => onToggle(it.id)}
-                className="h-3 w-3 accent-[var(--accent)]"
-              />
-              <span className="text-[var(--text)]">{it.label}</span>
-              {it.hint && (
-                <span className="ml-auto text-[var(--text-muted)]/70">
-                  {it.hint}
-                </span>
-              )}
-            </label>
-          ))}
+          {shown.length === 0 ? (
+            <p className="px-1 py-1 text-xs text-[var(--text-muted)]/70">
+              No matches.
+            </p>
+          ) : (
+            shown.map((it) => (
+              <label
+                key={it.id}
+                className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(it.id)}
+                  onChange={() => onToggle(it.id)}
+                  className="h-3 w-3 accent-[var(--accent)]"
+                />
+                <span className="text-[var(--text)]">{it.label}</span>
+                {it.hint && (
+                  <span className="ml-auto truncate text-[var(--text-muted)]/70">
+                    {it.hint}
+                  </span>
+                )}
+              </label>
+            ))
+          )}
         </div>
       )}
     </div>

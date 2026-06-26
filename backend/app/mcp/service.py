@@ -22,6 +22,7 @@ from app.groups.models import UserGroupMember
 from app.mcp.client import McpError, call_tool, fetch_tools
 from app.mcp.models import (
     ConnectorGroup,
+    ConnectorUser,
     McpConnector,
     WorkspaceMcpConnector,
 )
@@ -86,13 +87,15 @@ async def connectors_for_turn(
 ) -> list[McpConnector]:
     """Enabled connectors available for this turn.
 
-    Three ways a connector reaches a turn (OR'd, de-duplicated):
+    Four ways a connector reaches a turn (OR'd, de-duplicated):
 
     * ``global`` — available to everyone, everywhere.
     * ``restricted`` + attached to ``workspace_id`` — context scope: its
       tools appear in chats inside that workspace.
     * ``restricted`` + granted to a group ``user_id`` belongs to — identity
       scope: the member can use its tools in any chat.
+    * ``restricted`` + granted to ``user_id`` directly — identity scope for a
+      named user, no group membership required.
     """
     by_id: dict[uuid.UUID, McpConnector] = {}
 
@@ -157,6 +160,27 @@ async def connectors_for_turn(
             .all()
         )
         for c in grp_rows:
+            by_id[c.id] = c
+
+        usr_rows = (
+            (
+                await db.execute(
+                    select(McpConnector)
+                    .join(
+                        ConnectorUser,
+                        ConnectorUser.connector_id == McpConnector.id,
+                    )
+                    .where(
+                        McpConnector.enabled.is_(True),
+                        McpConnector.availability == "restricted",
+                        ConnectorUser.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for c in usr_rows:
             by_id[c.id] = c
 
     return list(by_id.values())

@@ -4,9 +4,10 @@ An ``McpConnector`` is an admin-configured remote MCP server. Its discovered
 tool catalog is cached on the row; auth (if any) is a single HTTP header
 whose value is Fernet-encrypted at rest (same as provider API keys). The
 ``availability`` field decides who can use it: ``global`` (everyone) or
-``restricted`` — reachable via the user groups it's granted to (identity
-scope, ``connector_groups``) and/or the workspaces it's attached to (context
-scope, ``workspace_mcp_connectors``).
+``restricted`` — reachable via the user groups (``connector_groups``) and
+individual users (``connector_users``) it's granted to (identity scope)
+and/or the workspaces it's attached to (context scope,
+``workspace_mcp_connectors``).
 """
 from __future__ import annotations
 
@@ -115,5 +116,22 @@ class ConnectorGroup(Base):
     )
     group_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("user_groups.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class ConnectorUser(Base):
+    """Join: which individual users a restricted connector is granted to
+    (identity-based scope — the named user can use its tools in any chat,
+    without needing to belong to a group)."""
+
+    __tablename__ = "connector_users"
+
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("mcp_connectors.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )

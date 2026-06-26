@@ -20,6 +20,7 @@ export interface McpConnector {
   availability: ConnectorAvailability;
   allowed_tools: string[] | null;
   group_ids: string[];
+  user_ids: string[];
   workspace_ids: string[];
   tools: McpToolInfo[];
   tools_refreshed_at: string | null;
@@ -37,6 +38,7 @@ export interface ConnectorCreatePayload {
   availability?: ConnectorAvailability;
   allowed_tools?: string[] | null;
   group_ids?: string[];
+  user_ids?: string[];
   workspace_ids?: string[];
 }
 
@@ -49,6 +51,7 @@ export interface ConnectorUpdatePayload {
   availability?: ConnectorAvailability;
   allowed_tools?: string[] | null;
   group_ids?: string[];
+  user_ids?: string[];
   workspace_ids?: string[];
 }
 

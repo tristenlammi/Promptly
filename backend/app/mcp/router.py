@@ -24,6 +24,7 @@ from app.database import get_db
 from app.mcp.client import McpError, fetch_tools
 from app.mcp.models import (
     ConnectorGroup,
+    ConnectorUser,
     McpConnector,
     WorkspaceMcpConnector,
 )
@@ -43,9 +44,10 @@ class ConnectorCreate(BaseModel):
     auth_value: str | None = Field(default=None, max_length=4000)
     availability: str = "global"  # 'global' | 'restricted'
     allowed_tools: list[str] | None = None
-    # When restricted: which groups (identity) and workspaces (context) it
-    # reaches. Ignored when availability == 'global'.
+    # When restricted: which groups + users (identity) and workspaces
+    # (context) it reaches. Ignored when availability == 'global'.
     group_ids: list[uuid.UUID] = []
+    user_ids: list[uuid.UUID] = []
     workspace_ids: list[uuid.UUID] = []
 
 
@@ -60,6 +62,7 @@ class ConnectorUpdate(BaseModel):
     allowed_tools: list[str] | None = None
     # Omit to leave scoping unchanged; send (possibly empty) lists to replace.
     group_ids: list[uuid.UUID] | None = None
+    user_ids: list[uuid.UUID] | None = None
     workspace_ids: list[uuid.UUID] | None = None
 
 
@@ -81,6 +84,7 @@ class ConnectorResponse(BaseModel):
     availability: str
     allowed_tools: list[str] | None
     group_ids: list[uuid.UUID]
+    user_ids: list[uuid.UUID]
     workspace_ids: list[uuid.UUID]
     tools: list[ToolInfo]
     tools_refreshed_at: datetime | None
@@ -89,12 +93,23 @@ class ConnectorResponse(BaseModel):
 
 async def _scope_ids(
     db: AsyncSession, connector_id: uuid.UUID
-) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
     groups = (
         (
             await db.execute(
                 select(ConnectorGroup.group_id).where(
                     ConnectorGroup.connector_id == connector_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    users = (
+        (
+            await db.execute(
+                select(ConnectorUser.user_id).where(
+                    ConnectorUser.connector_id == connector_id
                 )
             )
         )
@@ -112,7 +127,7 @@ async def _scope_ids(
         .scalars()
         .all()
     )
-    return list(groups), list(workspaces)
+    return list(groups), list(users), list(workspaces)
 
 
 async def _set_groups(
@@ -125,6 +140,18 @@ async def _set_groups(
     )
     for gid in dict.fromkeys(group_ids):
         db.add(ConnectorGroup(connector_id=connector_id, group_id=gid))
+
+
+async def _set_users(
+    db: AsyncSession, connector_id: uuid.UUID, user_ids: list[uuid.UUID]
+) -> None:
+    await db.execute(
+        delete(ConnectorUser).where(
+            ConnectorUser.connector_id == connector_id
+        )
+    )
+    for uid in dict.fromkeys(user_ids):
+        db.add(ConnectorUser(connector_id=connector_id, user_id=uid))
 
 
 async def _set_workspaces(
@@ -144,7 +171,7 @@ async def _set_workspaces(
 async def _to_response(
     db: AsyncSession, c: McpConnector
 ) -> ConnectorResponse:
-    group_ids, workspace_ids = await _scope_ids(db, c.id)
+    group_ids, user_ids, workspace_ids = await _scope_ids(db, c.id)
     return ConnectorResponse(
         id=c.id,
         name=c.name,
@@ -157,6 +184,7 @@ async def _to_response(
         availability=c.availability,
         allowed_tools=c.allowed_tools,
         group_ids=group_ids,
+        user_ids=user_ids,
         workspace_ids=workspace_ids,
         tools=[
             ToolInfo(
@@ -269,6 +297,7 @@ async def create_connector(
 
     if payload.availability == "restricted":
         await _set_groups(db, connector.id, payload.group_ids)
+        await _set_users(db, connector.id, payload.user_ids)
         await _set_workspaces(db, connector.id, payload.workspace_ids)
         await db.commit()
 
@@ -310,11 +339,14 @@ async def update_connector(
         c.allowed_tools = payload.allowed_tools
     if payload.group_ids is not None:
         await _set_groups(db, c.id, payload.group_ids)
+    if payload.user_ids is not None:
+        await _set_users(db, c.id, payload.user_ids)
     if payload.workspace_ids is not None:
         await _set_workspaces(db, c.id, payload.workspace_ids)
     # Going back to global drops any restricted scoping so it can't linger.
     if c.availability == "global":
         await _set_groups(db, c.id, [])
+        await _set_users(db, c.id, [])
         await _set_workspaces(db, c.id, [])
     await db.commit()
     await db.refresh(c)

@@ -36,6 +36,7 @@ from app.files.models import (  # noqa: F401
 from app.groups.models import UserGroup, UserGroupMember  # noqa: F401
 from app.mcp.models import (  # noqa: F401
     ConnectorGroup,
+    ConnectorUser,
     McpConnector,
     WorkspaceMcpConnector,
 )
