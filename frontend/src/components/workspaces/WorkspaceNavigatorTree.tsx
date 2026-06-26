@@ -5,12 +5,15 @@ import {
   ArchiveRestore,
   ChevronDown,
   ChevronRight,
+  Clock,
   Columns2,
   Columns3,
   FilePlus2,
   FileText,
   Folder,
+  FolderInput,
   FolderOpen,
+  FolderPlus,
   Home,
   Layers,
   Loader2,
@@ -30,12 +33,14 @@ import {
 
 import { chatApi } from "@/api/chat";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { Modal } from "@/components/shared/Modal";
 import { workspacesApi } from "@/api/workspaces";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
   useArchiveWorkspaceItem,
   useCreateWorkspaceItem,
   useDeleteWorkspaceItem,
+  useMoveWorkspaceItem,
   useSetItemContext,
   useSetItemPinned,
   useUnarchiveWorkspaceItem,
@@ -93,6 +98,8 @@ export function WorkspaceNavigatorTree({
   const qc = useQueryClient();
   const { data: workspace } = useWorkspace(workspaceId);
   const [creatingChat, setCreatingChat] = useState(false);
+  // The item whose "Move to folder" picker is open (null = closed).
+  const [movingNode, setMovingNode] = useState<WorkspaceItemNode | null>(null);
 
   // Pinned items surface in a dedicated section and are pruned from the main
   // tree (each item shows once), mirroring the chat sidebar.
@@ -213,6 +220,7 @@ export function WorkspaceNavigatorTree({
             onNewBoard={() => handleCreate("board", null)}
             onNewSheet={() => handleCreate("sheet", null)}
             onNewNotebook={() => handleCreate("container", null)}
+            onNewFolder={() => handleCreate("folder", null)}
             onNewTask={onNewTask}
           />
         )}
@@ -239,6 +247,7 @@ export function WorkspaceNavigatorTree({
                   onCreateInFolder={(kind, parentId) =>
                     handleCreate(kind, parentId)
                   }
+                  onMove={setMovingNode}
                 />
               ))}
             </ul>
@@ -265,6 +274,7 @@ export function WorkspaceNavigatorTree({
                 onCreateInFolder={(kind, parentId) =>
                   handleCreate(kind, parentId)
                 }
+                onMove={setMovingNode}
               />
             ))}
           </ul>
@@ -273,7 +283,99 @@ export function WorkspaceNavigatorTree({
 
       {/* Per-workspace Archive — pinned to the bottom of the rail. */}
       <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
+
+      {movingNode && (
+        <MoveToFolderModal
+          workspaceId={workspaceId}
+          node={movingNode}
+          folders={collectFolders(tree, movingNode.id)}
+          onClose={() => setMovingNode(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Flatten the tree into a depth-tagged list of folders, skipping the
+ *  subtree rooted at ``excludeId`` (you can't move an item into itself or
+ *  one of its own descendants). */
+function collectFolders(
+  nodes: WorkspaceItemNode[],
+  excludeId: string,
+  depth = 0
+): { id: string; title: string; depth: number }[] {
+  const out: { id: string; title: string; depth: number }[] = [];
+  for (const n of nodes) {
+    if (n.id === excludeId) continue; // skip self + its whole subtree
+    if (n.kind === "folder") {
+      out.push({ id: n.id, title: n.title || "Untitled folder", depth });
+      if (n.children?.length) {
+        out.push(...collectFolders(n.children, excludeId, depth + 1));
+      }
+    }
+  }
+  return out;
+}
+
+/** Small modal that lists the workspace's folders so the user can reparent
+ *  an item. "Top level" detaches it from any folder. */
+function MoveToFolderModal({
+  workspaceId,
+  node,
+  folders,
+  onClose,
+}: {
+  workspaceId: string;
+  node: WorkspaceItemNode;
+  folders: { id: string; title: string; depth: number }[];
+  onClose: () => void;
+}) {
+  const move = useMoveWorkspaceItem(workspaceId);
+
+  const go = (parentId: string | null) => {
+    move.mutate(
+      // A large position appends the item to the end of the target's children.
+      { itemId: node.id, payload: { parent_id: parentId, position: Date.now() } },
+      { onSettled: onClose }
+    );
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Move “${node.title || "item"}”`}
+      widthClass="max-w-sm"
+    >
+      <div className="space-y-1 text-sm">
+        <button
+          type="button"
+          onClick={() => go(null)}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--hover)]"
+        >
+          <Home className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+          Top level (no folder)
+        </button>
+        {folders.length === 0 ? (
+          <p className="px-2 py-2 text-xs text-[var(--text-muted)]/70">
+            No other folders yet. Create one from the “+ New” menu.
+          </p>
+        ) : (
+          folders.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => go(f.id)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--hover)]"
+              style={{ paddingLeft: f.depth * 14 + 8 }}
+            >
+              <Folder className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+              <span className="truncate">{f.title}</span>
+            </button>
+          ))
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -426,6 +528,7 @@ function TreeNode({
   onOpenToSide,
   canEdit,
   onCreateInFolder,
+  onMove,
 }: {
   workspaceId: string;
   node: WorkspaceItemNode;
@@ -438,6 +541,8 @@ function TreeNode({
     kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
     parentId: string
   ) => void;
+  /** Open the move-to-folder picker for a (movable) stored item. */
+  onMove?: (node: WorkspaceItemNode) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [renaming, setRenaming] = useState(false);
@@ -611,20 +716,14 @@ function TreeNode({
             <span className="w-3.5 shrink-0" />
           )}
 
-          {isContextItem && contextOn && (
-            <span
-              title="In this workspace's chat context — chats here can draw on it. Toggle via the ⋯ menu."
-              aria-label="Included in workspace context"
-              className="inline-flex shrink-0 items-center text-[var(--accent)]"
-            >
-              <Zap className="h-3 w-3" />
-            </span>
-          )}
+          {/* Context is ON by default for documents, so only the *excluded*
+              state is worth a glyph — flagging the exception keeps the rail
+              quiet. The on/off toggle still lives in the ⋯ menu. */}
           {isContextItem && !contextOn && (
             <span
               title="Excluded from this workspace's chat context. Toggle via the ⋯ menu."
               aria-label="Excluded from workspace context"
-              className="inline-flex shrink-0 items-center text-[var(--text-muted)]"
+              className="inline-flex shrink-0 items-center text-[var(--text-muted)]/70"
             >
               <ZapOff className="h-3 w-3" />
             </span>
@@ -677,6 +776,16 @@ function TreeNode({
             onNewBoard={() => onCreateInFolder("board", node.id)}
             onNewSheet={() => onCreateInFolder("sheet", node.id)}
             onNewNotebook={() => onCreateInFolder("container", node.id)}
+            onNewSubfolder={
+              isFolder ? () => onCreateInFolder("folder", node.id) : undefined
+            }
+            onMove={
+              // Only stored workspace_items move via the items API. Chats and
+              // automations are synthesised, so they have no movable row.
+              onMove && !isChat && node.kind !== "task"
+                ? () => onMove(node)
+                : undefined
+            }
             pinned={isPinned}
             onTogglePin={handleTogglePin}
             onOpenToSide={
@@ -702,6 +811,7 @@ function TreeNode({
               onOpenToSide={onOpenToSide}
               canEdit={canEdit}
               onCreateInFolder={onCreateInFolder}
+              onMove={onMove}
             />
           ))}
         </ul>
@@ -742,7 +852,8 @@ function NodeIcon({
     case "container":
       return <Layers className={cls} />;
     case "task":
-      return <Zap className={cls} />;
+      // A clock reads "scheduled"; reserve the bolt for the context flag.
+      return <Clock className={cls} />;
     case "note":
     default:
       return <FileText className={cls} />;
@@ -766,6 +877,8 @@ function NodeActions({
   onNewBoard,
   onNewSheet,
   onNewNotebook,
+  onNewSubfolder,
+  onMove,
   pinned,
   onTogglePin,
   onOpenToSide,
@@ -783,6 +896,9 @@ function NodeActions({
   onNewBoard: () => void;
   onNewSheet: () => void;
   onNewNotebook: () => void;
+  onNewSubfolder?: () => void;
+  /** Open the "move to folder" picker for this item. */
+  onMove?: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
@@ -917,7 +1033,27 @@ function NodeActions({
                       onNewNotebook();
                     }}
                   />
+                  {onNewSubfolder && (
+                    <MenuItem
+                      icon={<FolderPlus className="h-3.5 w-3.5" />}
+                      label="New subfolder"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onNewSubfolder();
+                      }}
+                    />
+                  )}
                 </>
+              )}
+              {onMove && (
+                <MenuItem
+                  icon={<FolderInput className="h-3.5 w-3.5" />}
+                  label="Move to folder"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onMove();
+                  }}
+                />
               )}
               {contextState && onToggleContext && (
                 <MenuItem
@@ -1009,6 +1145,15 @@ function MenuItem({
   );
 }
 
+/** A tiny uppercase divider label inside a dropdown menu. */
+function MenuSection({ label }: { label: string }) {
+  return (
+    <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+      {label}
+    </div>
+  );
+}
+
 function NewMenu({
   onNewChat,
   onNewNote,
@@ -1016,6 +1161,7 @@ function NewMenu({
   onNewBoard,
   onNewSheet,
   onNewNotebook,
+  onNewFolder,
   onNewTask,
   disabled,
 }: {
@@ -1026,6 +1172,7 @@ function NewMenu({
   onNewBoard: () => void;
   onNewSheet: () => void;
   onNewNotebook: () => void;
+  onNewFolder: () => void;
   onNewTask?: () => void;
   disabled?: boolean;
 }) {
@@ -1058,18 +1205,22 @@ function NewMenu({
           />
           <div
             role="menu"
-            className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-lg"
+            className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-lg"
           >
             {onNewChat && (
-              <MenuItem
-                icon={<MessageSquare className="h-3.5 w-3.5" />}
-                label="New chat"
-                onClick={() => {
-                  setOpen(false);
-                  onNewChat();
-                }}
-              />
+              <>
+                <MenuSection label="Chat" />
+                <MenuItem
+                  icon={<MessageSquare className="h-3.5 w-3.5" />}
+                  label="New chat"
+                  onClick={() => {
+                    setOpen(false);
+                    onNewChat();
+                  }}
+                />
+              </>
             )}
+            <MenuSection label="Documents" />
             <MenuItem
               icon={<FilePlus2 className="h-3.5 w-3.5" />}
               label="New note"
@@ -1102,6 +1253,7 @@ function NewMenu({
                 onNewSheet();
               }}
             />
+            <MenuSection label="Organize" />
             <MenuItem
               icon={<Layers className="h-3.5 w-3.5" />}
               label="New notebook"
@@ -1110,15 +1262,26 @@ function NewMenu({
                 onNewNotebook();
               }}
             />
+            <MenuItem
+              icon={<FolderPlus className="h-3.5 w-3.5" />}
+              label="New folder"
+              onClick={() => {
+                setOpen(false);
+                onNewFolder();
+              }}
+            />
             {onNewTask && (
-              <MenuItem
-                icon={<Zap className="h-3.5 w-3.5" />}
-                label="New automation"
-                onClick={() => {
-                  setOpen(false);
-                  onNewTask();
-                }}
-              />
+              <>
+                <MenuSection label="Automation" />
+                <MenuItem
+                  icon={<Clock className="h-3.5 w-3.5" />}
+                  label="New automation"
+                  onClick={() => {
+                    setOpen(false);
+                    onNewTask();
+                  }}
+                />
+              </>
             )}
           </div>
         </>
