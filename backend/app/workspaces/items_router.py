@@ -317,6 +317,30 @@ async def get_workspace_tree(
                 children=[],
             )
         )
+
+    # Synthesise automation (scheduled task) nodes the same way — the
+    # caller's tasks homed in this workspace. Opened by ref_id at /tasks/{id}.
+    from app.tasks.models import Task
+
+    tasks = (
+        await db.execute(
+            select(Task)
+            .where(Task.workspace_id == ws.id, Task.user_id == user.id)
+            .order_by(Task.created_at.desc())
+        )
+    ).scalars()
+    for idx, t in enumerate(tasks):
+        tree.append(
+            WorkspaceItemNode(
+                id=t.id,
+                kind="task",
+                ref_id=t.id,
+                title=t.title,
+                icon=None,
+                position=2_000_000.0 + idx,
+                children=[],
+            )
+        )
     return tree
 
 

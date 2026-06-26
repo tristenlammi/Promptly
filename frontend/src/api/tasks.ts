@@ -31,6 +31,8 @@ export interface Task {
   model_id: string | null;
   reasoning_effort: string | null;
   use_web_search: boolean;
+  workspace_id: string | null;
+  connector_ids: string[];
   frequency: TaskFrequency;
   hour: number | null;
   minute: number;
@@ -56,6 +58,8 @@ export interface TaskInput {
   model_id: string | null;
   reasoning_effort?: string | null;
   use_web_search: boolean;
+  workspace_id?: string | null;
+  connector_ids?: string[];
   frequency: TaskFrequency;
   hour: number | null;
   minute: number;
@@ -65,6 +69,14 @@ export interface TaskInput {
   enabled: boolean;
   notify: boolean;
   retention_runs: number;
+}
+
+export interface AvailableTaskConnector {
+  id: string;
+  name: string;
+  slug: string;
+  kind: string;
+  tool_count: number;
 }
 
 export const tasksApi = {
@@ -86,6 +98,15 @@ export const tasksApi = {
   },
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/tasks/${id}`);
+  },
+  async availableConnectors(
+    workspaceId?: string | null
+  ): Promise<AvailableTaskConnector[]> {
+    const { data } = await apiClient.get<AvailableTaskConnector[]>(
+      "/tasks/connectors/available",
+      { params: workspaceId ? { workspace_id: workspaceId } : undefined }
+    );
+    return data;
   },
   async runNow(id: string): Promise<TaskRun> {
     const { data } = await apiClient.post<TaskRun>(`/tasks/${id}/run`);

@@ -3,7 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/shared/Modal";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { useCreateTask, useUpdateTask } from "@/hooks/useTasks";
-import type { Task, TaskFrequency, TaskInput } from "@/api/tasks";
+import {
+  tasksApi,
+  type AvailableTaskConnector,
+  type Task,
+  type TaskFrequency,
+  type TaskInput,
+} from "@/api/tasks";
 import { cn } from "@/utils/cn";
 
 const FREQUENCIES: { value: TaskFrequency; label: string }[] = [
@@ -40,6 +46,12 @@ interface TaskFormModalProps {
   onClose: () => void;
   task?: Task | null;
   onSaved?: (task: Task) => void;
+  /**
+   * When the form is opened from a workspace navigator, the created task
+   * is homed in that workspace (and gets its restricted connectors). Omit
+   * for the standalone /tasks page (task stays top-level).
+   */
+  workspaceId?: string | null;
 }
 
 function pad(n: number): string {
@@ -51,16 +63,23 @@ export function TaskFormModal({
   onClose,
   task,
   onSaved,
+  workspaceId,
 }: TaskFormModalProps) {
   const { data: models } = useAvailableModels();
   const create = useCreateTask();
   const update = useUpdateTask();
   const editing = !!task;
 
+  // The task's home workspace: the existing one when editing, else the
+  // one the form was opened from. Drives which connectors are available.
+  const effectiveWorkspaceId = task?.workspace_id ?? workspaceId ?? null;
+
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [modelKey, setModelKey] = useState("");
   const [useWebSearch, setUseWebSearch] = useState(false);
+  const [connectorIds, setConnectorIds] = useState<Set<string>>(new Set());
+  const [connectors, setConnectors] = useState<AvailableTaskConnector[]>([]);
   const [frequency, setFrequency] = useState<TaskFrequency>("daily");
   const [time, setTime] = useState("07:00");
   const [weekday, setWeekday] = useState(0);
@@ -82,6 +101,7 @@ export function TaskFormModal({
           : ""
       );
       setUseWebSearch(task.use_web_search);
+      setConnectorIds(new Set(task.connector_ids));
       setFrequency(task.frequency);
       setTime(`${pad(task.hour ?? 7)}:${pad(task.minute ?? 0)}`);
       setWeekday(task.weekday ?? 0);
@@ -93,6 +113,7 @@ export function TaskFormModal({
       setPrompt("");
       setModelKey("");
       setUseWebSearch(false);
+      setConnectorIds(new Set());
       setFrequency("daily");
       setTime("07:00");
       setWeekday(0);
@@ -101,6 +122,20 @@ export function TaskFormModal({
       setEnabled(true);
     }
   }, [open, task]);
+
+  // Load the connectors this user can attach (global + their grants +
+  // the home workspace's restricted ones).
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    tasksApi
+      .availableConnectors(effectiveWorkspaceId)
+      .then((c) => alive && setConnectors(c))
+      .catch(() => alive && setConnectors([]));
+    return () => {
+      alive = false;
+    };
+  }, [open, effectiveWorkspaceId]);
 
   const modelOptions = useMemo(() => models ?? [], [models]);
 
@@ -125,6 +160,8 @@ export function TaskFormModal({
       provider_id: providerId,
       model_id: modelId,
       use_web_search: useWebSearch,
+      workspace_id: effectiveWorkspaceId,
+      connector_ids: [...connectorIds],
       frequency,
       hour: frequency === "hourly" ? null : isNaN(hh) ? 0 : hh,
       minute: isNaN(mm) ? 0 : mm,
@@ -239,6 +276,53 @@ export function TaskFormModal({
             </span>
           </span>
         </label>
+
+        {/* ---- Connectors (MCP tool calls) ---- */}
+        {connectors.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className={labelCls}>Connectors</label>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                {connectorIds.size} selected
+              </span>
+            </div>
+            <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+              Let this run call read-only tools from these connectors
+              (e.g. list devices, fetch issues) and analyse what it finds.
+            </p>
+            <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1">
+              {connectors.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={connectorIds.has(c.id)}
+                    onChange={() =>
+                      setConnectorIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(c.id)) next.delete(c.id);
+                        else next.add(c.id);
+                        return next;
+                      })
+                    }
+                    className="h-3.5 w-3.5 accent-[var(--accent)]"
+                  />
+                  <span className="text-[var(--text)]">{c.name}</span>
+                  {c.kind !== "mcp" && (
+                    <span className="rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                      {c.kind}
+                    </span>
+                  )}
+                  <span className="ml-auto text-[var(--text-muted)]/70">
+                    {c.tool_count} tool{c.tool_count === 1 ? "" : "s"}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ---- Schedule ---- */}
         <div className="rounded-card border border-[var(--border)] p-3">

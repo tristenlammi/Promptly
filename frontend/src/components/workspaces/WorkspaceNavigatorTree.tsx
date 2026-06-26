@@ -69,6 +69,7 @@ export function WorkspaceNavigatorTree({
   atHome,
   onSettings,
   atSettings,
+  onNewTask,
 }: {
   workspaceId: string;
   tree: WorkspaceItemNode[];
@@ -85,6 +86,8 @@ export function WorkspaceNavigatorTree({
   onSettings?: () => void;
   /** True when the settings page is showing. */
   atSettings?: boolean;
+  /** Open the "new automation" task form (homed in this workspace). */
+  onNewTask?: () => void;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
@@ -210,6 +213,7 @@ export function WorkspaceNavigatorTree({
             onNewBoard={() => handleCreate("board", null)}
             onNewSheet={() => handleCreate("sheet", null)}
             onNewNotebook={() => handleCreate("container", null)}
+            onNewTask={onNewTask}
           />
         )}
       </div>
@@ -737,6 +741,8 @@ function NodeIcon({
       return <Table2 className={cls} />;
     case "container":
       return <Layers className={cls} />;
+    case "task":
+      return <Zap className={cls} />;
     case "note":
     default:
       return <FileText className={cls} />;
@@ -1010,6 +1016,7 @@ function NewMenu({
   onNewBoard,
   onNewSheet,
   onNewNotebook,
+  onNewTask,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
@@ -1019,6 +1026,7 @@ function NewMenu({
   onNewBoard: () => void;
   onNewSheet: () => void;
   onNewNotebook: () => void;
+  onNewTask?: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1102,6 +1110,16 @@ function NewMenu({
                 onNewNotebook();
               }}
             />
+            {onNewTask && (
+              <MenuItem
+                icon={<Zap className="h-3.5 w-3.5" />}
+                label="New automation"
+                onClick={() => {
+                  setOpen(false);
+                  onNewTask();
+                }}
+              />
+            )}
           </div>
         </>
       )}

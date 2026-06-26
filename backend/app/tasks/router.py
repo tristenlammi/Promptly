@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, select
+from pydantic import BaseModel
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -18,7 +20,8 @@ from app.auth.models import User
 from app.chat.models import Conversation, Message
 from app.chat.pdf_render import PdfRenderError, render_markdown_to_pdf
 from app.database import get_db
-from app.tasks.models import Task, TaskRun
+from app.mcp.models import McpConnector
+from app.tasks.models import Task, TaskConnector, TaskRun
 from app.tasks.recurrence import compute_next_run, describe_schedule
 from app.tasks.runner import execute_run
 from app.tasks.schemas import (
@@ -28,6 +31,7 @@ from app.tasks.schemas import (
     TaskRunSummary,
     TaskUpdate,
 )
+from app.workspaces.shares import get_accessible_workspace
 
 router = APIRouter()
 
@@ -65,7 +69,53 @@ async def _latest_runs(
     return {r.task_id: r for r in rows}
 
 
-def _serialize(task: Task, latest: TaskRun | None) -> TaskResponse:
+async def _connector_ids_for(
+    db: AsyncSession, task_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TaskConnector.task_id, TaskConnector.connector_id).where(
+                TaskConnector.task_id.in_(task_ids)
+            )
+        )
+    ).all()
+    out: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    for tid, cid in rows:
+        out[tid].append(cid)
+    return out
+
+
+async def _set_task_connectors(
+    db: AsyncSession, task_id: uuid.UUID, connector_ids: list[uuid.UUID]
+) -> None:
+    """Replace a task's connector set with the valid ids among ``connector_ids``."""
+    await db.execute(
+        delete(TaskConnector).where(TaskConnector.task_id == task_id)
+    )
+    if connector_ids:
+        valid = set(
+            (
+                await db.execute(
+                    select(McpConnector.id).where(
+                        McpConnector.id.in_(connector_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for cid in dict.fromkeys(connector_ids):
+            if cid in valid:
+                db.add(TaskConnector(task_id=task_id, connector_id=cid))
+
+
+def _serialize(
+    task: Task,
+    latest: TaskRun | None,
+    connector_ids: list[uuid.UUID] | None = None,
+) -> TaskResponse:
     return TaskResponse(
         id=task.id,
         title=task.title,
@@ -74,6 +124,8 @@ def _serialize(task: Task, latest: TaskRun | None) -> TaskResponse:
         model_id=task.model_id,
         reasoning_effort=task.reasoning_effort,
         use_web_search=task.use_web_search,
+        workspace_id=task.workspace_id,
+        connector_ids=connector_ids or [],
         frequency=task.frequency,
         hour=task.hour,
         minute=task.minute,
@@ -130,8 +182,61 @@ async def list_tasks(
         .scalars()
         .all()
     )
-    latest = await _latest_runs(db, [t.id for t in tasks])
-    return [_serialize(t, latest.get(t.id)) for t in tasks]
+    ids = [t.id for t in tasks]
+    latest = await _latest_runs(db, ids)
+    conns = await _connector_ids_for(db, ids)
+    return [_serialize(t, latest.get(t.id), conns.get(t.id, [])) for t in tasks]
+
+
+async def _validate_workspace(
+    db: AsyncSession, user: User, workspace_id: uuid.UUID | None
+) -> None:
+    """Reject a workspace the user can't access (404 like the rest of tasks)."""
+    if workspace_id is None:
+        return
+    try:
+        await get_accessible_workspace(workspace_id, user, db)
+    except HTTPException as e:  # normalise to 404 — don't leak existence
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        ) from e
+
+
+class AvailableConnector(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    kind: str
+    tool_count: int
+
+
+@router.get("/connectors/available", response_model=list[AvailableConnector])
+async def available_connectors(
+    workspace_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[AvailableConnector]:
+    """Connectors this user can put on a task — global ones, plus any
+    granted to them via groups/direct, plus (when a workspace is chosen)
+    that workspace's restricted connectors. Mirrors the chat resolution so
+    the picker never offers a connector the run couldn't actually use."""
+    if workspace_id is not None:
+        await _validate_workspace(db, user, workspace_id)
+    from app.mcp.service import connectors_for_turn
+
+    conns = await connectors_for_turn(
+        db, user_id=user.id, workspace_id=workspace_id
+    )
+    return [
+        AvailableConnector(
+            id=c.id,
+            name=c.name,
+            slug=c.slug,
+            kind=c.kind,
+            tool_count=len(c.tool_catalog or []),
+        )
+        for c in conns
+    ]
 
 
 @router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -151,6 +256,8 @@ async def create_task(
             detail=f"You can have at most {MAX_TASKS_PER_USER} tasks.",
         )
 
+    await _validate_workspace(db, user, payload.workspace_id)
+
     task = Task(
         user_id=user.id,
         title=payload.title.strip(),
@@ -159,6 +266,7 @@ async def create_task(
         model_id=payload.model_id,
         reasoning_effort=payload.reasoning_effort,
         use_web_search=payload.use_web_search,
+        workspace_id=payload.workspace_id,
         frequency=payload.frequency,
         hour=payload.hour,
         minute=payload.minute,
@@ -171,9 +279,12 @@ async def create_task(
     )
     task.next_run_at = _compute_next(task)
     db.add(task)
+    await db.flush()
+    await _set_task_connectors(db, task.id, payload.connector_ids)
     await db.commit()
     await db.refresh(task)
-    return _serialize(task, None)
+    conns = await _connector_ids_for(db, [task.id])
+    return _serialize(task, None, conns.get(task.id, []))
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -184,7 +295,8 @@ async def get_task(
 ) -> TaskResponse:
     task = await _get_owned_task(task_id, user, db)
     latest = await _latest_runs(db, [task.id])
-    return _serialize(task, latest.get(task.id))
+    conns = await _connector_ids_for(db, [task.id])
+    return _serialize(task, latest.get(task.id), conns.get(task.id, []))
 
 
 @router.patch("/{task_id}", response_model=TaskResponse)
@@ -196,6 +308,10 @@ async def update_task(
 ) -> TaskResponse:
     task = await _get_owned_task(task_id, user, db)
     data = payload.model_dump(exclude_unset=True)
+    # ``connector_ids`` is a join, not a column — handle separately.
+    connector_ids = data.pop("connector_ids", None)
+    if "workspace_id" in data:
+        await _validate_workspace(db, user, data["workspace_id"])
     schedule_keys = {
         "frequency",
         "hour",
@@ -212,10 +328,13 @@ async def update_task(
         setattr(task, key, value)
     if touched_schedule:
         task.next_run_at = _compute_next(task)
+    if connector_ids is not None:
+        await _set_task_connectors(db, task.id, connector_ids)
     await db.commit()
     await db.refresh(task)
     latest = await _latest_runs(db, [task.id])
-    return _serialize(task, latest.get(task.id))
+    conns = await _connector_ids_for(db, [task.id])
+    return _serialize(task, latest.get(task.id), conns.get(task.id, []))
 
 
 @router.delete(

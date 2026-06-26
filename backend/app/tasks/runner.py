@@ -38,7 +38,7 @@ from app.models_config.provider import (
     UsageEvent,
     model_router,
 )
-from app.tasks.models import Task, TaskRun
+from app.tasks.models import Task, TaskConnector, TaskRun
 
 logger = logging.getLogger("promptly.tasks.runner")
 
@@ -46,6 +46,10 @@ logger = logging.getLogger("promptly.tasks.runner")
 # handful of times is almost always looping; better to summarise what it
 # has. Each hop may emit several tool calls.
 _MAX_HOPS = 6
+# A run wired to MCP connectors may legitimately make many tool calls
+# (e.g. "list devices, then clients, then summarise") so it gets a larger
+# hop budget than a plain search digest.
+_MAX_HOPS_CONNECTORS = 12
 _NIL_UUID = uuid.UUID(int=0)
 
 # Per-run output ceiling (T.4 cost guard). Headless runs can't be watched
@@ -96,7 +100,9 @@ def _strip_tool_call_xml(text: str) -> str:
     return _TOOL_CALL_XML_RE.sub("", text).strip()
 
 
-def _build_system_prompt(task: Task, now_local_iso: str) -> str:
+def _build_system_prompt(
+    task: Task, now_local_iso: str, connector_names: list[str] | None = None
+) -> str:
     parts = [
         "You are Promptly's automation engine running a scheduled task "
         "with no human watching. Produce a single, self-contained, "
@@ -131,7 +137,54 @@ def _build_system_prompt(task: Task, now_local_iso: str) -> str:
             "inline with [1], [2], … matching the results you used. Place "
             "the citation marker at the end of the relevant sentence."
         )
+    if connector_names:
+        parts.append(
+            "Connectors:\n"
+            f"- You have read-only tools from: {', '.join(connector_names)}. "
+            "Call them to gather live data for this report (they are "
+            "namespaced ``mcp__<connector>__<tool>``). Pull what the task "
+            "asks for, then analyse it — call out anything notable or "
+            "anomalous rather than just dumping raw results."
+        )
     return "\n".join(parts)
+
+
+async def _resolve_connectors(task: Task, db):
+    """Resolve the task's explicitly-selected connectors that the owner can
+    still reach, into (schemas, dispatch_map, names). Empty when none.
+
+    Re-checks the selection against ``connectors_for_turn`` so a connector
+    the owner lost access to (group/workspace grant revoked, or disabled)
+    silently drops out of the run instead of erroring.
+    """
+    selected_ids = set(
+        (
+            await db.execute(
+                select(TaskConnector.connector_id).where(
+                    TaskConnector.task_id == task.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not selected_ids:
+        return [], {}, []
+
+    from app.mcp.service import (
+        build_tools_from_connectors,
+        connectors_for_turn,
+    )
+
+    reachable = await connectors_for_turn(
+        db, user_id=task.user_id, workspace_id=task.workspace_id
+    )
+    chosen = [c for c in reachable if c.id in selected_ids]
+    if not chosen:
+        return [], {}, []
+    schemas, dispatch = build_tools_from_connectors(chosen)
+    names = [c.name for c in chosen]
+    return schemas, dispatch, names
 
 
 async def _resolve_provider(
@@ -169,10 +222,14 @@ async def _generate(
     user: User,
     use_web_search: bool,
     reasoning_effort: str | None,
+    mcp_schemas: list[dict],
+    mcp_dispatch: dict,
     db,
 ) -> tuple[str, list[dict], dict]:
     """Run the compact tool loop. Returns (text, sources, usage)."""
-    tools = list_openai_tools({"search"}) if use_web_search else None
+    base_tools = list_openai_tools({"search"}) if use_web_search else []
+    tools = (base_tools + mcp_schemas) or None
+    max_hops = _MAX_HOPS_CONNECTORS if mcp_dispatch else _MAX_HOPS
     is_deepseek = provider.type == "deepseek"
     convo: list = [ChatMessage(role="user", content=prompt)]
     sources: list[dict] = []
@@ -226,7 +283,7 @@ async def _generate(
                 finish = ev.reason
         return hop_text, hop_reasoning, pending, finish
 
-    for _hop in range(_MAX_HOPS):
+    for _hop in range(max_hops):
         hop_text, hop_reasoning, pending, finish = await _consume(tools)
 
         text_now = _strip_tool_call_xml("".join(hop_text).strip())
@@ -263,30 +320,49 @@ async def _generate(
         convo.append(assistant_turn)
         for call in tool_calls:
             name = call["function"]["name"]
-            tool = get_tool(name)
             try:
                 args = json.loads(call["function"]["arguments"] or "{}")
             except json.JSONDecodeError:
                 args = {}
-            if tool is None:
-                content = f"Unknown tool: {name}"
-            else:
-                ctx = ToolContext(
-                    db=db,
-                    user=user,
-                    conversation_id=_NIL_UUID,
-                    user_message_id=_NIL_UUID,
-                )
+            if name in mcp_dispatch:
+                # MCP connector tool — route to its server / native client.
+                from app.mcp.client import McpError
+                from app.mcp.service import call_connector_tool
+
+                connector_id, real_tool = mcp_dispatch[name]
                 try:
-                    result = await tool.run(ctx, args)
-                    content = result.content
-                    if result.sources:
-                        sources.extend(result.sources)
-                except ToolError as e:
+                    content = await call_connector_tool(
+                        db,
+                        connector_id=connector_id,
+                        real_tool=real_tool,
+                        arguments=args,
+                    )
+                except McpError as e:
                     content = f"Tool error: {e}"
                 except Exception as e:  # noqa: BLE001
-                    logger.exception("Task tool %s crashed", name)
+                    logger.exception("Task connector tool %s crashed", name)
                     content = f"Tool failed: {type(e).__name__}"
+            else:
+                tool = get_tool(name)
+                if tool is None:
+                    content = f"Unknown tool: {name}"
+                else:
+                    ctx = ToolContext(
+                        db=db,
+                        user=user,
+                        conversation_id=_NIL_UUID,
+                        user_message_id=_NIL_UUID,
+                    )
+                    try:
+                        result = await tool.run(ctx, args)
+                        content = result.content
+                        if result.sources:
+                            sources.extend(result.sources)
+                    except ToolError as e:
+                        content = f"Tool error: {e}"
+                    except Exception as e:  # noqa: BLE001
+                        logger.exception("Task tool %s crashed", name)
+                        content = f"Tool failed: {type(e).__name__}"
             convo.append(
                 {"role": "tool", "tool_call_id": call["id"], "content": content}
             )
@@ -367,10 +443,13 @@ async def execute_run(run_id: uuid.UUID) -> None:
             if user is None:
                 raise TaskRunError("Task owner no longer exists.")
             provider, model_id = await _resolve_provider(task, db)
+            mcp_schemas, mcp_dispatch, connector_names = (
+                await _resolve_connectors(task, db)
+            )
             now_local = run.started_at.astimezone(timezone.utc).isoformat(
                 timespec="minutes"
             )
-            system = _build_system_prompt(task, now_local)
+            system = _build_system_prompt(task, now_local, connector_names)
             text, sources, usage = await _generate(
                 provider=provider,
                 model_id=model_id,
@@ -379,6 +458,8 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 user=user,
                 use_web_search=task.use_web_search,
                 reasoning_effort=task.reasoning_effort,
+                mcp_schemas=mcp_schemas,
+                mcp_dispatch=mcp_dispatch,
                 db=db,
             )
             run.output_markdown = text

@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { cn } from "@/utils/cn";
 import {
@@ -69,6 +70,7 @@ import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceComman
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
+import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
@@ -114,6 +116,8 @@ export function WorkspaceDetailPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const qc = useQueryClient();
 
   // Persist the open item(s) in the URL so a refresh restores the view
   // instead of dropping back to the workspace home. ``item`` is the primary
@@ -191,6 +195,12 @@ export function WorkspaceDetailPage() {
   // Everything — chats included — opens inline in the main pane so the
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
+    // Automations open in the dedicated Tasks detail page (their runs +
+    // schedule live there); they aren't rendered inline in the workspace.
+    if (node.kind === "task") {
+      navigate(`/tasks/${node.ref_id ?? node.id}`);
+      return;
+    }
     // Avoid the same item on both sides of a split.
     if (secondary && secondary.id === node.id) setSecondary(null);
     setSettingsOpen(false);
@@ -309,6 +319,11 @@ export function WorkspaceDetailPage() {
                   setSettingsOpen(true);
                 }}
                 atSettings={settingsOpen}
+                onNewTask={
+                  canEdit && !isArchived
+                    ? () => setTaskModalOpen(true)
+                    : undefined
+                }
               />
             )}
           </aside>
@@ -491,6 +506,17 @@ export function WorkspaceDetailPage() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onSelectNode={handleSelect}
+      />
+
+      <TaskFormModal
+        open={taskModalOpen}
+        workspaceId={id}
+        onClose={() => setTaskModalOpen(false)}
+        onSaved={(saved) => {
+          setTaskModalOpen(false);
+          void qc.invalidateQueries({ queryKey: ["workspaces", "tree", id] });
+          navigate(`/tasks/${saved.id}`);
+        }}
       />
     </>
   );

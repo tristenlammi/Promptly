@@ -27,6 +27,16 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Optional home workspace. When set, the task shows up as an
+    # "automation" node in that workspace's navigator (synthesised at
+    # tree-read time, like chats) and a run can reach the workspace's
+    # restricted connectors. NULL = a top-level task under /tasks.
+    # SET NULL on workspace delete so the task survives as a top-level one.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     # The instruction the model runs each period.
@@ -78,6 +88,24 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<Task id={self.id} title={self.title!r} freq={self.frequency}>"
+
+
+class TaskConnector(Base):
+    """Join: which MCP connectors a task may call during its run.
+
+    Explicit per-task selection (decision) — a run only advertises the
+    connectors listed here, re-checked at run time against what the task
+    owner can actually reach (so a revoked grant silently drops the tool).
+    """
+
+    __tablename__ = "task_connectors"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("mcp_connectors.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):

@@ -102,7 +102,8 @@ export type WorkspaceItemKind =
   | "file"
   | "chat"
   | "sheet"
-  | "container";
+  | "container"
+  | "task";
 
 /** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
  *  ``children``; chats are appended flat at the root. */

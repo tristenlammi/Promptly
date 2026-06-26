@@ -18,6 +18,9 @@ class TaskCreate(BaseModel):
     model_id: str | None = Field(default=None, max_length=200)
     reasoning_effort: str | None = None
     use_web_search: bool = False
+    # Optional home workspace + explicit MCP connectors the run may call.
+    workspace_id: uuid.UUID | None = None
+    connector_ids: list[uuid.UUID] = []
 
     frequency: str
     hour: int | None = Field(default=None, ge=0, le=23)
@@ -52,6 +55,10 @@ class TaskUpdate(BaseModel):
     model_id: str | None = Field(default=None, max_length=200)
     reasoning_effort: str | None = None
     use_web_search: bool | None = None
+    # Omit to leave unchanged. ``workspace_id`` explicit null = detach to
+    # top-level. ``connector_ids`` provided = replace the whole set.
+    workspace_id: uuid.UUID | None = None
+    connector_ids: list[uuid.UUID] | None = None
 
     frequency: str | None = None
     hour: int | None = Field(default=None, ge=0, le=23)
@@ -112,6 +119,8 @@ class TaskResponse(BaseModel):
     model_id: str | None
     reasoning_effort: str | None
     use_web_search: bool
+    workspace_id: uuid.UUID | None
+    connector_ids: list[uuid.UUID]
 
     frequency: str
     hour: int | None
