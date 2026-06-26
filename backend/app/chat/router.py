@@ -142,6 +142,7 @@ from app.files.prompt import (
     looks_image,
 )
 from app.files.router import attachment_snapshot, resolve_attachments
+from app.models_config.access import is_model_allowed
 from app.models_config.models import ModelProvider
 from app.models_config.provider import (
     ChatMessage,
@@ -1574,12 +1575,13 @@ async def send_message(
         effective_model_id = resolved.base_model_id
 
     # Enforce per-user model allowlist for non-admins. None = unrestricted.
-    if user.role != "admin" and user.allowed_models is not None:
-        if effective_model_id not in set(user.allowed_models):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to that model. Ask an admin to grant it.",
-            )
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective_model_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that model. Ask an admin to grant it.",
+        )
 
     # Resolve attachments up-front so an unknown ID fails the request loudly
     # instead of silently dropping context on the floor.
@@ -1831,12 +1833,13 @@ async def edit_and_resend_message(
             )
         effective_model_id_for_check = resolved.base_model_id
 
-    if user.role != "admin" and user.allowed_models is not None:
-        if effective_model_id_for_check not in set(user.allowed_models):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to that model. Ask an admin to grant it.",
-            )
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective_model_id_for_check
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that model. Ask an admin to grant it.",
+        )
 
     # Phase 2.6 — create the edited message as a *sibling* of the
     # original (same lineage parent), carrying over the attachments. The
@@ -2205,12 +2208,13 @@ async def regenerate_assistant_message(
             )
         effective_model_id_for_check = resolved.base_model_id
 
-    if user.role != "admin" and user.allowed_models is not None:
-        if effective_model_id_for_check not in set(user.allowed_models):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to that model. Ask an admin to grant it.",
-            )
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective_model_id_for_check
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that model. Ask an admin to grant it.",
+        )
 
     # Phase 2.6 — no deletes. The new answer streams in as a *sibling* of
     # ``target`` (both hang off ``prompt``). We re-point the active leaf
@@ -2368,12 +2372,13 @@ async def continue_assistant_message(
             )
         effective_model_id_for_check = resolved.base_model_id
 
-    if user.role != "admin" and user.allowed_models is not None:
-        if effective_model_id_for_check not in set(user.allowed_models):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to that model. Ask an admin to grant it.",
-            )
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective_model_id_for_check
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that model. Ask an admin to grant it.",
+        )
 
     # The active leaf stays on ``target`` — we're extending it in place.
     conv.model_id = model_id
@@ -2478,12 +2483,13 @@ async def enhance_prompt_endpoint(
         provider = resolved.base_provider
         effective_model_id = resolved.base_model_id
 
-    if user.role != "admin" and user.allowed_models is not None:
-        if effective_model_id not in set(user.allowed_models):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to that model. Ask an admin to grant it.",
-            )
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective_model_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that model. Ask an admin to grant it.",
+        )
 
     try:
         improved = await enhance_prompt(
@@ -2558,12 +2564,13 @@ async def edit_artifact_endpoint(
         provider = resolved.base_provider
         effective_model_id = resolved.base_model_id
 
-    if user.role != "admin" and user.allowed_models is not None:
-        if effective_model_id not in set(user.allowed_models):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have access to that model. Ask an admin to grant it.",
-            )
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective_model_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to that model. Ask an admin to grant it.",
+        )
 
     try:
         updated = await edit_artifact(

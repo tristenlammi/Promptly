@@ -256,31 +256,6 @@ async def fetch_provider_models(
 # --------------------------------------------------------------------
 # Flat list for the inline chat model dropdown (every authed user).
 # --------------------------------------------------------------------
-async def _group_granted_models(user_id, db: AsyncSession) -> set[str]:
-    """Union of ``allowed_models`` across every group the user belongs to."""
-    from app.groups.models import UserGroup, UserGroupMember
-
-    rows = (
-        (
-            await db.execute(
-                select(UserGroup.allowed_models)
-                .join(
-                    UserGroupMember,
-                    UserGroupMember.group_id == UserGroup.id,
-                )
-                .where(UserGroupMember.user_id == user_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    out: set[str] = set()
-    for lst in rows:
-        if lst:
-            out.update(lst)
-    return out
-
-
 async def list_available_models_for(
     user: User, db: AsyncSession
 ) -> list[AvailableModel]:
@@ -326,10 +301,12 @@ async def list_available_models_for(
     # with the models granted by every group they belong to (a group is a
     # role bundle). ``None`` = full access (admin, or a user with no custom
     # list) — groups can't *narrow* that, only widen a custom list.
+    from app.models_config.access import group_granted_models
+
     user_allow: set[str] | None = None
     if user.role != "admin" and user.allowed_models is not None:
         user_allow = set(user.allowed_models)
-        user_allow |= await _group_granted_models(user.id, db)
+        user_allow |= await group_granted_models(user.id, db)
 
     flat: list[AvailableModel] = []
     for provider in result.scalars().all():

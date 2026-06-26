@@ -489,6 +489,15 @@ async def model_pool(
         base = provider_by_id.get(cm.base_provider_id)
         if base is None:
             continue
+        # Respect the base provider's enabled_models curation — if the
+        # underlying model isn't picker-visible, neither is the custom
+        # wrapper (matches the chat-side enforcement, so we never offer a
+        # custom model that would be silently filtered out on use).
+        if (
+            base.enabled_models is not None
+            and cm.base_model_id not in set(base.enabled_models)
+        ):
+            continue
         base_entry = next(
             (m for m in (base.models or []) if m.get("id") == cm.base_model_id),
             None,

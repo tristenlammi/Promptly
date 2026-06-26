@@ -265,16 +265,19 @@ async def _resolve_provider(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
         )
-    if (
-        model_id is not None
-        and user.role != "admin"
-        and user.allowed_models is not None
-        and model_id not in set(user.allowed_models)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to that model. Ask an admin to grant it.",
-        )
+    if model_id is not None:
+        from app.models_config.access import is_model_allowed
+
+        # Study model ids aren't synthetic custom ids here, so the base id
+        # equals the picked id — but routing through the shared check keeps
+        # group grants honoured everywhere.
+        if not await is_model_allowed(
+            user, db, model_id=model_id, base_model_id=model_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to that model. Ask an admin to grant it.",
+            )
     return provider
 
 
