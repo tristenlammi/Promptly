@@ -258,6 +258,18 @@ async def create_task(
 
     await _validate_workspace(db, user, payload.workspace_id)
 
+    # Default the schedule timezone to the creator's own setting when the
+    # client didn't pin one (the form sends it explicitly; API/skill callers
+    # may not). Falls back to the AU default if the user has none.
+    timezone = (payload.timezone or "").strip()
+    if not timezone:
+        user_tz = (user.settings or {}).get("timezone")
+        timezone = (
+            user_tz.strip()
+            if isinstance(user_tz, str) and user_tz.strip()
+            else "Australia/Sydney"
+        )
+
     task = Task(
         user_id=user.id,
         title=payload.title.strip(),
@@ -272,7 +284,7 @@ async def create_task(
         minute=payload.minute,
         weekday=payload.weekday,
         day_of_month=payload.day_of_month,
-        timezone=payload.timezone,
+        timezone=timezone,
         enabled=payload.enabled,
         notify=payload.notify,
         retention_runs=payload.retention_runs,

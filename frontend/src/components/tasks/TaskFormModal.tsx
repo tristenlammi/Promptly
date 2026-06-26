@@ -10,6 +10,7 @@ import {
   type TaskFrequency,
   type TaskInput,
 } from "@/api/tasks";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 const FREQUENCIES: { value: TaskFrequency; label: string }[] = [
@@ -74,6 +75,14 @@ export function TaskFormModal({
   // one the form was opened from. Drives which connectors are available.
   const effectiveWorkspaceId = task?.workspace_id ?? workspaceId ?? null;
 
+  // A new task defaults to the creator's own timezone (their profile /
+  // personal-context setting), falling back to the AU default if unset.
+  const userTimezone = useAuthStore((s) => {
+    const tz = s.user?.settings?.timezone;
+    return typeof tz === "string" && tz.trim() ? tz.trim() : null;
+  });
+  const defaultTimezone = userTimezone ?? "Australia/Sydney";
+
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [modelKey, setModelKey] = useState("");
@@ -84,7 +93,7 @@ export function TaskFormModal({
   const [time, setTime] = useState("07:00");
   const [weekday, setWeekday] = useState(0);
   const [dayOfMonth, setDayOfMonth] = useState(1);
-  const [timezone, setTimezone] = useState("Australia/Sydney");
+  const [timezone, setTimezone] = useState(defaultTimezone);
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,10 +127,10 @@ export function TaskFormModal({
       setTime("07:00");
       setWeekday(0);
       setDayOfMonth(1);
-      setTimezone("Australia/Sydney");
+      setTimezone(defaultTimezone);
       setEnabled(true);
     }
-  }, [open, task]);
+  }, [open, task, defaultTimezone]);
 
   // Load the connectors this user can attach (global + their grants +
   // the home workspace's restricted ones).
@@ -138,6 +147,15 @@ export function TaskFormModal({
   }, [open, effectiveWorkspaceId]);
 
   const modelOptions = useMemo(() => models ?? [], [models]);
+
+  // Curated AU list, plus the user's own zone and the editing task's zone
+  // if they fall outside it — so the <select> always has a matching option.
+  const tzOptions = useMemo(() => {
+    const set = new Set<string>(TIMEZONES);
+    if (userTimezone) set.add(userTimezone);
+    if (task?.timezone) set.add(task.timezone);
+    return [...set];
+  }, [userTimezone, task?.timezone]);
 
   const buildPayload = (): TaskInput | null => {
     if (!title.trim()) {
@@ -415,7 +433,7 @@ export function TaskFormModal({
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}
               >
-                {TIMEZONES.map((tz) => (
+                {tzOptions.map((tz) => (
                   <option key={tz} value={tz}>
                     {tz.replace("Australia/", "")}
                   </option>

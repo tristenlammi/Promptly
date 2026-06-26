@@ -27,7 +27,9 @@ class TaskCreate(BaseModel):
     minute: int = Field(default=0, ge=0, le=59)
     weekday: int | None = Field(default=None, ge=0, le=6)
     day_of_month: int | None = Field(default=None, ge=1, le=28)
-    timezone: str = Field(default="Australia/Sydney", max_length=64)
+    # Omit to inherit the creator's own timezone (their profile setting),
+    # falling back to the AU default if they haven't set one.
+    timezone: str | None = Field(default=None, max_length=64)
 
     enabled: bool = True
     notify: bool = True
