@@ -20,15 +20,18 @@
  * hits the markdown pipeline — students should never see the raw
  * tokens even if the model misformats them.
  *
- * Also tolerant of whitespace and the self-closing / open-tag variants
- * (``<request_confidence>`` without the slash) so a model that drifts
- * from the exact template isn't penalised.
+ * Also tolerant of whitespace and every tag variant — self-closing
+ * (``<request_confidence/>``), bare open (``<request_confidence>``),
+ * AND the closing form (``</request_confidence>``). The model sometimes
+ * wraps its question in a paired ``<request_predict>…</request_predict>``
+ * block; the leading-slash branch (``\/?`` right after ``<``) ensures the
+ * closing tag is stripped too instead of leaking into the chat.
  */
 
-const CONFIDENCE_MARKER_RE = /<\s*request_confidence\s*\/?\s*>/gi;
-const TEACHBACK_MARKER_RE = /<\s*request_teachback\s*\/?\s*>/gi;
-const PREDICT_MARKER_RE = /<\s*request_predict\s*\/?\s*>/gi;
-const CELEBRATE_MARKER_RE = /<\s*celebrate\s*\/?\s*>/gi;
+const CONFIDENCE_MARKER_RE = /<\s*\/?\s*request_confidence\s*\/?\s*>/gi;
+const TEACHBACK_MARKER_RE = /<\s*\/?\s*request_teachback\s*\/?\s*>/gi;
+const PREDICT_MARKER_RE = /<\s*\/?\s*request_predict\s*\/?\s*>/gi;
+const CELEBRATE_MARKER_RE = /<\s*\/?\s*celebrate\s*\/?\s*>/gi;
 // Strip board_op tags so they never appear in the chat transcript even
 // if the backend parser fails to intercept them during streaming.
 const BOARD_OP_RE = /<\s*board_op\b[^>]*\/?>[\s\S]*?<\/board_op>|<\s*board_op\b[^>]*\/>/gi;
