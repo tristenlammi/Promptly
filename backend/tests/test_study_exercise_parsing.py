@@ -17,8 +17,12 @@ Two surfaces are covered, both pure-Python (no DB / HTTP):
 
 from __future__ import annotations
 
+import uuid
+from types import SimpleNamespace
+
 from app.study import service
 from app.study.parser import TaggedActionParser
+from app.study.service import build_history_for_llm
 
 
 # ---------------------------------------------------------------------------
@@ -118,3 +122,56 @@ def test_rejects_pure_prose():
     assert service.parse_whiteboard_payload("just some words, no markup") is None
     assert service.parse_whiteboard_payload("   ") is None
     assert service.parse_whiteboard_payload("") is None
+
+
+# ---------------------------------------------------------------------------
+# build_history_for_llm — the exercise HTML must reach the grading context.
+#
+# Regression test for the keying bug: ``exercises_by_msg`` is keyed by the
+# assistant *message* id, but the lookup used ``m.exercise_id`` (an
+# exercise id), so it never matched. The exercise HTML was never
+# re-injected and the tutor graded every submission blind — seeing only
+# the bare answer keys with no question text, it confabulated questions
+# and marked wrong answers right.
+# ---------------------------------------------------------------------------
+def test_history_reinjects_exercise_html_for_grading():
+    msg_id = uuid.uuid4()
+    placed = SimpleNamespace(
+        role="assistant", content="Try this.", id=msg_id, exercise_id=uuid.uuid4()
+    )
+    submission = SimpleNamespace(
+        role="user",
+        content="I submitted: Question 2: a",
+        id=uuid.uuid4(),
+        exercise_id=None,
+    )
+    ex = SimpleNamespace(
+        html="<!DOCTYPE html><title>Cards</title><body>Drawing the 7 of clubs</body>",
+        title="Cards",
+        message_id=msg_id,  # exercises_by_msg is keyed by message id
+    )
+    hist = build_history_for_llm([placed, submission], {msg_id: ex})
+    joined = "\n".join(m.content for m in hist)
+    # The actual exercise content must be present so the tutor grades
+    # against the real questions, not a hallucination.
+    assert "<whiteboard_action>" in joined
+    assert "7 of clubs" in joined
+
+
+def test_history_collapses_older_exercises_to_a_marker():
+    """Only the most-recent exercise carries full HTML; older ones shrink
+    to a one-line marker to keep the grading turn from ballooning."""
+    old_msg, new_msg = uuid.uuid4(), uuid.uuid4()
+    rows = [
+        SimpleNamespace(role="assistant", content="First.", id=old_msg, exercise_id=uuid.uuid4()),
+        SimpleNamespace(role="user", content="ok", id=uuid.uuid4(), exercise_id=None),
+        SimpleNamespace(role="assistant", content="Second.", id=new_msg, exercise_id=uuid.uuid4()),
+    ]
+    exq = {
+        old_msg: SimpleNamespace(html="<title>OLD-EX</title>OLDBODY", title="Old", message_id=old_msg),
+        new_msg: SimpleNamespace(html="<title>NEW-EX</title>NEWBODY", title="New", message_id=new_msg),
+    }
+    joined = "\n".join(m.content for m in build_history_for_llm(rows, exq))
+    assert "NEWBODY" in joined  # latest exercise kept in full
+    assert "OLDBODY" not in joined  # older one collapsed
+    assert "Old" in joined  # ...but referenced by title

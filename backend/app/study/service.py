@@ -1672,9 +1672,17 @@ def build_history_for_llm(
     # gets truncated mid-``<whiteboard_action>``, silently dropping the
     # exercise. Keeping only the latest full block keeps the model
     # grounded without the bloat.
+    # NOTE: ``exercises_by_msg`` is keyed by the assistant *message* id
+    # (the caller builds it as ``{ex.message_id: ex}``), so the lookup
+    # MUST use ``m.id`` — not ``m.exercise_id`` (an exercise id, a
+    # different id space). The old ``m.exercise_id in exercises_by_msg``
+    # never matched, so the exercise HTML was never re-injected and the
+    # tutor graded every submission blind — it only saw the answer keys
+    # ("q2: a") with no question text, so it confabulated questions and
+    # routinely marked wrong answers right (and right answers wrong).
     last_exercised_msg_id: uuid.UUID | None = None
     for m in rows:
-        if m.role == "assistant" and m.exercise_id in exercises_by_msg:
+        if m.role == "assistant" and m.id in exercises_by_msg:
             last_exercised_msg_id = m.id
 
     history: list[ChatMessage] = []
@@ -1682,8 +1690,8 @@ def build_history_for_llm(
         if m.role not in ("user", "assistant", "system"):
             continue
         content = m.content or ""
-        if m.role == "assistant" and m.exercise_id in exercises_by_msg:
-            ex = exercises_by_msg[m.exercise_id]
+        if m.role == "assistant" and m.id in exercises_by_msg:
+            ex = exercises_by_msg[m.id]
             if m.id == last_exercised_msg_id:
                 # Re-inject as raw HTML (matches the tutor's emit format)
                 # so the model can read its previous exercise without us
