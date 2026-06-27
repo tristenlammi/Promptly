@@ -67,7 +67,7 @@ export function LessonArcRail({ sessionId, phaseVersion = 0 }: LessonArcRailProp
   const progressFraction = STEPS.length > 1 ? currentStepIdx / (STEPS.length - 1) : 0;
 
   return (
-    <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-5 py-5">
+    <div className="max-h-[38%] shrink-0 overflow-y-auto border-b border-[var(--border)] bg-[var(--surface)] px-5 py-3.5">
 
       {/* ── Phase stepper ──────────────────────────────────────────── */}
       {/*
@@ -166,8 +166,8 @@ export function LessonArcRail({ sessionId, phaseVersion = 0 }: LessonArcRailProp
 
       {/* ── Objectives list ────────────────────────────────────────── */}
       {arc.objectives.length > 0 && (
-        <div className="mt-5">
-          <div className="mb-3 flex items-center justify-between">
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               Objectives
             </span>
@@ -184,7 +184,7 @@ export function LessonArcRail({ sessionId, phaseVersion = 0 }: LessonArcRailProp
                 <div
                   key={obj.index}
                   className={cn(
-                    "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
+                    "flex items-start gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors",
                     isCurrent  && "bg-[var(--accent)]/[0.07] ring-1 ring-inset ring-[var(--accent)]/20",
                     obj.mastered && !isCurrent && "opacity-50",
                   )}

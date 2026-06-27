@@ -460,9 +460,12 @@ export function LessonBoard({
           )}
           aria-hidden={tab !== "board"}
         >
-          {/* Active exercise sits at the top of the board panel */}
+          {/* Active exercise sits at the top of the board panel and takes
+              the majority of the height — it's the task the student is
+              actively working on, so the pinned blocks below it shrink to
+              a reference strip rather than splitting the pane 50/50. */}
           {hasActiveExercise && activeExercise && (
-            <div className="flex h-1/2 shrink-0 flex-col border-b border-[var(--border)]">
+            <div className="flex min-h-0 flex-[3] flex-col border-b border-[var(--border)]">
               <ExerciseRenderer
                 ref={rendererRef}
                 exercise={activeExercise}
@@ -472,8 +475,15 @@ export function LessonBoard({
             </div>
           )}
 
-          {/* Pinned blocks */}
-          <div className="flex-1 overflow-y-auto p-3">
+          {/* Pinned blocks — fill the pane when no exercise is active, or
+              take the remaining ~40% as a scrollable reference strip when
+              one is. */}
+          <div
+            className={cn(
+              "overflow-y-auto p-3",
+              hasActiveExercise ? "min-h-0 flex-[2]" : "flex-1"
+            )}
+          >
             {boardBlocks.length === 0 && !hasActiveExercise ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[var(--text-muted)]">
                 <BookOpen className="h-7 w-7 opacity-25" />
