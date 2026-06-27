@@ -1458,7 +1458,12 @@ async def enter_unit(
                 "provider_id": str(provider.id),
                 "model_id": teaching_model_id,
                 "temperature": 0.6,
-                "max_tokens": 2000,
+                # Match the regular unit-turn budget. The old 2000 was too
+                # small for a reasoning teaching model with the large study
+                # system prompt — it spent the whole budget on reasoning
+                # tokens and emitted no content, leaving the student with a
+                # blank opening message ("no output from the first turn").
+                "max_tokens": 8000,
                 "reviewing_exercise_id": None,
                 "session_kind": "unit",
                 "unit_id": str(unit.id),
@@ -2217,6 +2222,29 @@ async def _stream_generator(
             )
             full_chat += hint
             yield _sse({"delta": hint})
+
+        # Guard against a fully empty turn: a reasoning model can exhaust
+        # its token budget on hidden reasoning and emit no content, no
+        # exercise, and no side-channel action. Persisting that blank
+        # assistant row leaves the student staring at an empty bubble (and,
+        # on a kickoff, permanently — the unit then has a user message so
+        # it never re-kicks-off). Surface a retryable error instead and
+        # don't persist anything.
+        if (
+            not full_chat.strip()
+            and not pending_whiteboard
+            and not pending_side_actions
+        ):
+            logger.warning(
+                "Study stream %s produced no content (reasoning-only or "
+                "empty model reply) — not persisting a blank turn",
+                stream_id,
+            )
+            yield _sse(
+                {"error": "The tutor didn't return a response — please try again."}
+            )
+            yield _sse({"done": True})
+            return
 
         assistant = StudyMessage(
             session_id=session.id,
