@@ -1520,7 +1520,9 @@ function MessageBubbleImpl({
             )}
           </div>
         )}
-        {hasSources && <SourcesFooter sources={sources!} />}
+        {hasSources && (
+          <SourcesFooter sources={sources!} openByDefault={isResearchReport} />
+        )}
       </div>
     </div>
   );
@@ -1970,11 +1972,18 @@ function ReasoningDisclosure({
   );
 }
 
-function SourcesFooter({ sources }: { sources: Source[] }) {
-  // Open by default when there are many sources — a deep-research report
-  // (typically 10+) should show its evidence up front so it reads as
-  // trustable; a one-off web-search citation (1-3) stays tucked away.
-  const openByDefault = sources.length >= 5;
+function SourcesFooter({
+  sources,
+  openByDefault = false,
+}: {
+  sources: Source[];
+  /** Expand the list on render. Reserved for deep-research reports, whose
+   *  evidence should read up front so the report feels trustable. Normal
+   *  chat citations (web search, RAG) stay collapsed by default — source
+   *  count is NOT used to decide this, because an ordinary search that
+   *  happens to return 5+ links shouldn't auto-expand. */
+  openByDefault?: boolean;
+}) {
   return (
     <details
       open={openByDefault}
