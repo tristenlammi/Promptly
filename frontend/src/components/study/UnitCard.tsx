@@ -6,6 +6,10 @@ import { cn } from "@/utils/cn";
 interface UnitCardProps {
   unit: StudyUnitSummary;
   onOpen: () => void;
+  /** Reset this unit's progress. When provided, a hover-revealed
+   *  "Reset" button appears next to the CTA on units that have any
+   *  progress (in-progress or completed). Omitted = no reset affordance. */
+  onReset?: () => void;
   disabled?: boolean;
   /** Mastery rows for THIS unit's objectives, filtered client-side
    *  from the project-level ``useObjectiveMasteryQuery``. Undefined
@@ -55,6 +59,7 @@ function stalenessFooter(
 export function UnitCard({
   unit,
   onOpen,
+  onReset,
   disabled,
   masteryEntries,
 }: UnitCardProps) {
@@ -105,12 +110,23 @@ export function UnitCard({
     }
   })();
 
+  const canReset = Boolean(onReset) && unit.status !== "not_started";
+
   return (
-    <button
-      onClick={onOpen}
-      disabled={disabled}
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      onClick={disabled ? undefined : onOpen}
+      onKeyDown={(e) => {
+        if (disabled) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       className={cn(
-        "group relative flex min-h-[180px] w-full flex-col items-stretch rounded-card border bg-[var(--surface)] p-4 text-left transition",
+        "group relative flex min-h-[180px] w-full cursor-pointer flex-col items-stretch rounded-card border bg-[var(--surface)] p-4 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50",
         statusMeta.border,
         !disabled && "hover:border-[var(--accent)]/60 hover:shadow-sm",
         disabled && "cursor-not-allowed opacity-60"
@@ -226,11 +242,28 @@ export function UnitCard({
             </div>
           )}
         </div>
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] opacity-0 transition group-hover:opacity-100">
-          {statusMeta.ctaIcon}
-          {statusMeta.cta}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {canReset && (
+            <button
+              type="button"
+              disabled={disabled}
+              title="Reset this unit's progress"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReset?.();
+              }}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-[var(--text-muted)] opacity-0 transition hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:text-red-400"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </button>
+          )}
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] opacity-0 transition group-hover:opacity-100">
+            {statusMeta.ctaIcon}
+            {statusMeta.cta}
+          </span>
+        </div>
       </div>
-    </button>
+    </div>
   );
 }

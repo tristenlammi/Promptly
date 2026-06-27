@@ -265,7 +265,12 @@ async def test_gate_flags_missing_teachback_and_confidence() -> None:
     assert any("confidence" in m for m in readiness["unmet"])
 
 
-async def test_gate_flags_insufficient_turns() -> None:
+async def test_low_turn_count_does_not_block_completion() -> None:
+    """The minimum-student-turns floor was intentionally removed: it
+    punished efficient students who demonstrated mastery quickly. A
+    session that meets every *understanding* condition must be ready to
+    close even with a tiny turn count. ``min_turns_required`` is still
+    surfaced for analytics, it just no longer gates."""
     unit = _make_unit()
     session = _passing_session(unit)
     session.student_turn_count = 1
@@ -282,8 +287,10 @@ async def test_gate_flags_insufficient_turns() -> None:
         proposed_summary="summary",
     )
 
-    assert readiness["ready"] is False
-    assert any("turns" in m for m in readiness["unmet"])
+    assert readiness["ready"] is True
+    assert not any("turns" in m for m in readiness["unmet"])
+    # Still reported for analytics / UI, just not gating.
+    assert readiness["min_turns_required"] == 5
 
 
 async def test_gate_accepts_summary_when_no_reflection_row_yet() -> None:

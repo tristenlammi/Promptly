@@ -138,12 +138,28 @@ class TaggedActionParser:
 
         return "".join(emit_parts), captures
 
+    def pending_capture(self) -> str | None:
+        """Public tag name currently mid-capture, or ``None``.
+
+        Call this right before :meth:`flush` at end-of-stream. A
+        non-``None`` result means the model stopped emitting before the
+        closing tag arrived, so :meth:`flush` is about to discard a
+        *partial* action block. Callers use this to surface or recover
+        from a truncated ``<whiteboard_action>`` (an exercise cut off by
+        the token budget) instead of dropping it silently — which looks
+        to the student exactly like "the board stopped working".
+        """
+        if self._in_tag is None:
+            return None
+        return self._tag_aliases.get(self._in_tag, self._in_tag)
+
     def flush(self) -> str:
         """Drain the buffer at end-of-stream.
 
         If the model stopped mid-capture we discard the partial action
-        (it's malformed anyway). Any text buffered because it *could*
-        have been a tag prefix is now safe to emit verbatim.
+        (it's malformed anyway — see :meth:`pending_capture` to detect
+        this before calling). Any text buffered because it *could* have
+        been a tag prefix is now safe to emit verbatim.
         """
         if self._in_tag is not None:
             leftover = ""

@@ -1489,6 +1489,94 @@ async def get_unit(
     return _unit_summary(unit)
 
 
+@router.post("/units/{unit_id}/reset", response_model=StudyUnitSummary)
+async def reset_unit(
+    unit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StudyUnitSummary:
+    """Wipe a unit's progress so the student can re-study it from scratch.
+
+    Deletes the unit's tutor session (which cascades its chat messages,
+    whiteboard exercises, board blocks, and retrieval attempts) plus the
+    unit-scoped learner state the session cascade doesn't reach
+    (per-objective mastery, reflections, unit-specific misconceptions),
+    then resets the unit row back to ``not_started``. The unit's
+    *definition* — title, description, objectives, prereq metadata — is
+    preserved; only progress is cleared.
+
+    Resetting a completed unit on a finished project flips the project
+    back to ``active`` (it's no longer fully complete). Archived topics
+    must be unarchived first, mirroring the other write endpoints.
+    """
+    from sqlalchemy import delete as sql_delete
+
+    unit, project = await _get_owned_unit(unit_id, user, db)
+
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This topic is archived — unarchive it to reset a unit.",
+        )
+
+    # Detach the unit's session pointer first so deleting the session
+    # below doesn't momentarily leave a dangling FK, then delete the
+    # session. The DB cascades study_messages, whiteboard_exercises,
+    # study_board_blocks, and session-scoped study_retrieval_attempts.
+    session_id = unit.session_id
+    unit.session_id = None
+    await db.flush()
+    if session_id is not None:
+        session = await db.get(StudySession, session_id)
+        if session is not None:
+            await db.delete(session)
+            await db.flush()
+
+    # Unit-scoped learner state the session cascade doesn't cover.
+    await db.execute(
+        sql_delete(StudyObjectiveMastery).where(
+            StudyObjectiveMastery.unit_id == unit.id
+        )
+    )
+    await db.execute(
+        sql_delete(StudyUnitReflection).where(
+            StudyUnitReflection.unit_id == unit.id
+        )
+    )
+    await db.execute(
+        sql_delete(StudyMisconception).where(
+            StudyMisconception.unit_id == unit.id
+        )
+    )
+    # Any retrieval attempts not already removed via the session cascade
+    # (e.g. rows whose session was previously hard-deleted, leaving the
+    # attempt with a null session_id but this unit_id still set).
+    await db.execute(
+        sql_delete(StudyRetrievalAttempt).where(
+            StudyRetrievalAttempt.unit_id == unit.id
+        )
+    )
+
+    now = datetime.now(timezone.utc)
+    unit.status = "not_started"
+    unit.mastery_score = None
+    unit.mastery_summary = None
+    unit.exam_focus = None
+    unit.completed_at = None
+    unit.last_studied_at = None
+    unit.updated_at = now
+
+    # A reset unit means the plan is no longer fully complete; pull a
+    # finished project back to active so its progress ratio is honest.
+    if project.status == "completed":
+        project.status = "active"
+    project.updated_at = now
+
+    await db.commit()
+    await db.refresh(unit)
+    return _unit_summary(unit)
+
+
 # ====================================================================
 # Final Exam
 # ====================================================================
@@ -1802,6 +1890,18 @@ async def send_message(
     await db.commit()
     await db.refresh(user_msg)
 
+    # Unit and exam turns can place an interactive exercise, whose raw
+    # HTML alone runs 2–3k tokens. The client's default budget (4096)
+    # left too little room once feedback prose was added, truncating the
+    # reply mid-``<whiteboard_action>`` and silently dropping the
+    # exercise. Floor those kinds at a budget that fits a full exercise
+    # plus commentary; legacy free-chat sessions keep the client value.
+    requested_max_tokens = payload.max_tokens or 4096
+    if session.kind in ("unit", "exam"):
+        effective_max_tokens = max(requested_max_tokens, 8000)
+    else:
+        effective_max_tokens = requested_max_tokens
+
     stream_id = uuid.uuid4()
     ctx: StudyStreamContext = {
         "session_id": str(session.id),
@@ -1810,7 +1910,7 @@ async def send_message(
         "provider_id": str(provider.id),
         "model_id": model_id,
         "temperature": payload.temperature,
-        "max_tokens": payload.max_tokens,
+        "max_tokens": effective_max_tokens,
         "reviewing_exercise_id": None,
         "session_kind": session.kind or "legacy",
         "unit_id": str(session.unit_id) if session.unit_id else None,
@@ -2079,12 +2179,45 @@ async def _stream_generator(
             logger.info("Study stream %s cancelled", stream_id)
             raise
 
+        # Detect a truncated action block BEFORE flushing — flush()
+        # discards any partial capture. ``truncated_tag`` is the tag the
+        # model was still mid-emit on when the stream ended (usually
+        # because it hit the token budget). For ``whiteboard_action``
+        # this means an exercise was cut off and would otherwise vanish
+        # without a trace.
+        truncated_tag = parser.pending_capture()
         tail = parser.flush()
         if tail:
             chat_parts.append(tail)
             yield _sse({"delta": tail})
 
+        exercise_truncated = truncated_tag == "whiteboard_action"
+        if truncated_tag is not None:
+            logger.warning(
+                "Study stream %s ended mid-<%s> (token budget?) — partial "
+                "action discarded",
+                stream_id,
+                truncated_tag,
+            )
+
         full_chat = "".join(chat_parts)
+
+        # Self-heal a truncated exercise. ``pending_whiteboard`` holds the
+        # complete, parsed exercises from this turn; if the model's block
+        # was cut off mid-stream nothing lands there. When that happens
+        # AND nothing complete arrived, the student would be left staring
+        # at a blank board with no explanation — so add a short, visible
+        # recovery prompt to the reply they can act on immediately.
+        exercise_dropped = exercise_truncated and not pending_whiteboard
+        if exercise_dropped:
+            hint = (
+                "\n\n_(Heads up — the practice exercise didn't finish "
+                "loading. Say \"try again\" and I'll resend a shorter "
+                "version.)_"
+            )
+            full_chat += hint
+            yield _sse({"delta": hint})
+
         assistant = StudyMessage(
             session_id=session.id,
             role="assistant",
@@ -2187,6 +2320,76 @@ async def _stream_generator(
                 )
             )
 
+        # Tell the model (hidden from the student) that its exercise was
+        # truncated so it resends a smaller one next turn instead of
+        # repeating the overflow. Pairs with the visible recovery prompt
+        # appended to ``full_chat`` above.
+        if exercise_dropped:
+            db.add(
+                StudyMessage(
+                    session_id=session.id,
+                    role="system",
+                    content=(
+                        "Internal tutor note (not shown to the student): "
+                        "your last <whiteboard_action> was cut off before "
+                        "its closing tag, so the exercise did NOT render. "
+                        "This usually means the reply ran past the response "
+                        "budget. On your next reply, resend a SHORTER, "
+                        "self-contained exercise and keep any lead-in to one "
+                        "or two sentences so the full HTML fits. Don't "
+                        "mention this note."
+                    ),
+                )
+            )
+
+        # Surface any captures the parser grabbed but couldn't parse, so
+        # the tutor re-emits them in a parseable form instead of the
+        # action silently vanishing. The biggest offender is a
+        # ``<board_op .../>`` whose SVG/diagram payload contains ``/>``
+        # (the self-closing parser stops at the first one and truncates
+        # the JSON); the JSON-body ``<board_op>{...}</board_op>`` form is
+        # immune, so that's what we steer the model toward.
+        parse_failures = capture_result.get("parse_failures") or []
+        if parse_failures:
+            _PARSE_FIX_HINTS = {
+                "board_op": (
+                    "a board_op didn't parse — re-emit it as "
+                    "<board_op>{\"op\":\"add\",\"kind\":\"...\","
+                    "\"payload\":{...}}</board_op> (JSON between the tags). "
+                    "Do NOT use the self-closing <board_op ... /> form: it "
+                    "breaks whenever the payload contains '/>', e.g. an SVG "
+                    "diagram."
+                ),
+                "unit_action": (
+                    "a unit_action didn't parse — re-emit it as "
+                    "<unit_action>{...valid JSON...}</unit_action>."
+                ),
+                "exam_action": (
+                    "your exam_action (grade) didn't parse — re-emit it as "
+                    "<exam_action>{...valid JSON...}</exam_action> so the "
+                    "result is recorded."
+                ),
+            }
+            lines = []
+            for tag in dict.fromkeys(parse_failures):  # dedupe, keep order
+                lines.append("- " + _PARSE_FIX_HINTS.get(
+                    tag,
+                    f"a {tag} didn't parse — re-emit it as valid JSON "
+                    f"between <{tag}> and </{tag}>.",
+                ))
+            db.add(
+                StudyMessage(
+                    session_id=session.id,
+                    role="system",
+                    content=(
+                        "Internal tutor note (not shown to the student): one "
+                        "or more side-channel actions you emitted couldn't be "
+                        "applied:\n" + "\n".join(lines) + "\nRe-emit them on "
+                        "your next reply. Don't mention this note."
+                    ),
+                )
+            )
+
         # Mark the exercise being reviewed as 'reviewed' and stash
         # feedback (the full assistant reply).
         if reviewing_exercise_id is not None:
@@ -2226,6 +2429,9 @@ async def _stream_generator(
                     "block": block_info,
                 }
             )
+
+        if exercise_dropped:
+            yield _sse({"event": "exercise_error", "reason": "truncated"})
 
         for ex in emitted_exercises:
             yield _sse(
@@ -2996,7 +3202,13 @@ async def submit_exercise(
         "provider_id": str(provider.id),
         "model_id": model_id,
         "temperature": 0.7,
-        "max_tokens": 4096,
+        # Review turns carry both the feedback prose AND a freshly
+        # re-presented exercise (often a 2–3k-token HTML block). 4096
+        # routinely truncated the reply mid-``<whiteboard_action>``, so
+        # the closing tag never arrived and the exercise was silently
+        # dropped — the board went blank after a wrong answer. Give the
+        # turn real headroom.
+        "max_tokens": 8000,
         "reviewing_exercise_id": str(exercise.id),
         "session_kind": session.kind or "legacy",
         "unit_id": str(session.unit_id) if session.unit_id else None,

@@ -170,6 +170,12 @@ export const studyApi = {
     );
     return data;
   },
+  async resetUnit(unitId: string): Promise<StudyUnitSummary> {
+    const { data } = await apiClient.post<StudyUnitSummary>(
+      `/study/units/${unitId}/reset`
+    );
+    return data;
+  },
 
   async startFinalExam(
     projectId: string,

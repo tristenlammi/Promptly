@@ -897,10 +897,20 @@ You will receive a user message containing their answer payload as JSON.
 Evaluate it in chat:
 
 - Be specific — point out exactly what was right and what was wrong.
-- Explain mistakes briefly and usefully.
+- Explain mistakes briefly and usefully — **2–4 sentences, not an essay.**
 - Celebrate real wins.
 - Then decide: place a follow-up exercise with another
   `<whiteboard_action>` block, or stay in chat for a recap.
+- **If you place a follow-up exercise on the same turn, keep the feedback
+  TIGHT.** The whole reply — feedback + the exercise's full HTML — has to
+  fit in one response. A long recap followed by a big exercise can get
+  cut off before the closing `</whiteboard_action>`, and a cut-off
+  exercise does NOT render — the student is left with a blank board. When
+  in doubt, give short feedback now and place the next exercise on its
+  own turn.
+- When re-trying after a wrong answer, do NOT paste the same large
+  exercise back verbatim — give a leaner version (fewer items, simpler
+  markup) so it always fits.
 
 ## Canonical free-recall / brain-dump template — use in INDEPENDENT phase
 
@@ -1651,6 +1661,22 @@ def build_history_for_llm(
     already implicitly knows about (the student's mastery score, exam
     outcome) and rehydrating them is pure noise.
     """
+    # Only the MOST RECENT exercise is re-injected as full HTML — the
+    # model occasionally needs to see the exact markup it just placed
+    # (to grade a submission or avoid an identical repeat). Older
+    # exercises are collapsed to a one-line marker. Re-injecting every
+    # past exercise's full HTML (often 2–3k tokens each) used to balloon
+    # the context every turn, which both cost tokens and crowded the
+    # output budget — the bigger the prompt, the likelier the model's
+    # reply (feedback + a fresh exercise) overruns ``max_tokens`` and
+    # gets truncated mid-``<whiteboard_action>``, silently dropping the
+    # exercise. Keeping only the latest full block keeps the model
+    # grounded without the bloat.
+    last_exercised_msg_id: uuid.UUID | None = None
+    for m in rows:
+        if m.role == "assistant" and m.exercise_id in exercises_by_msg:
+            last_exercised_msg_id = m.id
+
     history: list[ChatMessage] = []
     for m in rows:
         if m.role not in ("user", "assistant", "system"):
@@ -1658,13 +1684,21 @@ def build_history_for_llm(
         content = m.content or ""
         if m.role == "assistant" and m.exercise_id in exercises_by_msg:
             ex = exercises_by_msg[m.exercise_id]
-            # Re-inject as raw HTML (matches the tutor's new emit format).
-            # The model can read its previous exercise without us needing
-            # to fight JSON-escaping.
-            content = (
-                (content + "\n\n" if content else "")
-                + f"<whiteboard_action>\n{ex.html}\n</whiteboard_action>"
-            )
+            if m.id == last_exercised_msg_id:
+                # Re-inject as raw HTML (matches the tutor's emit format)
+                # so the model can read its previous exercise without us
+                # fighting JSON-escaping.
+                content = (
+                    (content + "\n\n" if content else "")
+                    + f"<whiteboard_action>\n{ex.html}\n</whiteboard_action>"
+                )
+            else:
+                label = (ex.title or "practice exercise").strip()
+                content = (
+                    (content + "\n\n" if content else "")
+                    + f"[You placed an interactive exercise here: "
+                    f"\"{label}\". It has since been submitted and reviewed.]"
+                )
         if not content:
             continue
         history.append(ChatMessage(role=m.role, content=content))
@@ -1900,42 +1934,50 @@ def parse_whiteboard_payload(body: str) -> dict[str, Any] | None:
     """
     if not body or not body.strip():
         return None
-    stripped = body.strip()
-    stripped = _strip_code_fences(stripped)
+    stripped = _strip_code_fences(body.strip())
 
-    # --- Raw HTML path -------------------------------------------------
-    lower_head = stripped[:200].lower().lstrip()
-    looks_like_html = (
-        lower_head.startswith("<!doctype")
-        or lower_head.startswith("<html")
-        or lower_head.startswith("<!--")
-    )
-    if looks_like_html:
-        title_match = _TITLE_TAG_RE.search(stripped)
-        title = title_match.group("title").strip() if title_match else None
-        return {
-            "type": "exercise",
-            "title": title,
-            "html": stripped,
-        }
-
-    # --- JSON envelope path -------------------------------------------
+    # --- JSON envelope path (legacy) ----------------------------------
+    # Only the older JSON-wrapped form starts with ``{``. Try it first,
+    # but DON'T bail if it fails — a body that opens with ``{`` could
+    # still be HTML the model fumbled, so we fall through to the raw-HTML
+    # salvage below rather than discarding the exercise.
     if stripped.startswith("{"):
         obj = parse_action_payload(stripped)
-        if obj is None:
-            return None
-        html = obj.get("html")
-        if not isinstance(html, str) or not html.strip():
-            return None
-        title = obj.get("title")
-        return {
-            "type": str(obj.get("type") or "exercise").lower(),
-            "title": str(title).strip() if isinstance(title, str) else None,
-            "html": html,
-        }
+        if obj is not None:
+            html = obj.get("html")
+            if isinstance(html, str) and html.strip():
+                title = obj.get("title")
+                return {
+                    "type": str(obj.get("type") or "exercise").lower(),
+                    "title": str(title).strip() if isinstance(title, str) else None,
+                    "html": html,
+                }
 
-    # Could not recognise either format.
-    return None
+    # --- Raw HTML path (preferred + robust) ---------------------------
+    # The prompt tells the model to place raw HTML directly between the
+    # tags, so anything that isn't a usable JSON envelope is treated as
+    # HTML. We previously required the body to *start with* exactly
+    # ``<!doctype`` / ``<html`` / ``<!--``, which silently discarded the
+    # exercise whenever the model drifted (a stray sentence before the
+    # markup, a leading ``<style>`` / ``<div>``, etc.) — the student saw
+    # the board go blank with no explanation. Instead, find the first
+    # HTML tag and take everything from there: liberal in what we accept
+    # so a small formatting wobble never costs the student their
+    # exercise.
+    lt = stripped.find("<")
+    if lt == -1:
+        # No markup at all — genuinely not an exercise.
+        return None
+    html = stripped[lt:].strip()
+    if not html:
+        return None
+    title_match = _TITLE_TAG_RE.search(html)
+    title = title_match.group("title").strip() if title_match else None
+    return {
+        "type": "exercise",
+        "title": title,
+        "html": html,
+    }
 
 
 class MarkCompleteGateResult(TypedDict):
@@ -3120,6 +3162,14 @@ async def apply_captures(
         # SSE event so the frontend can update the board in real-time.
         "board_blocks_added": [],
         "session_goal_set": False,
+        # Tags whose body the parser captured but we could NOT parse into
+        # a usable payload (malformed JSON, an SVG-laden ``<board_op .../>``
+        # truncated at its first ``/>``, etc.). Previously these were
+        # dropped on the floor with no trace — the tutor's action just
+        # silently didn't happen and it never knew. The SSE generator
+        # turns this into a hidden self-correct note so the model re-emits
+        # the action in a form that parses.
+        "parse_failures": [],
     }
     for cap in captures:
         try:
@@ -3128,6 +3178,13 @@ async def apply_captures(
                 # Fallback: model used XML-attribute style instead of JSON body.
                 payload = parse_board_op_attr_body(cap.body)
             if payload is None:
+                logger.warning(
+                    "study: unparseable <%s> capture (%d chars) head=%r",
+                    cap.tag,
+                    len(cap.body),
+                    cap.body[:120],
+                )
+                result["parse_failures"].append(cap.tag)
                 continue
             await _apply_single_capture(
                 db=db,

@@ -145,6 +145,22 @@ export function useEnterStudyUnit() {
   });
 }
 
+export function useResetStudyUnit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (unitId: string) => studyApi.resetUnit(unitId),
+    onSuccess: (unit) => {
+      // Reset wipes the unit's session, mastery, reflections, and
+      // misconceptions — refresh every surface that reads them.
+      qc.invalidateQueries({ queryKey: ["study", "project", unit.project_id] });
+      qc.invalidateQueries({ queryKey: PROJECTS_KEY });
+      qc.invalidateQueries({ queryKey: ["study", "unit", unit.id] });
+      qc.invalidateQueries({ queryKey: ["study", "objective-mastery", unit.project_id] });
+      qc.invalidateQueries({ queryKey: ["study", "review-queue", unit.project_id] });
+    },
+  });
+}
+
 export function useStartFinalExam() {
   const qc = useQueryClient();
   return useMutation({

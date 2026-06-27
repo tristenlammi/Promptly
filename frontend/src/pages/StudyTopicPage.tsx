@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
+import { Modal } from "@/components/shared/Modal";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ExamBreakdown } from "@/components/study/ExamBreakdown";
 import { FinalExamCard } from "@/components/study/FinalExamCard";
@@ -27,6 +28,7 @@ import {
   useEnterStudyUnit,
   useObjectiveMasteryQuery,
   useRegenerateStudyPlan,
+  useResetStudyUnit,
   useStartFinalExam,
   useStudyProjectQuery,
   useUnarchiveStudyProject,
@@ -62,6 +64,7 @@ export function StudyTopicPage() {
   const enterUnit = useEnterStudyUnit();
   const startExam = useStartFinalExam();
   const regenerate = useRegenerateStudyPlan();
+  const resetUnit = useResetStudyUnit();
   const deleteMutation = useDeleteStudyProject();
   const archiveMutation = useArchiveStudyProject();
   const unarchiveMutation = useUnarchiveStudyProject();
@@ -69,6 +72,11 @@ export function StudyTopicPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [regenerateOpen, setRegenerateOpen] = useState(false);
+  // The unit the student has asked to reset (drives the confirm modal),
+  // or null when the modal is closed.
+  const [resetTarget, setResetTarget] = useState<{ id: string; title: string } | null>(
+    null
+  );
   const [localError, setLocalError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"units" | "insights">("units");
 
@@ -101,6 +109,19 @@ export function StudyTopicPage() {
     },
     [enterUnit, navigate, buildSessionUrl]
   );
+
+  const handleResetUnit = useCallback(async () => {
+    if (!resetTarget) return;
+    setLocalError(null);
+    try {
+      await resetUnit.mutateAsync(resetTarget.id);
+      setResetTarget(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLocalError(msg);
+      setResetTarget(null);
+    }
+  }, [resetTarget, resetUnit]);
 
   const handleStartReview = useCallback(
     async (unitId: string, objectiveId: string) => {
@@ -426,6 +447,11 @@ export function StudyTopicPage() {
                             key={u.id}
                             unit={u}
                             onOpen={() => handleOpenUnit(u.id)}
+                            onReset={
+                              isArchived
+                                ? undefined
+                                : () => setResetTarget({ id: u.id, title: u.title })
+                            }
                             disabled={isArchived || enterUnit.isPending}
                             masteryEntries={masteryByUnit.get(u.id)}
                           />
@@ -482,6 +508,46 @@ export function StudyTopicPage() {
         secondDescription={`Archive "${project.title}" now?`}
         secondConfirmLabel="Archive topic"
       />
+
+      <Modal
+        open={resetTarget !== null}
+        onClose={() => {
+          if (!resetUnit.isPending) setResetTarget(null);
+        }}
+        title="Reset this unit?"
+        widthClass="max-w-md"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setResetTarget(null)}
+              disabled={resetUnit.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleResetUnit}
+              loading={resetUnit.isPending}
+            >
+              Reset unit
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-[var(--text)]">
+          {resetTarget ? (
+            <>
+              This wipes your progress on{" "}
+              <span className="font-medium">"{resetTarget.title}"</span> — the
+              tutor chat, exercises, mastery scores, and reflections for this
+              unit are deleted and it goes back to <em>Not started</em>. The
+              unit's objectives stay the same so you can study it fresh. This
+              can't be undone.
+            </>
+          ) : null}
+        </p>
+      </Modal>
 
       <ConfirmDoubleModal
         open={regenerateOpen}
