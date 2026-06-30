@@ -163,7 +163,7 @@ export function WorkspaceBoardCardDetail({
       onClick={onClose}
     >
       <div
-        className="mt-4 w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--bg)] shadow-xl"
+        className="mt-4 w-full max-w-lg rounded-card border border-[var(--border)] bg-[var(--bg)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -336,7 +336,7 @@ export function WorkspaceBoardCardDetail({
                     className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
                   >
                     {s.done ? (
-                      <Check className="h-4 w-4 text-emerald-500" />
+                      <Check className="h-4 w-4 text-[var(--success)]" />
                     ) : (
                       <Square className="h-4 w-4" />
                     )}
@@ -364,7 +364,7 @@ export function WorkspaceBoardCardDetail({
                       onClick={() =>
                         setSubtasks(subtasks.filter((x) => x.id !== s.id))
                       }
-                      className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                      className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -409,7 +409,7 @@ export function WorkspaceBoardCardDetail({
             <button
               type="button"
               onClick={onDelete}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500"
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-[var(--text-muted)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
             >
               <Trash2 className="h-4 w-4" />
               Delete task
@@ -543,7 +543,7 @@ function LabelsSection({
               <button
                 type="button"
                 onClick={() => remove(l.id)}
-                className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:text-red-500"
+                className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--danger)]"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -676,7 +676,7 @@ function ActivitySection({
                   <button
                     type="button"
                     onClick={() => del.mutate(e.id)}
-                    className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                    className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
                     title="Delete comment"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -893,7 +893,7 @@ function LinksSection({
                   type="button"
                   onClick={() => remove(l.item_id)}
                   title="Remove link"
-                  className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                  className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -1060,7 +1060,7 @@ function AttachmentsSection({
         onChange={(e) => void onPick(e.target.files)}
       />
 
-      {error && <p className="mb-1 text-xs text-red-500">{error}</p>}
+      {error && <p className="mb-1 text-xs text-[var(--danger)]">{error}</p>}
 
       {attachments.length === 0 && !uploading ? (
         <span className="text-xs text-[var(--text-muted)]">
@@ -1143,7 +1143,7 @@ function AttachmentsSection({
                     type="button"
                     title="Remove attachment"
                     onClick={() => remove.mutate(a.file_id)}
-                    className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                    className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>

@@ -113,7 +113,7 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
                     <button
                       type="button"
                       onClick={() => void remove(c.id)}
-                      className="h-fit shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
+                      className="h-fit shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)] group-hover:opacity-100"
                       title="Delete comment"
                       aria-label="Delete comment"
                     >

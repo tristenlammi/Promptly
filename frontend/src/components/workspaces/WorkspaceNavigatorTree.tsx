@@ -505,7 +505,7 @@ function WorkspaceArchiveSection({
                     title="Delete permanently"
                     aria-label="Delete permanently"
                     onClick={() => void del(node)}
-                    className="rounded p-1 text-red-500 hover:bg-red-500/10"
+                    className="rounded p-1 text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -1135,7 +1135,7 @@ function MenuItem({
       className={cn(
         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition disabled:opacity-50",
         destructive
-          ? "text-red-500 hover:bg-red-500/10"
+          ? "text-[var(--danger)] hover:bg-[var(--danger-bg)]"
           : "text-[var(--text)] hover:bg-[var(--accent)]/10"
       )}
     >

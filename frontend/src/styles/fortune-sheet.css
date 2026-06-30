@@ -1,22 +1,27 @@
 /*
- * Theme overrides for the Fortune-sheet spreadsheet widget.
+ * Native-feel theme for the Fortune-sheet spreadsheet widget.
  *
  * Fortune-sheet renders its grid on a <canvas> and ships no dark theme, so the
- * sheet always renders as a light "paper" surface. The bug this fixes: the
- * app's global text colour (near-white in dark mode) cascades into the widget's
- * light chrome and makes toolbar labels + dialog text invisible (and inputs
- * inherit transparent/odd backgrounds via Tailwind Preflight). We pin readable
- * light-surface colours inside the widget so it stays legible in every app
- * theme.
+ * grid itself always renders as a light "paper" surface — there's no library
+ * hook to darken it. Rather than frame that un-darkenable white grid in dark
+ * chrome (a glare boxed in shadow), we lean into it: the whole widget is a
+ * single, cohesive *warm light* document surface in every app theme — chrome
+ * and grid share one palette, the way a sheet of paper would. This also fixes
+ * the original legibility bug (the app's near-white dark-mode text used to
+ * cascade into the widget's light chrome and vanish): we pin warm, readable
+ * light-surface colours, so the sheet stays legible regardless of app theme.
  *
- * Every selector below is a `.fortune-*` class — unique to the library — so the
- * rest of the app is never affected. Higher specificity than the library's own
- * `.fortune-*` rules (we prefix nothing but rely on the cascade order; the file
- * is imported after the library CSS in WorkspaceSheetPane).
+ * The values mirror the app's LIGHT design tokens (warm taupe surfaces, the
+ * #D97757 terracotta accent) rather than the library's cool clinical greys, so
+ * the sheet reads as native — just always in its light "document" guise.
+ *
+ * Every selector is a `.fortune-*` class — unique to the library — so the rest
+ * of the app is never affected. The file is imported after the library CSS in
+ * WorkspaceSheetPane, so cascade order lets these win without `!important`.
  */
 
-/* Force a light, readable text colour on every chrome surface that otherwise
-   inherits the app's (possibly near-white) text colour. */
+/* Warm, readable text on every chrome surface (replaces the cool #1f2937 the
+   library ships, and overrides the app's near-white dark-mode text bleed). */
 .fortune-container,
 .fortune-toolbar,
 .fortune-toolbar-combo,
@@ -40,12 +45,55 @@
 .fortune-sheettab-button,
 .fortune-stat-area,
 .fortune-name-box-container {
-  color: #1f2937;
+  color: #1a1a19;
 }
 
-/* Inputs / selects / textareas inside the widget: explicit light field so the
-   value and placeholder are legible (Preflight otherwise leaves them
-   transparent, inheriting the app's near-white text). */
+/* Muted secondary text — the warm taupe grey instead of cool slate. */
+.fortune-toolbar-combo-text,
+.fortune-stat-area,
+.fortune-sheettab-button {
+  color: #57534e;
+}
+
+/* Raised chrome surfaces (toolbar, sheet-tab bar, stat bar) sit a step above
+   the white grid on the faint warm tone — matching the app's --surface-1. */
+.fortune-toolbar,
+.fortune-sheettab-container,
+.fortune-stat-area,
+.fortune-name-box-container {
+  background-color: #f2f0ec;
+  border-color: rgba(122, 105, 95, 0.16);
+}
+
+/* Dropdown / menu / dialog surfaces — solid warm-white so dark-mode bleed
+   can't leave them translucent-dark. */
+.fortune-toolbar-combo-popup,
+.fortune-toolbar-select-option,
+.fortune-context-menu,
+.fortune-filter-menu,
+.fortune-border-select-menu,
+.fortune-border-style-picker-menu,
+.fortune-dialog,
+.fortune-dialog-box-content,
+.fortune-modal-container {
+  background-color: #ffffff;
+  border-color: rgba(122, 105, 95, 0.16);
+}
+
+/* Hover / active toolbar + menu rows pick up the app's warm hover wash and the
+   terracotta accent, in place of the library's cool blue-grey. */
+.fortune-toolbar-button:hover,
+.fortune-toolbar-button:active,
+.fortune-menuitem-row:hover,
+.fortune-toolbar-select-option:hover,
+.fortune-sheettab-button:hover {
+  background-color: #ebe8e3;
+  color: #1a1a19;
+}
+
+/* Inputs / selects / textareas: explicit warm-light field so the value and
+   placeholder stay legible (Preflight otherwise leaves them transparent,
+   inheriting the app's near-white text), with a terracotta focus ring. */
 .fortune-dialog input,
 .fortune-dialog select,
 .fortune-dialog textarea,
@@ -57,23 +105,36 @@
 .fortune-fx-input,
 .fortune-name-box {
   background-color: #ffffff;
-  color: #1f2937;
-  border-color: #d1d5db;
+  color: #1a1a19;
+  border-color: #ded7ce;
+}
+
+.fortune-dialog input:focus,
+.fortune-modal-container input:focus,
+.fortune-fx-input:focus,
+.fortune-name-box:focus {
+  border-color: #d97757;
+  outline-color: #d97757;
 }
 
 .fortune-dialog input::placeholder,
 .fortune-modal-container input::placeholder,
 .fortune-fx-input::placeholder {
-  color: #9ca3af;
+  color: #9b9590;
 }
 
-/* Dropdown / menu surfaces get an explicit light background so dark-mode bleed
-   can't leave them translucent-dark. */
-.fortune-toolbar-combo-popup,
-.fortune-toolbar-select-option,
-.fortune-context-menu,
-.fortune-filter-menu,
-.fortune-border-select-menu,
-.fortune-border-style-picker-menu {
-  background-color: #ffffff;
+/* Primary / confirm dialog buttons in the terracotta accent so they read as
+   the app's, not the library's blue. */
+.fortune-dialog .fortune-message-box-button.button-primary,
+.fortune-modal-container .button-primary,
+.fortune-dialog button[class*="primary"] {
+  background-color: #d97757;
+  border-color: #d97757;
+  color: #ffffff;
+}
+.fortune-dialog .fortune-message-box-button.button-primary:hover,
+.fortune-modal-container .button-primary:hover,
+.fortune-dialog button[class*="primary"]:hover {
+  background-color: #c2613e;
+  border-color: #c2613e;
 }

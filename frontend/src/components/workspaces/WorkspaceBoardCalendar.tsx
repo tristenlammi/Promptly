@@ -223,9 +223,9 @@ export function WorkspaceBoardCalendar({
                       className={cn(
                         "flex items-center gap-1 rounded border px-1 py-0.5 text-left text-[11px] transition hover:border-[var(--accent)]",
                         overdue
-                          ? "border-red-500/40 bg-red-500/10 text-red-500"
+                          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
                           : soon
-                            ? "border-orange-500/40 bg-orange-500/10 text-orange-500"
+                            ? "border-[var(--warning-border)] bg-[var(--warning-bg)] text-[var(--warning)]"
                             : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
                         t.done && "opacity-60"
                       )}

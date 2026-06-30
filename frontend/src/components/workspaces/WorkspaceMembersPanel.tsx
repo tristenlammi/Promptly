@@ -128,7 +128,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
       </form>
 
       {errorMsg && (
-        <div className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+        <div className="mt-2 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs text-[var(--danger)]">
           {errorMsg}
         </div>
       )}
@@ -140,7 +140,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
         {isLoading ? (
           <div className="text-xs text-[var(--text-muted)]">Loading…</div>
         ) : isError ? (
-          <div className="text-xs text-red-500">
+          <div className="text-xs text-[var(--danger)]">
             Couldn't load existing shares. Try again in a moment.
           </div>
         ) : (data ?? []).length === 0 ? (
@@ -169,7 +169,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
                 <button
                   type="button"
                   onClick={() => remove.mutate(row.id)}
-                  className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500"
+                  className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
                   title={
                     row.status === "accepted"
                       ? "Remove access"
@@ -256,15 +256,15 @@ function StatusPill({ status }: { status: "pending" | "accepted" | "declined" })
   const map: Record<typeof status, { label: string; cls: string }> = {
     pending: {
       label: "Pending",
-      cls: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
+      cls: "bg-[var(--warning-bg)] text-[var(--warning)]",
     },
     accepted: {
       label: "Active",
-      cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+      cls: "bg-[var(--success-bg)] text-[var(--success)]",
     },
     declined: {
       label: "Declined",
-      cls: "bg-zinc-500/15 text-zinc-500 dark:text-zinc-400",
+      cls: "bg-[var(--surface-2)] text-[var(--text-muted)]",
     },
   };
   const meta = map[status];

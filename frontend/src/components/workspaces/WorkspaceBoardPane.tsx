@@ -642,7 +642,7 @@ export function WorkspaceBoardPane({
                       className={cn(
                         "rounded-full px-1.5 text-[11px]",
                         overWip
-                          ? "bg-red-500/15 text-red-500"
+                          ? "bg-[var(--danger-bg)] text-[var(--danger)]"
                           : "bg-[var(--hover)] text-[var(--text-muted)]"
                       )}
                     >
@@ -864,7 +864,7 @@ function ColumnsManager({
               type="button"
               disabled={columns.length <= 1}
               onClick={() => remove(c.id)}
-              className="rounded p-0.5 text-[var(--text-muted)] hover:text-red-500 disabled:opacity-30"
+              className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-30"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -1032,7 +1032,7 @@ function BoardCard({
                 onDelete();
               }}
               title="Delete task"
-              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -1058,9 +1058,9 @@ function BoardCard({
               className={cn(
                 "inline-flex items-center gap-1",
                 urgency === "overdue"
-                  ? "text-red-500"
+                  ? "text-[var(--danger)]"
                   : urgency === "soon"
-                    ? "text-orange-500"
+                    ? "text-[var(--warning)]"
                     : "text-[var(--text-muted)]"
               )}
             >
@@ -1090,7 +1090,7 @@ function BoardCard({
                   className="flex items-center gap-1.5 text-left text-xs text-[var(--text-muted)] disabled:cursor-default"
                 >
                   {s.done ? (
-                    <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                    <Check className="h-3 w-3 shrink-0 text-[var(--success)]" />
                   ) : (
                     <Square className="h-3 w-3 shrink-0" />
                   )}

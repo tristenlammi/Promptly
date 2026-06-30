@@ -1,0 +1,37 @@
+/*
+ * Native-feel theme overrides for the Excalidraw whiteboard.
+ *
+ * Excalidraw ships its own indigo accent (#6965db light / #a8a5ff dark) for
+ * selection rings, active toolbar items, and primary buttons — which reads as
+ * "an embedded third-party tool" against the app's warm terracotta palette.
+ * We re-point Excalidraw's ``--color-primary*`` family at the app accent so the
+ * board feels native. Light/dark are themed separately because the accent has
+ * to invert (darker terracotta on light, lighter terracotta on dark) the same
+ * way Excalidraw's own indigo does.
+ *
+ * Everything is scoped under ``.promptly-canvas`` (the pane wrapper) so these
+ * overrides never touch any other Excalidraw instance — and the surface/island
+ * backgrounds are intentionally left to Excalidraw's own (now app-synced)
+ * light/dark theme so its internal contrast math keeps working.
+ */
+
+.promptly-canvas .excalidraw {
+  /* Light theme — terracotta in place of indigo #6965db. */
+  --color-primary: #d97757;
+  --color-primary-darker: #c2613e;
+  --color-primary-darkest: #a94f30;
+  --color-primary-hover: #c2613e;
+  --color-primary-light: #f3ded5;
+  --color-primary-light-darker: #ecc9bb;
+}
+
+.promptly-canvas .excalidraw.theme--dark {
+  /* Dark theme — lighter, warmer terracotta so it reads on the dark island,
+     mirroring how Excalidraw lightens its indigo (#a8a5ff) on dark. */
+  --color-primary: #e08a6e;
+  --color-primary-darker: #e8a089;
+  --color-primary-darkest: #efb6a3;
+  --color-primary-hover: #e8a089;
+  --color-primary-light: #3d2e26;
+  --color-primary-light-darker: #4a372d;
+}

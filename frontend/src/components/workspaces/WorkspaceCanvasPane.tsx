@@ -10,6 +10,11 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { canvasApi } from "@/api/canvas";
 import { useCanvasThemeStore } from "@/store/canvasThemeStore";
+import { useThemeStore } from "@/store/themeStore";
+// Re-points Excalidraw's indigo accent at the app's terracotta (scoped to
+// the .promptly-canvas wrapper below).
+import "@/styles/excalidraw.css";
+import { ErrorState } from "@/components/shared/Callout";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
 import { buildBundledLibraryItems } from "./canvas/libraries";
@@ -59,18 +64,42 @@ export function WorkspaceCanvasPane({
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawImperativeAPI | null>(null);
 
-  // Initial scene data, built once at mount. The canvas theme is seeded
-  // from the (per-user, light-by-default) canvas theme store and from then
-  // on is owned by Excalidraw's own toggle — we persist the user's choice
-  // back to the store in ``handleChange`` below. ``getState()`` (not the
-  // hook) reads the persisted value without making theme a reactive dep.
+  // The board follows the app theme by default; a manual flip of Excalidraw's
+  // own toggle sticks (see canvasThemeStore). ``resolved()`` collapses the
+  // app's light/dark/system into a concrete value.
+  const appTheme = useThemeStore((s) => s.resolved());
+
+  // The theme we last applied to / observed from Excalidraw. Lets ``handleChange``
+  // tell a genuine user toggle apart from the echo of our own programmatic
+  // ``updateScene`` when the app theme changes.
+  const expectedThemeRef = useRef<"light" | "dark">(
+    useCanvasThemeStore.getState().overridden
+      ? useCanvasThemeStore.getState().theme
+      : useThemeStore.getState().resolved()
+  );
+
+  // Initial scene data, built once at mount. Seeded from the overridden canvas
+  // theme if the user set one, otherwise from the current app theme. ``getState()``
+  // (not the hook) reads the persisted value without making theme a reactive dep.
   const initialData = useMemo(
     () => ({
       libraryItems: buildBundledLibraryItems(),
-      appState: { theme: useCanvasThemeStore.getState().theme },
+      appState: { theme: expectedThemeRef.current },
     }),
     []
   );
+
+  // Follow the app theme: when it changes and the user hasn't overridden the
+  // board, push the new theme into Excalidraw. We bump ``expectedThemeRef``
+  // first so the resulting ``onChange`` echo isn't mistaken for a manual flip.
+  useEffect(() => {
+    if (!excalidrawAPI) return;
+    const store = useCanvasThemeStore.getState();
+    store.followApp(appTheme);
+    if (store.overridden || appTheme === expectedThemeRef.current) return;
+    expectedThemeRef.current = appTheme;
+    excalidrawAPI.updateScene({ appState: { theme: appTheme } });
+  }, [appTheme, excalidrawAPI]);
 
   const binding = useExcalidrawCanvas({
     excalidrawAPI,
@@ -120,9 +149,15 @@ export function WorkspaceCanvasPane({
     (elements, appState, files) => {
       binding.onChange(elements, appState, files);
       schedulePush(elements);
+      // A theme that differs from what we last applied means the user flipped
+      // Excalidraw's own toggle. Record it as a sticky override (or clear the
+      // override if they re-synced to the current app theme).
       const nextTheme = (appState as { theme?: "light" | "dark" }).theme;
-      if (nextTheme && nextTheme !== useCanvasThemeStore.getState().theme) {
-        useCanvasThemeStore.getState().setTheme(nextTheme);
+      if (nextTheme && nextTheme !== expectedThemeRef.current) {
+        expectedThemeRef.current = nextTheme;
+        useCanvasThemeStore
+          .getState()
+          .setManual(nextTheme, useThemeStore.getState().resolved());
       }
 
       // Surface the "Remove background" button for a single selected image.
@@ -185,19 +220,13 @@ export function WorkspaceCanvasPane({
   }, [canvasId]);
 
   if (error) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 py-10">
-        <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </div>
-      </div>
-    );
+    return <ErrorState>{error}</ErrorState>;
   }
 
   return (
     <div
       ref={containerRef}
-      className="relative h-full min-h-0 w-full flex-1"
+      className="promptly-canvas relative h-full min-h-0 w-full flex-1"
       // Stop publishing our cursor once the pointer leaves the board, so
       // peers don't see a stranded cursor sitting where we last were.
       onPointerLeave={binding.clearPointer}
@@ -227,7 +256,7 @@ export function WorkspaceCanvasPane({
             onClick={handleRemoveBackground}
             disabled={bgState === "working"}
             title="Remove the background from this image"
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white shadow-md hover:bg-neutral-700 disabled:opacity-70"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text)] shadow-md transition hover:bg-[var(--surface-hover)] disabled:opacity-70"
           >
             {bgState === "working" ? (
               <>
@@ -236,7 +265,7 @@ export function WorkspaceCanvasPane({
               </>
             ) : bgState === "error" ? (
               <>
-                <Wand2 className="h-3.5 w-3.5 text-red-400" />
+                <Wand2 className="h-3.5 w-3.5 text-[var(--danger)]" />
                 Failed — try again
               </>
             ) : (

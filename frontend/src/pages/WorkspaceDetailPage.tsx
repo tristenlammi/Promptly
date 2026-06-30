@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
+import { ErrorState } from "@/components/shared/Callout";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
@@ -632,13 +633,13 @@ function WorkspaceMainPane({
             "mb-4 flex items-center gap-2 rounded-card border p-3 text-xs " +
             (canEdit
               ? "border-[var(--accent)]/30 bg-[var(--accent)]/5 text-[var(--text)]"
-              : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200")
+              : "border-[var(--warning-border)] bg-[var(--warning-bg)] text-[var(--text)]")
           }
         >
           <Users
             className={
               "h-3.5 w-3.5 shrink-0 " +
-              (canEdit ? "text-[var(--accent)]" : "text-amber-500")
+              (canEdit ? "text-[var(--accent)]" : "text-[var(--warning)]")
             }
           />
           <span>
@@ -1004,13 +1005,7 @@ function WorkspaceNotePane({
   }, [node.id, node.ref_id]);
 
   if (error) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 py-10">
-        <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </div>
-      </div>
-    );
+    return <ErrorState>{error}</ErrorState>;
   }
 
   if (!file) {
@@ -1362,7 +1357,7 @@ function NotebookTabs({
                 dragId === p.id && "opacity-50",
                 active
                   ? "bg-[var(--accent)]/15 text-[var(--text)]"
-                  : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+                  : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] "
               )}
             >
               <button
@@ -1432,7 +1427,7 @@ function NotebookTabs({
             type="button"
             onClick={() => setAddOpen((o) => !o)}
             disabled={adding}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] disabled:opacity-50 dark:hover:bg-white/[0.06]"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-50 "
             title="Add a page"
             aria-haspopup="menu"
             aria-expanded={addOpen}
@@ -1463,7 +1458,7 @@ function NotebookTabs({
                       type="button"
                       role="menuitem"
                       onClick={() => pick(kind)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)] "
                     >
                       <Icon className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                       {label}
@@ -1558,13 +1553,7 @@ function WorkspaceCanvasPaneFrame({
   canEdit: boolean;
 }) {
   if (!node.ref_id) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 py-10">
-        <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          This canvas has no underlying board.
-        </div>
-      </div>
-    );
+    return <ErrorState>This canvas has no underlying board.</ErrorState>;
   }
   return (
     // ``min-h-0`` lets this flex child shrink so the absolutely-positioned

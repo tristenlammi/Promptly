@@ -8,6 +8,7 @@ import "@/styles/fortune-sheet.css";
 
 import { workspacesApi } from "@/api/workspaces";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { ErrorState } from "@/components/shared/Callout";
 import { useSheetCollabProvider } from "./useSheetCollabProvider";
 import { useSheetCollab } from "./useSheetCollab";
 
@@ -332,13 +333,7 @@ export function WorkspaceSheetPane({
   }, [saveWorkbook, clearAll]);
 
   if (error) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 py-10">
-        <div className="rounded-card border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </div>
-      </div>
-    );
+    return <ErrorState>{error}</ErrorState>;
   }
 
   if (!data) {
@@ -406,11 +401,11 @@ function CollabStatus({
       >
         {peers > 0 ? (
           <>
-            <Users className="h-3 w-3 text-emerald-500" />
-            <span className="text-emerald-500">{peers + 1}</span>
+            <Users className="h-3 w-3 text-[var(--success)]" />
+            <span className="text-[var(--success)]">{peers + 1}</span>
           </>
         ) : (
-          <Wifi className="h-3 w-3 text-emerald-500" />
+          <Wifi className="h-3 w-3 text-[var(--success)]" />
         )}
       </span>
     );
@@ -444,7 +439,7 @@ function SaveStatus({ state }: { state: SaveState }) {
   }
   if (state === "saved") {
     return (
-      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-emerald-500">
+      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-[var(--success)]">
         <Check className="h-3 w-3" />
         Saved
       </span>
@@ -452,7 +447,7 @@ function SaveStatus({ state }: { state: SaveState }) {
   }
   if (state === "error") {
     return (
-      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-red-500">
+      <span className="inline-flex items-center gap-1 px-1 text-[11px] text-[var(--danger)]">
         <CircleAlert className="h-3 w-3" />
         Save failed
       </span>

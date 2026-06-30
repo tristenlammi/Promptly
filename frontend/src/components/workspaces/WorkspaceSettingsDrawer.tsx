@@ -454,7 +454,7 @@ function FilesTab({
       {previewError && (
         <div
           role="alert"
-          className="mb-3 rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
+          className="mb-3 rounded-card border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-sm text-[var(--danger)]"
         >
           {previewError}
         </div>
@@ -510,7 +510,7 @@ function FilesTab({
                   <button
                     onClick={() => unpin.mutate(f.file_id)}
                     title="Unpin"
-                    className="rounded p-1 text-[var(--text-muted)] transition hover:bg-red-500/10 hover:text-red-500"
+                    className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
                     disabled={unpin.isPending}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -565,17 +565,17 @@ function ContextBudgetBar({ workspace }: { workspace: WorkspaceDetail }) {
     embeddings_configured,
     files,
   } = workspace;
-  let tone = "text-emerald-500";
-  if (per_turn_tokens >= 8000) tone = "text-red-500";
-  else if (per_turn_tokens >= 3000) tone = "text-amber-500";
+  let tone = "text-[var(--success)]";
+  if (per_turn_tokens >= 8000) tone = "text-[var(--danger)]";
+  else if (per_turn_tokens >= 3000) tone = "text-[var(--warning)]";
 
   const showEmbeddingsNudge = !embeddings_configured && files.length > 0;
 
   return (
     <div className="mb-4 space-y-2">
       {showEmbeddingsNudge && (
-        <div className="flex items-start gap-2 rounded-card border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-          <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <div className="flex items-start gap-2 rounded-card border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-xs text-[var(--text)]">
+          <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
           <span>
             <span className="font-semibold">Semantic search not configured</span>
             {" — "}pinned files are injected in full on every turn. To enable
@@ -639,7 +639,7 @@ function IndexStatusChip({
   return (
     <span
       title={error ?? undefined}
-      className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-500"
+      className="inline-flex items-center gap-1 rounded-full bg-[var(--danger-bg)] px-1.5 py-0.5 text-[10px] text-[var(--danger)]"
     >
       <CircleAlert className="h-2.5 w-2.5" />
       not indexed
@@ -1026,7 +1026,7 @@ function AutosaveIndicator({
 }) {
   if (needsTitle && state !== "saving") {
     return (
-      <span className="text-xs text-amber-500">
+      <span className="text-xs text-[var(--warning)]">
         Title can't be empty — changes pause until you add one.
       </span>
     );
@@ -1041,7 +1041,7 @@ function AutosaveIndicator({
   }
   if (state === "saved") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500">
+      <span className="inline-flex items-center gap-1.5 text-xs text-[var(--success)]">
         <Check className="h-3 w-3" />
         Saved
       </span>
@@ -1049,7 +1049,7 @@ function AutosaveIndicator({
   }
   if (state === "error") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-red-500">
+      <span className="inline-flex items-center gap-1.5 text-xs text-[var(--danger)]">
         <CircleAlert className="h-3 w-3" />
         Couldn't save — keep editing to retry
       </span>
@@ -1258,13 +1258,13 @@ function WorkspaceInstructionsEditor({
   const [showTips, setShowTips] = useState(false);
   const tokens = useMemo(() => estimateTokens(value), [value]);
 
-  let toneClass = "text-emerald-500";
+  let toneClass = "text-[var(--success)]";
   let toneLabel = "compact";
   if (tokens >= 1500) {
-    toneClass = "text-red-500";
+    toneClass = "text-[var(--danger)]";
     toneLabel = "long — consider trimming";
   } else if (tokens >= 500) {
-    toneClass = "text-amber-500";
+    toneClass = "text-[var(--warning)]";
     toneLabel = "getting long";
   }
 

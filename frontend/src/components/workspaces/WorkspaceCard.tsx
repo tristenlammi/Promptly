@@ -196,7 +196,7 @@ function IconActionButton({
       className={cn(
         "relative z-10 rounded p-1 text-[var(--text-muted)] transition",
         destructive
-          ? "hover:bg-red-500/10 hover:text-red-500"
+          ? "hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
           : "hover:bg-[var(--accent)]/10 hover:text-[var(--accent)]"
       )}
     >
