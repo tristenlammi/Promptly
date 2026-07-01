@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -11,7 +11,6 @@ import {
   FilePlus2,
   FileText,
   Folder,
-  FolderInput,
   FolderOpen,
   FolderPlus,
   Home,
@@ -34,7 +33,6 @@ import {
 import { chatApi } from "@/api/chat";
 import { tasksApi } from "@/api/tasks";
 import { confirm } from "@/components/shared/ConfirmDialog";
-import { Modal } from "@/components/shared/Modal";
 import { workspacesApi } from "@/api/workspaces";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
@@ -99,13 +97,82 @@ export function WorkspaceNavigatorTree({
   const qc = useQueryClient();
   const { data: workspace } = useWorkspace(workspaceId);
   const [creatingChat, setCreatingChat] = useState(false);
-  // The item whose "Move to folder" picker is open (null = closed).
-  const [movingNode, setMovingNode] = useState<WorkspaceItemNode | null>(null);
+  const move = useMoveWorkspaceItem(workspaceId);
+  const setPinned = useSetItemPinned(workspaceId);
 
   // Pinned items surface in a dedicated section and are pruned from the main
   // tree (each item shows once), mirroring the chat sidebar.
   const pinnedNodes = collectPinned(tree);
   const mainTree = removePinned(tree);
+
+  // --- Drag & drop: reorder items, move them into folders, and pin them ---
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [drop, setDrop] = useState<{ id: string; mode: DropMode } | null>(null);
+  const [pinHover, setPinHover] = useState(false);
+  const dndIndex = useMemo(() => buildDndIndex(mainTree), [mainTree]);
+
+  const performMove = useCallback(
+    (targetId: string, mode: DropMode) => {
+      const draggedId = dragId;
+      if (!draggedId || draggedId === targetId) return;
+      const target = dndIndex.get(targetId);
+      if (!target) return;
+      // Never drop a folder into itself or one of its own descendants.
+      if (mode === "inside" && draggedId === targetId) return;
+      if (isDndAncestor(dndIndex, draggedId, targetId)) return;
+
+      let parentId: string | null;
+      let position: number;
+      if (mode === "inside") {
+        parentId = targetId;
+        const kids = target.childPositions;
+        position = (kids.length ? Math.max(...kids) : 0) + 1;
+      } else {
+        parentId = target.parentId;
+        const sibs = target.siblings;
+        const i = sibs.findIndex((s) => s.id === targetId);
+        if (mode === "before") {
+          const prev = sibs[i - 1];
+          position = prev
+            ? (prev.position + sibs[i].position) / 2
+            : sibs[i].position - 1;
+        } else {
+          const next = sibs[i + 1];
+          position = next
+            ? (sibs[i].position + next.position) / 2
+            : sibs[i].position + 1;
+        }
+      }
+      // Optimistic reorder so the drop feels instant; the refetch confirms.
+      qc.setQueryData<WorkspaceItemNode[]>(
+        ["workspaces", "tree", workspaceId],
+        (old) => (old ? moveNodeInTree(old, draggedId, parentId, position) : old)
+      );
+      move.mutate({ itemId: draggedId, payload: { parent_id: parentId, position } });
+    },
+    [dragId, dndIndex, move, qc, workspaceId]
+  );
+
+  const performPin = useCallback(() => {
+    if (dragId) setPinned.mutate({ itemId: dragId, pinned: true });
+  }, [dragId, setPinned]);
+
+  const dnd = useMemo<TreeDnd>(
+    () => ({
+      canDrag: canEdit,
+      draggingId: dragId,
+      begin: setDragId,
+      end: () => {
+        setDragId(null);
+        setDrop(null);
+        setPinHover(false);
+      },
+      drop,
+      setDrop,
+      perform: performMove,
+    }),
+    [canEdit, dragId, drop, performMove]
+  );
 
   const handleCreate = async (
     kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
@@ -227,17 +294,65 @@ export function WorkspaceNavigatorTree({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-        {pinnedNodes.length > 0 && (
-          <div className="mb-2 border-b border-[var(--border)] pb-2">
-            <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-              <Pin className="h-3 w-3 fill-current" />
-              Pinned
+      <TreeDndContext.Provider value={dnd}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+          {/* Drop-to-pin zone — only while dragging, so the rail stays clean. */}
+          {dragId && (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setPinHover(true);
+              }}
+              onDragLeave={() => setPinHover(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                performPin();
+                dnd.end();
+              }}
+              className={cn(
+                "mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed py-2 text-[11px] font-medium transition",
+                pinHover
+                  ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                  : "border-[var(--border)] text-[var(--text-muted)]"
+              )}
+            >
+              <Pin className={cn("h-3.5 w-3.5", pinHover && "fill-current")} />
+              Drop here to pin
             </div>
+          )}
+          {pinnedNodes.length > 0 && (
+            <div className="mb-2 border-b border-[var(--border)] pb-2">
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                <Pin className="h-3 w-3 fill-current" />
+                Pinned
+              </div>
+              <ul>
+                {pinnedNodes.map((node) => (
+                  <TreeNode
+                    key={`pin-${node.id}`}
+                    workspaceId={workspaceId}
+                    node={node}
+                    depth={0}
+                    selectedId={selectedId}
+                    onSelect={onSelect}
+                    onOpenToSide={onOpenToSide}
+                    canEdit={canEdit}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+          {tree.length === 0 ? (
+            <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
+              Nothing here yet. Use{" "}
+              <span className="font-medium text-[var(--text)]">+ New</span> to
+              add a chat, note, canvas, or folder.
+            </div>
+          ) : mainTree.length === 0 ? null : (
             <ul>
-              {pinnedNodes.map((node) => (
+              {mainTree.map((node) => (
                 <TreeNode
-                  key={`pin-${node.id}`}
+                  key={node.id}
                   workspaceId={workspaceId}
                   node={node}
                   depth={0}
@@ -245,141 +360,109 @@ export function WorkspaceNavigatorTree({
                   onSelect={onSelect}
                   onOpenToSide={onOpenToSide}
                   canEdit={canEdit}
-                  onCreateInFolder={(kind, parentId) =>
-                    handleCreate(kind, parentId)
-                  }
-                  onMove={setMovingNode}
                 />
               ))}
             </ul>
-          </div>
-        )}
-        {tree.length === 0 ? (
-          <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
-            Nothing here yet. Use{" "}
-            <span className="font-medium text-[var(--text)]">+ New</span> to add
-            a chat, note, canvas, or folder.
-          </div>
-        ) : mainTree.length === 0 ? null : (
-          <ul>
-            {mainTree.map((node) => (
-              <TreeNode
-                key={node.id}
-                workspaceId={workspaceId}
-                node={node}
-                depth={0}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                onOpenToSide={onOpenToSide}
-                canEdit={canEdit}
-                onCreateInFolder={(kind, parentId) =>
-                  handleCreate(kind, parentId)
-                }
-                onMove={setMovingNode}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
+          )}
+        </div>
+      </TreeDndContext.Provider>
 
       {/* Per-workspace Archive — pinned to the bottom of the rail. */}
       <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
-
-      {movingNode && (
-        <MoveToFolderModal
-          workspaceId={workspaceId}
-          node={movingNode}
-          folders={collectFolders(tree, movingNode.id)}
-          onClose={() => setMovingNode(null)}
-        />
-      )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------
+// Drag & drop plumbing
+// ---------------------------------------------------------------------
+type DropMode = "before" | "after" | "inside";
+interface TreeDnd {
+  canDrag: boolean;
+  draggingId: string | null;
+  begin: (id: string) => void;
+  end: () => void;
+  drop: { id: string; mode: DropMode } | null;
+  setDrop: (d: { id: string; mode: DropMode } | null) => void;
+  perform: (targetId: string, mode: DropMode) => void;
+}
+const TreeDndContext = createContext<TreeDnd | null>(null);
+
+interface DndEntry {
+  parentId: string | null;
+  siblings: { id: string; position: number }[];
+  childPositions: number[];
+}
+/** node id → its parent, ordered siblings, and child positions (for drop math). */
+function buildDndIndex(nodes: WorkspaceItemNode[]): Map<string, DndEntry> {
+  const map = new Map<string, DndEntry>();
+  const walk = (list: WorkspaceItemNode[], parentId: string | null) => {
+    const siblings = list.map((n) => ({ id: n.id, position: n.position }));
+    for (const n of list) {
+      map.set(n.id, {
+        parentId,
+        siblings,
+        childPositions: (n.children ?? []).map((c) => c.position),
+      });
+      if (n.children?.length) walk(n.children, n.id);
+    }
+  };
+  walk(nodes, null);
+  return map;
+}
+/** True if ``ancestorId`` is at/above ``nodeId`` (so we never nest into self). */
+function isDndAncestor(
+  map: Map<string, DndEntry>,
+  ancestorId: string,
+  nodeId: string
+): boolean {
+  let cur: string | null | undefined = nodeId;
+  while (cur) {
+    if (cur === ancestorId) return true;
+    cur = map.get(cur)?.parentId ?? null;
+  }
+  return false;
+}
+/** Immutably relocate a node under ``parentId`` at ``position`` and re-sort. */
+function moveNodeInTree(
+  tree: WorkspaceItemNode[],
+  id: string,
+  parentId: string | null,
+  position: number
+): WorkspaceItemNode[] {
+  let moved: WorkspaceItemNode | null = null;
+  const strip = (nodes: WorkspaceItemNode[]): WorkspaceItemNode[] =>
+    nodes
+      .filter((n) => {
+        if (n.id === id) {
+          moved = n;
+          return false;
+        }
+        return true;
+      })
+      .map((n) => ({ ...n, children: strip(n.children ?? []) }));
+  let next = strip(tree);
+  if (!moved) return tree;
+  const node = { ...(moved as WorkspaceItemNode), position };
+  const sortByPos = (a: WorkspaceItemNode, b: WorkspaceItemNode) =>
+    a.position - b.position;
+  if (parentId == null) {
+    next = [...next, node].sort(sortByPos);
+  } else {
+    const addTo = (nodes: WorkspaceItemNode[]): WorkspaceItemNode[] =>
+      nodes.map((n) =>
+        n.id === parentId
+          ? { ...n, children: [...(n.children ?? []), node].sort(sortByPos) }
+          : { ...n, children: addTo(n.children ?? []) }
+      );
+    next = addTo(next);
+  }
+  return next;
 }
 
 /** Flatten the tree into a depth-tagged list of folders, skipping the
  *  subtree rooted at ``excludeId`` (you can't move an item into itself or
  *  one of its own descendants). */
-function collectFolders(
-  nodes: WorkspaceItemNode[],
-  excludeId: string,
-  depth = 0
-): { id: string; title: string; depth: number }[] {
-  const out: { id: string; title: string; depth: number }[] = [];
-  for (const n of nodes) {
-    if (n.id === excludeId) continue; // skip self + its whole subtree
-    if (n.kind === "folder") {
-      out.push({ id: n.id, title: n.title || "Untitled folder", depth });
-      if (n.children?.length) {
-        out.push(...collectFolders(n.children, excludeId, depth + 1));
-      }
-    }
-  }
-  return out;
-}
-
-/** Small modal that lists the workspace's folders so the user can reparent
- *  an item. "Top level" detaches it from any folder. */
-function MoveToFolderModal({
-  workspaceId,
-  node,
-  folders,
-  onClose,
-}: {
-  workspaceId: string;
-  node: WorkspaceItemNode;
-  folders: { id: string; title: string; depth: number }[];
-  onClose: () => void;
-}) {
-  const move = useMoveWorkspaceItem(workspaceId);
-
-  const go = (parentId: string | null) => {
-    move.mutate(
-      // A large position appends the item to the end of the target's children.
-      { itemId: node.id, payload: { parent_id: parentId, position: Date.now() } },
-      { onSettled: onClose }
-    );
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={`Move “${node.title || "item"}”`}
-      widthClass="max-w-sm"
-    >
-      <div className="space-y-1 text-sm">
-        <button
-          type="button"
-          onClick={() => go(null)}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--hover)]"
-        >
-          <Home className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-          Top level (no folder)
-        </button>
-        {folders.length === 0 ? (
-          <p className="px-2 py-2 text-xs text-[var(--text-muted)]/70">
-            No other folders yet. Create one from the “+ New” menu.
-          </p>
-        ) : (
-          folders.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => go(f.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--hover)]"
-              style={{ paddingLeft: f.depth * 14 + 8 }}
-            >
-              <Folder className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-              <span className="truncate">{f.title}</span>
-            </button>
-          ))
-        )}
-      </div>
-    </Modal>
-  );
-}
-
 /** Top-most pinned nodes (doesn't descend into a pinned subtree). */
 function collectPinned(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
   const out: WorkspaceItemNode[] = [];
@@ -528,8 +611,6 @@ function TreeNode({
   onSelect,
   onOpenToSide,
   canEdit,
-  onCreateInFolder,
-  onMove,
 }: {
   workspaceId: string;
   node: WorkspaceItemNode;
@@ -538,12 +619,6 @@ function TreeNode({
   onSelect: (node: WorkspaceItemNode) => void;
   onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
-  onCreateInFolder: (
-    kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
-    parentId: string
-  ) => void;
-  /** Open the move-to-folder picker for a (movable) stored item. */
-  onMove?: (node: WorkspaceItemNode) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [renaming, setRenaming] = useState(false);
@@ -701,17 +776,74 @@ function TreeNode({
 
   const isSelected = selectedId === node.id;
 
+  // --- Drag & drop ---
+  const dnd = useContext(TreeDndContext);
+  // Chats + automations are synthesised (no movable row); everything stored is
+  // draggable to reorder / move into folders.
+  const canDragThis =
+    !!dnd?.canDrag && !isChat && !isTask && !renaming;
+  const isDragging = dnd?.draggingId === node.id;
+  const dropMode = dnd?.drop?.id === node.id ? dnd.drop.mode : null;
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (!dnd?.draggingId || dnd.draggingId === node.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - r.top;
+    const mode: DropMode =
+      isFolder && y > r.height * 0.25 && y < r.height * 0.75
+        ? "inside"
+        : y < r.height / 2
+          ? "before"
+          : "after";
+    if (dnd.drop?.id !== node.id || dnd.drop.mode !== mode)
+      dnd.setDrop({ id: node.id, mode });
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (!dnd?.draggingId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (dropMode) dnd.perform(node.id, dropMode);
+    dnd.end();
+  };
+
   return (
     <li>
       <div
-        className={cn(
-          "group flex items-center gap-1 rounded-md pr-1 text-sm transition",
-          isSelected
-            ? "bg-[var(--accent)]/10 text-[var(--text)]"
-            : "text-[var(--text)] hover:bg-[var(--hover)]"
-        )}
-        style={{ paddingLeft: depth * 12 + 4 }}
+        className="relative"
+        onDragOver={canDragThis ? onDragOver : undefined}
+        onDrop={canDragThis ? onDrop : undefined}
       >
+        {/* Reorder insertion line */}
+        {dropMode === "before" && (
+          <div className="pointer-events-none absolute left-2 right-2 top-0 z-10 h-0.5 rounded-full bg-[var(--accent)]" />
+        )}
+        {dropMode === "after" && (
+          <div className="pointer-events-none absolute bottom-0 left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--accent)]" />
+        )}
+        <div
+          draggable={canDragThis}
+          onDragStart={(e) => {
+            if (!canDragThis || !dnd) return;
+            e.stopPropagation();
+            e.dataTransfer.effectAllowed = "move";
+            dnd.begin(node.id);
+          }}
+          onDragEnd={() => dnd?.end()}
+          className={cn(
+            "group flex items-center gap-1 rounded-md pr-1 text-sm transition",
+            isSelected
+              ? "bg-[var(--accent)]/10 text-[var(--text)]"
+              : "text-[var(--text)] hover:bg-[var(--hover)]",
+            // Drop-into-folder highlight.
+            dropMode === "inside" &&
+              "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/50",
+            isDragging && "opacity-40",
+            canDragThis && "cursor-grab active:cursor-grabbing"
+          )}
+          style={{ paddingLeft: depth * 12 + 4 }}
+        >
         <button
           type="button"
           onClick={handleClick}
@@ -785,21 +917,6 @@ function TreeNode({
             }}
             onArchive={handleArchive}
             onDelete={handleDelete}
-            onNewNote={() => onCreateInFolder("note", node.id)}
-            onNewCanvas={() => onCreateInFolder("canvas", node.id)}
-            onNewBoard={() => onCreateInFolder("board", node.id)}
-            onNewSheet={() => onCreateInFolder("sheet", node.id)}
-            onNewNotebook={() => onCreateInFolder("container", node.id)}
-            onNewSubfolder={
-              isFolder ? () => onCreateInFolder("folder", node.id) : undefined
-            }
-            onMove={
-              // Only stored workspace_items move via the items API. Chats and
-              // automations are synthesised, so they have no movable row.
-              onMove && !isChat && node.kind !== "task"
-                ? () => onMove(node)
-                : undefined
-            }
             pinned={isPinned}
             onTogglePin={handleTogglePin}
             onOpenToSide={
@@ -810,6 +927,7 @@ function TreeNode({
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
+        </div>
       </div>
 
       {isFolder && expanded && node.children.length > 0 && (
@@ -824,8 +942,6 @@ function TreeNode({
               onSelect={onSelect}
               onOpenToSide={onOpenToSide}
               canEdit={canEdit}
-              onCreateInFolder={onCreateInFolder}
-              onMove={onMove}
             />
           ))}
         </ul>
@@ -887,13 +1003,6 @@ function NodeActions({
   onRename,
   onArchive,
   onDelete,
-  onNewNote,
-  onNewCanvas,
-  onNewBoard,
-  onNewSheet,
-  onNewNotebook,
-  onNewSubfolder,
-  onMove,
   pinned,
   onTogglePin,
   onOpenToSide,
@@ -907,14 +1016,6 @@ function NodeActions({
   onRename?: () => void;
   onArchive: () => void;
   onDelete: () => void;
-  onNewNote: () => void;
-  onNewCanvas: () => void;
-  onNewBoard: () => void;
-  onNewSheet: () => void;
-  onNewNotebook: () => void;
-  onNewSubfolder?: () => void;
-  /** Open the "move to folder" picker for this item. */
-  onMove?: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
@@ -928,20 +1029,6 @@ function NodeActions({
 
   return (
     <div className="flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
-      {isFolder && (
-        <button
-          type="button"
-          title="New note in folder"
-          aria-label="New note in folder"
-          onClick={(e) => {
-            e.stopPropagation();
-            onNewNote();
-          }}
-          className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      )}
       {onTogglePin && (
         <button
           type="button"
@@ -1004,70 +1091,6 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onOpenToSide();
-                  }}
-                />
-              )}
-              {isFolder && (
-                <>
-                  <MenuItem
-                    icon={<FilePlus2 className="h-3.5 w-3.5" />}
-                    label="New note"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNewNote();
-                    }}
-                  />
-                  <MenuItem
-                    icon={<PenTool className="h-3.5 w-3.5" />}
-                    label="New canvas"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNewCanvas();
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Columns3 className="h-3.5 w-3.5" />}
-                    label="New board"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNewBoard();
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Table2 className="h-3.5 w-3.5" />}
-                    label="New sheet"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNewSheet();
-                    }}
-                  />
-                  <MenuItem
-                    icon={<Layers className="h-3.5 w-3.5" />}
-                    label="New notebook"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onNewNotebook();
-                    }}
-                  />
-                  {onNewSubfolder && (
-                    <MenuItem
-                      icon={<FolderPlus className="h-3.5 w-3.5" />}
-                      label="New subfolder"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onNewSubfolder();
-                      }}
-                    />
-                  )}
-                </>
-              )}
-              {onMove && (
-                <MenuItem
-                  icon={<FolderInput className="h-3.5 w-3.5" />}
-                  label="Move to folder"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onMove();
                   }}
                 />
               )}
