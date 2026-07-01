@@ -5143,6 +5143,30 @@ async def _stream_generator(
             cost_micros = max(0, int(round(cost_usd * 1_000_000)))
 
         reasoning_full = "".join(collected_reasoning) or None
+
+        # The conversation can be deleted out from under a long stream — the
+        # user deletes the chat (or its workspace notebook page) while the
+        # reply is still generating. Persisting the assistant message would
+        # then violate the messages→conversations FK and crash the stream,
+        # leaving the client wedged on "loading" with no clean close. If the
+        # row is gone, end the stream cleanly without saving (nobody is
+        # viewing a deleted chat anyway).
+        conv_alive = await db.scalar(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.id == conv.id)
+        )
+        if not conv_alive:
+            logger.info(
+                "conversation %s deleted mid-stream; ending without persist "
+                "(stream=%s)",
+                conv.id,
+                stream_id,
+            )
+            await db.rollback()
+            yield _sse({"done": True})
+            return
+
         if continue_target is not None:
             # Continue-generation (Phase 3.1): append the freshly streamed
             # text onto the existing reply rather than creating a sibling.

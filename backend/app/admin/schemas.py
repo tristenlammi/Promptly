@@ -16,7 +16,11 @@ class AdminUserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: EmailStr
+    # Display-only: read back whatever is stored. Not ``EmailStr`` — historical
+    # / seeded / test accounts can hold non-RFC addresses (e.g. ``@x.test``),
+    # and one such row must not 500 the entire admin user list. Input schemas
+    # (create/update) keep ``EmailStr`` to validate new addresses.
+    email: str
     username: str
     role: UserRole
     # NULL = full access to the admin-curated pool. Admins always have
