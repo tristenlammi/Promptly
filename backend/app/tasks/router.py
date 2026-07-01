@@ -173,11 +173,13 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[TaskResponse]:
+    # Personal automations only — workspace-homed ones live in (and are only
+    # reachable from) their workspace, never the top-level /tasks area.
     tasks = (
         (
             await db.execute(
                 select(Task)
-                .where(Task.user_id == user.id)
+                .where(Task.user_id == user.id, Task.workspace_id.is_(None))
                 .order_by(Task.created_at.desc())
             )
         )
