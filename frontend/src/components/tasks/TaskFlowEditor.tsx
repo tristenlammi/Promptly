@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   addEdge,
   Background,
@@ -28,7 +36,9 @@ import {
   GitMerge,
   Globe,
   Loader2,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   Plus,
   Repeat2,
   ScanText,
@@ -77,6 +87,64 @@ import { useThemeStore } from "@/store/themeStore";
 import { Modal } from "@/components/shared/Modal";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+
+// Shared by the custom node renderers so "Detailed" mode can show each node's
+// full settings on its face (the same inspector, rendered inline). Provided by
+// the editor around the ReactFlow canvas.
+interface FlowEditCtx {
+  detailed: boolean;
+  boards: BoardOption[];
+  chats: BoardOption[];
+  connectors: AvailableTaskConnector[];
+  inWorkspace: boolean;
+  outputsCount: number;
+  updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  setOutputTypeFor: (id: string, type: string) => void;
+  removeNode: (id: string) => void;
+}
+const FlowEditContext = createContext<FlowEditCtx | null>(null);
+
+/** In Detailed mode, returns the inline settings panel for a node; else null.
+ *  Called at the top of every custom node so the hook order stays stable. */
+function useDetailed(
+  id: string,
+  type: string,
+  data: unknown
+): React.ReactNode | null {
+  const ctx = useContext(FlowEditContext);
+  if (!ctx?.detailed) return null;
+  return <InlineNodeSettings ctx={ctx} node={{ id, type, data } as Node} />;
+}
+
+function InlineNodeSettings({
+  ctx,
+  node,
+}: {
+  ctx: FlowEditCtx;
+  node: Node;
+}) {
+  const t = node.type ?? "";
+  const isOutput = t.startsWith("output.");
+  const canDelete =
+    PROCESSING_NODE_TYPES.has(t) || (isOutput && ctx.outputsCount > 1);
+  // `nodrag`/`nowheel` so editing fields doesn't pan/drag the canvas.
+  return (
+    <div className="nodrag nowheel mt-1 border-t border-[var(--border)] pt-2">
+      <NodeInspector
+        node={node}
+        boards={ctx.boards}
+        chats={ctx.chats}
+        inWorkspace={ctx.inWorkspace}
+        connectors={ctx.connectors}
+        canDelete={canDelete}
+        onPatch={(p) => ctx.updateNodeData(node.id, p)}
+        onSetOutputType={(ty) => ctx.setOutputTypeFor(node.id, ty)}
+        onDelete={() => ctx.removeNode(node.id)}
+        inline
+      />
+    </div>
+  );
+}
 
 function nodeModalTitle(type?: string): string {
   if (type === "ai.prompt") return "AI step";
@@ -188,10 +256,12 @@ function NodeShell({
   hasIn?: boolean;
   hasOut?: boolean;
 }) {
+  const detailed = useContext(FlowEditContext)?.detailed;
   return (
     <div
       className={cn(
-        "w-60 rounded-card border bg-[var(--surface)] shadow-sm transition",
+        "rounded-card border bg-[var(--surface)] shadow-sm transition",
+        detailed ? "w-80" : "w-60",
         selected
           ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
           : "border-[var(--border)]"
@@ -225,8 +295,9 @@ function NodeShell({
   );
 }
 
-function TriggerNode({ data, selected }: NodeProps) {
+function TriggerNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as ScheduleTriggerData;
+  const detail = useDetailed(id, type ?? "trigger.schedule", data);
   return (
     <NodeShell
       icon={<Clock className="h-3.5 w-3.5" />}
@@ -235,14 +306,19 @@ function TriggerNode({ data, selected }: NodeProps) {
       selected={selected}
       hasOut
     >
-      <div className="truncate text-[var(--text)]">{scheduleSummary(d)}</div>
-      <div className="mt-0.5 truncate">{d.timezone}</div>
+      {detail ?? (
+        <>
+          <div className="truncate text-[var(--text)]">{scheduleSummary(d)}</div>
+          <div className="mt-0.5 truncate">{d.timezone}</div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function AINode({ data, selected }: NodeProps) {
+function AINode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as AIPromptData;
+  const detail = useDetailed(id, type ?? "ai.prompt", data);
   return (
     <NodeShell
       icon={<Brain className="h-3.5 w-3.5" />}
@@ -252,30 +328,35 @@ function AINode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="line-clamp-2 text-[var(--text)]">
-        {d.prompt || <span className="italic text-[var(--text-muted)]">No prompt yet</span>}
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.model_id || "no model"}
-        </span>
-        {d.use_web_search && (
-          <span className="inline-flex items-center gap-0.5 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-            <Globe className="h-2.5 w-2.5" /> web
-          </span>
-        )}
-        {d.connector_ids.length > 0 && (
-          <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-            {d.connector_ids.length} tool{d.connector_ids.length > 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
+      {detail ?? (
+        <>
+          <div className="line-clamp-2 text-[var(--text)]">
+            {d.prompt || <span className="italic text-[var(--text-muted)]">No prompt yet</span>}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.model_id || "no model"}
+            </span>
+            {d.use_web_search && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+                <Globe className="h-2.5 w-2.5" /> web
+              </span>
+            )}
+            {d.connector_ids.length > 0 && (
+              <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+                {d.connector_ids.length} tool{d.connector_ids.length > 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function SummariseNode({ data, selected }: NodeProps) {
+function SummariseNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as SummariseData;
+  const detail = useDetailed(id, type ?? "ai.summarise", data);
   return (
     <NodeShell
       icon={<TextQuote className="h-3.5 w-3.5" />}
@@ -285,18 +366,23 @@ function SummariseNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="text-[var(--text)]">Condenses the upstream text</div>
-      <div className="mt-1">
-        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.model_id || "no model"}
-        </span>
-      </div>
+      {detail ?? (
+        <>
+          <div className="text-[var(--text)]">Condenses the upstream text</div>
+          <div className="mt-1">
+            <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.model_id || "no model"}
+            </span>
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function ExtractNode({ data, selected }: NodeProps) {
+function ExtractNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as ExtractData;
+  const detail = useDetailed(id, type ?? "ai.extract", data);
   return (
     <NodeShell
       icon={<ScanText className="h-3.5 w-3.5" />}
@@ -306,24 +392,29 @@ function ExtractNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="line-clamp-2 text-[var(--text)]">
-        {d.spec || (
-          <span className="italic text-[var(--text-muted)]">
-            Pulls JSON fields
-          </span>
-        )}
-      </div>
-      <div className="mt-1">
-        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.model_id || "no model"}
-        </span>
-      </div>
+      {detail ?? (
+        <>
+          <div className="line-clamp-2 text-[var(--text)]">
+            {d.spec || (
+              <span className="italic text-[var(--text-muted)]">
+                Pulls JSON fields
+              </span>
+            )}
+          </div>
+          <div className="mt-1">
+            <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.model_id || "no model"}
+            </span>
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function SearchNode({ data, selected }: NodeProps) {
+function SearchNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as WebSearchData;
+  const detail = useDetailed(id, type ?? "search.web", data);
   return (
     <NodeShell
       icon={<Search className="h-3.5 w-3.5" />}
@@ -333,24 +424,29 @@ function SearchNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="line-clamp-2 text-[var(--text)]">
-        {d.query || (
-          <span className="italic text-[var(--text-muted)]">
-            Searches the upstream text
-          </span>
-        )}
-      </div>
-      <div className="mt-1">
-        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.count || 5} results
-        </span>
-      </div>
+      {detail ?? (
+        <>
+          <div className="line-clamp-2 text-[var(--text)]">
+            {d.query || (
+              <span className="italic text-[var(--text-muted)]">
+                Searches the upstream text
+              </span>
+            )}
+          </div>
+          <div className="mt-1">
+            <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.count || 5} results
+            </span>
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function FetchNode({ data, selected }: NodeProps) {
+function FetchNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as FetchPageData;
+  const detail = useDetailed(id, type ?? "fetch.page", data);
   return (
     <NodeShell
       icon={<Download className="h-3.5 w-3.5" />}
@@ -360,24 +456,29 @@ function FetchNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="truncate text-[var(--text)]">
-        {d.url || (
-          <span className="italic text-[var(--text-muted)]">
-            First URL from upstream
-          </span>
-        )}
-      </div>
-      <div className="mt-1">
-        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          reader text
-        </span>
-      </div>
+      {detail ?? (
+        <>
+          <div className="truncate text-[var(--text)]">
+            {d.url || (
+              <span className="italic text-[var(--text-muted)]">
+                First URL from upstream
+              </span>
+            )}
+          </div>
+          <div className="mt-1">
+            <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              reader text
+            </span>
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function DeepResearchNode({ data, selected }: NodeProps) {
+function DeepResearchNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as DeepResearchData;
+  const detail = useDetailed(id, type ?? "research.deep", data);
   return (
     <NodeShell
       icon={<Telescope className="h-3.5 w-3.5" />}
@@ -387,27 +488,32 @@ function DeepResearchNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="line-clamp-2 text-[var(--text)]">
-        {d.query || (
-          <span className="italic text-[var(--text-muted)]">
-            Researches the upstream text
-          </span>
-        )}
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1">
-        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.max_pages || 5} pages
-        </span>
-        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.model_id || "no model"}
-        </span>
-      </div>
+      {detail ?? (
+        <>
+          <div className="line-clamp-2 text-[var(--text)]">
+            {d.query || (
+              <span className="italic text-[var(--text-muted)]">
+                Researches the upstream text
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.max_pages || 5} pages
+            </span>
+            <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.model_id || "no model"}
+            </span>
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function LoopNode({ data, selected }: NodeProps) {
+function LoopNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as LoopData;
+  const detail = useDetailed(id, type ?? "loop.foreach", data);
   return (
     <NodeShell
       icon={<Repeat2 className="h-3.5 w-3.5" />}
@@ -417,27 +523,32 @@ function LoopNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="line-clamp-2 text-[var(--text)]">
-        {d.prompt || (
-          <span className="italic text-[var(--text-muted)]">
-            Runs a step per item
-          </span>
-        )}
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1">
-        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          per {d.split_mode === "json" ? "JSON item" : "line"}
-        </span>
-        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-          {d.model_id || "no model"}
-        </span>
-      </div>
+      {detail ?? (
+        <>
+          <div className="line-clamp-2 text-[var(--text)]">
+            {d.prompt || (
+              <span className="italic text-[var(--text-muted)]">
+                Runs a step per item
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              per {d.split_mode === "json" ? "JSON item" : "line"}
+            </span>
+            <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.model_id || "no model"}
+            </span>
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function MergeNode({ data, selected }: NodeProps) {
+function MergeNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as MergeData;
+  const detail = useDetailed(id, type ?? "flow.merge", data);
   return (
     <NodeShell
       icon={<GitMerge className="h-3.5 w-3.5" />}
@@ -447,19 +558,25 @@ function MergeNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="text-[var(--text)]">
-        {d.mode === "any" ? "Proceeds with any branch" : "Waits for all branches"}
-      </div>
-      <div className="mt-0.5">Joins their outputs</div>
+      {detail ?? (
+        <>
+          <div className="text-[var(--text)]">
+            {d.mode === "any"
+              ? "Proceeds with any branch"
+              : "Waits for all branches"}
+          </div>
+          <div className="mt-0.5">Joins their outputs</div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function DelayNode({ data, selected }: NodeProps) {
+function DelayNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as DelayData;
   const s = d.seconds || 0;
-  const label =
-    s >= 60 ? `${Math.round(s / 60)} min` : `${s} sec`;
+  const label = s >= 60 ? `${Math.round(s / 60)} min` : `${s} sec`;
+  const detail = useDetailed(id, type ?? "flow.delay", data);
   return (
     <NodeShell
       icon={<Timer className="h-3.5 w-3.5" />}
@@ -469,7 +586,7 @@ function DelayNode({ data, selected }: NodeProps) {
       hasIn
       hasOut
     >
-      <div className="text-[var(--text)]">Pauses {label}</div>
+      {detail ?? <div className="text-[var(--text)]">Pauses {label}</div>}
     </NodeShell>
   );
 }
@@ -484,6 +601,7 @@ function BranchNode({
   selected,
   header,
   branches,
+  body,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -491,11 +609,14 @@ function BranchNode({
   selected?: boolean;
   header: React.ReactNode;
   branches: { id: string; label: string; color: string }[];
+  body?: React.ReactNode;
 }) {
+  const detailed = useContext(FlowEditContext)?.detailed;
   return (
     <div
       className={cn(
-        "w-60 rounded-card border bg-[var(--surface)] shadow-sm transition",
+        "rounded-card border bg-[var(--surface)] shadow-sm transition",
+        detailed ? "w-80" : "w-60",
         selected
           ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
           : "border-[var(--border)]"
@@ -515,6 +636,7 @@ function BranchNode({
         <span className="truncate">{label}</span>
       </div>
       <div className="px-3 pb-1 text-xs text-[var(--text-muted)]">{header}</div>
+      {body && <div className="px-3 pb-1">{body}</div>}
       <div className="pb-2">
         {branches.length === 0 ? (
           <div className="px-3 py-1 text-[11px] italic text-[var(--text-muted)]">
@@ -548,9 +670,10 @@ function BranchNode({
   );
 }
 
-function ConditionNode({ data, selected }: NodeProps) {
+function ConditionNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as ConditionData;
   const op = CONDITION_OPERATORS.find((o) => o.value === d.operator);
+  const detail = useDetailed(id, type ?? "control.condition", data);
   return (
     <BranchNode
       icon={<GitBranch className="h-3.5 w-3.5" />}
@@ -558,11 +681,14 @@ function ConditionNode({ data, selected }: NodeProps) {
       accent="#a855f7"
       selected={selected}
       header={
-        <span className="text-[var(--text)]">
-          input {op?.label ?? d.operator}
-          {op?.needsValue && d.value ? ` "${d.value}"` : ""}
-        </span>
+        detail ? null : (
+          <span className="text-[var(--text)]">
+            input {op?.label ?? d.operator}
+            {op?.needsValue && d.value ? ` "${d.value}"` : ""}
+          </span>
+        )
       }
+      body={detail}
       branches={[
         { id: "true", label: "✓ true", color: "var(--success)" },
         { id: "false", label: "✗ false", color: "var(--danger)" },
@@ -571,15 +697,17 @@ function ConditionNode({ data, selected }: NodeProps) {
   );
 }
 
-function RouterNode({ data, selected }: NodeProps) {
+function RouterNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as RouterData;
+  const detail = useDetailed(id, type ?? "control.router", data);
   return (
     <BranchNode
       icon={<Split className="h-3.5 w-3.5" />}
       label="Router"
       accent="#a855f7"
       selected={selected}
-      header={<span>AI classifies into one branch</span>}
+      header={detail ? null : <span>AI classifies into one branch</span>}
+      body={detail}
       branches={(d.categories ?? []).map((c) => ({
         id: c.id,
         label: c.name || c.id,
@@ -589,8 +717,9 @@ function RouterNode({ data, selected }: NodeProps) {
   );
 }
 
-function OutputNode({ data, selected }: NodeProps) {
+function OutputNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as ReportOutputData;
+  const detail = useDetailed(id, type ?? "output.report", data);
   return (
     <NodeShell
       icon={<FileText className="h-3.5 w-3.5" />}
@@ -599,14 +728,21 @@ function OutputNode({ data, selected }: NodeProps) {
       selected={selected}
       hasIn
     >
-      <div className="text-[var(--text)]">Saved as a run report</div>
-      <div className="mt-0.5">{d.notify ? "Notifies on completion" : "No notification"}</div>
+      {detail ?? (
+        <>
+          <div className="text-[var(--text)]">Saved as a run report</div>
+          <div className="mt-0.5">
+            {d.notify ? "Notifies on completion" : "No notification"}
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function BoardCardNode({ data, selected }: NodeProps) {
+function BoardCardNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as BoardCardOutputData & { board_title?: string };
+  const detail = useDetailed(id, type ?? "output.board_card", data);
   return (
     <NodeShell
       icon={<Columns3 className="h-3.5 w-3.5" />}
@@ -615,22 +751,27 @@ function BoardCardNode({ data, selected }: NodeProps) {
       selected={selected}
       hasIn
     >
-      <div className="truncate text-[var(--text)]">
-        {d.board_item_id ? (
-          d.board_title || "On a board"
-        ) : (
-          <span className="italic text-[var(--text-muted)]">Pick a board</span>
-        )}
-      </div>
-      <div className="mt-0.5">
-        {d.column} · {d.priority} priority
-      </div>
+      {detail ?? (
+        <>
+          <div className="truncate text-[var(--text)]">
+            {d.board_item_id ? (
+              d.board_title || "On a board"
+            ) : (
+              <span className="italic text-[var(--text-muted)]">Pick a board</span>
+            )}
+          </div>
+          <div className="mt-0.5">
+            {d.column} · {d.priority} priority
+          </div>
+        </>
+      )}
     </NodeShell>
   );
 }
 
-function SendMessageNode({ data, selected }: NodeProps) {
+function SendMessageNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as ChatMessageOutputData & { chat_title?: string };
+  const detail = useDetailed(id, type ?? "output.chat_message", data);
   return (
     <NodeShell
       icon={<MessageSquare className="h-3.5 w-3.5" />}
@@ -639,13 +780,15 @@ function SendMessageNode({ data, selected }: NodeProps) {
       selected={selected}
       hasIn
     >
-      <div className="truncate text-[var(--text)]">
-        {d.chat_item_id ? (
-          d.chat_title || "To a chat"
-        ) : (
-          <span className="italic text-[var(--text-muted)]">Pick a chat</span>
-        )}
-      </div>
+      {detail ?? (
+        <div className="truncate text-[var(--text)]">
+          {d.chat_item_id ? (
+            d.chat_title || "To a chat"
+          ) : (
+            <span className="italic text-[var(--text-muted)]">Pick a chat</span>
+          )}
+        </div>
+      )}
     </NodeShell>
   );
 }
@@ -803,6 +946,8 @@ export function TaskFlowEditor({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  // "Detailed" view: each node shows its settings inline (no click-to-open).
+  const [detailed, setDetailed] = useState(false);
 
   // ---- Run replay: paint each node's status onto the canvas as the run's
   // steps come back, so you watch the flow light up like n8n. ----
@@ -905,24 +1050,28 @@ export function TaskFlowEditor({
     [nodes, selectedId]
   );
 
-  const patchSelected = useCallback(
-    (patch: Record<string, unknown>) => {
-      if (!selectedId) return;
+  // Patch any node's data by id — used by both the modal (selected node) and
+  // inline Detailed-mode editors.
+  const updateNodeData = useCallback(
+    (id: string, patch: Record<string, unknown>) => {
       setNodes((ns) =>
-        ns.map((n) =>
-          n.id === selectedId ? { ...n, data: { ...n.data, ...patch } } : n
-        )
+        ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))
       );
       setDirty(true);
     },
-    [selectedId, setNodes]
+    [setNodes]
+  );
+  const patchSelected = useCallback(
+    (patch: Record<string, unknown>) => {
+      if (selectedId) updateNodeData(selectedId, patch);
+    },
+    [selectedId, updateNodeData]
   );
 
-  // Switch the terminal output node between report / board card / chat message,
-  // resetting its data to that kind's defaults.
-  const setOutputType = useCallback(
-    (type: string) => {
-      if (!selectedId) return;
+  // Switch an output node between report / board card / chat message, resetting
+  // its data to that kind's defaults.
+  const setOutputTypeFor = useCallback(
+    (id: string, type: string) => {
       const defaults: Record<string, Record<string, unknown>> = {
         "output.board_card": {
           board_item_id: null,
@@ -934,14 +1083,18 @@ export function TaskFlowEditor({
       };
       setNodes((ns) =>
         ns.map((n) =>
-          n.id === selectedId
-            ? { ...n, type, data: defaults[type] ?? { notify: true } }
-            : n
+          n.id === id ? { ...n, type, data: defaults[type] ?? { notify: true } } : n
         )
       );
       setDirty(true);
     },
-    [selectedId, setNodes]
+    [setNodes]
+  );
+  const setOutputType = useCallback(
+    (type: string) => {
+      if (selectedId) setOutputTypeFor(selectedId, type);
+    },
+    [selectedId, setOutputTypeFor]
   );
 
   const aiNodes = nodes.filter((n) => n.type === "ai.prompt");
@@ -1050,22 +1203,6 @@ export function TaskFlowEditor({
     },
     [aiNodes, nodeCount, setNodes]
   );
-  const addAIStep = useCallback(
-    (pos?: { x: number; y: number }) => addNode("ai.prompt", pos),
-    [addNode]
-  );
-
-  // Jump to + select the output node (where "send to a board" is configured)
-  // so it's never lost off-screen.
-  const focusOutput = useCallback(() => {
-    const out = nodes.find((n) => (n.type ?? "").startsWith("output."));
-    if (!out) return;
-    setSelectedId(out.id);
-    rfInstance.current?.setCenter(out.position.x + 120, out.position.y + 40, {
-      zoom: 1,
-      duration: 300,
-    });
-  }, [nodes]);
 
   // Right-click pane menu → add a node at the clicked position.
   const addNodeAtMenu = useCallback(
@@ -1137,7 +1274,23 @@ export function TaskFlowEditor({
     );
   }
 
+  const outputsCount = nodes.filter((n) =>
+    (n.type ?? "").startsWith("output.")
+  ).length;
+  const editCtx: FlowEditCtx = {
+    detailed,
+    boards,
+    chats,
+    connectors: connectors ?? [],
+    inWorkspace: !!task?.workspace_id,
+    outputsCount,
+    updateNodeData,
+    setOutputTypeFor,
+    removeNode,
+  };
+
   return (
+    <FlowEditContext.Provider value={editCtx}>
     <div className="flex h-full min-h-0">
       <div className="relative min-w-0 flex-1">
         {/* Toolbar */}
@@ -1163,37 +1316,26 @@ export function TaskFlowEditor({
             <Zap className="h-3 w-3" />
             {graph.mode === "advanced" ? "Advanced flow" : "Simple task"}
           </span>
+          <span className="hidden text-[11px] text-[var(--text-muted)] lg:inline">
+            Right-click the canvas to add nodes
+          </span>
           <button
             type="button"
-            onClick={() => addAIStep()}
-            title="Add a disconnected AI step (or right-click the canvas)"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+            onClick={() => setDetailed((v) => !v)}
+            title="Show each node's settings on its face"
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition",
+              detailed
+                ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-hover)]"
+            )}
           >
-            <Plus className="h-3.5 w-3.5" /> AI step
-          </button>
-          <button
-            type="button"
-            onClick={() => addNode("search.web")}
-            title="Add a web-search step (right-click the canvas for more)"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
-          >
-            <Search className="h-3.5 w-3.5" /> Search
-          </button>
-          <button
-            type="button"
-            onClick={() => addNode("fetch.page")}
-            title="Add a fetch-page step that extracts a URL's readable text"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
-          >
-            <Download className="h-3.5 w-3.5" /> Fetch
-          </button>
-          <button
-            type="button"
-            onClick={focusOutput}
-            title="Configure what happens with the result (report or board card)"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
-          >
-            <FileText className="h-3.5 w-3.5" /> Output
+            {detailed ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+            Detailed
           </button>
           <button
             type="button"
@@ -1369,9 +1511,10 @@ export function TaskFlowEditor({
         )}
       </div>
 
-      {/* Node editor — a modal with its own Save so it's right where you edit. */}
+      {/* Node editor — a modal with its own Save so it's right where you edit.
+          Suppressed in Detailed mode, where settings live on the node face. */}
       <Modal
-        open={!!selected}
+        open={!!selected && !detailed}
         onClose={() => setSelectedId(null)}
         title={selected ? nodeModalTitle(selected.type) : ""}
         widthClass="max-w-md"
@@ -1427,6 +1570,7 @@ export function TaskFlowEditor({
         )}
       </Modal>
     </div>
+    </FlowEditContext.Provider>
   );
 }
 
@@ -1440,6 +1584,7 @@ function NodeInspector({
   onPatch,
   onSetOutputType,
   onDelete,
+  inline,
 }: {
   node: Node;
   boards: BoardOption[];
@@ -1450,6 +1595,7 @@ function NodeInspector({
   onPatch: (patch: Record<string, unknown>) => void;
   onSetOutputType: (type: string) => void;
   onDelete: () => void;
+  inline?: boolean;
 }) {
   const isOutput = (node.type ?? "").startsWith("output.");
   const { data: models } = useAvailableModels();
@@ -1457,7 +1603,13 @@ function NodeInspector({
   const modelKey =
     ai.provider_id && ai.model_id ? `${ai.provider_id}::${ai.model_id}` : "";
   return (
-    <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+    <div
+      className={cn(
+        "flex flex-col gap-3",
+        // Inline on a node: grow with content. In the modal: bounded + scroll.
+        inline ? "text-left" : "max-h-[60vh] overflow-y-auto"
+      )}
+    >
       {node.type === "ai.prompt" && (
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">
