@@ -5,7 +5,7 @@ import { ExternalLink, Loader2, Play } from "lucide-react";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { useRunTask, useTask, useTaskRun, useTaskRuns } from "@/hooks/useTasks";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
-import { RunStepsDrawer } from "@/components/tasks/RunStepsDrawer";
+import { RunModal } from "@/components/tasks/RunModal";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
 
@@ -113,13 +113,12 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
           </Suspense>
         </div>
 
-        {stepsOpen && run && (
-          <RunStepsDrawer
-            run={run}
-            onClose={() => setStepsOpen(false)}
-            onOpenReport={() => navigate(`/tasks/${taskId}`)}
-          />
-        )}
+        <RunModal
+          run={run}
+          open={stepsOpen}
+          onClose={() => setStepsOpen(false)}
+          onOpenRuns={() => navigate(`/tasks/${taskId}`)}
+        />
       </div>
     </div>
   );

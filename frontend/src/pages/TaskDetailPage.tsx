@@ -25,7 +25,7 @@ import { tasksApi } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { TaskRunDocument } from "@/components/tasks/TaskRunDocument";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
-import { RunStepsDrawer } from "@/components/tasks/RunStepsDrawer";
+import { RunModal } from "@/components/tasks/RunModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
@@ -273,16 +273,15 @@ export function TaskDetailPage() {
               <TaskFlowEditor taskId={id} />
             </Suspense>
           </div>
-          {flowRunOpen && run && (
-            <RunStepsDrawer
-              run={run}
-              onClose={() => setFlowRunOpen(false)}
-              onOpenReport={() => {
-                setFlowRunOpen(false);
-                setShowFlow(false);
-              }}
-            />
-          )}
+          <RunModal
+            run={run}
+            open={flowRunOpen}
+            onClose={() => setFlowRunOpen(false)}
+            onOpenRuns={() => {
+              setFlowRunOpen(false);
+              setShowFlow(false);
+            }}
+          />
         </div>
       )}
 
