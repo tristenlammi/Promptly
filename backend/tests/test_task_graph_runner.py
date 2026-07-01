@@ -199,10 +199,87 @@ async def test_node_runs_captured_per_node(patched_model):
     assert all(n["status"] == "success" for n in node_runs)
 
 
-async def test_non_linear_flow_is_rejected(patched_model):
+async def test_fan_out_to_two_report_sinks_runs_both(patched_model):
+    # a0 fans out to two report outputs — the DAG engine runs both sinks.
     graph = _chain(_ai("a0", "x"))
-    graph.nodes.append(FlowNode(id="out2", type=NodeType.OUTPUT_REPORT, data={}))
-    graph.edges.append(FlowEdge(source="a0", target="out2"))  # branch
+    graph.nodes.append(
+        FlowNode(id="out2", type=NodeType.OUTPUT_REPORT, data=ReportOutputData().model_dump())
+    )
+    graph.edges.append(FlowEdge(source="a0", target="out2"))
+    text, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    assert text == "OUT[x]"
+    # One AI step recorded plus two report sinks.
+    assert [n["type"] for n in node_runs] == [
+        NodeType.AI_PROMPT,
+        NodeType.OUTPUT_REPORT,
+        NodeType.OUTPUT_REPORT,
+    ]
+
+
+async def test_fan_in_merges_upstream_outputs(patched_model):
+    # Two AI branches off the trigger merge into a third AI node, whose prompt
+    # sees both upstreams via {{upstream_output}}.
+    nodes = [
+        FlowNode(
+            id="trigger",
+            type=NodeType.TRIGGER_SCHEDULE,
+            data=ScheduleTriggerData(frequency="daily", timezone="UTC").model_dump(),
+        ),
+        _ai("a0", "left"),
+        _ai("a1", "right"),
+        _ai("merge", "combine: {{upstream_output}}"),
+        FlowNode(id="output", type=NodeType.OUTPUT_REPORT, data=ReportOutputData().model_dump()),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="trigger", target="a1"),
+        FlowEdge(source="a0", target="merge"),
+        FlowEdge(source="a1", target="merge"),
+        FlowEdge(source="merge", target="output"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _s, _u, _n = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    # merge received both branch outputs joined together.
+    assert text == "OUT[combine: OUT[left]\n\nOUT[right]]"
+
+
+async def test_cyclic_flow_is_rejected(patched_model):
+    graph = _chain(_ai("a0", "x"), _ai("a1", "y"))
+    graph.edges.append(FlowEdge(source="a1", target="a0"))  # back-edge → cycle
+    with pytest.raises(graph_runner.TaskRunError):
+        await run_graph_flow(
+            task=_task(),
+            graph=graph,
+            user=object(),
+            run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            db=None,
+        )
+
+
+async def test_output_less_flow_is_rejected(patched_model):
+    # trigger → a0, no output node at all.
+    nodes = [
+        FlowNode(
+            id="trigger",
+            type=NodeType.TRIGGER_SCHEDULE,
+            data=ScheduleTriggerData(frequency="daily", timezone="UTC").model_dump(),
+        ),
+        _ai("a0", "x"),
+    ]
+    edges = [FlowEdge(source="trigger", target="a0")]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
     with pytest.raises(graph_runner.TaskRunError):
         await run_graph_flow(
             task=_task(),

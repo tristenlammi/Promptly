@@ -377,6 +377,87 @@ def is_linear_flow(graph: FlowGraph) -> bool:
     )
 
 
+def topological_order(graph: FlowGraph) -> list[str]:
+    """Kahn topological sort of the node ids. Ties are broken by the node's
+    position in ``graph.nodes`` so a given graph always executes in a stable,
+    reproducible order. Raises ``ValueError`` if the graph contains a cycle."""
+    out_adj, in_adj = _adjacency(graph)
+    node_ids = [n.id for n in graph.nodes]
+    indeg = {nid: len(in_adj.get(nid, [])) for nid in node_ids}
+    ready = [nid for nid in node_ids if indeg[nid] == 0]
+    order: list[str] = []
+    while ready:
+        cur = ready.pop(0)
+        order.append(cur)
+        for nxt in out_adj.get(cur, []):
+            if nxt not in indeg:
+                continue  # edge to a phantom id — ignore
+            indeg[nxt] -= 1
+            if indeg[nxt] == 0:
+                ready.append(nxt)
+    if len(order) != len(node_ids):
+        raise ValueError("graph has a cycle")
+    return order
+
+
+def is_executable_graph(graph: FlowGraph) -> bool:
+    """True when the graph is a runnable DAG (the shape the engine executes):
+
+    * exactly one trigger, with no incoming edges;
+    * at least one terminal output node (outputs have no outgoing edges);
+    * only known node types (trigger / processing / output);
+    * acyclic; and
+    * every node reachable from the trigger (no orphan steps).
+
+    This is a strict superset of :func:`is_linear_flow` — it additionally
+    permits fan-out (a node feeding several downstream nodes), fan-in (a node
+    merging several upstream outputs), and multiple output sinks. Conditional
+    branching (Router/Condition) still runs *every* reachable node; active-path
+    selection is a later phase.
+    """
+    triggers = [
+        n
+        for n in graph.nodes
+        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+    ]
+    outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
+    procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
+    if len(triggers) != 1 or len(outs) < 1:
+        return False
+    # No unknown/unsupported node types in the mix.
+    if len(triggers) + len(outs) + len(procs) != len(graph.nodes):
+        return False
+
+    out_adj, in_adj = _adjacency(graph)
+    trig = triggers[0]
+    if in_adj.get(trig.id):
+        return False  # trigger must have no input
+    if any(out_adj.get(o.id) for o in outs):
+        return False  # outputs must be terminal
+
+    try:
+        topological_order(graph)
+    except ValueError:
+        return False
+
+    # Every node must be reachable from the trigger — no silently-ignored orphans.
+    seen: set[str] = set()
+    stack = [trig.id]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        stack.extend(out_adj.get(cur, []))
+    return all(n.id in seen for n in graph.nodes)
+
+
+def output_nodes(graph: FlowGraph) -> list[FlowNode]:
+    """All terminal output/action nodes (report / board-card / …). A DAG may
+    have several (fan-out to multiple sinks)."""
+    return [n for n in graph.nodes if n.type in OUTPUT_TYPES]
+
+
 def terminal_output_node(graph: FlowGraph) -> FlowNode | None:
     """The single terminal output/action node (report or a workspace-output).
     Assumes :func:`is_linear_flow` holds."""
@@ -464,11 +545,14 @@ __all__ = [
     "OUTPUT_TYPES",
     "PROCESSING_TYPES",
     "terminal_output_node",
+    "output_nodes",
     "SimpleTaskFields",
     "task_to_graph",
     "graph_to_task_fields",
     "is_simple_graph",
     "is_linear_flow",
+    "is_executable_graph",
+    "topological_order",
     "ordered_flow_nodes",
     "ordered_ai_nodes",
     "SIMPLE_TRIGGER_ID",

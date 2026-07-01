@@ -284,3 +284,76 @@ def test_ai_free_search_flow_is_linear():
     g = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
     assert is_linear_flow(g) is True
     assert ordered_ai_nodes(g) == []
+
+
+# ---------------------------------------------------------------------
+# DAG executability: the runnable superset of a linear flow (fan-out,
+# fan-in, multiple output sinks).
+# ---------------------------------------------------------------------
+def test_linear_flow_is_executable():
+    from app.tasks.flow_graph import is_executable_graph
+
+    assert is_executable_graph(_linear_graph(2)) is True
+
+
+def test_fan_out_to_two_outputs_is_executable_but_not_linear():
+    from app.tasks.flow_graph import is_executable_graph, output_nodes
+
+    g = _linear_graph(1)
+    g.nodes.append(FlowNode(id="out2", type=NodeType.OUTPUT_REPORT, data={}))
+    g.edges.append(FlowEdge(source="ai0", target="out2"))  # fan-out to 2 sinks
+    assert is_linear_flow(g) is False
+    assert is_executable_graph(g) is True
+    assert {n.id for n in output_nodes(g)} == {"output", "out2"}
+
+
+def test_fan_in_two_branches_merge_is_executable():
+    from app.tasks.flow_graph import is_executable_graph
+
+    nodes = [
+        FlowNode(id="trigger", type=NodeType.TRIGGER_SCHEDULE, data={"frequency": "daily"}),
+        FlowNode(id="a0", type=NodeType.AI_PROMPT, data={"prompt": "l"}),
+        FlowNode(id="a1", type=NodeType.AI_PROMPT, data={"prompt": "r"}),
+        FlowNode(id="merge", type=NodeType.AI_PROMPT, data={"prompt": "{{upstream_output}}"}),
+        FlowNode(id="output", type=NodeType.OUTPUT_REPORT, data={}),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="trigger", target="a1"),
+        FlowEdge(source="a0", target="merge"),
+        FlowEdge(source="a1", target="merge"),
+        FlowEdge(source="merge", target="output"),
+    ]
+    g = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    assert is_executable_graph(g) is True
+
+
+def test_cycle_is_not_executable():
+    from app.tasks.flow_graph import is_executable_graph, topological_order
+
+    g = _linear_graph(2)
+    g.edges.append(FlowEdge(source="ai1", target="ai0"))  # back-edge
+    assert is_executable_graph(g) is False
+    with pytest.raises(ValueError):
+        topological_order(g)
+
+
+def test_orphan_node_is_not_executable():
+    from app.tasks.flow_graph import is_executable_graph
+
+    g = _linear_graph(1)
+    # A disconnected AI node not reachable from the trigger.
+    g.nodes.append(FlowNode(id="orphan", type=NodeType.AI_PROMPT, data={"prompt": "x"}))
+    assert is_executable_graph(g) is False
+
+
+def test_missing_output_is_not_executable():
+    from app.tasks.flow_graph import is_executable_graph
+
+    nodes = [
+        FlowNode(id="trigger", type=NodeType.TRIGGER_SCHEDULE, data={"frequency": "daily"}),
+        FlowNode(id="a0", type=NodeType.AI_PROMPT, data={"prompt": "x"}),
+    ]
+    edges = [FlowEdge(source="trigger", target="a0")]
+    g = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    assert is_executable_graph(g) is False

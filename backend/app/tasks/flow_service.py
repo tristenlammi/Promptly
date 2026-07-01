@@ -18,11 +18,11 @@ from app.tasks.flow_graph import (
     ReportOutputData,
     ScheduleTriggerData,
     graph_to_task_fields,
-    is_linear_flow,
+    is_executable_graph,
     is_simple_graph,
     ordered_ai_nodes,
+    output_nodes,
     task_to_graph,
-    terminal_output_node,
 )
 from app.tasks.models import Task, TaskConnector
 
@@ -68,17 +68,17 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
     * A graph in ``simple`` mode that is structurally a single-AI flow writes
       back the task columns and clears ``flow_graph`` — it stays a reversible
       Simple task.
-    * Any other (still linear) graph is stored in ``flow_graph`` as the source
-      of truth, while the columns are kept as a faithful *projection* of the
-      first AI node so column-only consumers (list view, scheduler labels)
-      still show a sensible model + prompt.
+    * Any other executable graph is stored in ``flow_graph`` as the source of
+      truth, while the columns are kept as a faithful *projection* of the first
+      AI node so column-only consumers (list view, scheduler labels) still show
+      a sensible model + prompt.
 
-    Raises ``ValueError`` if the graph isn't an executable linear flow.
+    Raises ``ValueError`` if the graph isn't an executable DAG.
     """
-    if not is_linear_flow(graph):
+    if not is_executable_graph(graph):
         raise ValueError(
-            "Only linear flows (trigger → one or more AI steps → output) are "
-            "supported for now."
+            "This flow can't be saved to run yet — it needs one trigger, at "
+            "least one output, no loops, and every step connected."
         )
 
     if graph.mode == "simple" and is_simple_graph(graph):
@@ -120,9 +120,14 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
         task.day_of_month = s.day_of_month
         task.timezone = s.timezone
 
-    term = terminal_output_node(graph)
-    if term is not None and term.type == NodeType.OUTPUT_REPORT:
-        task.notify = ReportOutputData.model_validate(term.data).notify
+    # Project a report node's notify flag onto the column (if the graph has
+    # one — a fan-out flow may have several outputs; take the first report).
+    report_node = next(
+        (o for o in output_nodes(graph) if o.type == NodeType.OUTPUT_REPORT),
+        None,
+    )
+    if report_node is not None:
+        task.notify = ReportOutputData.model_validate(report_node.data).notify
 
     # Project the first AI node onto the prompt/model columns when there is one.
     # A flow can now be AI-free (e.g. search → report), in which case the

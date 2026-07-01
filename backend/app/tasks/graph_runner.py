@@ -32,11 +32,12 @@ from app.tasks.flow_graph import (
     FlowGraph,
     FlowNode,
     NodeType,
+    OUTPUT_TYPES,
+    PROCESSING_TYPES,
     ScheduleTriggerData,
     WebSearchData,
-    is_linear_flow,
-    ordered_flow_nodes,
-    terminal_output_node,
+    is_executable_graph,
+    topological_order,
 )
 from app.tasks.models import Task
 from app.tasks.runner import (
@@ -407,6 +408,32 @@ def _flow_timezone(graph: FlowGraph, task: Task) -> str:
     return task.timezone
 
 
+def _predecessors(graph: FlowGraph) -> dict[str, list[str]]:
+    """node_id → its immediate upstream node ids, in edge declaration order."""
+    inc: dict[str, list[str]] = {}
+    for e in graph.edges:
+        inc.setdefault(e.target, []).append(e.source)
+    return inc
+
+
+def _successor_types(graph: FlowGraph) -> dict[str, set[str]]:
+    """node_id → the set of node types it feeds into (its downstream kinds)."""
+    out: dict[str, set[str]] = {}
+    by_id = {n.id: n for n in graph.nodes}
+    for e in graph.edges:
+        tgt = by_id.get(e.target)
+        if tgt is not None:
+            out.setdefault(e.source, set()).add(tgt.type)
+    return out
+
+
+def _merge_upstream(preds: list[str], outputs: dict[str, str]) -> str:
+    """The text handed to a node: its predecessors' outputs, joined. A single
+    predecessor (the linear case) passes straight through unchanged."""
+    parts = [outputs[p] for p in preds if outputs.get(p)]
+    return "\n\n".join(parts)
+
+
 async def run_graph_flow(
     *,
     task: Task,
@@ -415,46 +442,47 @@ async def run_graph_flow(
     run_started_at: datetime,
     trigger_payload: str | None = None,
     db,
-) -> tuple[str, list[dict], dict]:
-    """Execute a linear flow graph → ``(report_markdown, sources, usage)``.
+) -> tuple[str, list[dict], dict, list[dict]]:
+    """Execute a flow graph as a DAG → ``(report, sources, usage, node_runs)``.
 
-    Each AI node resolves its own model + connectors, runs the shared tool
-    loop, and its text becomes ``{{upstream_output}}`` for the next node. The
-    final AI node's text is the run report; usage + sources accumulate across
-    the chain.
+    Nodes run in topological order. Each node's input is the merge of its
+    predecessors' outputs (a single predecessor — the linear case — passes
+    straight through, so Simple tasks and linear chains behave identically).
+    A node's output is available downstream as ``{{node_<id>.output}}`` and, for
+    the immediate next node, ``{{upstream_output}}``.
+
+    Fan-out (a node feeding several downstream nodes) and multiple output sinks
+    are supported: every reachable node runs. The run report is the text feeding
+    an ``output.report`` node if present, else the last processing node's output;
+    each action sink (board card, …) appends a one-line note.
     """
-    if not is_linear_flow(graph):
+    if not is_executable_graph(graph):
         raise TaskRunError(
-            "This flow isn't a supported shape yet — Advanced flows currently "
-            "run as a linear chain of steps (branching and loops are coming)."
+            "This flow can't run yet — it needs one trigger, at least one "
+            "output, no loops, and every step connected."
         )
-    flow_nodes = ordered_flow_nodes(graph)
-    if not flow_nodes:
-        raise TaskRunError("This flow has no step to run.")
+
+    order = topological_order(graph)
+    by_id = {n.id: n for n in graph.nodes}
+    preds = _predecessors(graph)
+    succ_types = _successor_types(graph)
 
     tz = _flow_timezone(graph, task)
     now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
 
-    # The terminal output decides how the *last AI* step should shape its
-    # result (a report vs. a board card) — earlier steps are intermediate.
-    out_node = terminal_output_node(graph)
-    terminal_kind = (
-        "board_card"
-        if out_node is not None and out_node.type == NodeType.OUTPUT_BOARD_CARD
-        else "report"
-    )
-
-    upstream = ""
-    outputs: dict[str, str] = {}  # node_id → its text output (for {{node_x.output}})
+    outputs: dict[str, str] = {}  # node_id → text output (for {{node_x.output}})
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
-    # Per-node record for the run inspector.
     node_runs: list[dict] = []
-    ai_count = sum(1 for n in flow_nodes if n.type == NodeType.AI_PROMPT)
+    ai_count = sum(1 for n in graph.nodes if n.type == NodeType.AI_PROMPT)
     ai_seen = 0
+    last_processing_output = ""  # fallback run report when there's no report node
+    report_from_output: str | None = None  # an output.report node's input, if any
+    action_notes: list[str] = []
 
-    for i, node in enumerate(flow_nodes):
-        is_last = i == len(flow_nodes) - 1
+    for nid in order:
+        node = by_id[nid]
+        upstream = _merge_upstream(preds.get(nid, []), outputs)
         ctx = _step_context(
             upstream=upstream,
             trigger_payload=trigger_payload or "",
@@ -462,17 +490,27 @@ async def run_graph_flow(
             outputs=outputs,
         )
 
+        if node.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL):
+            outputs[nid] = trigger_payload or ""
+            continue
+
         if node.type == NodeType.SEARCH_WEB:
             text, node_sources, record = await _run_search_node(
                 node, ctx, db=db, user=user
             )
             sources.extend(node_sources)
             node_runs.append(record)
+            outputs[nid] = text
+            last_processing_output = text
+
         elif node.type == NodeType.FETCH_PAGE:
             text, node_sources, record = await _run_fetch_node(node, ctx)
             sources.extend(node_sources)
             node_runs.append(record)
-        else:  # NodeType.AI_PROMPT
+            outputs[nid] = text
+            last_processing_output = text
+
+        elif node.type == NodeType.AI_PROMPT:
             ai_seen += 1
             data = AIPromptData.model_validate(node.data)
             provider, model_id = await _resolve_provider(
@@ -486,18 +524,25 @@ async def run_graph_flow(
                 workspace_id=task.workspace_id,
                 connector_ids=[uuid.UUID(c) for c in data.connector_ids],
             )
+            # Shape this step's output for what it feeds: a board card wants JSON,
+            # a report/note wants prose, anything else is an intermediate step.
+            downs = succ_types.get(nid, set())
+            if NodeType.OUTPUT_BOARD_CARD in downs:
+                output_kind = "board_card"
+            elif downs & OUTPUT_TYPES:
+                output_kind = "report"
+            else:
+                output_kind = "step"
             system = _build_system_prompt(
                 timezone=tz,
                 use_web_search=data.use_web_search,
                 now_local_iso=now_local,
                 connector_names=names,
-                output_kind=terminal_kind if is_last else "step",
+                output_kind=output_kind,
             )
             # Blank prompt → default to consuming the upstream text, so an AI
             # step dropped after a search/fetch "just works" without config.
-            prompt = _interpolate(
-                data.prompt.strip() or "{{upstream_output}}", ctx
-            )
+            prompt = _interpolate(data.prompt.strip() or "{{upstream_output}}", ctx)
             text, node_sources, node_usage = await _generate(
                 provider=provider,
                 model_id=model_id,
@@ -521,7 +566,7 @@ async def run_graph_flow(
                 ]
             node_runs.append(
                 {
-                    "node_id": node.id,
+                    "node_id": nid,
                     "type": NodeType.AI_PROMPT,
                     "label": f"AI step {ai_seen}" if ai_count > 1 else "AI step",
                     "status": "success",
@@ -530,43 +575,52 @@ async def run_graph_flow(
                     "completion_tokens": node_usage.get("completion_tokens") or None,
                 }
             )
+            outputs[nid] = text
+            last_processing_output = text
 
-        upstream = text
-        outputs[node.id] = text
+        elif node.type == NodeType.OUTPUT_BOARD_CARD:
+            note = await _file_board_card(
+                db,
+                task=task,
+                data=BoardCardOutputData.model_validate(node.data),
+                text=upstream,
+            )
+            action_notes.append(note)
+            outputs[nid] = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Create card",
+                    "status": "success",
+                    "output": note,
+                }
+            )
 
-    # Terminal output node: a plain report, or a workspace-output action that
-    # consumes the final AI text (the run still records that text as its
-    # report so history stays readable).
-    report = upstream
-    if out_node is not None and out_node.type == NodeType.OUTPUT_BOARD_CARD:
-        note = await _file_board_card(
-            db,
-            task=task,
-            data=BoardCardOutputData.model_validate(out_node.data),
-            text=upstream,
-        )
-        report = f"{upstream}\n\n---\n\n*{note}*"
-        node_runs.append(
-            {
-                "node_id": out_node.id,
-                "type": out_node.type,
-                "label": "Create card",
-                "status": "success",
-                "output": note,
-            }
-        )
-    elif out_node is not None:
-        node_runs.append(
-            {
-                "node_id": out_node.id,
-                "type": out_node.type,
-                "label": "Report",
-                "status": "success",
-                "output": "Saved as the run report.",
-            }
-        )
+        else:  # NodeType.OUTPUT_REPORT
+            report_from_output = upstream
+            outputs[nid] = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Report",
+                    "status": "success",
+                    "output": "Saved as the run report.",
+                }
+            )
 
-    # De-dup sources by URL across the whole chain, preserving order.
+    # The run's report: the text feeding a report node if there is one, else the
+    # last processing node's output. Action sinks append their one-line notes.
+    report = (
+        report_from_output
+        if report_from_output is not None
+        else last_processing_output
+    )
+    for note in action_notes:
+        report = f"{report}\n\n---\n\n*{note}*"
+
+    # De-dup sources by URL across the whole graph, preserving order.
     seen: set[str] = set()
     deduped: list[dict] = []
     for s in sources:

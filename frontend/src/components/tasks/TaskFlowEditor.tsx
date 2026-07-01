@@ -344,9 +344,10 @@ function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
       type: n.type,
       position: n.position,
       data: { ...n.data },
-      // Trigger + output are required singletons — don't let a stray Delete
-      // remove them. Processing steps (AI / search / fetch) are deletable.
-      deletable: PROCESSING_NODE_TYPES.has(n.type),
+      // The trigger is a protected singleton. Everything else — processing
+      // steps AND output sinks (a flow can now fan out to several) — is
+      // deletable; Save validates that at least one output remains.
+      deletable: !(n.type ?? "").startsWith("trigger."),
     })),
     edges: graph.edges.map((e) => ({
       id: `${e.source}->${e.target}`,
@@ -373,9 +374,9 @@ function fromRF(base: FlowGraph, nodes: Node[], edges: Edge[]): FlowGraph {
 /**
  * The Advanced flow editor for a scheduled task. Renders the task's node
  * graph (derived from its Simple config, or its stored Advanced graph),
- * lets the user chain AI steps together (prompt-injection via
- * ``{{upstream_output}}``) and edit each step, then persists via PUT /graph.
- * Linear chains only for now — matches what the backend engine executes.
+ * lets the user wire steps together (AI / web search / fetch page →
+ * ``{{upstream_output}}``), fan out to several outputs, and edit each step,
+ * then persists via PUT /graph. The backend runs the graph as a DAG.
  */
 export function TaskFlowEditor({ taskId }: { taskId: string }) {
   const { data: graph, isLoading } = useTaskGraph(taskId);
@@ -504,7 +505,10 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   // connected. Search/fetch nodes default to consuming the upstream text.
   const nodeCount = nodes.length;
   const addNode = useCallback(
-    (type: "ai.prompt" | "search.web" | "fetch.page", pos?: { x: number; y: number }) => {
+    (
+      type: "ai.prompt" | "search.web" | "fetch.page" | "output.report",
+      pos?: { x: number; y: number }
+    ) => {
       const model =
         (aiNodes[aiNodes.length - 1]?.data as unknown as
           | AIPromptData
@@ -518,14 +522,16 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           ? { query: "", count: 5 }
           : type === "fetch.page"
             ? { url: "", max_chars: 8000 }
-            : {
-                prompt: "Use the previous step's output:\n\n{{upstream_output}}",
-                provider_id: model?.provider_id ?? null,
-                model_id: model?.model_id ?? null,
-                reasoning_effort: model?.reasoning_effort ?? null,
-                use_web_search: false,
-                connector_ids: [],
-              };
+            : type === "output.report"
+              ? { notify: true }
+              : {
+                  prompt: "Use the previous step's output:\n\n{{upstream_output}}",
+                  provider_id: model?.provider_id ?? null,
+                  model_id: model?.model_id ?? null,
+                  reasoning_effort: model?.reasoning_effort ?? null,
+                  use_web_search: false,
+                  connector_ids: [],
+                };
       const newNode: Node = { id, type, position, deletable: true, data };
       setNodes((ns) => ns.concat(newNode));
       setSelectedId(id);
@@ -554,7 +560,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 
   // Right-click pane menu → add a node at the clicked position.
   const addNodeAtMenu = useCallback(
-    (type: "ai.prompt" | "search.web" | "fetch.page") => {
+    (type: "ai.prompt" | "search.web" | "fetch.page" | "output.report") => {
       if (menu && rfInstance.current) {
         addNode(
           type,
@@ -748,6 +754,14 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
               >
                 <Download className="h-3.5 w-3.5 text-[#3b82f6]" /> Add fetch page
               </button>
+              <div className="my-1 h-px bg-[var(--border)]" />
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("output.report")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <FileText className="h-3.5 w-3.5 text-[var(--warning)]" /> Add output
+              </button>
             </div>
           </>
         )}
@@ -793,7 +807,13 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
             boards={boards}
             inWorkspace={!!task?.workspace_id}
             connectors={connectors ?? []}
-            canDelete={PROCESSING_NODE_TYPES.has(selected.type ?? "")}
+            canDelete={
+              PROCESSING_NODE_TYPES.has(selected.type ?? "") ||
+              // An output is removable only while another output remains.
+              (((selected.type ?? "").startsWith("output.")) &&
+                nodes.filter((n) => (n.type ?? "").startsWith("output.")).length >
+                  1)
+            }
             onPatch={patchSelected}
             onSetOutputType={setOutputType}
             onDelete={() => {
