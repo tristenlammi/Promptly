@@ -111,6 +111,8 @@ class TaskRunResponse(BaseModel):
     completion_tokens: int | None
     cost_usd: float | None
     sources: list
+    # Per-node outputs for the flow run inspector (NULL for older/Simple runs).
+    node_runs: list | None = None
 
 
 class TaskResponse(BaseModel):

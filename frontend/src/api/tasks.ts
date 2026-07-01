@@ -14,6 +14,16 @@ export interface TaskRunSummary {
   cost_usd: number | null;
 }
 
+export interface NodeRun {
+  node_id: string;
+  type: string;
+  label: string;
+  status: string;
+  output: string;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+}
+
 export interface TaskRun extends TaskRunSummary {
   task_id: string;
   output_markdown: string | null;
@@ -21,6 +31,7 @@ export interface TaskRun extends TaskRunSummary {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   sources: Array<{ title?: string; url?: string; snippet?: string }>;
+  node_runs?: NodeRun[] | null;
 }
 
 export interface Task {

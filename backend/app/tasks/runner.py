@@ -474,7 +474,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             from app.tasks.graph_runner import run_graph_flow
 
             graph = await load_or_derive_graph(db, task)
-            text, sources, usage = await run_graph_flow(
+            text, sources, usage, node_runs = await run_graph_flow(
                 task=task,
                 graph=graph,
                 user=user,
@@ -482,6 +482,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 db=db,
             )
             run.output_markdown = text
+            run.node_runs = node_runs or None
             run.title = _derive_run_title(text)
             run.sources = sources
             run.prompt_tokens = usage["prompt_tokens"] or None

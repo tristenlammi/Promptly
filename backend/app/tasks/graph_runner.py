@@ -156,8 +156,10 @@ async def run_graph_flow(
     upstream = ""
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
+    # Per-node record for the run inspector.
+    node_runs: list[dict] = []
 
-    for node in ai_nodes:
+    for i, node in enumerate(ai_nodes):
         data = AIPromptData.model_validate(node.data)
         provider, model_id = await _resolve_provider(
             uuid.UUID(data.provider_id) if data.provider_id else None,
@@ -200,6 +202,17 @@ async def run_graph_flow(
             usage["completion_tokens"] += node_usage["completion_tokens"]
         if node_usage.get("cost_usd") is not None:
             usage["cost_usd"] = (usage["cost_usd"] or 0.0) + node_usage["cost_usd"]
+        node_runs.append(
+            {
+                "node_id": node.id,
+                "type": NodeType.AI_PROMPT,
+                "label": f"AI step {i + 1}" if len(ai_nodes) > 1 else "AI step",
+                "status": "success",
+                "output": text,
+                "prompt_tokens": node_usage.get("prompt_tokens") or None,
+                "completion_tokens": node_usage.get("completion_tokens") or None,
+            }
+        )
 
     # Terminal output node: a plain report, or a workspace-output action that
     # consumes the final AI text (the run still records that text as its
@@ -214,6 +227,25 @@ async def run_graph_flow(
             text=upstream,
         )
         report = f"{upstream}\n\n---\n\n*{note}*"
+        node_runs.append(
+            {
+                "node_id": out_node.id,
+                "type": out_node.type,
+                "label": "Create card",
+                "status": "success",
+                "output": note,
+            }
+        )
+    elif out_node is not None:
+        node_runs.append(
+            {
+                "node_id": out_node.id,
+                "type": out_node.type,
+                "label": "Report",
+                "status": "success",
+                "output": "Saved as the run report.",
+            }
+        )
 
     # De-dup sources by URL across the whole chain, preserving order.
     seen: set[str] = set()
@@ -226,7 +258,7 @@ async def run_graph_flow(
             seen.add(url)
         deduped.append(s)
 
-    return report, deduped, usage
+    return report, deduped, usage, node_runs
 
 
 __all__ = ["run_graph_flow", "_interpolate"]

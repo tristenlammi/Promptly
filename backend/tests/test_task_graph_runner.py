@@ -107,7 +107,7 @@ def _task() -> Task:
 # --- execution -----------------------------------------------------
 async def test_single_ai_report_is_the_node_output(patched_model):
     graph = _chain(_ai("a0", "write the report"))
-    text, sources, usage = await run_graph_flow(
+    text, sources, usage, _node_runs = await run_graph_flow(
         task=_task(),
         graph=graph,
         user=object(),
@@ -124,7 +124,7 @@ async def test_chain_injects_upstream_output_and_accumulates(patched_model):
         _ai("a0", "step one"),
         _ai("a1", "refine using: {{upstream_output}}"),
     )
-    text, sources, usage = await run_graph_flow(
+    text, sources, usage, _node_runs = await run_graph_flow(
         task=_task(),
         graph=graph,
         user=object(),
@@ -167,7 +167,7 @@ async def test_board_card_output_files_card_and_notes_it(patched_model, monkeypa
         FlowEdge(source="a0", target="out"),
     ]
     graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
-    text, _sources, _usage = await run_graph_flow(
+    text, _sources, _usage, _node_runs = await run_graph_flow(
         task=_task(),
         graph=graph,
         user=object(),
@@ -177,6 +177,26 @@ async def test_board_card_output_files_card_and_notes_it(patched_model, monkeypa
     # The run report keeps the AI text and notes that the card was filed.
     assert "OUT[write it]" in text
     assert 'Filed as a card on "My Board".' in text
+
+
+async def test_node_runs_captured_per_node(patched_model):
+    graph = _chain(_ai("a0", "one"), _ai("a1", "two"))
+    _text, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    # Two AI steps + the report output, each recorded with its output.
+    assert [n["type"] for n in node_runs] == [
+        NodeType.AI_PROMPT,
+        NodeType.AI_PROMPT,
+        NodeType.OUTPUT_REPORT,
+    ]
+    assert node_runs[0]["label"] == "AI step 1"
+    assert node_runs[0]["output"] == "OUT[one]"
+    assert all(n["status"] == "success" for n in node_runs)
 
 
 async def test_non_linear_flow_is_rejected(patched_model):

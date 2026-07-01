@@ -166,5 +166,12 @@ class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):
         JSONB, nullable=False, default=list, server_default="[]"
     )
 
+    # Per-node outputs for the flow run inspector: one entry per AI step and
+    # the terminal output node (node_id/type/label/status/output/tokens). NULL
+    # for Simple single-step runs and runs predating the flow engine.
+    node_runs: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+
     def __repr__(self) -> str:
         return f"<TaskRun id={self.id} task={self.task_id} status={self.status}>"
