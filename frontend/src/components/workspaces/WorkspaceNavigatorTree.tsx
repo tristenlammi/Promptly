@@ -1,5 +1,23 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  MeasuringStrategy,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Archive,
   ArchiveRestore,
@@ -105,74 +123,103 @@ export function WorkspaceNavigatorTree({
   const pinnedNodes = collectPinned(tree);
   const mainTree = removePinned(tree);
 
-  // --- Drag & drop: reorder items, move them into folders, and pin them ---
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{ id: string; mode: DropMode } | null>(null);
-  const [pinHover, setPinHover] = useState(false);
-  const dndIndex = useMemo(() => buildDndIndex(mainTree), [mainTree]);
+  // --- Drag & drop (dnd-kit): reorder, move into folders, pin. The tree is
+  // flattened to a sortable list so siblings animate out of the way live and a
+  // DragOverlay lifts the grabbed row. ---
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overPin, setOverPin] = useState(false);
+  const [offsetLeft, setOffsetLeft] = useState(0);
 
-  const performMove = useCallback(
-    (targetId: string, mode: DropMode) => {
-      const draggedId = dragId;
-      if (!draggedId || draggedId === targetId) return;
-      const target = dndIndex.get(targetId);
-      if (!target) return;
-      // Never drop a folder into itself or one of its own descendants.
-      if (mode === "inside" && draggedId === targetId) return;
-      if (isDndAncestor(dndIndex, draggedId, targetId)) return;
-
-      let parentId: string | null;
-      let position: number;
-      if (mode === "inside") {
-        parentId = targetId;
-        const kids = target.childPositions;
-        position = (kids.length ? Math.max(...kids) : 0) + 1;
-      } else {
-        parentId = target.parentId;
-        const sibs = target.siblings;
-        const i = sibs.findIndex((s) => s.id === targetId);
-        if (mode === "before") {
-          const prev = sibs[i - 1];
-          position = prev
-            ? (prev.position + sibs[i].position) / 2
-            : sibs[i].position - 1;
-        } else {
-          const next = sibs[i + 1];
-          position = next
-            ? (sibs[i].position + next.position) / 2
-            : sibs[i].position + 1;
-        }
-      }
-      // Optimistic reorder so the drop feels instant; the refetch confirms.
-      qc.setQueryData<WorkspaceItemNode[]>(
-        ["workspaces", "tree", workspaceId],
-        (old) => (old ? moveNodeInTree(old, draggedId, parentId, position) : old)
-      );
-      move.mutate({ itemId: draggedId, payload: { parent_id: parentId, position } });
-    },
-    [dragId, dndIndex, move, qc, workspaceId]
+  const flatItems = useMemo(
+    () => flattenTree(mainTree, collapsed),
+    [mainTree, collapsed]
   );
-
-  const performPin = useCallback(() => {
-    if (dragId) setPinned.mutate({ itemId: dragId, pinned: true });
-  }, [dragId, setPinned]);
-
-  const dnd = useMemo<TreeDnd>(
-    () => ({
-      canDrag: canEdit,
-      draggingId: dragId,
-      begin: setDragId,
-      end: () => {
-        setDragId(null);
-        setDrop(null);
-        setPinHover(false);
-      },
-      drop,
-      setDrop,
-      perform: performMove,
-    }),
-    [canEdit, dragId, drop, performMove]
+  // While dragging a folder, hide its descendants so it can't nest into itself
+  // and the list animates cleanly.
+  const visibleItems = useMemo(() => {
+    if (!activeId) return flatItems;
+    return removeChildrenOf(flatItems, activeId);
+  }, [flatItems, activeId]);
+  const sortableIds = useMemo(
+    () => visibleItems.map((i) => i.id),
+    [visibleItems]
   );
+  const activeItem = activeId
+    ? flatItems.find((i) => i.id === activeId) ?? null
+    : null;
+
+  const [overId, setOverId] = useState<string | null>(null);
+  const projected =
+    activeId && overId && overId !== PIN_ZONE_ID
+      ? getProjection(visibleItems, activeId, overId, offsetLeft)
+      : null;
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+  const resetDrag = () => {
+    setActiveId(null);
+    setOverId(null);
+    setOverPin(false);
+    setOffsetLeft(0);
+    document.body.style.removeProperty("cursor");
+  };
+
+  const canDragKind = (k: string) =>
+    k !== "chat" && k !== "task"; // synthesised rows have no movable item
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    const activeKind = flatItems.find((i) => i.id === active.id)?.node.kind;
+    resetDrag();
+    if (!over || !canEdit || !activeKind || !canDragKind(activeKind)) return;
+
+    // Dropped on the pin zone → pin it.
+    if (over.id === PIN_ZONE_ID) {
+      setPinned.mutate({ itemId: String(active.id), pinned: true });
+      return;
+    }
+    if (!projected) return;
+    const { parentId, depth } = projected;
+
+    // Recompute the new sibling order to derive a float position.
+    const clone = flatItems.map((i) => ({ ...i }));
+    const oldIndex = clone.findIndex((i) => i.id === active.id);
+    const newIndex = clone.findIndex((i) => i.id === over.id);
+    const ordered = arrayMove(clone, oldIndex, newIndex);
+    const at = ordered.findIndex((i) => i.id === active.id);
+    ordered[at] = { ...ordered[at], parentId, depth };
+    const sibs = ordered.filter((i) => i.parentId === parentId);
+    const si = sibs.findIndex((i) => i.id === active.id);
+    const prev = sibs[si - 1]?.node.position;
+    const next = sibs[si + 1]?.node.position;
+    const position =
+      prev != null && next != null
+        ? (prev + next) / 2
+        : prev != null
+          ? prev + 1
+          : next != null
+            ? next - 1
+            : 1;
+
+    qc.setQueryData<WorkspaceItemNode[]>(
+      ["workspaces", "tree", workspaceId],
+      (old) =>
+        old ? moveNodeInTree(old, String(active.id), parentId, position) : old
+    );
+    move.mutate({
+      itemId: String(active.id),
+      payload: { parent_id: parentId, position },
+    });
+  };
 
   const handleCreate = async (
     kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
@@ -294,31 +341,27 @@ export function WorkspaceNavigatorTree({
         )}
       </div>
 
-      <TreeDndContext.Provider value={dnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+        onDragStart={({ active }) => {
+          setActiveId(String(active.id));
+          setOverId(String(active.id));
+          document.body.style.cursor = "grabbing";
+        }}
+        onDragMove={({ delta }) => setOffsetLeft(delta.x)}
+        onDragOver={({ over }) => {
+          setOverPin(over?.id === PIN_ZONE_ID);
+          setOverId(over ? String(over.id) : null);
+        }}
+        onDragEnd={handleDragEnd}
+        onDragCancel={resetDrag}
+      >
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
           {/* Drop-to-pin zone — only while dragging, so the rail stays clean. */}
-          {dragId && (
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setPinHover(true);
-              }}
-              onDragLeave={() => setPinHover(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                performPin();
-                dnd.end();
-              }}
-              className={cn(
-                "mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed py-2 text-[11px] font-medium transition",
-                pinHover
-                  ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
-                  : "border-[var(--border)] text-[var(--text-muted)]"
-              )}
-            >
-              <Pin className={cn("h-3.5 w-3.5", pinHover && "fill-current")} />
-              Drop here to pin
-            </div>
+          {activeId && (
+            <PinDropZone active={overPin} />
           )}
           {pinnedNodes.length > 0 && (
             <div className="mb-2 border-b border-[var(--border)] pb-2">
@@ -328,15 +371,17 @@ export function WorkspaceNavigatorTree({
               </div>
               <ul>
                 {pinnedNodes.map((node) => (
-                  <TreeNode
+                  <TreeRow
                     key={`pin-${node.id}`}
                     workspaceId={workspaceId}
-                    node={node}
-                    depth={0}
+                    item={{ id: node.id, node, depth: 0, parentId: null }}
                     selectedId={selectedId}
                     onSelect={onSelect}
                     onOpenToSide={onOpenToSide}
                     canEdit={canEdit}
+                    collapsed={collapsed}
+                    toggleCollapse={toggleCollapse}
+                    sortable={false}
                   />
                 ))}
               </ul>
@@ -349,23 +394,52 @@ export function WorkspaceNavigatorTree({
               add a chat, note, canvas, or folder.
             </div>
           ) : mainTree.length === 0 ? null : (
-            <ul>
-              {mainTree.map((node) => (
-                <TreeNode
-                  key={node.id}
-                  workspaceId={workspaceId}
-                  node={node}
-                  depth={0}
-                  selectedId={selectedId}
-                  onSelect={onSelect}
-                  onOpenToSide={onOpenToSide}
-                  canEdit={canEdit}
-                />
-              ))}
-            </ul>
+            <SortableContext
+              items={sortableIds}
+              strategy={verticalListSortingStrategy}
+            >
+              <ul>
+                {visibleItems.map((item) => (
+                  <TreeRow
+                    key={item.id}
+                    workspaceId={workspaceId}
+                    item={item}
+                    selectedId={selectedId}
+                    onSelect={onSelect}
+                    onOpenToSide={onOpenToSide}
+                    canEdit={canEdit}
+                    collapsed={collapsed}
+                    toggleCollapse={toggleCollapse}
+                    sortable={canDragKind(item.node.kind)}
+                    isDropParent={
+                      !!activeId &&
+                      item.node.kind === "folder" &&
+                      projected?.parentId === item.id
+                    }
+                  />
+                ))}
+              </ul>
+            </SortableContext>
           )}
         </div>
-      </TreeDndContext.Provider>
+        <DragOverlay dropAnimation={null}>
+          {activeItem ? (
+            <div className="w-56 scale-[0.97] rounded-md bg-[var(--surface)] px-1 opacity-95 shadow-lg ring-1 ring-[var(--accent)]/40">
+              <TreeRow
+                workspaceId={workspaceId}
+                item={{ ...activeItem, depth: 0 }}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                canEdit={false}
+                collapsed={collapsed}
+                toggleCollapse={toggleCollapse}
+                sortable={false}
+                overlay
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       {/* Per-workspace Archive — pinned to the bottom of the rail. */}
       <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
@@ -374,55 +448,108 @@ export function WorkspaceNavigatorTree({
 }
 
 // ---------------------------------------------------------------------
-// Drag & drop plumbing
+// Drag & drop plumbing (dnd-kit flattened sortable tree)
 // ---------------------------------------------------------------------
-type DropMode = "before" | "after" | "inside";
-interface TreeDnd {
-  canDrag: boolean;
-  draggingId: string | null;
-  begin: (id: string) => void;
-  end: () => void;
-  drop: { id: string; mode: DropMode } | null;
-  setDrop: (d: { id: string; mode: DropMode } | null) => void;
-  perform: (targetId: string, mode: DropMode) => void;
-}
-const TreeDndContext = createContext<TreeDnd | null>(null);
+const PIN_ZONE_ID = "__pin_zone__";
+const INDENT = 14; // px of indentation per depth level
 
-interface DndEntry {
+interface FlatItem {
+  id: string;
+  node: WorkspaceItemNode;
+  depth: number;
   parentId: string | null;
-  siblings: { id: string; position: number }[];
-  childPositions: number[];
 }
-/** node id → its parent, ordered siblings, and child positions (for drop math). */
-function buildDndIndex(nodes: WorkspaceItemNode[]): Map<string, DndEntry> {
-  const map = new Map<string, DndEntry>();
-  const walk = (list: WorkspaceItemNode[], parentId: string | null) => {
-    const siblings = list.map((n) => ({ id: n.id, position: n.position }));
-    for (const n of list) {
-      map.set(n.id, {
-        parentId,
-        siblings,
-        childPositions: (n.children ?? []).map((c) => c.position),
-      });
-      if (n.children?.length) walk(n.children, n.id);
+
+/** Depth-first flatten of the tree, skipping collapsed folders' children. */
+function flattenTree(
+  nodes: WorkspaceItemNode[],
+  collapsed: Set<string>,
+  parentId: string | null = null,
+  depth = 0
+): FlatItem[] {
+  const out: FlatItem[] = [];
+  for (const n of nodes) {
+    out.push({ id: n.id, node: n, depth, parentId });
+    if (n.children?.length && !collapsed.has(n.id)) {
+      out.push(...flattenTree(n.children, collapsed, n.id, depth + 1));
     }
-  };
-  walk(nodes, null);
-  return map;
-}
-/** True if ``ancestorId`` is at/above ``nodeId`` (so we never nest into self). */
-function isDndAncestor(
-  map: Map<string, DndEntry>,
-  ancestorId: string,
-  nodeId: string
-): boolean {
-  let cur: string | null | undefined = nodeId;
-  while (cur) {
-    if (cur === ancestorId) return true;
-    cur = map.get(cur)?.parentId ?? null;
   }
-  return false;
+  return out;
 }
+
+/** Drop the dragged item's whole subtree from the list (so it can't nest into
+ *  itself and the remaining rows animate cleanly). */
+function removeChildrenOf(items: FlatItem[], id: string): FlatItem[] {
+  const out: FlatItem[] = [];
+  let skipBelow: number | null = null;
+  for (const it of items) {
+    if (skipBelow != null) {
+      if (it.depth > skipBelow) continue;
+      skipBelow = null;
+    }
+    out.push(it);
+    if (it.id === id) skipBelow = it.depth;
+  }
+  return out;
+}
+
+/** Where the dragged row would land: a depth (from the horizontal drag) clamped
+ *  so it can only nest under a folder, and the resulting parent id. */
+function getProjection(
+  items: FlatItem[],
+  activeId: string,
+  overId: string,
+  dragOffset: number
+): { depth: number; parentId: string | null } {
+  const overIndex = items.findIndex((i) => i.id === overId);
+  const activeIndex = items.findIndex((i) => i.id === activeId);
+  const active = items[activeIndex];
+  const newItems = arrayMove(items, activeIndex, overIndex);
+  const prev = newItems[overIndex - 1];
+  const next = newItems[overIndex + 1];
+  const dragDepth = Math.round(dragOffset / INDENT);
+  const projected = (active?.depth ?? 0) + dragDepth;
+  // Can only nest one level under the previous row, and only if it's a folder.
+  const maxDepth = prev
+    ? prev.node.kind === "folder"
+      ? prev.depth + 1
+      : prev.depth
+    : 0;
+  const minDepth = next ? next.depth : 0;
+  const depth = Math.max(minDepth, Math.min(projected, maxDepth));
+
+  const parentId = (() => {
+    if (depth === 0 || !prev) return null;
+    if (depth === prev.depth) return prev.parentId;
+    if (depth > prev.depth) return prev.id;
+    const ancestor = newItems
+      .slice(0, overIndex)
+      .reverse()
+      .find((i) => i.depth === depth);
+    return ancestor?.parentId ?? null;
+  })();
+  return { depth, parentId };
+}
+
+/** The "Drop here to pin" target (a dnd-kit droppable) shown while dragging. */
+function PinDropZone({ active }: { active: boolean }) {
+  const { setNodeRef } = useDroppable({ id: PIN_ZONE_ID });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed py-2 text-[11px] font-medium transition",
+        active
+          ? "scale-[1.01] border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+          : "border-[var(--border)] text-[var(--text-muted)]"
+      )}
+    >
+      <Pin className={cn("h-3.5 w-3.5", active && "fill-current")} />
+      Drop here to pin
+    </div>
+  );
+}
+
 /** Immutably relocate a node under ``parentId`` at ``position`` and re-sort. */
 function moveNodeInTree(
   tree: WorkspaceItemNode[],
@@ -460,9 +587,6 @@ function moveNodeInTree(
   return next;
 }
 
-/** Flatten the tree into a depth-tagged list of folders, skipping the
- *  subtree rooted at ``excludeId`` (you can't move an item into itself or
- *  one of its own descendants). */
 /** Top-most pinned nodes (doesn't descend into a pinned subtree). */
 function collectPinned(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {
   const out: WorkspaceItemNode[] = [];
@@ -603,24 +727,36 @@ function WorkspaceArchiveSection({
   );
 }
 
-function TreeNode({
+function TreeRow({
   workspaceId,
-  node,
-  depth,
+  item,
   selectedId,
   onSelect,
   onOpenToSide,
   canEdit,
+  collapsed,
+  toggleCollapse,
+  sortable,
+  isDropParent,
+  overlay,
 }: {
   workspaceId: string;
-  node: WorkspaceItemNode;
-  depth: number;
+  item: FlatItem;
   selectedId: string | null;
   onSelect: (node: WorkspaceItemNode) => void;
   onOpenToSide?: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
+  collapsed: Set<string>;
+  toggleCollapse: (id: string) => void;
+  /** Whether this row participates in dnd-kit sorting. */
+  sortable: boolean;
+  /** Highlight — the folder the dragged item will drop into. */
+  isDropParent?: boolean;
+  /** Rendered inside the DragOverlay (the lifted copy). */
+  overlay?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const { node, depth } = item;
+  const expanded = !collapsed.has(node.id);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(node.title);
 
@@ -747,11 +883,8 @@ function TreeNode({
   const indexing = node.indexing_status === "embedding";
 
   const handleClick = () => {
-    if (isFolder) {
-      setExpanded((e) => !e);
-    } else {
-      onSelect(node);
-    }
+    if (isFolder) toggleCollapse(node.id);
+    else onSelect(node);
   };
 
   const commitRename = async () => {
@@ -776,74 +909,45 @@ function TreeNode({
 
   const isSelected = selectedId === node.id;
 
-  // --- Drag & drop ---
-  const dnd = useContext(TreeDndContext);
-  // Chats + automations are synthesised (no movable row); everything stored is
-  // draggable to reorder / move into folders.
-  const canDragThis =
-    !!dnd?.canDrag && !isChat && !isTask && !renaming;
-  const isDragging = dnd?.draggingId === node.id;
-  const dropMode = dnd?.drop?.id === node.id ? dnd.drop.mode : null;
-
-  const onDragOver = (e: React.DragEvent) => {
-    if (!dnd?.draggingId || dnd.draggingId === node.id) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const r = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - r.top;
-    const mode: DropMode =
-      isFolder && y > r.height * 0.25 && y < r.height * 0.75
-        ? "inside"
-        : y < r.height / 2
-          ? "before"
-          : "after";
-    if (dnd.drop?.id !== node.id || dnd.drop.mode !== mode)
-      dnd.setDrop({ id: node.id, mode });
-  };
-  const onDrop = (e: React.DragEvent) => {
-    if (!dnd?.draggingId) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (dropMode) dnd.perform(node.id, dropMode);
-    dnd.end();
-  };
+  // --- dnd-kit sortable ---
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    // The overlay copy gets a throwaway id so it never double-registers the
+    // real row's id with the DnD context.
+    id: overlay ? `${item.id}__overlay` : item.id,
+    disabled: !sortable || renaming || overlay,
+  });
+  const dragHandle = sortable && !renaming ? { ...attributes, ...listeners } : {};
 
   return (
-    <li>
+    <li
+      ref={overlay ? undefined : setNodeRef}
+      style={
+        overlay
+          ? undefined
+          : { transform: CSS.Translate.toString(transform), transition }
+      }
+    >
       <div
-        className="relative"
-        onDragOver={canDragThis ? onDragOver : undefined}
-        onDrop={canDragThis ? onDrop : undefined}
+        {...dragHandle}
+        className={cn(
+          "group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors",
+          isSelected
+            ? "bg-[var(--accent)]/10 text-[var(--text)]"
+            : "text-[var(--text)] hover:bg-[var(--hover)]",
+          isDropParent &&
+            "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/50",
+          isDragging && !overlay && "opacity-40",
+          sortable && !renaming && "cursor-grab active:cursor-grabbing"
+        )}
+        style={{ paddingLeft: depth * INDENT + 4 }}
       >
-        {/* Reorder insertion line */}
-        {dropMode === "before" && (
-          <div className="pointer-events-none absolute left-2 right-2 top-0 z-10 h-0.5 rounded-full bg-[var(--accent)]" />
-        )}
-        {dropMode === "after" && (
-          <div className="pointer-events-none absolute bottom-0 left-2 right-2 z-10 h-0.5 rounded-full bg-[var(--accent)]" />
-        )}
-        <div
-          draggable={canDragThis}
-          onDragStart={(e) => {
-            if (!canDragThis || !dnd) return;
-            e.stopPropagation();
-            e.dataTransfer.effectAllowed = "move";
-            dnd.begin(node.id);
-          }}
-          onDragEnd={() => dnd?.end()}
-          className={cn(
-            "group flex items-center gap-1 rounded-md pr-1 text-sm transition",
-            isSelected
-              ? "bg-[var(--accent)]/10 text-[var(--text)]"
-              : "text-[var(--text)] hover:bg-[var(--hover)]",
-            // Drop-into-folder highlight.
-            dropMode === "inside" &&
-              "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/50",
-            isDragging && "opacity-40",
-            canDragThis && "cursor-grab active:cursor-grabbing"
-          )}
-          style={{ paddingLeft: depth * 12 + 4 }}
-        >
         <button
           type="button"
           onClick={handleClick}
@@ -882,6 +986,7 @@ function TreeNode({
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
               onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               onBlur={commitRename}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitRename();
@@ -906,7 +1011,7 @@ function TreeNode({
           )}
         </button>
 
-        {editable && !renaming && (
+        {editable && !renaming && !overlay && (
           <NodeActions
             isFolder={isFolder}
             isChat={isChat}
@@ -927,25 +1032,7 @@ function TreeNode({
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
-        </div>
       </div>
-
-      {isFolder && expanded && node.children.length > 0 && (
-        <ul>
-          {node.children.map((child) => (
-            <TreeNode
-              key={child.id}
-              workspaceId={workspaceId}
-              node={child}
-              depth={depth + 1}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onOpenToSide={onOpenToSide}
-              canEdit={canEdit}
-            />
-          ))}
-        </ul>
-      )}
     </li>
   );
 }
