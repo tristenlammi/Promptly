@@ -255,6 +255,90 @@ def is_simple_graph(graph: FlowGraph) -> bool:
     return have == wanted
 
 
+def _adjacency(
+    graph: FlowGraph,
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    out: dict[str, list[str]] = {}
+    inc: dict[str, list[str]] = {}
+    for e in graph.edges:
+        out.setdefault(e.source, []).append(e.target)
+        inc.setdefault(e.target, []).append(e.source)
+    return out, inc
+
+
+def is_linear_flow(graph: FlowGraph) -> bool:
+    """True when the graph is a single unbranched path
+    ``trigger → ai(+) → output`` of supported node types only — the shape the
+    Phase-1 engine can execute. This is the superset of
+    :func:`is_simple_graph` (which is just the one-AI-node special case); it
+    additionally permits a *chain* of AI nodes (prompt-injection steps). No
+    branches, cycles, loops, or unknown node types.
+    """
+    triggers = [
+        n
+        for n in graph.nodes
+        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+    ]
+    outs = graph.nodes_of_type(NodeType.OUTPUT_REPORT)
+    ais = graph.nodes_of_type(NodeType.AI_PROMPT)
+    if len(triggers) != 1 or len(outs) != 1 or len(ais) < 1:
+        return False
+    # No unknown/unsupported node types in the mix.
+    if len(triggers) + len(outs) + len(ais) != len(graph.nodes):
+        return False
+
+    out_adj, in_adj = _adjacency(graph)
+    trig, out_node = triggers[0], outs[0]
+    if in_adj.get(trig.id) or out_adj.get(out_node.id):
+        return False  # trigger must have no input, output no output
+
+    # Walk the single path from the trigger; every hop must be unambiguous.
+    order: list[str] = []
+    seen: set[str] = set()
+    cur = trig.id
+    while True:
+        if cur in seen:
+            return False  # cycle
+        seen.add(cur)
+        order.append(cur)
+        nxts = out_adj.get(cur, [])
+        if len(nxts) > 1:
+            return False  # branch
+        if not nxts:
+            break
+        cur = nxts[0]
+
+    if order[-1] != out_node.id or len(order) != len(graph.nodes):
+        return False
+    # Every interior node (the AI chain) has exactly one in and one out.
+    return all(
+        len(in_adj.get(nid, [])) == 1 and len(out_adj.get(nid, [])) == 1
+        for nid in order[1:-1]
+    )
+
+
+def ordered_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
+    """The ``ai.prompt`` nodes in execution order along the linear path.
+    Assumes :func:`is_linear_flow` holds (call it first)."""
+    out_adj, _ = _adjacency(graph)
+    trig = [
+        n
+        for n in graph.nodes
+        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+    ][0]
+    ordered: list[FlowNode] = []
+    cur = trig.id
+    while True:
+        nxts = out_adj.get(cur, [])
+        if not nxts:
+            break
+        cur = nxts[0]
+        node = graph.node(cur)
+        if node and node.type == NodeType.AI_PROMPT:
+            ordered.append(node)
+    return ordered
+
+
 def graph_to_task_fields(graph: FlowGraph) -> SimpleTaskFields:
     """Extract the Task-equivalent workflow fields from a canonical simple
     graph. The inverse of :func:`task_to_graph`; raises ``ValueError`` if the
@@ -304,6 +388,8 @@ __all__ = [
     "task_to_graph",
     "graph_to_task_fields",
     "is_simple_graph",
+    "is_linear_flow",
+    "ordered_ai_nodes",
     "SIMPLE_TRIGGER_ID",
     "SIMPLE_AI_ID",
     "SIMPLE_OUTPUT_ID",

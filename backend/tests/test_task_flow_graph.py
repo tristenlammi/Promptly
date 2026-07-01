@@ -18,13 +18,16 @@ import pytest
 
 from app.tasks.flow_graph import (
     NodeType,
+    FlowEdge,
     FlowGraph,
     FlowNode,
     SIMPLE_AI_ID,
     SIMPLE_OUTPUT_ID,
     SIMPLE_TRIGGER_ID,
     graph_to_task_fields,
+    is_linear_flow,
     is_simple_graph,
+    ordered_ai_nodes,
     task_to_graph,
 )
 from app.tasks.flow_graph import _row_fields
@@ -169,3 +172,51 @@ def test_extra_node_makes_graph_non_simple():
 
 def test_empty_graph_is_not_simple():
     assert is_simple_graph(FlowGraph()) is False
+
+
+# ---------------------------------------------------------------------
+# Linear flows: the executable superset (a *chain* of AI steps).
+# ---------------------------------------------------------------------
+def _linear_graph(n_ai: int) -> FlowGraph:
+    """trigger → ai_1 → … → ai_n → output."""
+    nodes = [FlowNode(id="trigger", type=NodeType.TRIGGER_SCHEDULE, data={"frequency": "daily"})]
+    ai_ids = [f"ai{i}" for i in range(n_ai)]
+    for aid in ai_ids:
+        nodes.append(FlowNode(id=aid, type=NodeType.AI_PROMPT, data={"prompt": aid}))
+    nodes.append(FlowNode(id="output", type=NodeType.OUTPUT_REPORT, data={"notify": True}))
+    chain = ["trigger", *ai_ids, "output"]
+    edges = [FlowEdge(source=a, target=b) for a, b in zip(chain, chain[1:])]
+    return FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+
+
+def test_simple_graph_is_also_linear():
+    assert is_linear_flow(task_to_graph(make_task(), connector_ids=[]))
+
+
+def test_multi_ai_chain_is_linear_and_ordered():
+    graph = _linear_graph(3)
+    assert is_linear_flow(graph)
+    assert [n.id for n in ordered_ai_nodes(graph)] == ["ai0", "ai1", "ai2"]
+
+
+def test_branch_is_not_linear():
+    graph = _linear_graph(1)
+    # ai0 fans out to a second output → a branch, not a chain.
+    graph.nodes.append(FlowNode(id="out2", type=NodeType.OUTPUT_REPORT, data={}))
+    graph.edges.append(FlowEdge(source="ai0", target="out2"))
+    assert is_linear_flow(graph) is False
+
+
+def test_cycle_is_not_linear():
+    graph = _linear_graph(2)
+    graph.edges.append(FlowEdge(source="ai1", target="ai0"))  # back-edge
+    assert is_linear_flow(graph) is False
+
+
+def test_unknown_node_type_is_not_linear():
+    graph = _linear_graph(1)
+    graph.nodes.append(FlowNode(id="x", type="action.http", data={}))
+    graph.edges.append(FlowEdge(source="ai0", target="x"))
+    graph.edges.append(FlowEdge(source="x", target="output"))
+    # 'output' now has two incoming; and an unsupported node type is present.
+    assert is_linear_flow(graph) is False

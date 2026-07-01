@@ -101,7 +101,11 @@ def _strip_tool_call_xml(text: str) -> str:
 
 
 def _build_system_prompt(
-    task: Task, now_local_iso: str, connector_names: list[str] | None = None
+    *,
+    timezone: str,
+    use_web_search: bool,
+    now_local_iso: str,
+    connector_names: list[str] | None = None,
 ) -> str:
     parts = [
         "You are Promptly's automation engine running a scheduled task "
@@ -109,7 +113,7 @@ def _build_system_prompt(
         "well-formatted Markdown report that stands on its own — assume "
         "the reader did not see any previous run. Think of it as a clean "
         "newsletter back-issue the reader will skim in under a minute.",
-        f"The current date/time is {now_local_iso} ({task.timezone}).",
+        f"The current date/time is {now_local_iso} ({timezone}).",
         "Structure:",
         "- Open with a single `#` title naming the report and the date.",
         "- Follow with a one- or two-sentence plain-text summary of the "
@@ -129,7 +133,7 @@ def _build_system_prompt(
         "- Be concise and factual. No preamble like 'Sure, here is' and no "
         "  sign-off; the report is the entire response.",
     ]
-    if task.use_web_search:
+    if use_web_search:
         parts.append(
             "Sourcing:\n"
             "- You have a web_search tool. Use it to gather current "
@@ -149,15 +153,45 @@ def _build_system_prompt(
     return "\n".join(parts)
 
 
-async def _resolve_connectors(task: Task, db):
-    """Resolve the task's explicitly-selected connectors that the owner can
-    still reach, into (schemas, dispatch_map, names). Empty when none.
+async def _resolve_connectors_by_ids(
+    db,
+    *,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    connector_ids: list[uuid.UUID],
+):
+    """Resolve an explicit set of connector ids the owner can still reach into
+    (schemas, dispatch_map, names). Empty when none.
 
-    Re-checks the selection against ``connectors_for_turn`` so a connector
-    the owner lost access to (group/workspace grant revoked, or disabled)
-    silently drops out of the run instead of erroring.
+    Re-checks the selection against ``connectors_for_turn`` so a connector the
+    owner lost access to (group/workspace grant revoked, or disabled) silently
+    drops out of the run instead of erroring.
     """
-    selected_ids = set(
+    selected = set(connector_ids)
+    if not selected:
+        return [], {}, []
+
+    from app.mcp.service import (
+        build_tools_from_connectors,
+        connectors_for_turn,
+    )
+
+    reachable = await connectors_for_turn(
+        db, user_id=user_id, workspace_id=workspace_id
+    )
+    chosen = [c for c in reachable if c.id in selected]
+    if not chosen:
+        return [], {}, []
+    schemas, dispatch = build_tools_from_connectors(chosen)
+    names = [c.name for c in chosen]
+    return schemas, dispatch, names
+
+
+async def _resolve_connectors(task: Task, db):
+    """A task's stored connector selection, resolved to (schemas, dispatch,
+    names). Thin wrapper over :func:`_resolve_connectors_by_ids` that reads the
+    ``task_connectors`` join."""
+    selected_ids = list(
         (
             await db.execute(
                 select(TaskConnector.connector_id).where(
@@ -168,34 +202,23 @@ async def _resolve_connectors(task: Task, db):
         .scalars()
         .all()
     )
-    if not selected_ids:
-        return [], {}, []
-
-    from app.mcp.service import (
-        build_tools_from_connectors,
-        connectors_for_turn,
+    return await _resolve_connectors_by_ids(
+        db,
+        user_id=task.user_id,
+        workspace_id=task.workspace_id,
+        connector_ids=selected_ids,
     )
-
-    reachable = await connectors_for_turn(
-        db, user_id=task.user_id, workspace_id=task.workspace_id
-    )
-    chosen = [c for c in reachable if c.id in selected_ids]
-    if not chosen:
-        return [], {}, []
-    schemas, dispatch = build_tools_from_connectors(chosen)
-    names = [c.name for c in chosen]
-    return schemas, dispatch, names
 
 
 async def _resolve_provider(
-    task: Task, db
+    provider_id: uuid.UUID | None, model_id: str | None, db
 ) -> tuple[ModelProvider, str]:
     """Return (provider, effective_model_id) or raise TaskRunError."""
-    if task.provider_id is None or not task.model_id:
+    if provider_id is None or not model_id:
         raise TaskRunError(
             "This task has no model configured. Edit the task and pick one."
         )
-    provider = await db.get(ModelProvider, task.provider_id)
+    provider = await db.get(ModelProvider, provider_id)
     if provider is None:
         raise TaskRunError(
             "The model provider for this task no longer exists. Pick a "
@@ -204,9 +227,9 @@ async def _resolve_provider(
     if not provider.enabled:
         raise TaskRunError("The model provider for this task is disabled.")
 
-    effective_model_id = task.model_id
-    if is_custom_model_id(task.model_id):
-        resolved = await resolve_custom_model(task.model_id, db)
+    effective_model_id = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
         if resolved is None:
             raise TaskRunError("The custom model for this task is unavailable.")
         effective_model_id = resolved.base_model_id
@@ -442,24 +465,20 @@ async def execute_run(run_id: uuid.UUID) -> None:
             user = await db.get(User, task.user_id)
             if user is None:
                 raise TaskRunError("Task owner no longer exists.")
-            provider, model_id = await _resolve_provider(task, db)
-            mcp_schemas, mcp_dispatch, connector_names = (
-                await _resolve_connectors(task, db)
-            )
-            now_local = run.started_at.astimezone(timezone.utc).isoformat(
-                timespec="minutes"
-            )
-            system = _build_system_prompt(task, now_local, connector_names)
-            text, sources, usage = await _generate(
-                provider=provider,
-                model_id=model_id,
-                system=system,
-                prompt=task.prompt,
+            # Execute the task's flow graph — its stored Advanced graph, or the
+            # canonical trigger→AI→output graph derived from the Simple columns.
+            # A Simple task is a single-AI chain, so this runs identically to
+            # the pre-graph path. Imported lazily to avoid an import cycle
+            # (graph_runner reuses this module's helpers).
+            from app.tasks.flow_service import load_or_derive_graph
+            from app.tasks.graph_runner import run_graph_flow
+
+            graph = await load_or_derive_graph(db, task)
+            text, sources, usage = await run_graph_flow(
+                task=task,
+                graph=graph,
                 user=user,
-                use_web_search=task.use_web_search,
-                reasoning_effort=task.reasoning_effort,
-                mcp_schemas=mcp_schemas,
-                mcp_dispatch=mcp_dispatch,
+                run_started_at=run.started_at,
                 db=db,
             )
             run.output_markdown = text

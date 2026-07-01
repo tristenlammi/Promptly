@@ -22,6 +22,8 @@ from app.chat.pdf_render import PdfRenderError, render_markdown_to_pdf
 from app.database import get_db
 from app.mcp.models import McpConnector
 from app.tasks.models import Task, TaskConnector, TaskRun
+from app.tasks.flow_graph import FlowGraph
+from app.tasks.flow_service import apply_graph, load_or_derive_graph, promote_task
 from app.tasks.recurrence import compute_next_run, describe_schedule
 from app.tasks.runner import execute_run
 from app.tasks.schemas import (
@@ -384,6 +386,57 @@ async def run_task_now(
     # run the client can poll.
     asyncio.create_task(execute_run(run.id), name=f"task_run_{run.id}")
     return TaskRunResponse.model_validate(run)
+
+
+# ------------------------------------------------------------------
+# Flow graph (Automations Phase 1) — the node-graph view of a task.
+# GET derives it (Simple) or loads it (Advanced); PUT saves an edited
+# graph keeping Simple/Advanced coherent; promote materialises the
+# derived graph so the editor has an explicit one to work on.
+# ------------------------------------------------------------------
+@router.get("/{task_id}/graph", response_model=FlowGraph)
+async def get_task_graph(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlowGraph:
+    task = await _get_owned_task(task_id, user, db)
+    return await load_or_derive_graph(db, task)
+
+
+@router.put("/{task_id}/graph", response_model=FlowGraph)
+async def put_task_graph(
+    task_id: uuid.UUID,
+    graph: FlowGraph,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlowGraph:
+    task = await _get_owned_task(task_id, user, db)
+    try:
+        await apply_graph(db, task, graph)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
+    # The schedule may have changed — recompute the next fire time.
+    task.next_run_at = _compute_next(task)
+    task.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(task)
+    return await load_or_derive_graph(db, task)
+
+
+@router.post("/{task_id}/promote", response_model=FlowGraph)
+async def promote_task_to_advanced(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlowGraph:
+    task = await _get_owned_task(task_id, user, db)
+    graph = await promote_task(db, task)
+    task.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return graph
 
 
 @router.get("/{task_id}/runs", response_model=list[TaskRunSummary])

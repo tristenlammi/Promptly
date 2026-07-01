@@ -13,6 +13,7 @@ import uuid
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
+from typing import Any
 from datetime import datetime
 
 from app.database import Base
@@ -76,6 +77,14 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
     # Retention: keep at most this many runs; older ones are swept (T.4).
     retention_runs: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30
+    )
+
+    # Advanced flow graph (Automations Phase 1). NULL = a plain Simple task
+    # whose trigger→AI→output graph is derived from the columns above on
+    # demand; non-NULL = an Advanced flow whose stored node graph is the
+    # source of truth (see app/tasks/flow_graph.py + flow_service.py).
+    flow_graph: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
     )
 
     next_run_at: Mapped[datetime | None] = mapped_column(
