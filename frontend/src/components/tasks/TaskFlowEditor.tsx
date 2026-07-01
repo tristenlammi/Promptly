@@ -34,6 +34,7 @@ import {
   type ScheduleTriggerData,
 } from "@/api/tasks";
 import { useSaveTaskGraph, useTaskGraph } from "@/hooks/useTasks";
+import { useAvailableModels } from "@/hooks/useProviders";
 import { useThemeStore } from "@/store/themeStore";
 import { cn } from "@/utils/cn";
 
@@ -429,6 +430,10 @@ function NodeInspector({
   onPatch: (patch: Record<string, unknown>) => void;
   onDelete: () => void;
 }) {
+  const { data: models } = useAvailableModels();
+  const ai = node.data as unknown as AIPromptData;
+  const modelKey =
+    ai.provider_id && ai.model_id ? `${ai.provider_id}::${ai.model_id}` : "";
   return (
     <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-l border-[var(--border)] bg-[var(--bg)] p-4">
       {node.type === "ai.prompt" && (
@@ -453,24 +458,38 @@ function NodeInspector({
             </code>{" "}
             to feed the previous step's output into this one.
           </p>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Model
+            <select
+              value={modelKey}
+              onChange={(e) => {
+                const [pid, mid] = e.target.value.split("::");
+                onPatch({ provider_id: pid || null, model_id: mid || null });
+              }}
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="">No model — set one</option>
+              {(models ?? []).map((m) => (
+                <option
+                  key={`${m.provider_id}::${m.model_id}`}
+                  value={`${m.provider_id}::${m.model_id}`}
+                >
+                  {m.display_name} · {m.provider_name}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex items-center justify-between text-xs text-[var(--text)]">
             <span className="inline-flex items-center gap-1.5">
               <Globe className="h-3.5 w-3.5 text-[var(--text-muted)]" /> Web search
             </span>
             <input
               type="checkbox"
-              checked={(node.data as unknown as AIPromptData).use_web_search}
+              checked={ai.use_web_search}
               onChange={(e) => onPatch({ use_web_search: e.target.checked })}
               className="h-4 w-4 accent-[var(--accent)]"
             />
           </label>
-          <div className="text-[11px] text-[var(--text-muted)]">
-            Model:{" "}
-            <span className="text-[var(--text)]">
-              {(node.data as unknown as AIPromptData).model_id || "inherited / none"}
-            </span>
-            <span className="block">Set the model in the Simple editor.</span>
-          </div>
           {canDelete && (
             <button
               type="button"
