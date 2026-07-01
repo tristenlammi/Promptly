@@ -21,6 +21,7 @@ from app.tasks.flow_graph import (
     FlowEdge,
     FlowGraph,
     FlowNode,
+    LoopData,
     NodeType,
     ReportOutputData,
     RouterCategory,
@@ -455,6 +456,84 @@ async def test_deep_research_node_synthesises_from_fetched_pages(
     # The fetched evidence was fed into the synthesis prompt (echoed by the fake).
     assert "EXTRACTED_BODY" in text
     assert "https://ex/0" in text
+
+
+def test_split_items_lines_strips_markers():
+    from app.tasks.graph_runner import _split_items
+
+    assert _split_items("- a\n2. b\n\n* c", "lines", 10) == ["a", "b", "c"]
+
+
+def test_split_items_json_array():
+    from app.tasks.graph_runner import _split_items
+
+    assert _split_items('["x", {"k": 1}]', "json", 10) == ["x", '{"k": 1}']
+
+
+def test_split_items_caps_iterations():
+    from app.tasks.graph_runner import _split_items
+
+    assert _split_items("a\nb\nc\nd", "lines", 2) == ["a", "b"]
+
+
+async def test_loop_runs_body_per_item_and_aggregates(patched_model):
+    nodes = [
+        _trigger(),
+        FlowNode(
+            id="loop",
+            type=NodeType.LOOP,
+            data=LoopData(
+                split_mode="lines",
+                prompt="do {{item}}",
+                provider_id=str(uuid.uuid4()),
+                model_id="m",
+                join_with="numbered",
+            ).model_dump(),
+        ),
+        _report("out"),
+    ]
+    edges = [FlowEdge(source="trigger", target="loop"), FlowEdge(source="loop", target="out")]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _s, usage, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+        trigger_payload="apple\n- banana\n3. cherry",
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["loop"]["label"] == "Loop (3 items)"
+    # {{item}} injected per iteration; the fake model echoes each body prompt.
+    assert "OUT[do apple]" in text
+    assert "OUT[do banana]" in text
+    assert "OUT[do cherry]" in text
+    assert text.startswith("1. OUT[do apple]")  # numbered aggregation
+    assert usage["completion_tokens"] == 6  # 2 per call × 3 items
+
+
+async def test_loop_with_no_items_is_a_noop(patched_model):
+    nodes = [
+        _trigger(),
+        FlowNode(
+            id="loop",
+            type=NodeType.LOOP,
+            data=LoopData(prompt="do {{item}}", provider_id=str(uuid.uuid4()), model_id="m").model_dump(),
+        ),
+        _report("out"),
+    ]
+    edges = [FlowEdge(source="trigger", target="loop"), FlowEdge(source="loop", target="out")]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    _t, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+        trigger_payload="",  # nothing to iterate
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["loop"]["label"] == "Loop (0 items)"
 
 
 async def test_cyclic_flow_is_rejected(patched_model):

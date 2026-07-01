@@ -51,6 +51,8 @@ class NodeType:
     FETCH_PAGE = "fetch.page"
     # Compound node: search → fetch top-N pages → synthesise a cited report.
     DEEP_RESEARCH = "research.deep"
+    # Map node: split the upstream into items, run an AI body per item, aggregate.
+    LOOP = "loop.foreach"
     # Control-flow nodes — they don't transform the text, they *route* it. Only
     # the branch(es) they select run; everything downstream of an unselected
     # branch is skipped ("active-path" execution).
@@ -80,6 +82,7 @@ PROCESSING_TYPES = frozenset(
         NodeType.SEARCH_WEB,
         NodeType.FETCH_PAGE,
         NodeType.DEEP_RESEARCH,
+        NodeType.LOOP,
     }
 )
 
@@ -188,6 +191,26 @@ class FetchPageData(BaseModel):
 
     url: str = ""
     max_chars: int = 8000  # cap the extracted text handed downstream
+
+
+class LoopData(BaseModel):
+    """A map-over-items step: splits the upstream text into items and runs the
+    ``prompt`` (an AI body) once per item, with ``{{item}}`` and
+    ``{{item_index}}`` available, then aggregates the results into one output.
+
+    ``split_mode`` is ``lines`` (one item per non-empty line, bullet/number
+    markers stripped) or ``json`` (a JSON array; objects are re-serialised).
+    ``join_with`` is ``blank`` (blank line between results) or ``numbered``."""
+
+    split_mode: str = "lines"  # lines | json
+    prompt: str = ""
+    provider_id: str | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
+    use_web_search: bool = False
+    connector_ids: list[str] = Field(default_factory=list)
+    max_items: int = 10  # 1..50 — a safety cap on iterations
+    join_with: str = "blank"  # blank | numbered
 
 
 class DeepResearchData(BaseModel):
@@ -622,6 +645,7 @@ __all__ = [
     "WebSearchData",
     "FetchPageData",
     "DeepResearchData",
+    "LoopData",
     "ConditionData",
     "RouterData",
     "RouterCategory",

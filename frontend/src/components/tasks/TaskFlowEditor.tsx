@@ -28,6 +28,7 @@ import {
   Globe,
   Loader2,
   Plus,
+  Repeat2,
   Save,
   Search,
   Split,
@@ -44,6 +45,7 @@ import {
   type ConditionData,
   type DeepResearchData,
   type FetchPageData,
+  type LoopData,
   type FlowGraph,
   type FlowNodeModel,
   type ReportOutputData,
@@ -70,6 +72,7 @@ function nodeModalTitle(type?: string): string {
   if (type === "search.web") return "Web search";
   if (type === "fetch.page") return "Fetch page";
   if (type === "research.deep") return "Deep research";
+  if (type === "loop.foreach") return "Loop";
   if (type === "control.condition") return "Condition";
   if (type === "control.router") return "Router";
   if (type === "output.report" || type === "output.board_card") return "Output";
@@ -335,6 +338,36 @@ function DeepResearchNode({ data, selected }: NodeProps) {
   );
 }
 
+function LoopNode({ data, selected }: NodeProps) {
+  const d = data as unknown as LoopData;
+  return (
+    <NodeShell
+      icon={<Repeat2 className="h-3.5 w-3.5" />}
+      label="Loop"
+      accent="#f97316"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="line-clamp-2 text-[var(--text)]">
+        {d.prompt || (
+          <span className="italic text-[var(--text-muted)]">
+            Runs a step per item
+          </span>
+        )}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          per {d.split_mode === "json" ? "JSON item" : "line"}
+        </span>
+        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          {d.model_id || "no model"}
+        </span>
+      </div>
+    </NodeShell>
+  );
+}
+
 // A control node with several labelled *source* handles on the right — one per
 // branch. React Flow reads each handle's real DOM position, so absolutely
 // positioning them per-row lets edges leave from the right branch.
@@ -497,6 +530,7 @@ const nodeTypes = {
   "search.web": SearchNode,
   "fetch.page": FetchNode,
   "research.deep": DeepResearchNode,
+  "loop.foreach": LoopNode,
   "control.condition": ConditionNode,
   "control.router": RouterNode,
   "output.report": OutputNode,
@@ -510,6 +544,7 @@ const PROCESSING_NODE_TYPES = new Set([
   "search.web",
   "fetch.page",
   "research.deep",
+  "loop.foreach",
   "control.condition",
   "control.router",
 ]);
@@ -700,6 +735,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         | "search.web"
         | "fetch.page"
         | "research.deep"
+        | "loop.foreach"
         | "control.condition"
         | "control.router"
         | "output.report",
@@ -723,6 +759,18 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           provider_id: model?.provider_id ?? null,
           model_id: model?.model_id ?? null,
           reasoning_effort: model?.reasoning_effort ?? null,
+        };
+      else if (type === "loop.foreach")
+        data = {
+          split_mode: "lines",
+          prompt: "Process this item:\n\n{{item}}",
+          provider_id: model?.provider_id ?? null,
+          model_id: model?.model_id ?? null,
+          reasoning_effort: model?.reasoning_effort ?? null,
+          use_web_search: false,
+          connector_ids: [],
+          max_items: 10,
+          join_with: "blank",
         };
       else if (type === "output.report") data = { notify: true };
       else if (type === "control.condition")
@@ -780,6 +828,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         | "search.web"
         | "fetch.page"
         | "research.deep"
+        | "loop.foreach"
         | "control.condition"
         | "control.router"
         | "output.report"
@@ -999,6 +1048,13 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
                 <Split className="h-3.5 w-3.5 text-[#a855f7]" /> Add router
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("loop.foreach")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Repeat2 className="h-3.5 w-3.5 text-[#f97316]" /> Add loop
               </button>
               <div className="my-1 h-px bg-[var(--border)]" />
               <button
@@ -1345,6 +1401,155 @@ function NodeInspector({
           </label>
         </>
       )}
+
+      {node.type === "loop.foreach" &&
+        (() => {
+          const l = node.data as unknown as LoopData;
+          const modelKey =
+            l.provider_id && l.model_id
+              ? `${l.provider_id}::${l.model_id}`
+              : "";
+          return (
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Splits the upstream text into items and runs the step below once
+                per item, then joins the results. Use{" "}
+                <code className="rounded bg-[var(--surface-2)] px-1">
+                  {"{{item}}"}
+                </code>{" "}
+                (and{" "}
+                <code className="rounded bg-[var(--surface-2)] px-1">
+                  {"{{item_index}}"}
+                </code>
+                ) in the prompt.
+              </p>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Split the upstream by
+                <select
+                  value={l.split_mode}
+                  onChange={(e) => onPatch({ split_mode: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                >
+                  <option value="lines">Lines (one item per line)</option>
+                  <option value="json">JSON array</option>
+                </select>
+              </label>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Per-item prompt
+                <textarea
+                  value={l.prompt}
+                  onChange={(e) => onPatch({ prompt: e.target.value })}
+                  rows={5}
+                  className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  placeholder="What should run for each item? Use {{item}}"
+                />
+              </label>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Model
+                <select
+                  value={modelKey}
+                  onChange={(e) => {
+                    const [pid, mid] = e.target.value.split("::");
+                    onPatch({ provider_id: pid || null, model_id: mid || null });
+                  }}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                >
+                  <option value="">No model — set one</option>
+                  {(models ?? []).map((m) => (
+                    <option
+                      key={`${m.provider_id}::${m.model_id}`}
+                      value={`${m.provider_id}::${m.model_id}`}
+                    >
+                      {m.display_name} · {m.provider_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex gap-2">
+                <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+                  Max items
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={l.max_items}
+                    onChange={(e) =>
+                      onPatch({
+                        max_items: Math.max(
+                          1,
+                          Math.min(50, Number(e.target.value) || 10)
+                        ),
+                      })
+                    }
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  />
+                </label>
+                <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+                  Join results
+                  <select
+                    value={l.join_with}
+                    onChange={(e) => onPatch({ join_with: e.target.value })}
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  >
+                    <option value="blank">Blank line</option>
+                    <option value="numbered">Numbered list</option>
+                  </select>
+                </label>
+              </div>
+              <label className="flex items-center justify-between text-xs text-[var(--text)]">
+                <span className="inline-flex items-center gap-1.5">
+                  <Globe className="h-3.5 w-3.5 text-[var(--text-muted)]" /> Web
+                  search per item
+                </span>
+                <input
+                  type="checkbox"
+                  checked={l.use_web_search}
+                  onChange={(e) => onPatch({ use_web_search: e.target.checked })}
+                  className="h-4 w-4 accent-[var(--accent)]"
+                />
+              </label>
+              {connectors.length > 0 && (
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-medium text-[var(--text-muted)]">
+                      Connectors
+                    </span>
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      {l.connector_ids.length} selected
+                    </span>
+                  </div>
+                  <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1">
+                    {connectors.map((c) => {
+                      const on = l.connector_ids.includes(c.id);
+                      return (
+                        <label
+                          key={c.id}
+                          className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() =>
+                              onPatch({
+                                connector_ids: on
+                                  ? l.connector_ids.filter((x) => x !== c.id)
+                                  : [...l.connector_ids, c.id],
+                              })
+                            }
+                            className="h-3.5 w-3.5 accent-[var(--accent)]"
+                          />
+                          <span className="truncate text-[var(--text)]">
+                            {c.name}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
       {node.type === "control.condition" &&
         (() => {

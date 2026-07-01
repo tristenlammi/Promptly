@@ -181,6 +181,7 @@ export type FlowNodeType =
   | "search.web"
   | "fetch.page"
   | "research.deep"
+  | "loop.foreach"
   | "control.condition"
   | "control.router"
   | "output.report"
@@ -236,6 +237,18 @@ export interface DeepResearchData {
   provider_id: string | null;
   model_id: string | null;
   reasoning_effort: string | null;
+}
+
+export interface LoopData {
+  split_mode: string;
+  prompt: string;
+  provider_id: string | null;
+  model_id: string | null;
+  reasoning_effort: string | null;
+  use_web_search: boolean;
+  connector_ids: string[];
+  max_items: number;
+  join_with: string;
 }
 
 export interface ConditionData {

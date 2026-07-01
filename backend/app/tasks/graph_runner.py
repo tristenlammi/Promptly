@@ -34,6 +34,7 @@ from app.tasks.flow_graph import (
     FetchPageData,
     FlowGraph,
     FlowNode,
+    LoopData,
     NodeType,
     OUTPUT_TYPES,
     RouterData,
@@ -398,6 +399,126 @@ async def _file_board_card(
         extras.append(f"{len(links)} link(s)")
     suffix = f" ({', '.join(extras)})" if extras else ""
     return f'Filed "{title}" on "{board.title or "board"}"{suffix}.'
+
+
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+
+
+def _split_items(upstream: str, mode: str, cap: int) -> list[str]:
+    """Break the upstream text into loop items. ``json`` parses a JSON array
+    (objects re-serialised); anything else — or a failed parse — splits on
+    non-empty lines with leading bullet/number markers stripped."""
+    if mode == "json":
+        try:
+            data = json.loads(upstream.strip())
+        except (json.JSONDecodeError, ValueError):
+            data = None
+        if isinstance(data, list):
+            items = [
+                x if isinstance(x, str) else json.dumps(x, ensure_ascii=False)
+                for x in data
+            ]
+            return [i for i in items if str(i).strip()][:cap]
+        # not a JSON list → fall through to line splitting
+    lines: list[str] = []
+    for raw in upstream.splitlines():
+        line = _LIST_MARKER_RE.sub("", raw.strip())
+        if line:
+            lines.append(line)
+    return lines[:cap]
+
+
+async def _run_loop_node(
+    node: FlowNode,
+    ctx: dict[str, str],
+    *,
+    db,
+    user: User,
+    task: Task,
+    tz: str,
+    now_local: str,
+) -> tuple[str, list[dict], dict, dict]:
+    """Map an AI body over each upstream item → (text, sources, usage, record).
+    Items run sequentially (they share the request's DB session, which isn't
+    safe to use concurrently)."""
+    data = LoopData.model_validate(node.data)
+    upstream = ctx.get("upstream_output", "")
+    cap = max(1, min(50, data.max_items or 10))
+    items = _split_items(upstream, data.split_mode, cap)
+
+    usage = _empty_usage()
+    if not items:
+        record = {
+            "node_id": node.id,
+            "type": NodeType.LOOP,
+            "label": "Loop (0 items)",
+            "status": "success",
+            "output": "",
+        }
+        return "", [], usage, record
+
+    provider, model_id = await _resolve_provider(
+        uuid.UUID(data.provider_id) if data.provider_id else None,
+        data.model_id,
+        db,
+    )
+    schemas, dispatch, names = await _resolve_connectors_by_ids(
+        db,
+        user_id=task.user_id,
+        workspace_id=task.workspace_id,
+        connector_ids=[uuid.UUID(c) for c in data.connector_ids],
+    )
+    system = _build_system_prompt(
+        timezone=tz,
+        use_web_search=data.use_web_search,
+        now_local_iso=now_local,
+        connector_names=names,
+        output_kind="step",
+    )
+
+    results: list[str] = []
+    sources: list[dict] = []
+    for idx, item in enumerate(items, 1):
+        item_ctx = dict(ctx)
+        item_ctx["item"] = item
+        item_ctx["item_index"] = str(idx)
+        prompt = _interpolate(data.prompt.strip() or "{{item}}", item_ctx)
+        text, item_sources, item_usage = await _generate(
+            provider=provider,
+            model_id=model_id,
+            system=system,
+            prompt=prompt,
+            user=user,
+            use_web_search=data.use_web_search,
+            reasoning_effort=data.reasoning_effort,
+            mcp_schemas=schemas,
+            mcp_dispatch=dispatch,
+            db=db,
+        )
+        results.append(text)
+        sources.extend(item_sources)
+        if item_usage.get("prompt_tokens"):
+            usage["prompt_tokens"] += item_usage["prompt_tokens"]
+        if item_usage.get("completion_tokens"):
+            usage["completion_tokens"] += item_usage["completion_tokens"]
+        if item_usage.get("cost_usd") is not None:
+            usage["cost_usd"] = (usage["cost_usd"] or 0.0) + item_usage["cost_usd"]
+
+    if data.join_with == "numbered":
+        aggregated = "\n\n".join(f"{i}. {r}" for i, r in enumerate(results, 1))
+    else:
+        aggregated = "\n\n".join(results)
+
+    record = {
+        "node_id": node.id,
+        "type": NodeType.LOOP,
+        "label": f"Loop ({len(items)} items)",
+        "status": "success",
+        "output": aggregated,
+        "prompt_tokens": usage.get("prompt_tokens") or None,
+        "completion_tokens": usage.get("completion_tokens") or None,
+    }
+    return aggregated, sources, usage, record
 
 
 async def _run_deep_research_node(
@@ -770,6 +891,16 @@ async def run_graph_flow(
             )
             sources.extend(node_sources)
             _accum_usage(dr_usage)
+            node_runs.append(record)
+            outputs[nid] = text
+            last_processing_output = text
+
+        elif node.type == NodeType.LOOP:
+            text, node_sources, loop_usage, record = await _run_loop_node(
+                node, ctx, db=db, user=user, task=task, tz=tz, now_local=now_local
+            )
+            sources.extend(node_sources)
+            _accum_usage(loop_usage)
             node_runs.append(record)
             outputs[nid] = text
             last_processing_output = text
