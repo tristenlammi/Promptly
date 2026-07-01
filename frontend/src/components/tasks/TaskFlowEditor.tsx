@@ -17,6 +17,7 @@ import {
   Position,
   ReactFlow,
   useEdgesState,
+  useNodeId,
   useNodesState,
   type Connection,
   type Edge,
@@ -28,6 +29,8 @@ import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import {
   Brain,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Columns3,
   Download,
@@ -93,6 +96,8 @@ import { cn } from "@/utils/cn";
 // the editor around the ReactFlow canvas.
 interface FlowEditCtx {
   detailed: boolean;
+  expandedIds: Set<string>;
+  toggleExpanded: (id: string) => void;
   boards: BoardOption[];
   chats: BoardOption[];
   connectors: AvailableTaskConnector[];
@@ -104,16 +109,48 @@ interface FlowEditCtx {
 }
 const FlowEditContext = createContext<FlowEditCtx | null>(null);
 
-/** In Detailed mode, returns the inline settings panel for a node; else null.
- *  Called at the top of every custom node so the hook order stays stable. */
+/** Whether a node should show its settings inline — the global Detailed toggle,
+ *  or this node individually expanded via its header caret. */
+function nodeIsExpanded(ctx: FlowEditCtx | null, id: string | null): boolean {
+  return !!ctx && (ctx.detailed || (id != null && ctx.expandedIds.has(id)));
+}
+
+/** The inline settings panel for a node when expanded; else null. Called at the
+ *  top of every custom node so the hook order stays stable. */
 function useDetailed(
   id: string,
   type: string,
   data: unknown
 ): React.ReactNode | null {
   const ctx = useContext(FlowEditContext);
-  if (!ctx?.detailed) return null;
+  if (!nodeIsExpanded(ctx, id) || !ctx) return null;
   return <InlineNodeSettings ctx={ctx} node={{ id, type, data } as Node} />;
+}
+
+/** The expand/collapse caret shown in a node header (when not in global
+ *  Detailed mode). Uses React Flow's node id so no prop threading is needed. */
+function NodeExpandToggle() {
+  const ctx = useContext(FlowEditContext);
+  const nodeId = useNodeId();
+  if (!ctx || ctx.detailed || !nodeId) return null;
+  const expanded = ctx.expandedIds.has(nodeId);
+  return (
+    <button
+      type="button"
+      className="nodrag ml-auto -mr-1 rounded p-0.5 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      title={expanded ? "Collapse" : "Show settings"}
+      onClick={(e) => {
+        e.stopPropagation();
+        ctx.toggleExpanded(nodeId);
+      }}
+    >
+      {expanded ? (
+        <ChevronUp className="h-3.5 w-3.5" />
+      ) : (
+        <ChevronDown className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
 }
 
 function InlineNodeSettings({
@@ -142,6 +179,130 @@ function InlineNodeSettings({
         onDelete={() => ctx.removeNode(node.id)}
         inline
       />
+    </div>
+  );
+}
+
+// --- Variable picker: type {{ in a template field to insert a run variable ---
+interface FlowVar {
+  token: string;
+  label: string;
+}
+const DEFAULT_VARS: FlowVar[] = [
+  { token: "upstream_output", label: "The previous step's output" },
+  { token: "trigger.payload", label: "The trigger's payload" },
+  { token: "trigger.timestamp", label: "When the run started" },
+];
+const LOOP_VARS: FlowVar[] = [
+  { token: "item", label: "The current loop item" },
+  { token: "item_index", label: "The item's number (from 1)" },
+  ...DEFAULT_VARS,
+];
+
+const FIELD_CLASS =
+  "w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]";
+
+function VariableField({
+  value,
+  onChange,
+  variables,
+  multiline,
+  rows,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  variables: FlowVar[];
+  multiline?: boolean;
+  rows?: number;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  // Open the picker when the caret sits just after an unclosed ``{{`` token.
+  const refresh = (val: string, caret: number | null) => {
+    if (caret == null) return setOpen(false);
+    const m = val.slice(0, caret).match(/\{\{\s*([\w.]*)$/);
+    if (m) {
+      setQuery(m[1]);
+      setOpen(true);
+    } else {
+      setOpen(false);
+    }
+  };
+  const handleChange = (
+    e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
+  ) => {
+    onChange(e.target.value);
+    refresh(e.target.value, e.target.selectionStart);
+  };
+  const handleCaret = (
+    e: React.SyntheticEvent<HTMLTextAreaElement | HTMLInputElement>
+  ) => refresh(e.currentTarget.value, e.currentTarget.selectionStart);
+
+  const insert = (token: string) => {
+    const el = ref.current;
+    const caret = el?.selectionStart ?? value.length;
+    const before = value
+      .slice(0, caret)
+      .replace(/\{\{\s*[\w.]*$/, `{{${token}}}`);
+    const next = before + value.slice(caret);
+    onChange(next);
+    setOpen(false);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(before.length, before.length);
+    });
+  };
+
+  const filtered = variables.filter((v) =>
+    v.token.toLowerCase().includes(query.toLowerCase())
+  );
+  const shared = {
+    value,
+    onChange: handleChange,
+    onKeyUp: handleCaret,
+    onClick: handleCaret,
+    onBlur: () => window.setTimeout(() => setOpen(false), 120),
+    placeholder,
+    className: cn(FIELD_CLASS, multiline && "resize-y"),
+  };
+
+  return (
+    <div className="relative">
+      {multiline ? (
+        <textarea
+          ref={ref as React.RefObject<HTMLTextAreaElement>}
+          rows={rows ?? 4}
+          {...shared}
+        />
+      ) : (
+        <input ref={ref as React.RefObject<HTMLInputElement>} {...shared} />
+      )}
+      {open && filtered.length > 0 && (
+        <ul className="nodrag nowheel absolute z-50 mt-1 max-h-44 w-full overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg">
+          {filtered.map((v) => (
+            <li key={v.token}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insert(v.token);
+                }}
+                className="flex w-full flex-col items-start px-2.5 py-1 text-left transition hover:bg-[var(--hover)]"
+              >
+                <code className="text-[11px] text-[var(--accent)]">{`{{${v.token}}}`}</code>
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  {v.label}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -256,12 +417,14 @@ function NodeShell({
   hasIn?: boolean;
   hasOut?: boolean;
 }) {
-  const detailed = useContext(FlowEditContext)?.detailed;
+  const ctx = useContext(FlowEditContext);
+  const nodeId = useNodeId();
+  const expanded = nodeIsExpanded(ctx, nodeId);
   return (
     <div
       className={cn(
         "rounded-card border bg-[var(--surface)] shadow-sm transition",
-        detailed ? "w-80" : "w-60",
+        expanded ? "w-80" : "w-60",
         selected
           ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
           : "border-[var(--border)]"
@@ -281,6 +444,7 @@ function NodeShell({
       >
         {icon}
         <span className="truncate">{label}</span>
+        <NodeExpandToggle />
       </div>
       <div className="px-3 pb-3 text-xs text-[var(--text-muted)]">{children}</div>
       {hasOut && (
@@ -611,12 +775,14 @@ function BranchNode({
   branches: { id: string; label: string; color: string }[];
   body?: React.ReactNode;
 }) {
-  const detailed = useContext(FlowEditContext)?.detailed;
+  const ctx = useContext(FlowEditContext);
+  const nodeId = useNodeId();
+  const expanded = nodeIsExpanded(ctx, nodeId);
   return (
     <div
       className={cn(
         "rounded-card border bg-[var(--surface)] shadow-sm transition",
-        detailed ? "w-80" : "w-60",
+        expanded ? "w-80" : "w-60",
         selected
           ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
           : "border-[var(--border)]"
@@ -634,6 +800,7 @@ function BranchNode({
       >
         {icon}
         <span className="truncate">{label}</span>
+        <NodeExpandToggle />
       </div>
       <div className="px-3 pb-1 text-xs text-[var(--text-muted)]">{header}</div>
       {body && <div className="px-3 pb-1">{body}</div>}
@@ -948,6 +1115,16 @@ export function TaskFlowEditor({
   const [dirty, setDirty] = useState(false);
   // "Detailed" view: each node shows its settings inline (no click-to-open).
   const [detailed, setDetailed] = useState(false);
+  // Individually expanded nodes (header caret) — inline even when Detailed is off.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   // ---- Run replay: paint each node's status onto the canvas as the run's
   // steps come back, so you watch the flow light up like n8n. ----
@@ -1279,6 +1456,8 @@ export function TaskFlowEditor({
   ).length;
   const editCtx: FlowEditCtx = {
     detailed,
+    expandedIds,
+    toggleExpanded,
     boards,
     chats,
     connectors: connectors ?? [],
@@ -1512,9 +1691,10 @@ export function TaskFlowEditor({
       </div>
 
       {/* Node editor — a modal with its own Save so it's right where you edit.
-          Suppressed in Detailed mode, where settings live on the node face. */}
+          Suppressed when the node's settings already live on its face (global
+          Detailed mode, or this node individually expanded). */}
       <Modal
-        open={!!selected && !detailed}
+        open={!!selected && !detailed && !(selected && expandedIds.has(selected.id))}
         onClose={() => setSelectedId(null)}
         title={selected ? nodeModalTitle(selected.type) : ""}
         widthClass="max-w-md"
@@ -1614,20 +1794,21 @@ function NodeInspector({
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">
             Prompt
-            <textarea
-              value={(node.data as unknown as AIPromptData).prompt}
-              onChange={(e) => onPatch({ prompt: e.target.value })}
-              rows={8}
-              className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              placeholder="What should this step do?"
-            />
+            <div className="mt-1">
+              <VariableField
+                value={(node.data as unknown as AIPromptData).prompt}
+                onChange={(v) => onPatch({ prompt: v })}
+                variables={DEFAULT_VARS}
+                multiline
+                rows={8}
+                placeholder="What should this step do?"
+              />
+            </div>
           </label>
           <p className="text-[11px] text-[var(--text-muted)]">
-            Insert{" "}
-            <code className="rounded bg-[var(--surface-2)] px-1">
-              {"{{upstream_output}}"}
-            </code>{" "}
-            to feed the previous step's output into this one.
+            Type{" "}
+            <code className="rounded bg-[var(--surface-2)] px-1">{"{{"}</code> to
+            insert a variable (like the previous step's output).
           </p>
           <label className="text-xs font-medium text-[var(--text-muted)]">
             Model
@@ -1776,13 +1957,16 @@ function NodeInspector({
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">
             Search query
-            <textarea
-              value={(node.data as unknown as WebSearchData).query}
-              onChange={(e) => onPatch({ query: e.target.value })}
-              rows={3}
-              className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              placeholder="Leave blank to search the previous step's output"
-            />
+            <div className="mt-1">
+              <VariableField
+                value={(node.data as unknown as WebSearchData).query}
+                onChange={(v) => onPatch({ query: v })}
+                variables={DEFAULT_VARS}
+                multiline
+                rows={3}
+                placeholder="Leave blank to search the previous step's output"
+              />
+            </div>
           </label>
           <p className="text-[11px] text-[var(--text-muted)]">
             Runs against your configured search provider (SearXNG). Insert{" "}
@@ -1814,12 +1998,14 @@ function NodeInspector({
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">
             URL
-            <input
-              value={(node.data as unknown as FetchPageData).url}
-              onChange={(e) => onPatch({ url: e.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              placeholder="Leave blank to fetch the first URL from upstream"
-            />
+            <div className="mt-1">
+              <VariableField
+                value={(node.data as unknown as FetchPageData).url}
+                onChange={(v) => onPatch({ url: v })}
+                variables={DEFAULT_VARS}
+                placeholder="Leave blank to fetch the first URL from upstream"
+              />
+            </div>
           </label>
           <p className="text-[11px] text-[var(--text-muted)]">
             Fetches the page (SSRF-guarded) and extracts its readable article
@@ -1856,13 +2042,16 @@ function NodeInspector({
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">
             Research question
-            <textarea
-              value={(node.data as unknown as DeepResearchData).query}
-              onChange={(e) => onPatch({ query: e.target.value })}
-              rows={3}
-              className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              placeholder="Leave blank to research the previous step's output"
-            />
+            <div className="mt-1">
+              <VariableField
+                value={(node.data as unknown as DeepResearchData).query}
+                onChange={(v) => onPatch({ query: v })}
+                variables={DEFAULT_VARS}
+                multiline
+                rows={3}
+                placeholder="Leave blank to research the previous step's output"
+              />
+            </div>
           </label>
           <p className="text-[11px] text-[var(--text-muted)]">
             Searches the web (SearXNG), reads the top pages, and writes one cited
@@ -1955,13 +2144,16 @@ function NodeInspector({
               </label>
               <label className="text-xs font-medium text-[var(--text-muted)]">
                 Per-item prompt
-                <textarea
-                  value={l.prompt}
-                  onChange={(e) => onPatch({ prompt: e.target.value })}
-                  rows={5}
-                  className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-                  placeholder="What should run for each item? Use {{item}}"
-                />
+                <div className="mt-1">
+                  <VariableField
+                    value={l.prompt}
+                    onChange={(v) => onPatch({ prompt: v })}
+                    variables={LOOP_VARS}
+                    multiline
+                    rows={5}
+                    placeholder="What should run for each item? Use {{item}}"
+                  />
+                </div>
               </label>
               <label className="text-xs font-medium text-[var(--text-muted)]">
                 Model
@@ -2183,14 +2375,18 @@ function NodeInspector({
                 <>
                   <label className="text-xs font-medium text-[var(--text-muted)]">
                     Value
-                    <input
-                      value={c.value}
-                      onChange={(e) => onPatch({ value: e.target.value })}
-                      className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-                      placeholder={
-                        c.operator === "matches" ? "regular expression" : "text to look for"
-                      }
-                    />
+                    <div className="mt-1">
+                      <VariableField
+                        value={c.value}
+                        onChange={(v) => onPatch({ value: v })}
+                        variables={DEFAULT_VARS}
+                        placeholder={
+                          c.operator === "matches"
+                            ? "regular expression"
+                            : "text to look for"
+                        }
+                      />
+                    </div>
                   </label>
                   <label className="flex items-center justify-between text-xs text-[var(--text)]">
                     <span>Case sensitive</span>
