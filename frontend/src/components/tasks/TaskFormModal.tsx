@@ -159,11 +159,11 @@ export function TaskFormModal({
 
   const buildPayload = (): TaskInput | null => {
     if (!title.trim()) {
-      setError("Give the task a title.");
+      setError("Give the automation a title.");
       return null;
     }
     if (!prompt.trim()) {
-      setError("Write the prompt the task should run each time.");
+      setError("Write the prompt the automation should run each time.");
       return null;
     }
     if (!modelKey) {
@@ -203,7 +203,7 @@ export function TaskFormModal({
       onClose();
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "Could not save the task. Try again."
+        e instanceof Error ? e.message : "Could not save the automation. Try again."
       );
     }
   };
@@ -217,7 +217,7 @@ export function TaskFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? "Edit task" : "New task"}
+      title={editing ? "Edit automation" : "New automation"}
       description="A scheduled prompt that produces a fresh report each run."
       widthClass="max-w-xl"
       footer={
@@ -233,7 +233,7 @@ export function TaskFormModal({
             disabled={busy}
             className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            {busy ? "Saving…" : editing ? "Save changes" : "Create task"}
+            {busy ? "Saving…" : editing ? "Save changes" : "Create automation"}
           </button>
         </>
       }

@@ -139,11 +139,11 @@ export function TaskDetailPage() {
             <button
               onClick={() => navigate("/tasks")}
               className="-ml-1 shrink-0 rounded-md p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
-              aria-label="Back to tasks"
+              aria-label="Back to automations"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
-            <span className="truncate">{task?.title ?? "Task"}</span>
+            <span className="truncate">{task?.title ?? "Automation"}</span>
           </span>
         }
         subtitle={

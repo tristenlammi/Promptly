@@ -544,7 +544,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 await notify_user(
                     user_id=owner_id,
                     category="task_complete",
-                    title=("Task report ready" if ok else "Task failed"),
+                    title=("Automation report ready" if ok else "Automation failed"),
                     body=(
                         f"'{title}' has a new report."
                         if ok

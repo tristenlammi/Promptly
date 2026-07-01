@@ -54,7 +54,7 @@ export function TasksPage() {
   return (
     <>
       <TopNav
-        title="Tasks"
+        title="Automations"
         subtitle="Scheduled prompts that produce a fresh report on their own"
         actions={
           <Button
@@ -62,7 +62,7 @@ export function TasksPage() {
             leftIcon={<Plus className="h-4 w-4" />}
             onClick={openNew}
           >
-            New task
+            New automation
           </Button>
         }
       />
@@ -107,7 +107,7 @@ export function TasksPage() {
                       setMenuFor(menuFor === task.id ? null : task.id);
                     }}
                     className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover-strong)]"
-                    aria-label="Task actions"
+                    aria-label="Automation actions"
                   >
                     <MoreVertical className="h-4 w-4" />
                   </button>
@@ -126,7 +126,7 @@ export function TasksPage() {
                         onClick={async () => {
                           setMenuFor(null);
                           const ok = await confirm({
-                            title: "Delete task",
+                            title: "Delete automation",
                             message: `Delete "${task.title}" and its runs? This can't be undone.`,
                             confirmLabel: "Delete",
                             danger: true,
@@ -134,10 +134,10 @@ export function TasksPage() {
                           if (!ok) return;
                           try {
                             await remove.mutateAsync(task.id);
-                            toast.success("Task deleted");
+                            toast.success("Automation deleted");
                           } catch {
                             toast.error(
-                              "Couldn't delete the task. Please try again."
+                              "Couldn't delete the automation. Please try again."
                             );
                           }
                         }}
@@ -225,9 +225,9 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center rounded-card border border-dashed border-[var(--border)] py-16 text-center">
       <CalendarClock className="h-10 w-10 text-[var(--text-muted)]" />
-      <h2 className="mt-3 text-base font-medium">No tasks yet</h2>
+      <h2 className="mt-3 text-base font-medium">No automations yet</h2>
       <p className="mt-1 max-w-sm text-sm text-[var(--text-muted)]">
-        Create a scheduled task and Promptly will run it automatically — like
+        Create a scheduled automation and Promptly will run it automatically — like
         a daily news digest or a weekly summary — saving each run as its own
         report.
       </p>
@@ -235,7 +235,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         onClick={onCreate}
         className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white"
       >
-        <Plus className="h-4 w-4" /> New task
+        <Plus className="h-4 w-4" /> New automation
       </button>
     </div>
   );

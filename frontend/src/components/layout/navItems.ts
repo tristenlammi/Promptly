@@ -39,7 +39,7 @@ export const OPTIONAL_NAV_KEYS: { key: OptionalNavKey; label: string; descriptio
   },
   {
     key: "tasks",
-    label: "Tasks",
+    label: "Automations",
     description: "Scheduled automations that generate recurring reports.",
   },
   {
@@ -83,7 +83,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     to: "/tasks",
     icon: CalendarClock,
-    label: "Tasks",
+    label: "Automations",
     section: "chat",
     optionalKey: "tasks",
   },
