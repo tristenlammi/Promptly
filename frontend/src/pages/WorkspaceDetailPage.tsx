@@ -72,6 +72,10 @@ import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
+import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
+import { useCreateTask } from "@/hooks/useTasks";
+import { useAvailableModels } from "@/hooks/useProviders";
+import { tasksApi } from "@/api/tasks";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
@@ -118,6 +122,48 @@ export function WorkspaceDetailPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskChooserOpen, setTaskChooserOpen] = useState(false);
+  const createTask = useCreateTask();
+  const { data: taskModels } = useAvailableModels();
+
+  // New automation in this workspace: Simple opens the form (homed here);
+  // Advanced creates a blank automation in this workspace and jumps to the
+  // flow editor.
+  const handleChooseAutomation = async (mode: "simple" | "advanced") => {
+    setTaskChooserOpen(false);
+    if (mode === "simple") {
+      setTaskModalOpen(true);
+      return;
+    }
+    if (!id) return;
+    try {
+      const first = (taskModels ?? [])[0];
+      const created = await createTask.mutateAsync({
+        title: "Untitled automation",
+        prompt: "Describe what this automation should do.",
+        provider_id: first?.provider_id ?? null,
+        model_id: first?.model_id ?? null,
+        use_web_search: false,
+        workspace_id: id,
+        frequency: "daily",
+        hour: 9,
+        minute: 0,
+        weekday: null,
+        day_of_month: null,
+        timezone:
+          Intl.DateTimeFormat().resolvedOptions().timeZone ||
+          "Australia/Brisbane",
+        enabled: true,
+        notify: true,
+        retention_runs: 30,
+      });
+      await tasksApi.promote(created.id);
+      void qc.invalidateQueries({ queryKey: ["workspaces", "tree", id] });
+      navigate(`/tasks/${created.id}?flow=1`);
+    } catch {
+      /* surfaced by the mutation's error handling */
+    }
+  };
   const qc = useQueryClient();
 
   // Persist the open item(s) in the URL so a refresh restores the view
@@ -322,7 +368,7 @@ export function WorkspaceDetailPage() {
                 atSettings={settingsOpen}
                 onNewTask={
                   canEdit && !isArchived
-                    ? () => setTaskModalOpen(true)
+                    ? () => setTaskChooserOpen(true)
                     : undefined
                 }
               />
@@ -507,6 +553,12 @@ export function WorkspaceDetailPage() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onSelectNode={handleSelect}
+      />
+
+      <NewAutomationChooser
+        open={taskChooserOpen}
+        onClose={() => setTaskChooserOpen(false)}
+        onChoose={handleChooseAutomation}
       />
 
       <TaskFormModal

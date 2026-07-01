@@ -11,11 +11,13 @@ import {
 } from "lucide-react";
 
 import {
+  useCreateTask,
   useDeleteTask,
   useRunTask,
   useTasks,
   useUpdateTask,
 } from "@/hooks/useTasks";
+import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi, type Task } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
@@ -37,14 +39,45 @@ export function TasksPage() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
-  const [createMode, setCreateMode] = useState<"simple" | "advanced">("simple");
+  const create = useCreateTask();
+  const { data: models } = useAvailableModels();
 
   const openNew = () => setChooserOpen(true);
-  const handleChoose = (mode: "simple" | "advanced") => {
+  const handleChoose = async (mode: "simple" | "advanced") => {
     setChooserOpen(false);
-    setEditing(null);
-    setCreateMode(mode);
-    setFormOpen(true);
+    if (mode === "simple") {
+      setEditing(null);
+      setFormOpen(true);
+      return;
+    }
+    // Advanced: create a blank automation and drop straight into the flow
+    // editor — no form. Everything (prompt, model, schedule, output) is set
+    // in the canvas. Seeds the first AI step with the default model.
+    try {
+      const first = (models ?? [])[0];
+      const created = await create.mutateAsync({
+        title: "Untitled automation",
+        prompt: "Describe what this automation should do.",
+        provider_id: first?.provider_id ?? null,
+        model_id: first?.model_id ?? null,
+        use_web_search: false,
+        frequency: "daily",
+        hour: 9,
+        minute: 0,
+        weekday: null,
+        day_of_month: null,
+        timezone:
+          Intl.DateTimeFormat().resolvedOptions().timeZone ||
+          "Australia/Brisbane",
+        enabled: true,
+        notify: true,
+        retention_runs: 30,
+      });
+      await tasksApi.promote(created.id);
+      navigate(`/tasks/${created.id}?flow=1`);
+    } catch {
+      toast.error("Couldn't create the automation. Try again.");
+    }
   };
   const openEdit = (task: Task) => {
     setEditing(task);
@@ -224,16 +257,7 @@ export function TasksPage() {
             onClose={() => setFormOpen(false)}
             task={editing}
             onSaved={(t) => {
-              if (editing) return;
-              // Advanced → promote to a flow graph and open the flow editor;
-              // Simple → the classic report view.
-              if (createMode === "advanced") {
-                void tasksApi
-                  .promote(t.id)
-                  .finally(() => navigate(`/tasks/${t.id}?flow=1`));
-              } else {
-                navigate(`/tasks/${t.id}`);
-              }
+              if (!editing) navigate(`/tasks/${t.id}`);
             }}
           />
         </div>
