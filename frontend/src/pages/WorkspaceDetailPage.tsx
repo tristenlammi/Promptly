@@ -1124,16 +1124,31 @@ function WorkspaceNotebookPane({
   const setContext = useSetItemContext(workspaceId);
   const move = useMoveWorkspaceItem(workspaceId);
 
-  const [activeId, setActiveId] = useState<string | null>(null);
-  useEffect(() => {
-    if (pages.length === 0) {
-      setActiveId(null);
-      return;
+  // Remember which page was open, keyed by notebook id, so a refresh restores
+  // it instead of snapping back to the first page.
+  const activeKey = `promptly.notebook.activePage.${node.id}`;
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(activeKey);
+    } catch {
+      return null;
     }
+  });
+  useEffect(() => {
+    // Don't clobber the restored id while the tree is still loading (pages are
+    // momentarily empty on first render); only reconcile once we have pages.
+    if (pages.length === 0) return;
     setActiveId((cur) =>
       cur && pages.some((p) => p.id === cur) ? cur : pages[0].id
     );
   }, [pages]);
+  useEffect(() => {
+    try {
+      if (activeId) localStorage.setItem(activeKey, activeId);
+    } catch {
+      /* ignore quota / private-mode errors */
+    }
+  }, [activeId, activeKey]);
 
   const active = pages.find((p) => p.id === activeId) ?? null;
 
