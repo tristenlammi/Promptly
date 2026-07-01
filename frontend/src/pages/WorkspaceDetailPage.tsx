@@ -77,6 +77,7 @@ import { useCreateTask } from "@/hooks/useTasks";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi } from "@/api/tasks";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
+import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
@@ -158,8 +159,21 @@ export function WorkspaceDetailPage() {
         retention_runs: 30,
       });
       await tasksApi.promote(created.id);
-      void qc.invalidateQueries({ queryKey: ["workspaces", "tree", id] });
-      navigate(`/tasks/${created.id}?flow=1`);
+      await qc.invalidateQueries({ queryKey: ["workspaces", "tree", id] });
+      // Open it inline in the workspace shell (rail + top bar stay put),
+      // instead of navigating to the standalone Tasks page.
+      setSettingsOpen(false);
+      setSecondary(null);
+      setSelected({
+        id: created.id,
+        kind: "task",
+        ref_id: created.id,
+        title: created.title,
+        icon: null,
+        position: 0,
+        indexing_status: null,
+        children: [],
+      });
     } catch {
       /* surfaced by the mutation's error handling */
     }
@@ -242,12 +256,8 @@ export function WorkspaceDetailPage() {
   // Everything — chats included — opens inline in the main pane so the
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
-    // Automations open in the dedicated Tasks detail page (their runs +
-    // schedule live there); they aren't rendered inline in the workspace.
-    if (node.kind === "task") {
-      navigate(`/tasks/${node.ref_id ?? node.id}`);
-      return;
-    }
+    // Automations now render inline in the workspace (rail + top bar stay put),
+    // like notes/canvases — the standalone /tasks page is still one click away.
     // Avoid the same item on both sides of a split.
     if (secondary && secondary.id === node.id) setSecondary(null);
     setSettingsOpen(false);
@@ -617,7 +627,8 @@ function WorkspaceMainPane({
       node.kind === "chat" ||
       node.kind === "board" ||
       node.kind === "sheet" ||
-      node.kind === "container")
+      node.kind === "container" ||
+      node.kind === "task")
   ) {
     return (
       <WorkspaceItemView
@@ -931,6 +942,9 @@ function WorkspaceItemView({
         onOpenItem={onOpenItem}
       />
     );
+  }
+  if (node.kind === "task" && node.ref_id) {
+    return <WorkspaceAutomationPane taskId={node.ref_id} />;
   }
   return null;
 }

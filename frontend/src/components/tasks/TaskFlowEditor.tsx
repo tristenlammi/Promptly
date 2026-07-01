@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  addEdge,
   Background,
   BackgroundVariant,
   Controls,
@@ -9,11 +10,14 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  type Connection,
   type Edge,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useQuery } from "@tanstack/react-query";
 import {
   Brain,
   Clock,
@@ -28,7 +32,9 @@ import {
 } from "lucide-react";
 
 import {
+  tasksApi,
   type AIPromptData,
+  type AvailableTaskConnector,
   type BoardCardOutputData,
   type FlowGraph,
   type FlowNodeModel,
@@ -80,6 +86,13 @@ const TIMEZONES = [
   "Australia/Darwin",
 ];
 const pad = (n: number) => String(n).padStart(2, "0");
+
+function saveErrorMessage(err: unknown): string {
+  const detail = (
+    err as { response?: { data?: { detail?: string } } } | undefined
+  )?.response?.data?.detail;
+  return detail || "Couldn't save the flow.";
+}
 
 function scheduleSummary(d: ScheduleTriggerData): string {
   const t = `${String(d.hour ?? 0).padStart(2, "0")}:${String(d.minute).padStart(2, "0")}`;
@@ -257,6 +270,9 @@ function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
       type: n.type,
       position: n.position,
       data: { ...n.data },
+      // Trigger + output are required singletons — don't let a stray Delete
+      // remove them. AI steps are freely deletable.
+      deletable: n.type === "ai.prompt",
     })),
     edges: graph.edges.map((e) => ({
       id: `${e.source}->${e.target}`,
@@ -321,6 +337,17 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     }
   };
 
+  // MCP connectors this automation can attach (workspace-scoped when homed in
+  // one). Offered per AI step in the inspector.
+  const { data: connectors } = useQuery({
+    queryKey: ["task-connectors", task?.workspace_id ?? null],
+    queryFn: () => tasksApi.availableConnectors(task?.workspace_id ?? null),
+    enabled: !!task,
+  });
+
+  const rfInstance = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -378,69 +405,77 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 
   const aiNodes = nodes.filter((n) => n.type === "ai.prompt");
 
-  // Append an AI step just before the output, rewiring the chain
-  // (…last → new → output). New step inherits the previous step's model so
-  // the chain stays runnable.
-  const addAIStep = useCallback(() => {
-    const output = nodes.find((n) => n.type === "output.report");
-    if (!output) return;
-    const lastAi = aiNodes[aiNodes.length - 1];
-    const prev = lastAi ?? nodes.find((n) => n.type?.startsWith("trigger."));
-    if (!prev) return;
-    const id = `ai_${Date.now().toString(36)}`;
-    const model = (lastAi?.data as unknown as AIPromptData | undefined) ?? null;
-    const newNode: Node = {
-      id,
-      type: "ai.prompt",
-      position: { x: prev.position.x + 280, y: prev.position.y },
-      data: {
-        prompt: "Use the previous step's output:\n\n{{upstream_output}}",
-        provider_id: model?.provider_id ?? null,
-        model_id: model?.model_id ?? null,
-        reasoning_effort: model?.reasoning_effort ?? null,
-        use_web_search: false,
-        connector_ids: [],
-      } as unknown as Record<string, unknown>,
-    };
-    // Shift the output (and anything at/after it) right to make room.
-    setNodes((ns) =>
-      ns
-        .map((n) =>
-          n.id === output.id
-            ? { ...n, position: { ...n.position, x: n.position.x + 280 } }
-            : n
-        )
-        .concat(newNode)
-    );
-    setEdges((es) =>
-      es
-        .filter((e) => !(e.source === prev.id && e.target === output.id))
-        .concat([
-          { id: `${prev.id}->${id}`, source: prev.id, target: id },
-          { id: `${id}->${output.id}`, source: id, target: output.id },
-        ])
-    );
-    setSelectedId(id);
-    setDirty(true);
-  }, [nodes, aiNodes, setNodes, setEdges]);
+  // Free-form wiring: drag from one node's handle to another to connect them.
+  const onConnect = useCallback(
+    (c: Connection) => {
+      setEdges((eds) => addEdge({ ...c, id: `${c.source}->${c.target}` }, eds));
+      setDirty(true);
+    },
+    [setEdges]
+  );
 
-  // Remove an AI step, healing the chain (its predecessor connects straight
-  // to its successor). Disabled for the last remaining AI step.
-  const removeAIStep = useCallback(
+  // Add a *disconnected* AI step — the user wires it in themselves. New steps
+  // inherit an existing step's model so they're runnable once connected.
+  const addAIStep = useCallback(
+    (pos?: { x: number; y: number }) => {
+      const model =
+        (aiNodes[aiNodes.length - 1]?.data as unknown as
+          | AIPromptData
+          | undefined) ?? null;
+      const id = `ai_${Date.now().toString(36)}`;
+      const position =
+        pos ?? { x: 140 + aiNodes.length * 48, y: 280 + aiNodes.length * 24 };
+      const newNode: Node = {
+        id,
+        type: "ai.prompt",
+        position,
+        deletable: true,
+        data: {
+          prompt: "Use the previous step's output:\n\n{{upstream_output}}",
+          provider_id: model?.provider_id ?? null,
+          model_id: model?.model_id ?? null,
+          reasoning_effort: model?.reasoning_effort ?? null,
+          use_web_search: false,
+          connector_ids: [],
+        } as unknown as Record<string, unknown>,
+      };
+      setNodes((ns) => ns.concat(newNode));
+      setSelectedId(id);
+      setDirty(true);
+    },
+    [aiNodes, setNodes]
+  );
+
+  // Right-click pane menu → add an AI step at the clicked position.
+  const addAIStepAtMenu = useCallback(() => {
+    if (menu && rfInstance.current) {
+      addAIStep(
+        rfInstance.current.screenToFlowPosition({ x: menu.x, y: menu.y })
+      );
+    } else {
+      addAIStep();
+    }
+    setMenu(null);
+  }, [menu, addAIStep]);
+
+  // Remove a node + its edges; if it sat mid-chain (one in, one out), heal the
+  // gap so the surrounding chain stays connected.
+  const removeNode = useCallback(
     (id: string) => {
       const incoming = edges.find((e) => e.target === id);
       const outgoing = edges.find((e) => e.source === id);
-      if (!incoming || !outgoing) return;
       setNodes((ns) => ns.filter((n) => n.id !== id));
-      setEdges((es) =>
-        es
-          .filter((e) => e.source !== id && e.target !== id)
-          .concat({
+      setEdges((es) => {
+        const kept = es.filter((e) => e.source !== id && e.target !== id);
+        if (incoming && outgoing) {
+          kept.push({
             id: `${incoming.source}->${outgoing.target}`,
             source: incoming.source,
             target: outgoing.target,
-          })
-      );
+          });
+        }
+        return kept;
+      });
       if (selectedId === id) setSelectedId(null);
       setDirty(true);
     },
@@ -491,7 +526,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           </span>
           <button
             type="button"
-            onClick={addAIStep}
+            onClick={() => addAIStep()}
+            title="Add a disconnected AI step (or right-click the canvas)"
             className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
           >
             <Plus className="h-3.5 w-3.5" /> AI step
@@ -511,16 +547,35 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           </button>
         </div>
 
+        {save.isError && (
+          <div className="absolute left-3 top-12 z-10 max-w-md rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-[11px] text-[var(--danger)]">
+            {saveErrorMessage(save.error)}
+          </div>
+        )}
+
         <ReactFlow
           colorMode={colorMode}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          onInit={(inst) => (rfInstance.current = inst)}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onNodesDelete={() => setDirty(true)}
+          onEdgesDelete={() => setDirty(true)}
           onNodeClick={(_e, n) => setSelectedId(n.id)}
-          onPaneClick={() => setSelectedId(null)}
+          onPaneClick={() => {
+            setSelectedId(null);
+            setMenu(null);
+          }}
+          onPaneContextMenu={(e) => {
+            e.preventDefault();
+            const me = e as React.MouseEvent;
+            setMenu({ x: me.clientX, y: me.clientY });
+          }}
           onNodeDragStop={() => setDirty(true)}
+          deleteKeyCode={["Backspace", "Delete"]}
           fitView
           proOptions={{ hideAttribution: true }}
         >
@@ -528,6 +583,26 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable className="!bg-[var(--surface)]" />
         </ReactFlow>
+
+        {menu && (
+          <>
+            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+            <div className="fixed inset-0 z-20" onClick={() => setMenu(null)} />
+            <div
+              role="menu"
+              className="fixed z-30 min-w-[9rem] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+              style={{ left: menu.x, top: menu.y }}
+            >
+              <button
+                type="button"
+                onClick={addAIStepAtMenu}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Brain className="h-3.5 w-3.5 text-[var(--accent)]" /> Add AI step
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Inspector */}
@@ -535,10 +610,11 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         <NodeInspector
           node={selected}
           boards={boards}
-          canDelete={selected.type === "ai.prompt" && aiNodes.length > 1}
+          connectors={connectors ?? []}
+          canDelete={selected.type === "ai.prompt"}
           onPatch={patchSelected}
           onSetOutputType={setOutputType}
-          onDelete={() => removeAIStep(selected.id)}
+          onDelete={() => removeNode(selected.id)}
         />
       )}
     </div>
@@ -548,6 +624,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 function NodeInspector({
   node,
   boards,
+  connectors,
   canDelete,
   onPatch,
   onSetOutputType,
@@ -555,6 +632,7 @@ function NodeInspector({
 }: {
   node: Node;
   boards: BoardOption[];
+  connectors: AvailableTaskConnector[];
   canDelete: boolean;
   onPatch: (patch: Record<string, unknown>) => void;
   onSetOutputType: (type: string) => void;
@@ -622,6 +700,49 @@ function NodeInspector({
               className="h-4 w-4 accent-[var(--accent)]"
             />
           </label>
+          {connectors.length > 0 && (
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs font-medium text-[var(--text-muted)]">
+                  Connectors
+                </span>
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  {ai.connector_ids.length} selected
+                </span>
+              </div>
+              <div className="max-h-36 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] p-1">
+                {connectors.map((c) => {
+                  const on = ai.connector_ids.includes(c.id);
+                  return (
+                    <label
+                      key={c.id}
+                      className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[var(--hover)]"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() =>
+                          onPatch({
+                            connector_ids: on
+                              ? ai.connector_ids.filter((x) => x !== c.id)
+                              : [...ai.connector_ids, c.id],
+                          })
+                        }
+                        className="h-3.5 w-3.5 accent-[var(--accent)]"
+                      />
+                      <span className="truncate text-[var(--text)]">{c.name}</span>
+                      <span className="ml-auto shrink-0 text-[10px] text-[var(--text-muted)]">
+                        {c.tool_count} tools
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+                Read-only tools this step can call.
+              </p>
+            </div>
+          )}
           {canDelete && (
             <button
               type="button"
