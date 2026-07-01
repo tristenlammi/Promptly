@@ -42,11 +42,13 @@ import {
   Maximize2,
   MessageSquare,
   Minimize2,
+  NotebookPen,
   Plus,
   Repeat2,
   ScanText,
   Save,
   Search,
+  Sheet,
   Split,
   Telescope,
   Timer,
@@ -68,6 +70,8 @@ import {
   type FetchPageData,
   type LoopData,
   type MergeData,
+  type NoteOutputData,
+  type SheetOutputData,
   type SummariseData,
   type FlowGraph,
   type FlowNodeModel,
@@ -100,6 +104,7 @@ interface FlowEditCtx {
   toggleExpanded: (id: string) => void;
   boards: BoardOption[];
   chats: BoardOption[];
+  folders: BoardOption[];
   connectors: AvailableTaskConnector[];
   inWorkspace: boolean;
   outputsCount: number;
@@ -171,6 +176,7 @@ function InlineNodeSettings({
         node={node}
         boards={ctx.boards}
         chats={ctx.chats}
+        folders={ctx.folders}
         inWorkspace={ctx.inWorkspace}
         connectors={ctx.connectors}
         canDelete={canDelete}
@@ -322,7 +328,9 @@ function nodeModalTitle(type?: string): string {
   if (
     type === "output.report" ||
     type === "output.board_card" ||
-    type === "output.chat_message"
+    type === "output.chat_message" ||
+    type === "output.note" ||
+    type === "output.sheet"
   )
     return "Output";
   if (type?.startsWith("trigger.")) return "Schedule";
@@ -960,6 +968,46 @@ function SendMessageNode({ id, type, data, selected }: NodeProps) {
   );
 }
 
+function NoteOutNode({ id, type, data, selected }: NodeProps) {
+  const d = data as unknown as NoteOutputData;
+  const detail = useDetailed(id, type ?? "output.note", data);
+  return (
+    <NodeShell
+      icon={<NotebookPen className="h-3.5 w-3.5" />}
+      label="Create note"
+      accent="var(--warning)"
+      selected={selected}
+      hasIn
+    >
+      {detail ?? (
+        <div className="truncate text-[var(--text)]">
+          {d.title ? `"${d.title}"` : "New note from the result"}
+        </div>
+      )}
+    </NodeShell>
+  );
+}
+
+function SheetOutNode({ id, type, data, selected }: NodeProps) {
+  const d = data as unknown as SheetOutputData;
+  const detail = useDetailed(id, type ?? "output.sheet", data);
+  return (
+    <NodeShell
+      icon={<Sheet className="h-3.5 w-3.5" />}
+      label="Create sheet"
+      accent="var(--warning)"
+      selected={selected}
+      hasIn
+    >
+      {detail ?? (
+        <div className="truncate text-[var(--text)]">
+          {d.title ? `"${d.title}"` : "New sheet from the result"}
+        </div>
+      )}
+    </NodeShell>
+  );
+}
+
 const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
@@ -977,6 +1025,8 @@ const nodeTypes = {
   "output.report": OutputNode,
   "output.board_card": BoardCardNode,
   "output.chat_message": SendMessageNode,
+  "output.note": NoteOutNode,
+  "output.sheet": SheetOutNode,
 };
 
 // Interior "do work" node types (processing + control) are freely deletable;
@@ -1082,6 +1132,24 @@ export function TaskFlowEditor({
       }
     };
     walk(tree ?? []);
+    return out;
+  }, [tree]);
+
+  // Folders — where a "Create note/sheet" output can file its new item.
+  const folders = useMemo<BoardOption[]>(() => {
+    const out: BoardOption[] = [];
+    const walk = (ns: WorkspaceItemNode[], prefix: string) => {
+      for (const n of ns) {
+        if (n.kind === "folder") {
+          const label = prefix + (n.title || "Folder");
+          out.push({ id: n.id, title: label });
+          walk(n.children ?? [], label + " / ");
+        } else if (n.children?.length) {
+          walk(n.children, prefix);
+        }
+      }
+    };
+    walk(tree ?? [], "");
     return out;
   }, [tree]);
 
@@ -1256,6 +1324,8 @@ export function TaskFlowEditor({
           priority: "medium",
         },
         "output.chat_message": { chat_item_id: null },
+        "output.note": { title: "", folder_item_id: null },
+        "output.sheet": { title: "", folder_item_id: null },
         "output.report": { notify: true },
       };
       setNodes((ns) =>
@@ -1460,6 +1530,7 @@ export function TaskFlowEditor({
     toggleExpanded,
     boards,
     chats,
+    folders,
     connectors: connectors ?? [],
     inWorkspace: !!task?.workspace_id,
     outputsCount,
@@ -1731,6 +1802,7 @@ export function TaskFlowEditor({
             node={selected}
             boards={boards}
             chats={chats}
+            folders={folders}
             inWorkspace={!!task?.workspace_id}
             connectors={connectors ?? []}
             canDelete={
@@ -1758,6 +1830,7 @@ function NodeInspector({
   node,
   boards,
   chats,
+  folders,
   inWorkspace,
   connectors,
   canDelete,
@@ -1769,6 +1842,7 @@ function NodeInspector({
   node: Node;
   boards: BoardOption[];
   chats: BoardOption[];
+  folders: BoardOption[];
   inWorkspace: boolean;
   connectors: AvailableTaskConnector[];
   canDelete: boolean;
@@ -2519,6 +2593,8 @@ function NodeInspector({
                 ? [
                     { t: "output.board_card", label: "Board card" },
                     { t: "output.chat_message", label: "Chat message" },
+                    { t: "output.note", label: "Note" },
+                    { t: "output.sheet", label: "Sheet" },
                   ]
                 : []),
             ].map((o) => (
@@ -2690,6 +2766,54 @@ function NodeInspector({
                 </label>
               </>
             ))}
+
+          {(node.type === "output.note" || node.type === "output.sheet") &&
+            (() => {
+              const isNote = node.type === "output.note";
+              const d = node.data as unknown as NoteOutputData & SheetOutputData;
+              return (
+                <>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    {isNote
+                      ? "Creates a new note from the result (Markdown becomes rich text) each run."
+                      : "Creates a new spreadsheet from the result each run — JSON, a Markdown table, or CSV/TSV rows are parsed into cells."}
+                  </p>
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Title
+                    <div className="mt-1">
+                      <VariableField
+                        value={d.title}
+                        onChange={(v) => onPatch({ title: v })}
+                        variables={DEFAULT_VARS}
+                        placeholder="Leave blank to use the result's first line"
+                      />
+                    </div>
+                  </label>
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Folder{" "}
+                    <span className="font-normal text-[10px]">(optional)</span>
+                    <select
+                      value={d.folder_item_id ?? ""}
+                      onChange={(e) =>
+                        onPatch({ folder_item_id: e.target.value || null })
+                      }
+                      className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                    >
+                      <option value="">Workspace root</option>
+                      {folders.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="text-[10px] text-[var(--text-muted)]">
+                    Tip: point scheduled runs at a dedicated folder to keep the
+                    workspace tidy.
+                  </p>
+                </>
+              );
+            })()}
         </>
       )}
 

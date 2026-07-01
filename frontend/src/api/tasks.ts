@@ -190,7 +190,9 @@ export type FlowNodeType =
   | "control.router"
   | "output.report"
   | "output.board_card"
-  | "output.chat_message";
+  | "output.chat_message"
+  | "output.note"
+  | "output.sheet";
 
 export interface FlowNodeModel {
   id: string;
@@ -260,6 +262,16 @@ export interface ExtractData {
 
 export interface ChatMessageOutputData {
   chat_item_id: string | null;
+}
+
+export interface NoteOutputData {
+  title: string;
+  folder_item_id: string | null;
+}
+
+export interface SheetOutputData {
+  title: string;
+  folder_item_id: string | null;
 }
 
 export interface MergeData {

@@ -69,6 +69,9 @@ class NodeType:
     OUTPUT_BOARD_CARD = "output.board_card"
     # Workspace-output node: posts the result as a message in a workspace chat.
     OUTPUT_CHAT_MESSAGE = "output.chat_message"
+    # Workspace-output nodes: create a new note / sheet from the result.
+    OUTPUT_NOTE = "output.note"
+    OUTPUT_SHEET = "output.sheet"
 
 
 # Every terminal "what to do with the result" node kind. output.report is the
@@ -79,6 +82,8 @@ OUTPUT_TYPES = frozenset(
         NodeType.OUTPUT_REPORT,
         NodeType.OUTPUT_BOARD_CARD,
         NodeType.OUTPUT_CHAT_MESSAGE,
+        NodeType.OUTPUT_NOTE,
+        NodeType.OUTPUT_SHEET,
     }
 )
 
@@ -332,6 +337,25 @@ class ChatMessageOutputData(BaseModel):
     ``chat_item_id`` is the ``kind='chat'`` WorkspaceItem to post into."""
 
     chat_item_id: str | None = None
+
+
+class NoteOutputData(BaseModel):
+    """Workspace-output: create a new note from the result (Markdown → rich
+    text). ``title`` is a template (blank → the output's first line);
+    ``folder_item_id`` optionally files it under a workspace folder so scheduled
+    notes stay tidy."""
+
+    title: str = ""
+    folder_item_id: str | None = None
+
+
+class SheetOutputData(BaseModel):
+    """Workspace-output: create a new spreadsheet from the result (parsed into
+    rows — JSON array, Markdown table, or CSV/TSV). ``title`` template +
+    optional ``folder_item_id``."""
+
+    title: str = ""
+    folder_item_id: str | None = None
 
 
 class ReportOutputData(BaseModel):
@@ -707,6 +731,8 @@ __all__ = [
     "SummariseData",
     "ExtractData",
     "ChatMessageOutputData",
+    "NoteOutputData",
+    "SheetOutputData",
     "WebSearchData",
     "FetchPageData",
     "DeepResearchData",

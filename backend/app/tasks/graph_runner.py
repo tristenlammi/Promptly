@@ -25,7 +25,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.models import User
-from app.chat.models import Conversation, Message, WorkspaceItem, WorkspaceTask
+from app.chat.models import (
+    Conversation,
+    Message,
+    Spreadsheet,
+    Workspace,
+    WorkspaceItem,
+    WorkspaceTask,
+)
 from app.tasks.flow_graph import (
     AIPromptData,
     BoardCardOutputData,
@@ -41,9 +48,11 @@ from app.tasks.flow_graph import (
     MergeData,
     DelayData,
     NodeType,
+    NoteOutputData,
     OUTPUT_TYPES,
     RouterData,
     ScheduleTriggerData,
+    SheetOutputData,
     SummariseData,
     WebSearchData,
     is_executable_graph,
@@ -671,6 +680,199 @@ async def _post_chat_message(
     return f'Posted to "{title or "chat"}".'
 
 
+async def _resolve_workspace_and_folder(
+    db, *, task: Task, folder_item_id: str | None
+) -> tuple[Workspace, User, uuid.UUID | None]:
+    """Shared setup for note/sheet outputs: the workspace, its owner (whose
+    Drive backs notes), and the validated target-folder item id (or None)."""
+    if task.workspace_id is None:
+        raise TaskRunError(
+            "This automation isn't in a workspace, so it can't create items."
+        )
+    ws = await db.get(Workspace, task.workspace_id)
+    if ws is None:
+        raise TaskRunError("This automation's workspace no longer exists.")
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        raise TaskRunError("The workspace owner is missing.")
+    parent_id: uuid.UUID | None = None
+    if folder_item_id:
+        folder = await db.get(WorkspaceItem, uuid.UUID(folder_item_id))
+        if folder is None or folder.kind != "folder" or folder.workspace_id != ws.id:
+            raise TaskRunError(
+                "The folder this automation files into no longer exists in its "
+                "workspace."
+            )
+        parent_id = folder.id
+    return ws, owner, parent_id
+
+
+async def _write_note(db, *, task: Task, data: NoteOutputData, text: str) -> str:
+    """Workspace-output: create a new note from the Markdown result."""
+    from app.files.document_build import markdown_to_doc_update
+    from app.files.document_render import (
+        extract_text_from_html,
+        render_html_from_update,
+    )
+    from app.files.documents_router import create_blank_document
+    from app.files.models import DocumentState
+    from app.files.storage import absolute_path
+    from app.workspaces.items_router import _next_position, _resolve_subfolder_id
+
+    ws, owner, parent_id = await _resolve_workspace_and_folder(
+        db, task=task, folder_item_id=data.folder_item_id
+    )
+    title = (data.title.strip() and _first_line_title(data.title.strip())) or (
+        _first_line_title(text)
+    )
+
+    notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
+    doc = await create_blank_document(
+        db, owner_id=owner.id, folder_id=notes_folder_id, name=title
+    )
+    # Seed the Y.Doc so the note opens already populated, and mirror it onto the
+    # HTML blob + content_text (preview / download / RAG) like a normal save.
+    update = markdown_to_doc_update(text)
+    ds = await db.get(DocumentState, doc.id)
+    if ds is not None:
+        ds.yjs_update = update
+        ds.version = (ds.version or 0) + 1
+    html = render_html_from_update(update)
+    doc.content_text = extract_text_from_html(html) or None
+    try:
+        with open(absolute_path(doc.storage_path), "w", encoding="utf-8") as f:
+            f.write(html)
+        doc.size_bytes = len(html.encode("utf-8"))
+    except OSError:
+        logger.warning("note blob write failed", exc_info=True)
+
+    pos = await _next_position(db, ws.id, parent_id)
+    item = WorkspaceItem(
+        workspace_id=ws.id,
+        parent_id=parent_id,
+        kind="note",
+        ref_id=doc.id,
+        title=title,
+        position=pos,
+        indexing_status="queued",
+    )
+    db.add(item)
+    await db.commit()
+
+    try:
+        from app.workspaces.knowledge import index_note_for_workspace
+
+        await index_note_for_workspace(ws.id, item.id)
+    except Exception:  # noqa: BLE001 — indexing must never fail the run
+        logger.warning("note index after creation failed", exc_info=True)
+    return f'Created note "{title}".'
+
+
+def _rows_from_text(text: str) -> list[list[str]]:
+    """Best-effort parse of the upstream text into a grid of rows — a JSON array
+    (of objects → header + values, of arrays, or of scalars), a Markdown table,
+    or CSV/TSV lines."""
+    t = text.strip()
+    try:
+        parsed = json.loads(t)
+    except (json.JSONDecodeError, ValueError):
+        parsed = None
+    if isinstance(parsed, list) and parsed:
+        if isinstance(parsed[0], dict):
+            headers: list[str] = []
+            for row in parsed:
+                for k in row.keys():
+                    if k not in headers:
+                        headers.append(str(k))
+            out = [headers]
+            for row in parsed:
+                out.append([_cell(row.get(h, "")) for h in headers])
+            return out
+        if isinstance(parsed[0], list):
+            return [[_cell(c) for c in row] for row in parsed]
+        return [[_cell(x)] for x in parsed]
+
+    lines = [ln for ln in t.splitlines() if ln.strip()]
+    # Markdown table (first couple of lines contain pipes).
+    if len(lines) >= 2 and all("|" in ln for ln in lines[:2]):
+        rows: list[list[str]] = []
+        for ln in lines:
+            if set(ln.strip()) <= set("|-: "):
+                continue  # separator row
+            rows.append([c.strip() for c in ln.strip().strip("|").split("|")])
+        if rows:
+            return rows
+    # CSV / TSV.
+    rows = []
+    for ln in lines:
+        sep = "\t" if "\t" in ln else ","
+        rows.append([c.strip() for c in ln.split(sep)])
+    return rows or [[t]]
+
+
+def _cell(v) -> str:
+    if isinstance(v, (dict, list)):
+        return json.dumps(v, ensure_ascii=False)
+    return str(v)
+
+
+async def _write_sheet(db, *, task: Task, data: SheetOutputData, text: str) -> str:
+    """Workspace-output: create a new spreadsheet from the result."""
+    from app.workspaces.items_router import _next_position
+
+    ws, _owner, parent_id = await _resolve_workspace_and_folder(
+        db, task=task, folder_item_id=data.folder_item_id
+    )
+    title = (data.title.strip() and _first_line_title(data.title.strip())) or (
+        _first_line_title(text)
+    )
+    rows = _rows_from_text(text)[:1000]  # cap runaway output
+    celldata = [
+        {"r": r, "c": c, "v": {"v": val, "m": val}}
+        for r, row in enumerate(rows)
+        for c, val in enumerate(row)
+    ]
+    ncols = max((len(r) for r in rows), default=1)
+    workbook = [
+        {
+            "name": "Sheet1",
+            "index": uuid.uuid4().hex,
+            "order": 0,
+            "status": 1,
+            "row": max(len(rows) + 4, 24),
+            "column": max(ncols + 2, 12),
+            "celldata": celldata,
+        }
+    ]
+    sheet = Spreadsheet(
+        workspace_id=ws.id,
+        title=title,
+        data=workbook,
+        content_text="\n".join("\t".join(r) for r in rows) or None,
+    )
+    db.add(sheet)
+    await db.flush()  # assign sheet.id before the item links to it
+    pos = await _next_position(db, ws.id, parent_id)
+    item = WorkspaceItem(
+        workspace_id=ws.id,
+        parent_id=parent_id,
+        kind="sheet",
+        ref_id=sheet.id,
+        title=title,
+        position=pos,
+    )
+    db.add(item)
+    await db.commit()
+
+    try:
+        from app.workspaces.knowledge import index_sheet_for_workspace
+
+        await index_sheet_for_workspace(ws.id, item.id)
+    except Exception:  # noqa: BLE001 — indexing must never fail the run
+        logger.warning("sheet index after creation failed", exc_info=True)
+    return f'Created sheet "{title}" ({len(rows)} rows).'
+
+
 async def _run_deep_research_node(
     node: FlowNode,
     ctx: dict[str, str],
@@ -1216,6 +1418,44 @@ async def run_graph_flow(
                     "node_id": nid,
                     "type": node.type,
                     "label": "Send message",
+                    "status": "success",
+                    "output": note,
+                }
+            )
+
+        elif node.type == NodeType.OUTPUT_NOTE:
+            note = await _write_note(
+                db,
+                task=task,
+                data=NoteOutputData.model_validate(node.data),
+                text=upstream,
+            )
+            action_notes.append(note)
+            outputs[nid] = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Create note",
+                    "status": "success",
+                    "output": note,
+                }
+            )
+
+        elif node.type == NodeType.OUTPUT_SHEET:
+            note = await _write_sheet(
+                db,
+                task=task,
+                data=SheetOutputData.model_validate(node.data),
+                text=upstream,
+            )
+            action_notes.append(note)
+            outputs[nid] = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Create sheet",
                     "status": "success",
                     "output": note,
                 }
