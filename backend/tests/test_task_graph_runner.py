@@ -16,15 +16,18 @@ from app.tasks import graph_runner
 from app.tasks.flow_graph import (
     AIPromptData,
     BoardCardOutputData,
+    ChatMessageOutputData,
     ConditionData,
     DeepResearchData,
     DelayData,
+    ExtractData,
     FlowEdge,
     FlowGraph,
     FlowNode,
     LoopData,
     MergeData,
     NodeType,
+    SummariseData,
     ReportOutputData,
     RouterCategory,
     RouterData,
@@ -693,6 +696,81 @@ async def test_delay_caps_long_pauses(patched_model, monkeypatch):
         trigger_payload="hi",
     )
     assert slept == [600]  # capped at _DELAY_CAP_SECONDS
+
+
+async def test_summarise_and_extract_presets_run(patched_model):
+    nodes = [
+        _trigger(),
+        _ai("a0", "hello"),
+        FlowNode(
+            id="sum",
+            type=NodeType.SUMMARISE,
+            data=SummariseData(
+                length="short", provider_id=str(uuid.uuid4()), model_id="m"
+            ).model_dump(),
+        ),
+        FlowNode(
+            id="ext",
+            type=NodeType.EXTRACT,
+            data=ExtractData(
+                spec="name, date", provider_id=str(uuid.uuid4()), model_id="m"
+            ).model_dump(),
+        ),
+        _report("out"),
+    ]
+    chain = ["trigger", "a0", "sum", "ext", "out"]
+    edges = [FlowEdge(source=a, target=b) for a, b in zip(chain, chain[1:])]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _s, usage, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["sum"]["label"] == "Summarise" and by["sum"]["status"] == "success"
+    assert by["ext"]["label"] == "Extract" and by["ext"]["status"] == "success"
+    assert "OUT[" in text  # the presets ran through the (faked) model
+    assert usage["completion_tokens"] == 6  # a0 + summarise + extract, 2 each
+
+
+async def test_chat_message_output_posts_and_notes(patched_model, monkeypatch):
+    posted = {}
+
+    async def fake_post(db, *, task, data, text):
+        posted["text"] = text
+        posted["chat"] = data.chat_item_id
+        return 'Posted to "Team chat".'
+
+    monkeypatch.setattr(graph_runner, "_post_chat_message", fake_post)
+
+    nodes = [
+        _trigger(),
+        _ai("a0", "hi"),
+        FlowNode(
+            id="chat",
+            type=NodeType.OUTPUT_CHAT_MESSAGE,
+            data=ChatMessageOutputData(chat_item_id="c1").model_dump(),
+        ),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="a0", target="chat"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    assert posted["text"] == "OUT[hi]"
+    assert posted["chat"] == "c1"
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["chat"]["label"] == "Send message"
+    assert 'Posted to "Team chat".' in text  # note appended to the run report
 
 
 async def test_cyclic_flow_is_rejected(patched_model):

@@ -45,6 +45,9 @@ class NodeType:
     TRIGGER_SCHEDULE = "trigger.schedule"
     TRIGGER_MANUAL = "trigger.manual"
     AI_PROMPT = "ai.prompt"
+    # AI presets — specialised prompts that "just work" on the upstream text.
+    SUMMARISE = "ai.summarise"
+    EXTRACT = "ai.extract"
     # Non-AI processing nodes — each takes the upstream text, does one job, and
     # emits text for the next node. The first steps toward an n8n-style catalog.
     SEARCH_WEB = "search.web"
@@ -64,13 +67,19 @@ class NodeType:
     OUTPUT_REPORT = "output.report"
     # Workspace-output node: files the AI result as a card on a workspace board.
     OUTPUT_BOARD_CARD = "output.board_card"
+    # Workspace-output node: posts the result as a message in a workspace chat.
+    OUTPUT_CHAT_MESSAGE = "output.chat_message"
 
 
 # Every terminal "what to do with the result" node kind. output.report is the
 # plain run report (a Simple task); the workspace-output kinds write into the
 # task's home workspace and are Advanced-only.
 OUTPUT_TYPES = frozenset(
-    {NodeType.OUTPUT_REPORT, NodeType.OUTPUT_BOARD_CARD}
+    {
+        NodeType.OUTPUT_REPORT,
+        NodeType.OUTPUT_BOARD_CARD,
+        NodeType.OUTPUT_CHAT_MESSAGE,
+    }
 )
 
 
@@ -82,6 +91,8 @@ OUTPUT_TYPES = frozenset(
 PROCESSING_TYPES = frozenset(
     {
         NodeType.AI_PROMPT,
+        NodeType.SUMMARISE,
+        NodeType.EXTRACT,
         NodeType.SEARCH_WEB,
         NodeType.FETCH_PAGE,
         NodeType.DEEP_RESEARCH,
@@ -172,6 +183,27 @@ class AIPromptData(BaseModel):
     reasoning_effort: str | None = None
     use_web_search: bool = False
     connector_ids: list[str] = Field(default_factory=list)
+
+
+class SummariseData(BaseModel):
+    """A preset AI step that condenses the upstream text. ``length`` tunes how
+    tight the summary is."""
+
+    length: str = "medium"  # short | medium | detailed
+    provider_id: str | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
+
+
+class ExtractData(BaseModel):
+    """A preset AI step that pulls structured JSON out of the upstream text.
+    ``spec`` describes the wanted fields (a plain list or a JSON schema); the
+    model returns a single JSON object matching it."""
+
+    spec: str = ""
+    provider_id: str | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
 
 
 class WebSearchData(BaseModel):
@@ -293,6 +325,13 @@ def branch_handles(node: FlowNode) -> list[str]:
             return []
         return [c.id for c in cats if c.id]
     return []
+
+
+class ChatMessageOutputData(BaseModel):
+    """Workspace-output: post the result as a message in a workspace chat.
+    ``chat_item_id`` is the ``kind='chat'`` WorkspaceItem to post into."""
+
+    chat_item_id: str | None = None
 
 
 class ReportOutputData(BaseModel):
@@ -665,6 +704,9 @@ __all__ = [
     "FlowGraph",
     "ScheduleTriggerData",
     "AIPromptData",
+    "SummariseData",
+    "ExtractData",
+    "ChatMessageOutputData",
     "WebSearchData",
     "FetchPageData",
     "DeepResearchData",

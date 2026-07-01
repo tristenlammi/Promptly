@@ -25,13 +25,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.models import User
-from app.chat.models import WorkspaceItem, WorkspaceTask
+from app.chat.models import Conversation, Message, WorkspaceItem, WorkspaceTask
 from app.tasks.flow_graph import (
     AIPromptData,
     BoardCardOutputData,
+    ChatMessageOutputData,
     ConditionData,
     CONTROL_TYPES,
     DeepResearchData,
+    ExtractData,
     FetchPageData,
     FlowGraph,
     FlowNode,
@@ -42,6 +44,7 @@ from app.tasks.flow_graph import (
     OUTPUT_TYPES,
     RouterData,
     ScheduleTriggerData,
+    SummariseData,
     WebSearchData,
     is_executable_graph,
     topological_order,
@@ -529,6 +532,131 @@ async def _run_loop_node(
     return aggregated, sources, usage, record
 
 
+_SUMMARY_LENGTH = {
+    "short": "1-2 sentences",
+    "medium": "a short paragraph",
+    "detailed": "a few concise paragraphs",
+}
+
+
+async def _run_summarise_node(
+    node: FlowNode, ctx: dict[str, str], *, db, user: User, tz: str, now_local: str
+) -> tuple[str, list[dict], dict, dict]:
+    """Preset AI step: summarise the upstream text → (text, sources, usage, record)."""
+    data = SummariseData.model_validate(node.data)
+    provider, model_id = await _resolve_provider(
+        uuid.UUID(data.provider_id) if data.provider_id else None,
+        data.model_id,
+        db,
+    )
+    length = _SUMMARY_LENGTH.get(data.length, "a short paragraph")
+    system = (
+        "You are a summariser running inside an automation, with no human "
+        "watching. Produce ONLY a clear, faithful summary of the text below — "
+        f"about {length}. No preamble ('Here is'), no sign-off, no meta "
+        f"commentary. The current date/time is {now_local} ({tz})."
+    )
+    prompt = ctx.get("upstream_output", "") or "(no input text)"
+    text, sources, usage = await _generate(
+        provider=provider,
+        model_id=model_id,
+        system=system,
+        prompt=prompt,
+        user=user,
+        use_web_search=False,
+        reasoning_effort=data.reasoning_effort,
+        mcp_schemas=[],
+        mcp_dispatch={},
+        db=db,
+    )
+    record = {
+        "node_id": node.id,
+        "type": NodeType.SUMMARISE,
+        "label": "Summarise",
+        "status": "success",
+        "output": text,
+        "prompt_tokens": usage.get("prompt_tokens") or None,
+        "completion_tokens": usage.get("completion_tokens") or None,
+    }
+    return text, sources, usage, record
+
+
+async def _run_extract_node(
+    node: FlowNode, ctx: dict[str, str], *, db, user: User, tz: str, now_local: str
+) -> tuple[str, list[dict], dict, dict]:
+    """Preset AI step: extract structured JSON from the upstream text."""
+    data = ExtractData.model_validate(node.data)
+    provider, model_id = await _resolve_provider(
+        uuid.UUID(data.provider_id) if data.provider_id else None,
+        data.model_id,
+        db,
+    )
+    spec = data.spec.strip() or "the key fields present in the text"
+    system = (
+        "You extract structured data from text inside an automation. Return "
+        "ONLY a single valid JSON object — no markdown, no code fences, no prose "
+        "around it — with fields matching this spec:\n"
+        f"{spec}\n"
+        "Use null for anything the text doesn't provide; never invent values. "
+        f"The current date/time is {now_local} ({tz})."
+    )
+    prompt = ctx.get("upstream_output", "") or "(no input text)"
+    text, sources, usage = await _generate(
+        provider=provider,
+        model_id=model_id,
+        system=system,
+        prompt=prompt,
+        user=user,
+        use_web_search=False,
+        reasoning_effort=data.reasoning_effort,
+        mcp_schemas=[],
+        mcp_dispatch={},
+        db=db,
+    )
+    record = {
+        "node_id": node.id,
+        "type": NodeType.EXTRACT,
+        "label": "Extract",
+        "status": "success",
+        "output": text,
+        "prompt_tokens": usage.get("prompt_tokens") or None,
+        "completion_tokens": usage.get("completion_tokens") or None,
+    }
+    return text, sources, usage, record
+
+
+async def _post_chat_message(
+    db, *, task: Task, data: ChatMessageOutputData, text: str
+) -> str:
+    """Workspace-output: post the result as an assistant message in a workspace
+    chat. Appends to the chat's active thread so it shows up immediately."""
+    if task.workspace_id is None:
+        raise TaskRunError(
+            "This automation isn't in a workspace, so it can't post to a chat."
+        )
+    if not data.chat_item_id:
+        raise TaskRunError("The send-message step has no chat selected.")
+    item = await db.get(WorkspaceItem, uuid.UUID(data.chat_item_id))
+    if item is None or item.kind != "chat" or item.workspace_id != task.workspace_id:
+        raise TaskRunError(
+            "The chat this automation posts to no longer exists in its workspace."
+        )
+    conv = await db.get(Conversation, item.ref_id)
+    if conv is None:
+        raise TaskRunError("The target chat has no conversation to post into.")
+    msg = Message(
+        conversation_id=conv.id,
+        parent_id=conv.active_leaf_message_id,
+        role="assistant",
+        content=text or "(empty automation result)",
+    )
+    db.add(msg)
+    await db.flush()  # assign msg.id before pointing the thread leaf at it
+    conv.active_leaf_message_id = msg.id
+    await db.commit()
+    return f'Posted to "{item.title or "chat"}".'
+
+
 async def _run_deep_research_node(
     node: FlowNode,
     ctx: dict[str, str],
@@ -940,6 +1068,26 @@ async def run_graph_flow(
             outputs[nid] = text
             last_processing_output = text
 
+        elif node.type == NodeType.SUMMARISE:
+            text, node_sources, s_usage, record = await _run_summarise_node(
+                node, ctx, db=db, user=user, tz=tz, now_local=now_local
+            )
+            sources.extend(node_sources)
+            _accum_usage(s_usage)
+            node_runs.append(record)
+            outputs[nid] = text
+            last_processing_output = text
+
+        elif node.type == NodeType.EXTRACT:
+            text, node_sources, e_usage, record = await _run_extract_node(
+                node, ctx, db=db, user=user, tz=tz, now_local=now_local
+            )
+            sources.extend(node_sources)
+            _accum_usage(e_usage)
+            node_runs.append(record)
+            outputs[nid] = text
+            last_processing_output = text
+
         elif node.type == NodeType.DEEP_RESEARCH:
             text, node_sources, dr_usage, record = await _run_deep_research_node(
                 node, ctx, db=db, user=user, tz=tz, now_local=now_local
@@ -1035,6 +1183,25 @@ async def run_graph_flow(
                     "node_id": nid,
                     "type": node.type,
                     "label": "Create card",
+                    "status": "success",
+                    "output": note,
+                }
+            )
+
+        elif node.type == NodeType.OUTPUT_CHAT_MESSAGE:
+            note = await _post_chat_message(
+                db,
+                task=task,
+                data=ChatMessageOutputData.model_validate(node.data),
+                text=upstream,
+            )
+            action_notes.append(note)
+            outputs[nid] = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Send message",
                     "status": "success",
                     "output": note,
                 }

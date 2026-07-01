@@ -178,6 +178,8 @@ export type FlowNodeType =
   | "trigger.schedule"
   | "trigger.manual"
   | "ai.prompt"
+  | "ai.summarise"
+  | "ai.extract"
   | "search.web"
   | "fetch.page"
   | "research.deep"
@@ -187,7 +189,8 @@ export type FlowNodeType =
   | "control.condition"
   | "control.router"
   | "output.report"
-  | "output.board_card";
+  | "output.board_card"
+  | "output.chat_message";
 
 export interface FlowNodeModel {
   id: string;
@@ -239,6 +242,24 @@ export interface DeepResearchData {
   provider_id: string | null;
   model_id: string | null;
   reasoning_effort: string | null;
+}
+
+export interface SummariseData {
+  length: string;
+  provider_id: string | null;
+  model_id: string | null;
+  reasoning_effort: string | null;
+}
+
+export interface ExtractData {
+  spec: string;
+  provider_id: string | null;
+  model_id: string | null;
+  reasoning_effort: string | null;
+}
+
+export interface ChatMessageOutputData {
+  chat_item_id: string | null;
 }
 
 export interface MergeData {

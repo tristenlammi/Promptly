@@ -28,14 +28,17 @@ import {
   GitMerge,
   Globe,
   Loader2,
+  MessageSquare,
   Plus,
   Repeat2,
+  ScanText,
   Save,
   Search,
   Split,
   Telescope,
   Timer,
   Trash2,
+  TextQuote,
   Zap,
 } from "lucide-react";
 
@@ -44,12 +47,15 @@ import {
   type AIPromptData,
   type AvailableTaskConnector,
   type BoardCardOutputData,
+  type ChatMessageOutputData,
   type ConditionData,
   type DeepResearchData,
   type DelayData,
+  type ExtractData,
   type FetchPageData,
   type LoopData,
   type MergeData,
+  type SummariseData,
   type FlowGraph,
   type FlowNodeModel,
   type ReportOutputData,
@@ -73,6 +79,8 @@ import { cn } from "@/utils/cn";
 
 function nodeModalTitle(type?: string): string {
   if (type === "ai.prompt") return "AI step";
+  if (type === "ai.summarise") return "Summarise";
+  if (type === "ai.extract") return "Extract";
   if (type === "search.web") return "Web search";
   if (type === "fetch.page") return "Fetch page";
   if (type === "research.deep") return "Deep research";
@@ -81,7 +89,12 @@ function nodeModalTitle(type?: string): string {
   if (type === "flow.delay") return "Delay";
   if (type === "control.condition") return "Condition";
   if (type === "control.router") return "Router";
-  if (type === "output.report" || type === "output.board_card") return "Output";
+  if (
+    type === "output.report" ||
+    type === "output.board_card" ||
+    type === "output.chat_message"
+  )
+    return "Output";
   if (type?.startsWith("trigger.")) return "Schedule";
   return "Node";
 }
@@ -255,6 +268,54 @@ function AINode({ data, selected }: NodeProps) {
             {d.connector_ids.length} tool{d.connector_ids.length > 1 ? "s" : ""}
           </span>
         )}
+      </div>
+    </NodeShell>
+  );
+}
+
+function SummariseNode({ data, selected }: NodeProps) {
+  const d = data as unknown as SummariseData;
+  return (
+    <NodeShell
+      icon={<TextQuote className="h-3.5 w-3.5" />}
+      label="Summarise"
+      accent="var(--accent)"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="text-[var(--text)]">Condenses the upstream text</div>
+      <div className="mt-1">
+        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          {d.model_id || "no model"}
+        </span>
+      </div>
+    </NodeShell>
+  );
+}
+
+function ExtractNode({ data, selected }: NodeProps) {
+  const d = data as unknown as ExtractData;
+  return (
+    <NodeShell
+      icon={<ScanText className="h-3.5 w-3.5" />}
+      label="Extract data"
+      accent="var(--accent)"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="line-clamp-2 text-[var(--text)]">
+        {d.spec || (
+          <span className="italic text-[var(--text-muted)]">
+            Pulls JSON fields
+          </span>
+        )}
+      </div>
+      <div className="mt-1">
+        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          {d.model_id || "no model"}
+        </span>
       </div>
     </NodeShell>
   );
@@ -567,10 +628,33 @@ function BoardCardNode({ data, selected }: NodeProps) {
   );
 }
 
+function SendMessageNode({ data, selected }: NodeProps) {
+  const d = data as unknown as ChatMessageOutputData & { chat_title?: string };
+  return (
+    <NodeShell
+      icon={<MessageSquare className="h-3.5 w-3.5" />}
+      label="Send message"
+      accent="var(--warning)"
+      selected={selected}
+      hasIn
+    >
+      <div className="truncate text-[var(--text)]">
+        {d.chat_item_id ? (
+          d.chat_title || "To a chat"
+        ) : (
+          <span className="italic text-[var(--text-muted)]">Pick a chat</span>
+        )}
+      </div>
+    </NodeShell>
+  );
+}
+
 const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
   "ai.prompt": AINode,
+  "ai.summarise": SummariseNode,
+  "ai.extract": ExtractNode,
   "search.web": SearchNode,
   "fetch.page": FetchNode,
   "research.deep": DeepResearchNode,
@@ -581,12 +665,15 @@ const nodeTypes = {
   "control.router": RouterNode,
   "output.report": OutputNode,
   "output.board_card": BoardCardNode,
+  "output.chat_message": SendMessageNode,
 };
 
 // Interior "do work" node types (processing + control) are freely deletable;
 // the trigger is a protected singleton and outputs are guarded down to the last.
 const PROCESSING_NODE_TYPES = new Set([
   "ai.prompt",
+  "ai.summarise",
+  "ai.extract",
   "search.web",
   "fetch.page",
   "research.deep",
@@ -666,6 +753,19 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     return out;
   }, [tree]);
 
+  // Chats in this workspace — the targets a "Send message" output can post to.
+  const chats = useMemo<BoardOption[]>(() => {
+    const out: BoardOption[] = [];
+    const walk = (ns: WorkspaceItemNode[]) => {
+      for (const n of ns) {
+        if (n.kind === "chat") out.push({ id: n.id, title: n.title || "Chat" });
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk(tree ?? []);
+    return out;
+  }, [tree]);
+
   // Title editing lives in the flow toolbar (it's task metadata, not a node).
   const updateTask = useUpdateTask();
   const [title, setTitle] = useState("");
@@ -732,22 +832,24 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     [selectedId, setNodes]
   );
 
-  // Switch the terminal output node between "report" and "board card",
+  // Switch the terminal output node between report / board card / chat message,
   // resetting its data to that kind's defaults.
   const setOutputType = useCallback(
     (type: string) => {
       if (!selectedId) return;
+      const defaults: Record<string, Record<string, unknown>> = {
+        "output.board_card": {
+          board_item_id: null,
+          column: "todo",
+          priority: "medium",
+        },
+        "output.chat_message": { chat_item_id: null },
+        "output.report": { notify: true },
+      };
       setNodes((ns) =>
         ns.map((n) =>
           n.id === selectedId
-            ? {
-                ...n,
-                type,
-                data:
-                  type === "output.board_card"
-                    ? { board_item_id: null, column: "todo", priority: "medium" }
-                    : { notify: true },
-              }
+            ? { ...n, type, data: defaults[type] ?? { notify: true } }
             : n
         )
       );
@@ -780,6 +882,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     (
       type:
         | "ai.prompt"
+        | "ai.summarise"
+        | "ai.extract"
         | "search.web"
         | "fetch.page"
         | "research.deep"
@@ -799,8 +903,15 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
       const id = `${prefix}_${Date.now().toString(36)}`;
       const position =
         pos ?? { x: 140 + nodeCount * 40, y: 280 + nodeCount * 22 };
+      const modelBits = {
+        provider_id: model?.provider_id ?? null,
+        model_id: model?.model_id ?? null,
+        reasoning_effort: model?.reasoning_effort ?? null,
+      };
       let data: Record<string, unknown>;
-      if (type === "search.web") data = { query: "", count: 5 };
+      if (type === "ai.summarise") data = { length: "medium", ...modelBits };
+      else if (type === "ai.extract") data = { spec: "", ...modelBits };
+      else if (type === "search.web") data = { query: "", count: 5 };
       else if (type === "fetch.page") data = { url: "", max_chars: 8000 };
       else if (type === "research.deep")
         data = {
@@ -861,9 +972,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   // Jump to + select the output node (where "send to a board" is configured)
   // so it's never lost off-screen.
   const focusOutput = useCallback(() => {
-    const out = nodes.find(
-      (n) => n.type === "output.report" || n.type === "output.board_card"
-    );
+    const out = nodes.find((n) => (n.type ?? "").startsWith("output."));
     if (!out) return;
     setSelectedId(out.id);
     rfInstance.current?.setCenter(out.position.x + 120, out.position.y + 40, {
@@ -877,6 +986,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     (
       type:
         | "ai.prompt"
+        | "ai.summarise"
+        | "ai.extract"
         | "search.web"
         | "fetch.page"
         | "research.deep"
@@ -1068,6 +1179,22 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
               </button>
               <button
                 type="button"
+                onClick={() => addNodeAtMenu("ai.summarise")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <TextQuote className="h-3.5 w-3.5 text-[var(--accent)]" /> Add
+                summarise
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("ai.extract")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <ScanText className="h-3.5 w-3.5 text-[var(--accent)]" /> Add
+                extract data
+              </button>
+              <button
+                type="button"
                 onClick={() => addNodeAtMenu("search.web")}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
@@ -1175,6 +1302,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           <NodeInspector
             node={selected}
             boards={boards}
+            chats={chats}
             inWorkspace={!!task?.workspace_id}
             connectors={connectors ?? []}
             canDelete={
@@ -1200,6 +1328,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 function NodeInspector({
   node,
   boards,
+  chats,
   inWorkspace,
   connectors,
   canDelete,
@@ -1209,6 +1338,7 @@ function NodeInspector({
 }: {
   node: Node;
   boards: BoardOption[];
+  chats: BoardOption[];
   inWorkspace: boolean;
   connectors: AvailableTaskConnector[];
   canDelete: boolean;
@@ -1216,8 +1346,7 @@ function NodeInspector({
   onSetOutputType: (type: string) => void;
   onDelete: () => void;
 }) {
-  const isOutput =
-    node.type === "output.report" || node.type === "output.board_card";
+  const isOutput = (node.type ?? "").startsWith("output.");
   const { data: models } = useAvailableModels();
   const ai = node.data as unknown as AIPromptData;
   const modelKey =
@@ -1320,6 +1449,71 @@ function NodeInspector({
           )}
         </>
       )}
+
+      {(node.type === "ai.summarise" || node.type === "ai.extract") &&
+        (() => {
+          const isSummarise = node.type === "ai.summarise";
+          const md = node.data as unknown as SummariseData & ExtractData;
+          const mKey =
+            md.provider_id && md.model_id
+              ? `${md.provider_id}::${md.model_id}`
+              : "";
+          return (
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {isSummarise
+                  ? "Condenses the previous step's output into a summary — no prompt-writing needed."
+                  : "Pulls structured JSON out of the previous step's output. Describe the fields you want below."}
+              </p>
+              {isSummarise ? (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Length
+                  <select
+                    value={(node.data as unknown as SummariseData).length}
+                    onChange={(e) => onPatch({ length: e.target.value })}
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  >
+                    <option value="short">Short (1–2 sentences)</option>
+                    <option value="medium">Medium (a paragraph)</option>
+                    <option value="detailed">Detailed (a few paragraphs)</option>
+                  </select>
+                </label>
+              ) : (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Fields to extract
+                  <textarea
+                    value={(node.data as unknown as ExtractData).spec}
+                    onChange={(e) => onPatch({ spec: e.target.value })}
+                    rows={5}
+                    className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                    placeholder={"e.g. name, email, amount (USD), due_date (YYYY-MM-DD)"}
+                  />
+                </label>
+              )}
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Model
+                <select
+                  value={mKey}
+                  onChange={(e) => {
+                    const [pid, mid] = e.target.value.split("::");
+                    onPatch({ provider_id: pid || null, model_id: mid || null });
+                  }}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                >
+                  <option value="">No model — set one</option>
+                  {(models ?? []).map((m) => (
+                    <option
+                      key={`${m.provider_id}::${m.model_id}`}
+                      value={`${m.provider_id}::${m.model_id}`}
+                    >
+                      {m.display_name} · {m.provider_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          );
+        })()}
 
       {node.type === "search.web" && (
         <>
@@ -1869,7 +2063,10 @@ function NodeInspector({
             {[
               { t: "output.report", label: "Report" },
               ...(inWorkspace
-                ? [{ t: "output.board_card", label: "Board card" }]
+                ? [
+                    { t: "output.board_card", label: "Board card" },
+                    { t: "output.chat_message", label: "Chat message" },
+                  ]
                 : []),
             ].map((o) => (
               <button
@@ -1998,6 +2195,46 @@ function NodeInspector({
                     </select>
                   </label>
                 </div>
+              </>
+            ))}
+
+          {node.type === "output.chat_message" &&
+            (chats.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)]">
+                This workspace has no chat yet — create a chat in it, then pick
+                it here.
+              </p>
+            ) : (
+              <>
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  Posts the result as a message in a workspace chat — handy for
+                  alerts and digests.
+                </p>
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Chat
+                  <select
+                    value={
+                      (node.data as unknown as ChatMessageOutputData)
+                        .chat_item_id ?? ""
+                    }
+                    onChange={(e) =>
+                      onPatch({
+                        chat_item_id: e.target.value || null,
+                        chat_title:
+                          chats.find((c) => c.id === e.target.value)?.title ??
+                          null,
+                      })
+                    }
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  >
+                    <option value="">Select a chat…</option>
+                    {chats.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </>
             ))}
         </>
