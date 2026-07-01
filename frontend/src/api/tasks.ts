@@ -182,6 +182,8 @@ export type FlowNodeType =
   | "fetch.page"
   | "research.deep"
   | "loop.foreach"
+  | "flow.merge"
+  | "flow.delay"
   | "control.condition"
   | "control.router"
   | "output.report"
@@ -237,6 +239,15 @@ export interface DeepResearchData {
   provider_id: string | null;
   model_id: string | null;
   reasoning_effort: string | null;
+}
+
+export interface MergeData {
+  mode: string;
+  separator: string;
+}
+
+export interface DelayData {
+  seconds: number;
 }
 
 export interface LoopData {

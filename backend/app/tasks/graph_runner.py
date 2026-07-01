@@ -14,6 +14,7 @@ nodes and wires their outputs together.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -35,6 +36,8 @@ from app.tasks.flow_graph import (
     FlowGraph,
     FlowNode,
     LoopData,
+    MergeData,
+    DelayData,
     NodeType,
     OUTPUT_TYPES,
     RouterData,
@@ -53,6 +56,11 @@ from app.tasks.runner import (
 )
 
 logger = logging.getLogger("promptly.tasks.graph_runner")
+
+# A Delay node caps its pause here so a long sleep can't tie up a worker slot.
+# Longer waits belong to a future durable-reschedule mechanism, not a blocking
+# sleep inside the run.
+_DELAY_CAP_SECONDS = 600
 
 # ``{{ var }}`` — literal, no-eval interpolation. Only whitelisted keys resolve;
 # an unknown reference is left verbatim so a stray brace can never blow up a run
@@ -823,7 +831,19 @@ async def run_graph_flow(
 
         # A node runs only if an incoming edge is active. All-inactive → skip
         # (and it stays inactive, so its own downstream skips too).
-        active_srcs = [e.source for e in in_edges.get(nid, []) if _edge_active(e)]
+        node_in_edges = in_edges.get(nid, [])
+        active_srcs = [e.source for e in node_in_edges if _edge_active(e)]
+        # A Merge in "wait for all" mode requires *every* incoming branch to be
+        # active — if any branch was skipped, the merge doesn't fire.
+        if node.type == NodeType.MERGE:
+            try:
+                _wait_all = MergeData.model_validate(node.data).mode == "all"
+            except Exception:  # noqa: BLE001 — malformed → default to wait-all
+                _wait_all = True
+            if _wait_all and (
+                not node_in_edges or len(active_srcs) != len(node_in_edges)
+            ):
+                active_srcs = []  # force skip until all branches arrive
         if not active_srcs:
             outputs[nid] = ""
             node_runs.append(
@@ -868,6 +888,41 @@ async def run_graph_flow(
             selected[nid] = {picked}
             outputs[nid] = upstream
             node_runs.append(record)
+
+        elif node.type == NodeType.MERGE:
+            data = MergeData.model_validate(node.data)
+            sep = {"blank": "\n\n", "newline": "\n", "space": " "}.get(
+                data.separator, "\n\n"
+            )
+            merged = sep.join(outputs[s] for s in active_srcs if outputs.get(s))
+            outputs[nid] = merged
+            last_processing_output = merged
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": NodeType.MERGE,
+                    "label": f"Merge ({len(active_srcs)} branch"
+                    + ("es" if len(active_srcs) != 1 else "")
+                    + ")",
+                    "status": "success",
+                    "output": merged,
+                }
+            )
+
+        elif node.type == NodeType.DELAY:
+            secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
+            if secs:
+                await asyncio.sleep(secs)
+            outputs[nid] = upstream  # pass the text through unchanged
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": NodeType.DELAY,
+                    "label": f"Delay {secs}s",
+                    "status": "success",
+                    "output": f"Paused {secs}s.",
+                }
+            )
 
         elif node.type == NodeType.SEARCH_WEB:
             text, node_sources, record = await _run_search_node(

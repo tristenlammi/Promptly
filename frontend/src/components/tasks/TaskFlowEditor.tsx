@@ -25,6 +25,7 @@ import {
   Download,
   FileText,
   GitBranch,
+  GitMerge,
   Globe,
   Loader2,
   Plus,
@@ -33,6 +34,7 @@ import {
   Search,
   Split,
   Telescope,
+  Timer,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -44,8 +46,10 @@ import {
   type BoardCardOutputData,
   type ConditionData,
   type DeepResearchData,
+  type DelayData,
   type FetchPageData,
   type LoopData,
+  type MergeData,
   type FlowGraph,
   type FlowNodeModel,
   type ReportOutputData,
@@ -73,6 +77,8 @@ function nodeModalTitle(type?: string): string {
   if (type === "fetch.page") return "Fetch page";
   if (type === "research.deep") return "Deep research";
   if (type === "loop.foreach") return "Loop";
+  if (type === "flow.merge") return "Merge";
+  if (type === "flow.delay") return "Delay";
   if (type === "control.condition") return "Condition";
   if (type === "control.router") return "Router";
   if (type === "output.report" || type === "output.board_card") return "Output";
@@ -368,6 +374,44 @@ function LoopNode({ data, selected }: NodeProps) {
   );
 }
 
+function MergeNode({ data, selected }: NodeProps) {
+  const d = data as unknown as MergeData;
+  return (
+    <NodeShell
+      icon={<GitMerge className="h-3.5 w-3.5" />}
+      label="Merge"
+      accent="#f97316"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="text-[var(--text)]">
+        {d.mode === "any" ? "Proceeds with any branch" : "Waits for all branches"}
+      </div>
+      <div className="mt-0.5">Joins their outputs</div>
+    </NodeShell>
+  );
+}
+
+function DelayNode({ data, selected }: NodeProps) {
+  const d = data as unknown as DelayData;
+  const s = d.seconds || 0;
+  const label =
+    s >= 60 ? `${Math.round(s / 60)} min` : `${s} sec`;
+  return (
+    <NodeShell
+      icon={<Timer className="h-3.5 w-3.5" />}
+      label="Delay"
+      accent="#f97316"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="text-[var(--text)]">Pauses {label}</div>
+    </NodeShell>
+  );
+}
+
 // A control node with several labelled *source* handles on the right — one per
 // branch. React Flow reads each handle's real DOM position, so absolutely
 // positioning them per-row lets edges leave from the right branch.
@@ -531,6 +575,8 @@ const nodeTypes = {
   "fetch.page": FetchNode,
   "research.deep": DeepResearchNode,
   "loop.foreach": LoopNode,
+  "flow.merge": MergeNode,
+  "flow.delay": DelayNode,
   "control.condition": ConditionNode,
   "control.router": RouterNode,
   "output.report": OutputNode,
@@ -545,6 +591,8 @@ const PROCESSING_NODE_TYPES = new Set([
   "fetch.page",
   "research.deep",
   "loop.foreach",
+  "flow.merge",
+  "flow.delay",
   "control.condition",
   "control.router",
 ]);
@@ -736,6 +784,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         | "fetch.page"
         | "research.deep"
         | "loop.foreach"
+        | "flow.merge"
+        | "flow.delay"
         | "control.condition"
         | "control.router"
         | "output.report",
@@ -772,6 +822,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           max_items: 10,
           join_with: "blank",
         };
+      else if (type === "flow.merge") data = { mode: "all", separator: "blank" };
+      else if (type === "flow.delay") data = { seconds: 30 };
       else if (type === "output.report") data = { notify: true };
       else if (type === "control.condition")
         data = { operator: "contains", value: "", case_sensitive: false };
@@ -829,6 +881,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         | "fetch.page"
         | "research.deep"
         | "loop.foreach"
+        | "flow.merge"
+        | "flow.delay"
         | "control.condition"
         | "control.router"
         | "output.report"
@@ -1055,6 +1109,20 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
                 <Repeat2 className="h-3.5 w-3.5 text-[#f97316]" /> Add loop
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("flow.merge")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <GitMerge className="h-3.5 w-3.5 text-[#f97316]" /> Add merge
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("flow.delay")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Timer className="h-3.5 w-3.5 text-[#f97316]" /> Add delay
               </button>
               <div className="my-1 h-px bg-[var(--border)]" />
               <button
@@ -1547,6 +1615,88 @@ function NodeInspector({
                   </div>
                 </div>
               )}
+            </>
+          );
+        })()}
+
+      {node.type === "flow.merge" && (
+        <>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Joins several branches back into one. Wire multiple steps into this
+            node's input.
+          </p>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            When to proceed
+            <select
+              value={(node.data as unknown as MergeData).mode}
+              onChange={(e) => onPatch({ mode: e.target.value })}
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="all">Wait for all branches</option>
+              <option value="any">Proceed with any branch</option>
+            </select>
+          </label>
+          <p className="text-[10px] text-[var(--text-muted)]">
+            “Wait for all” only fires when every incoming branch ran — use it for
+            parallel branches, not the two sides of a condition (only one of
+            those ever runs).
+          </p>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Join outputs with
+            <select
+              value={(node.data as unknown as MergeData).separator}
+              onChange={(e) => onPatch({ separator: e.target.value })}
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="blank">Blank line</option>
+              <option value="newline">New line</option>
+              <option value="space">Space</option>
+            </select>
+          </label>
+        </>
+      )}
+
+      {node.type === "flow.delay" &&
+        (() => {
+          const secs = (node.data as unknown as DelayData).seconds || 0;
+          const unit = secs % 60 === 0 && secs >= 60 ? "minutes" : "seconds";
+          const amount = unit === "minutes" ? secs / 60 : secs;
+          const setFrom = (nextAmount: number, nextUnit: string) => {
+            const raw = nextUnit === "minutes" ? nextAmount * 60 : nextAmount;
+            onPatch({ seconds: Math.max(0, Math.min(600, Math.round(raw))) });
+          };
+          return (
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Pauses the run before continuing — handy for rate-limiting or
+                letting an external process settle. Capped at 10 minutes (longer
+                waits would tie up a worker).
+              </p>
+              <div className="flex gap-2">
+                <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+                  Duration
+                  <input
+                    type="number"
+                    min={0}
+                    value={amount}
+                    onChange={(e) =>
+                      setFrom(Number(e.target.value) || 0, unit)
+                    }
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  />
+                </label>
+                <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+                  Unit
+                  <select
+                    value={unit}
+                    onChange={(e) => setFrom(amount, e.target.value)}
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  >
+                    <option value="seconds">Seconds</option>
+                    <option value="minutes">Minutes</option>
+                  </select>
+                </label>
+              </div>
             </>
           );
         })()}

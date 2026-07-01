@@ -18,10 +18,12 @@ from app.tasks.flow_graph import (
     BoardCardOutputData,
     ConditionData,
     DeepResearchData,
+    DelayData,
     FlowEdge,
     FlowGraph,
     FlowNode,
     LoopData,
+    MergeData,
     NodeType,
     ReportOutputData,
     RouterCategory,
@@ -534,6 +536,163 @@ async def test_loop_with_no_items_is_a_noop(patched_model):
     )
     by = {n["node_id"]: n for n in node_runs}
     assert by["loop"]["label"] == "Loop (0 items)"
+
+
+async def test_merge_all_joins_parallel_branches(patched_model):
+    # trigger fans out to a0 + a1; both feed a merge(all) → report.
+    nodes = [
+        _trigger(),
+        _ai("a0", "x"),
+        _ai("a1", "y"),
+        FlowNode(
+            id="m",
+            type=NodeType.MERGE,
+            data=MergeData(mode="all", separator="newline").model_dump(),
+        ),
+        _report("out"),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="trigger", target="a1"),
+        FlowEdge(source="a0", target="m"),
+        FlowEdge(source="a1", target="m"),
+        FlowEdge(source="m", target="out"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["m"]["status"] == "success"
+    assert by["m"]["output"] == "OUT[x]\nOUT[y]"  # newline-joined
+    assert text == "OUT[x]\nOUT[y]"
+
+
+async def test_merge_all_skips_when_a_branch_is_skipped(patched_model):
+    # a0 → condition(false) → merge is one input; a1 → merge is the other.
+    # In "all" mode the merge waits for both, so a skipped branch skips it.
+    nodes = [
+        _trigger(),
+        _ai("a0", "x"),
+        FlowNode(
+            id="c",
+            type=NodeType.CONDITION,
+            data=ConditionData(operator="contains", value="ZZZ").model_dump(),
+        ),
+        _ai("a1", "y"),
+        FlowNode(id="m", type=NodeType.MERGE, data=MergeData(mode="all").model_dump()),
+        _report("out"),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="a0", target="c"),
+        FlowEdge(source="trigger", target="a1"),
+        FlowEdge(source="c", target="m", source_handle="true"),  # never fires
+        FlowEdge(source="a1", target="m"),
+        FlowEdge(source="m", target="out"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    _t, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["m"]["status"] == "skipped"
+    assert by["out"]["status"] == "skipped"
+
+
+async def test_merge_any_proceeds_with_available_branch(patched_model):
+    # Same shape, but "any" mode → merge runs with just the active branch.
+    nodes = [
+        _trigger(),
+        _ai("a0", "x"),
+        FlowNode(
+            id="c",
+            type=NodeType.CONDITION,
+            data=ConditionData(operator="contains", value="ZZZ").model_dump(),
+        ),
+        _ai("a1", "y"),
+        FlowNode(id="m", type=NodeType.MERGE, data=MergeData(mode="any").model_dump()),
+        _report("out"),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="a0", target="c"),
+        FlowEdge(source="trigger", target="a1"),
+        FlowEdge(source="c", target="m", source_handle="true"),
+        FlowEdge(source="a1", target="m"),
+        FlowEdge(source="m", target="out"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    _t, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["m"]["status"] == "success"
+    assert by["m"]["output"] == "OUT[y]"  # only a1's branch was active
+
+
+async def test_delay_passes_upstream_through(patched_model):
+    nodes = [
+        _trigger(),
+        _ai("a0", "x"),
+        FlowNode(id="d", type=NodeType.DELAY, data=DelayData(seconds=0).model_dump()),
+        _report("out"),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="a0", target="d"),
+        FlowEdge(source="d", target="out"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _s, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["d"]["label"] == "Delay 0s"
+    assert text == "OUT[x]"  # delay is a pass-through
+
+
+async def test_delay_caps_long_pauses(patched_model, monkeypatch):
+    slept: list[float] = []
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    monkeypatch.setattr(graph_runner.asyncio, "sleep", fake_sleep)
+    nodes = [
+        _trigger(),
+        FlowNode(
+            id="d", type=NodeType.DELAY, data=DelayData(seconds=999999).model_dump()
+        ),
+        _report("out"),
+    ]
+    edges = [FlowEdge(source="trigger", target="d"), FlowEdge(source="d", target="out")]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+        trigger_payload="hi",
+    )
+    assert slept == [600]  # capped at _DELAY_CAP_SECONDS
 
 
 async def test_cyclic_flow_is_rejected(patched_model):

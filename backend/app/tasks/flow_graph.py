@@ -53,6 +53,9 @@ class NodeType:
     DEEP_RESEARCH = "research.deep"
     # Map node: split the upstream into items, run an AI body per item, aggregate.
     LOOP = "loop.foreach"
+    # Flow helpers: join several branches into one, and pause the run.
+    MERGE = "flow.merge"
+    DELAY = "flow.delay"
     # Control-flow nodes — they don't transform the text, they *route* it. Only
     # the branch(es) they select run; everything downstream of an unselected
     # branch is skipped ("active-path" execution).
@@ -83,6 +86,8 @@ PROCESSING_TYPES = frozenset(
         NodeType.FETCH_PAGE,
         NodeType.DEEP_RESEARCH,
         NodeType.LOOP,
+        NodeType.MERGE,
+        NodeType.DELAY,
     }
 )
 
@@ -211,6 +216,24 @@ class LoopData(BaseModel):
     connector_ids: list[str] = Field(default_factory=list)
     max_items: int = 10  # 1..50 — a safety cap on iterations
     join_with: str = "blank"  # blank | numbered
+
+
+class MergeData(BaseModel):
+    """Join several upstream branches into one. ``mode`` ``all`` waits for every
+    incoming branch to have run (skips if any didn't — use for parallel
+    branches); ``any`` proceeds with whichever branches are active (the default
+    fan-in behaviour). ``separator`` joins the branch outputs."""
+
+    mode: str = "all"  # all | any
+    separator: str = "blank"  # blank | newline | space
+
+
+class DelayData(BaseModel):
+    """Pause the run before continuing. Short pauses only (rate-limiting / letting
+    an external process settle) — the runner caps it so a long sleep can't tie up
+    a worker."""
+
+    seconds: int = 5
 
 
 class DeepResearchData(BaseModel):
@@ -646,6 +669,8 @@ __all__ = [
     "FetchPageData",
     "DeepResearchData",
     "LoopData",
+    "MergeData",
+    "DelayData",
     "ConditionData",
     "RouterData",
     "RouterCategory",
