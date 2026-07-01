@@ -46,6 +46,16 @@ class NodeType:
     TRIGGER_MANUAL = "trigger.manual"
     AI_PROMPT = "ai.prompt"
     OUTPUT_REPORT = "output.report"
+    # Workspace-output node: files the AI result as a card on a workspace board.
+    OUTPUT_BOARD_CARD = "output.board_card"
+
+
+# Every terminal "what to do with the result" node kind. output.report is the
+# plain run report (a Simple task); the workspace-output kinds write into the
+# task's home workspace and are Advanced-only.
+OUTPUT_TYPES = frozenset(
+    {NodeType.OUTPUT_REPORT, NodeType.OUTPUT_BOARD_CARD}
+)
 
 
 # Stable node ids for the canonical 3-node "simple" graph. Deterministic so a
@@ -128,6 +138,18 @@ class ReportOutputData(BaseModel):
     """The output step: the run report (implicit) + whether to notify."""
 
     notify: bool = True
+
+
+class BoardCardOutputData(BaseModel):
+    """Workspace-output: file the AI result as a card on a workspace board.
+
+    ``board_item_id`` is the ``kind='board'`` WorkspaceItem in the task's home
+    workspace; the card's title is the first line of the AI output and its
+    description the full text."""
+
+    board_item_id: str | None = None
+    column: str = "todo"  # board column / status id
+    priority: str = "medium"  # low | medium | high
 
 
 # ---------------------------------------------------------------------
@@ -279,7 +301,7 @@ def is_linear_flow(graph: FlowGraph) -> bool:
         for n in graph.nodes
         if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
     ]
-    outs = graph.nodes_of_type(NodeType.OUTPUT_REPORT)
+    outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     ais = graph.nodes_of_type(NodeType.AI_PROMPT)
     if len(triggers) != 1 or len(outs) != 1 or len(ais) < 1:
         return False
@@ -315,6 +337,13 @@ def is_linear_flow(graph: FlowGraph) -> bool:
         len(in_adj.get(nid, [])) == 1 and len(out_adj.get(nid, [])) == 1
         for nid in order[1:-1]
     )
+
+
+def terminal_output_node(graph: FlowGraph) -> FlowNode | None:
+    """The single terminal output/action node (report or a workspace-output).
+    Assumes :func:`is_linear_flow` holds."""
+    outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
+    return outs[0] if len(outs) == 1 else None
 
 
 def ordered_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
@@ -384,6 +413,9 @@ __all__ = [
     "ScheduleTriggerData",
     "AIPromptData",
     "ReportOutputData",
+    "BoardCardOutputData",
+    "OUTPUT_TYPES",
+    "terminal_output_node",
     "SimpleTaskFields",
     "task_to_graph",
     "graph_to_task_fields",

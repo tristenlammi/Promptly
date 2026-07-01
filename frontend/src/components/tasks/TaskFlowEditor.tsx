@@ -17,6 +17,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Brain,
   Clock,
+  Columns3,
   FileText,
   Globe,
   Loader2,
@@ -28,15 +29,23 @@ import {
 
 import {
   type AIPromptData,
+  type BoardCardOutputData,
   type FlowGraph,
   type FlowNodeModel,
   type ReportOutputData,
   type ScheduleTriggerData,
 } from "@/api/tasks";
-import { useSaveTaskGraph, useTaskGraph } from "@/hooks/useTasks";
+import { useSaveTaskGraph, useTask, useTaskGraph } from "@/hooks/useTasks";
+import { useWorkspaceTree } from "@/hooks/useWorkspaces";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { useThemeStore } from "@/store/themeStore";
+import type { WorkspaceItemNode } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+
+interface BoardOption {
+  id: string;
+  title: string;
+}
 
 // ---------------------------------------------------------------------
 // Node category colours — the app's own warm palette (green triggers,
@@ -181,11 +190,36 @@ function OutputNode({ data, selected }: NodeProps) {
   );
 }
 
+function BoardCardNode({ data, selected }: NodeProps) {
+  const d = data as unknown as BoardCardOutputData & { board_title?: string };
+  return (
+    <NodeShell
+      icon={<Columns3 className="h-3.5 w-3.5" />}
+      label="Create card"
+      accent="var(--warning)"
+      selected={selected}
+      hasIn
+    >
+      <div className="truncate text-[var(--text)]">
+        {d.board_item_id ? (
+          d.board_title || "On a board"
+        ) : (
+          <span className="italic text-[var(--text-muted)]">Pick a board</span>
+        )}
+      </div>
+      <div className="mt-0.5">
+        {d.column} · {d.priority} priority
+      </div>
+    </NodeShell>
+  );
+}
+
 const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
   "ai.prompt": AINode,
   "output.report": OutputNode,
+  "output.board_card": BoardCardNode,
 };
 
 // --- graph ⇄ react-flow ---------------------------------------------
@@ -231,6 +265,22 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   const save = useSaveTaskGraph(taskId);
   const colorMode = useThemeStore((s) => s.resolved());
 
+  // Boards in the automation's home workspace — the targets a "Create card"
+  // output node can write to. Empty for a top-level (non-workspace) task.
+  const { data: task } = useTask(taskId);
+  const { data: tree } = useWorkspaceTree(task?.workspace_id ?? undefined);
+  const boards = useMemo<BoardOption[]>(() => {
+    const out: BoardOption[] = [];
+    const walk = (ns: WorkspaceItemNode[]) => {
+      for (const n of ns) {
+        if (n.kind === "board") out.push({ id: n.id, title: n.title || "Board" });
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk(tree ?? []);
+    return out;
+  }, [tree]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -255,6 +305,30 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
       setNodes((ns) =>
         ns.map((n) =>
           n.id === selectedId ? { ...n, data: { ...n.data, ...patch } } : n
+        )
+      );
+      setDirty(true);
+    },
+    [selectedId, setNodes]
+  );
+
+  // Switch the terminal output node between "report" and "board card",
+  // resetting its data to that kind's defaults.
+  const setOutputType = useCallback(
+    (type: string) => {
+      if (!selectedId) return;
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === selectedId
+            ? {
+                ...n,
+                type,
+                data:
+                  type === "output.board_card"
+                    ? { board_item_id: null, column: "todo", priority: "medium" }
+                    : { notify: true },
+              }
+            : n
         )
       );
       setDirty(true);
@@ -410,8 +484,10 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
       {selected && (
         <NodeInspector
           node={selected}
+          boards={boards}
           canDelete={selected.type === "ai.prompt" && aiNodes.length > 1}
           onPatch={patchSelected}
+          onSetOutputType={setOutputType}
           onDelete={() => removeAIStep(selected.id)}
         />
       )}
@@ -421,15 +497,21 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 
 function NodeInspector({
   node,
+  boards,
   canDelete,
   onPatch,
+  onSetOutputType,
   onDelete,
 }: {
   node: Node;
+  boards: BoardOption[];
   canDelete: boolean;
   onPatch: (patch: Record<string, unknown>) => void;
+  onSetOutputType: (type: string) => void;
   onDelete: () => void;
 }) {
+  const isOutput =
+    node.type === "output.report" || node.type === "output.board_card";
   const { data: models } = useAvailableModels();
   const ai = node.data as unknown as AIPromptData;
   const modelKey =
@@ -502,20 +584,110 @@ function NodeInspector({
         </>
       )}
 
-      {node.type === "output.report" && (
+      {isOutput && (
         <>
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-            <FileText className="h-4 w-4 text-[var(--warning)]" /> Report
+            <FileText className="h-4 w-4 text-[var(--warning)]" /> Output
           </div>
-          <label className="flex items-center justify-between text-xs text-[var(--text)]">
-            <span>Notify on completion</span>
-            <input
-              type="checkbox"
-              checked={(node.data as unknown as ReportOutputData).notify}
-              onChange={(e) => onPatch({ notify: e.target.checked })}
-              className="h-4 w-4 accent-[var(--accent)]"
-            />
-          </label>
+          {/* What to do with the final AI result. */}
+          <div className="inline-flex rounded-md border border-[var(--border)] p-0.5 text-xs">
+            {[
+              { t: "output.report", label: "Report" },
+              { t: "output.board_card", label: "Board card" },
+            ].map((o) => (
+              <button
+                key={o.t}
+                type="button"
+                onClick={() => onSetOutputType(o.t)}
+                className={cn(
+                  "rounded px-2 py-1 transition",
+                  node.type === o.t
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          {node.type === "output.report" && (
+            <label className="flex items-center justify-between text-xs text-[var(--text)]">
+              <span>Notify on completion</span>
+              <input
+                type="checkbox"
+                checked={(node.data as unknown as ReportOutputData).notify}
+                onChange={(e) => onPatch({ notify: e.target.checked })}
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+            </label>
+          )}
+
+          {node.type === "output.board_card" &&
+            (boards.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)]">
+                No boards here. Board cards need the automation to live in a
+                workspace that has a board.
+              </p>
+            ) : (
+              <>
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  The AI result becomes a card — its first line is the title,
+                  the rest the description.
+                </p>
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Board
+                  <select
+                    value={
+                      (node.data as unknown as BoardCardOutputData).board_item_id ??
+                      ""
+                    }
+                    onChange={(e) =>
+                      onPatch({
+                        board_item_id: e.target.value || null,
+                        board_title:
+                          boards.find((b) => b.id === e.target.value)?.title ??
+                          null,
+                      })
+                    }
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  >
+                    <option value="">Select a board…</option>
+                    {boards.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex gap-2">
+                  <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+                    Column
+                    <select
+                      value={(node.data as unknown as BoardCardOutputData).column}
+                      onChange={(e) => onPatch({ column: e.target.value })}
+                      className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                    >
+                      <option value="todo">To Do</option>
+                      <option value="doing">In Progress</option>
+                      <option value="done">Done</option>
+                    </select>
+                  </label>
+                  <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+                    Priority
+                    <select
+                      value={(node.data as unknown as BoardCardOutputData).priority}
+                      onChange={(e) => onPatch({ priority: e.target.value })}
+                      className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </label>
+                </div>
+              </>
+            ))}
         </>
       )}
 

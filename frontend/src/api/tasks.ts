@@ -164,7 +164,8 @@ export type FlowNodeType =
   | "trigger.schedule"
   | "trigger.manual"
   | "ai.prompt"
-  | "output.report";
+  | "output.report"
+  | "output.board_card";
 
 export interface FlowNodeModel {
   id: string;
@@ -207,4 +208,10 @@ export interface AIPromptData {
 
 export interface ReportOutputData {
   notify: boolean;
+}
+
+export interface BoardCardOutputData {
+  board_item_id: string | null;
+  column: string;
+  priority: string;
 }

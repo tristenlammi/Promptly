@@ -15,6 +15,7 @@ import pytest
 from app.tasks import graph_runner
 from app.tasks.flow_graph import (
     AIPromptData,
+    BoardCardOutputData,
     FlowEdge,
     FlowGraph,
     FlowNode,
@@ -137,6 +138,45 @@ async def test_chain_injects_upstream_output_and_accumulates(patched_model):
     assert usage["completion_tokens"] == 4
     assert usage["cost_usd"] == 1.0
     assert sources == [{"url": "http://x"}]
+
+
+async def test_board_card_output_files_card_and_notes_it(patched_model, monkeypatch):
+    async def fake_file(db, *, task, data, text):
+        assert data.board_item_id == "b1"
+        assert data.column == "todo"
+        assert text == "OUT[write it]"
+        return 'Filed as a card on "My Board".'
+
+    monkeypatch.setattr(graph_runner, "_file_board_card", fake_file)
+
+    nodes = [
+        FlowNode(
+            id="trigger",
+            type=NodeType.TRIGGER_SCHEDULE,
+            data=ScheduleTriggerData(frequency="daily", timezone="UTC").model_dump(),
+        ),
+        _ai("a0", "write it"),
+        FlowNode(
+            id="out",
+            type=NodeType.OUTPUT_BOARD_CARD,
+            data=BoardCardOutputData(board_item_id="b1").model_dump(),
+        ),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="a0"),
+        FlowEdge(source="a0", target="out"),
+    ]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, _sources, _usage = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    # The run report keeps the AI text and notes that the card was filed.
+    assert "OUT[write it]" in text
+    assert 'Filed as a card on "My Board".' in text
 
 
 async def test_non_linear_flow_is_rejected(patched_model):

@@ -213,6 +213,29 @@ def test_cycle_is_not_linear():
     assert is_linear_flow(graph) is False
 
 
+def test_board_card_terminal_is_linear_but_not_simple():
+    from app.tasks.flow_graph import terminal_output_node
+
+    nodes = [
+        FlowNode(id="trigger", type=NodeType.TRIGGER_SCHEDULE, data={"frequency": "daily"}),
+        FlowNode(id="ai0", type=NodeType.AI_PROMPT, data={"prompt": "x"}),
+        FlowNode(
+            id="out",
+            type=NodeType.OUTPUT_BOARD_CARD,
+            data={"board_item_id": "b1", "column": "todo", "priority": "medium"},
+        ),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="ai0"),
+        FlowEdge(source="ai0", target="out"),
+    ]
+    g = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    assert is_linear_flow(g) is True
+    # A workspace-output flow can't be represented as a plain Simple task.
+    assert is_simple_graph(g) is False
+    assert terminal_output_node(g).type == NodeType.OUTPUT_BOARD_CARD
+
+
 def test_unknown_node_type_is_not_linear():
     graph = _linear_graph(1)
     graph.nodes.append(FlowNode(id="x", type="action.http", data={}))

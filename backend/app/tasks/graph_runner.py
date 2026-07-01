@@ -14,18 +14,24 @@ nodes and wires their outputs together.
 """
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone as _tz
 
+from sqlalchemy import func, select
+
 from app.auth.models import User
+from app.chat.models import WorkspaceItem, WorkspaceTask
 from app.tasks.flow_graph import (
     AIPromptData,
+    BoardCardOutputData,
     FlowGraph,
     NodeType,
     ScheduleTriggerData,
     is_linear_flow,
     ordered_ai_nodes,
+    terminal_output_node,
 )
 from app.tasks.models import Task
 from app.tasks.runner import (
@@ -35,6 +41,8 @@ from app.tasks.runner import (
     _resolve_connectors_by_ids,
     _resolve_provider,
 )
+
+logger = logging.getLogger("promptly.tasks.graph_runner")
 
 # ``{{ var }}`` — literal, no-eval interpolation. Only whitelisted keys resolve;
 # an unknown reference is left verbatim so a stray brace can never blow up a run
@@ -46,6 +54,64 @@ def _interpolate(template: str, context: dict[str, str]) -> str:
     return _VAR_RE.sub(
         lambda m: context.get(m.group(1), m.group(0)), template
     )
+
+
+def _first_line_title(text: str) -> str:
+    """The card title: first non-empty line of the AI output, markup-stripped."""
+    for raw in text.splitlines():
+        line = raw.strip().lstrip("#").strip()
+        if line:
+            return line[:200]
+    return "Automation result"
+
+
+async def _file_board_card(
+    db, *, task: Task, data: BoardCardOutputData, text: str
+) -> str:
+    """Workspace-output: create a card on the target board from the AI result.
+    Returns a one-line note to append to the run report."""
+    if task.workspace_id is None:
+        raise TaskRunError(
+            "This automation isn't in a workspace, so it can't file a board card."
+        )
+    if not data.board_item_id:
+        raise TaskRunError("The board-card step has no board selected.")
+    board_id = uuid.UUID(data.board_item_id)
+    board = await db.get(WorkspaceItem, board_id)
+    if (
+        board is None
+        or board.kind != "board"
+        or board.workspace_id != task.workspace_id
+    ):
+        raise TaskRunError(
+            "The board this automation writes to no longer exists in its "
+            "workspace."
+        )
+    max_pos = await db.scalar(
+        select(func.max(WorkspaceTask.position)).where(
+            WorkspaceTask.workspace_id == task.workspace_id
+        )
+    )
+    card = WorkspaceTask(
+        workspace_id=task.workspace_id,
+        board_item_id=board_id,
+        title=_first_line_title(text),
+        description=text,
+        status=data.column or "todo",
+        priority=data.priority or "medium",
+        position=float(max_pos or 0.0) + 1.0,
+        created_by=task.user_id,
+    )
+    db.add(card)
+    await db.commit()
+    # Keep the board's RAG text fresh (best-effort; owns its own session).
+    try:
+        from app.workspaces.knowledge import index_board_for_workspace
+
+        await index_board_for_workspace(task.workspace_id, board_id)
+    except Exception:  # noqa: BLE001 — reindex must never fail the run
+        logger.warning("board reindex after card creation failed", exc_info=True)
+    return f'Filed as a card on "{board.title or "board"}".'
 
 
 def _flow_timezone(graph: FlowGraph, task: Task) -> str:
@@ -135,6 +201,20 @@ async def run_graph_flow(
         if node_usage.get("cost_usd") is not None:
             usage["cost_usd"] = (usage["cost_usd"] or 0.0) + node_usage["cost_usd"]
 
+    # Terminal output node: a plain report, or a workspace-output action that
+    # consumes the final AI text (the run still records that text as its
+    # report so history stays readable).
+    report = upstream
+    out_node = terminal_output_node(graph)
+    if out_node is not None and out_node.type == NodeType.OUTPUT_BOARD_CARD:
+        note = await _file_board_card(
+            db,
+            task=task,
+            data=BoardCardOutputData.model_validate(out_node.data),
+            text=upstream,
+        )
+        report = f"{upstream}\n\n---\n\n*{note}*"
+
     # De-dup sources by URL across the whole chain, preserving order.
     seen: set[str] = set()
     deduped: list[dict] = []
@@ -146,7 +226,7 @@ async def run_graph_flow(
             seen.add(url)
         deduped.append(s)
 
-    return upstream, deduped, usage
+    return report, deduped, usage
 
 
 __all__ = ["run_graph_flow", "_interpolate"]
