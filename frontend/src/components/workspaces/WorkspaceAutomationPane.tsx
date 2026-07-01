@@ -4,7 +4,6 @@ import { Loader2, Play } from "lucide-react";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { useRunTask, useTask, useTaskRun, useTaskRuns } from "@/hooks/useTasks";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
-import { RunModal } from "@/components/tasks/RunModal";
 import { TaskRunDocument } from "@/components/tasks/TaskRunDocument";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
@@ -30,7 +29,9 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
   const { data: runs } = useTaskRuns(taskId, true);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [showFlow, setShowFlow] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
+  // The run just kicked off by "Run now" — the flow canvas animates this one
+  // (rather than instantly painting an old run picked from the rail).
+  const [animateRunId, setAnimateRunId] = useState<string | null>(null);
 
   // Default-select the newest run so the Runs view has something to show.
   useEffect(() => {
@@ -45,13 +46,10 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
   const onRunNow = async () => {
     const created = await runTask.mutateAsync(taskId);
     setSelectedRunId(created.id);
-    if (showFlow) setModalOpen(true);
+    setAnimateRunId(created.id);
   };
 
-  const onRunClick = (id: string) => {
-    setSelectedRunId(id);
-    if (showFlow) setModalOpen(true); // flow view → modal; runs view → report
-  };
+  const onRunClick = (id: string) => setSelectedRunId(id);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -128,7 +126,11 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
                 </div>
               }
             >
-              <TaskFlowEditor taskId={taskId} />
+              <TaskFlowEditor
+                taskId={taskId}
+                activeRun={run ?? null}
+                animateRunId={animateRunId}
+              />
             </Suspense>
           ) : (
             <div className="promptly-scroll h-full overflow-y-auto px-5 py-4">
@@ -145,18 +147,6 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
           )}
         </div>
       </div>
-
-      {showFlow && (
-        <RunModal
-          run={run}
-          open={modalOpen}
-          onClose={() => setModalOpen(false)}
-          onOpenRuns={() => {
-            setModalOpen(false);
-            setShowFlow(false);
-          }}
-        />
-      )}
     </div>
   );
 }

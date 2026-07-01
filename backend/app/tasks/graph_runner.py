@@ -636,14 +636,28 @@ async def _post_chat_message(
         )
     if not data.chat_item_id:
         raise TaskRunError("The send-message step has no chat selected.")
-    item = await db.get(WorkspaceItem, uuid.UUID(data.chat_item_id))
-    if item is None or item.kind != "chat" or item.workspace_id != task.workspace_id:
+    picked = uuid.UUID(data.chat_item_id)
+    # The picker's id is either a notebook chat *page* (a ``kind='chat'``
+    # WorkspaceItem whose ``ref_id`` is the conversation) or a top-level
+    # workspace chat, which is synthesised straight from a Conversation and has
+    # no item row — so its id IS the conversation id. Resolve both.
+    item = await db.get(WorkspaceItem, picked)
+    conv: Conversation | None
+    title: str | None
+    if item is not None and item.kind == "chat":
+        if item.workspace_id != task.workspace_id:
+            raise TaskRunError(
+                "The chat this automation posts to is in a different workspace."
+            )
+        conv = await db.get(Conversation, item.ref_id)
+        title = item.title
+    else:
+        conv = await db.get(Conversation, picked)
+        title = conv.title if conv is not None else None
+    if conv is None or conv.workspace_id != task.workspace_id:
         raise TaskRunError(
             "The chat this automation posts to no longer exists in its workspace."
         )
-    conv = await db.get(Conversation, item.ref_id)
-    if conv is None:
-        raise TaskRunError("The target chat has no conversation to post into.")
     msg = Message(
         conversation_id=conv.id,
         parent_id=conv.active_leaf_message_id,
@@ -654,7 +668,7 @@ async def _post_chat_message(
     await db.flush()  # assign msg.id before pointing the thread leaf at it
     conv.active_leaf_message_id = msg.id
     await db.commit()
-    return f'Posted to "{item.title or "chat"}".'
+    return f'Posted to "{title or "chat"}".'
 
 
 async def _run_deep_research_node(

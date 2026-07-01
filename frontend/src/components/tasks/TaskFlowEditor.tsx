@@ -62,6 +62,7 @@ import {
   type RouterCategory,
   type RouterData,
   type ScheduleTriggerData,
+  type TaskRun,
   type WebSearchData,
 } from "@/api/tasks";
 import {
@@ -732,7 +733,15 @@ function fromRF(base: FlowGraph, nodes: Node[], edges: Edge[]): FlowGraph {
  * ``{{upstream_output}}``), fan out to several outputs, and edit each step,
  * then persists via PUT /graph. The backend runs the graph as a DAG.
  */
-export function TaskFlowEditor({ taskId }: { taskId: string }) {
+export function TaskFlowEditor({
+  taskId,
+  activeRun,
+  animateRunId,
+}: {
+  taskId: string;
+  activeRun?: TaskRun | null;
+  animateRunId?: string | null;
+}) {
   const { data: graph, isLoading } = useTaskGraph(taskId);
   const save = useSaveTaskGraph(taskId);
   const colorMode = useThemeStore((s) => s.resolved());
@@ -794,6 +803,83 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  // ---- Run replay: paint each node's status onto the canvas as the run's
+  // steps come back, so you watch the flow light up like n8n. ----
+  const runDone =
+    activeRun?.status === "success" || activeRun?.status === "failed";
+  const runActive =
+    activeRun?.status === "pending" || activeRun?.status === "running";
+  const statusByNode = useMemo<Record<string, string>>(() => {
+    const m: Record<string, string> = {};
+    for (const r of activeRun?.node_runs ?? []) m[r.node_id] = r.status;
+    return m;
+  }, [activeRun]);
+  const triggerId = useMemo(
+    () => nodes.find((n) => (n.type ?? "").startsWith("trigger."))?.id,
+    [nodes]
+  );
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const animatedRef = useRef<string | null>(null);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => {
+    timers.current.forEach((t) => clearTimeout(t));
+    timers.current = [];
+    if (!activeRun || !runDone) {
+      setRevealed(new Set());
+      return;
+    }
+    const steps = activeRun.node_runs ?? [];
+    const seedTrigger = () =>
+      new Set<string>(triggerId ? [triggerId] : []);
+    const animate = activeRun.id === animateRunId && animatedRef.current !== activeRun.id;
+    if (!animate) {
+      // A run picked from the rail (or a failed run with no steps) → paint at once.
+      setRevealed(new Set([...seedTrigger(), ...steps.map((s) => s.node_id)]));
+      return;
+    }
+    animatedRef.current = activeRun.id;
+    setRevealed(seedTrigger());
+    steps.forEach((s, i) => {
+      const t = window.setTimeout(() => {
+        setRevealed((prev) => new Set(prev).add(s.node_id));
+      }, 320 * (i + 1));
+      timers.current.push(t);
+    });
+    return () => {
+      timers.current.forEach((t) => clearTimeout(t));
+    };
+    // Keyed on the run id + terminal status so a fresh run animates exactly
+    // once; polling stops on completion, so no tick interrupts the reveal.
+  }, [activeRun?.id, activeRun?.status, animateRunId, triggerId]);
+
+  // Overlay the run status onto nodes (a CSS ring) + light the edges between
+  // revealed steps. Kept separate from the editable `nodes`/`edges` state.
+  const displayNodes = useMemo(() => {
+    if (revealed.size === 0) return nodes;
+    return nodes.map((n) => {
+      if (!revealed.has(n.id)) return n;
+      const st = n.id === triggerId ? "success" : statusByNode[n.id];
+      const cls =
+        st === "skipped"
+          ? "flow-node-skipped"
+          : st === "failed"
+            ? "flow-node-failed"
+            : "flow-node-success";
+      return { ...n, className: cn(n.className, cls) };
+    });
+  }, [nodes, revealed, statusByNode, triggerId]);
+  const displayEdges = useMemo(() => {
+    if (revealed.size === 0) return edges;
+    return edges.map((e) => ({
+      ...e,
+      animated:
+        revealed.has(e.source) &&
+        revealed.has(e.target) &&
+        statusByNode[e.target] !== "skipped",
+    }));
+  }, [edges, revealed, statusByNode]);
 
   // Fit the view once, after the graph's nodes first load — the ReactFlow
   // `fitView` prop runs on mount, before the async graph exists, so without
@@ -1122,6 +1208,25 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
             )}
             Save
           </button>
+
+          {runActive && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--accent)]">
+              <Loader2 className="h-3 w-3 animate-spin" /> Running…
+            </span>
+          )}
+          {runDone && activeRun?.status === "success" && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--success)]/40 bg-[var(--success)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--success)]">
+              ✓ Ran successfully
+            </span>
+          )}
+          {runDone && activeRun?.status === "failed" && (
+            <span
+              className="inline-flex max-w-xs items-center gap-1 truncate rounded-full border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--danger)]"
+              title={activeRun.error ?? "Run failed"}
+            >
+              ✗ {activeRun.error ?? "Run failed"}
+            </span>
+          )}
         </div>
 
         {save.isError && (
@@ -1132,8 +1237,8 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 
         <ReactFlow
           colorMode={colorMode}
-          nodes={nodes}
-          edges={edges}
+          nodes={displayNodes}
+          edges={displayEdges}
           nodeTypes={nodeTypes}
           onInit={(inst) => (rfInstance.current = inst)}
           onNodesChange={onNodesChange}
