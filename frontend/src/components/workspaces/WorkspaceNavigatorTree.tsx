@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
+import { tasksApi } from "@/api/tasks";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { Modal } from "@/components/shared/Modal";
 import { workspacesApi } from "@/api/workspaces";
@@ -558,6 +559,7 @@ function TreeNode({
 
   const isFolder = node.kind === "folder";
   const isChat = node.kind === "chat";
+  const isTask = node.kind === "task";
   // Notes, canvases, boards, sheets, and chats can feed the workspace RAG
   // context, so they get the "Use as workspace context" toggle. Documents
   // default ON; chats default OFF (scratch space until opted in).
@@ -628,6 +630,17 @@ function TreeNode({
       setChatBusy(true);
       try {
         await chatApi.remove(node.ref_id);
+        invalidateTreeAndArchive();
+      } finally {
+        setChatBusy(false);
+      }
+    } else if (isTask) {
+      // Automations are synthesised (no workspace_items row) — delete the
+      // underlying Task, which drops it from the workspace tree.
+      if (!node.ref_id) return;
+      setChatBusy(true);
+      try {
+        await tasksApi.remove(node.ref_id);
         invalidateTreeAndArchive();
       } finally {
         setChatBusy(false);
@@ -765,6 +778,7 @@ function TreeNode({
           <NodeActions
             isFolder={isFolder}
             isChat={isChat}
+            isTask={isTask}
             onRename={() => {
               setDraftTitle(node.title);
               setRenaming(true);
@@ -869,6 +883,7 @@ function isEmoji(s: string): boolean {
 function NodeActions({
   isFolder,
   isChat,
+  isTask,
   onRename,
   onArchive,
   onDelete,
@@ -888,6 +903,7 @@ function NodeActions({
 }: {
   isFolder: boolean;
   isChat: boolean;
+  isTask: boolean;
   onRename?: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -1075,16 +1091,19 @@ function NodeActions({
                   }}
                 />
               )}
-              {/* Archive first (the soft step), then permanent delete. */}
-              <MenuItem
-                icon={<Archive className="h-3.5 w-3.5" />}
-                label="Archive"
-                disabled={deleting}
-                onClick={() => {
-                  setMenuOpen(false);
-                  onArchive();
-                }}
-              />
+              {/* Archive first (the soft step), then permanent delete.
+                  Automations are synthesised and have no archive state. */}
+              {!isTask && (
+                <MenuItem
+                  icon={<Archive className="h-3.5 w-3.5" />}
+                  label="Archive"
+                  disabled={deleting}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onArchive();
+                  }}
+                />
+              )}
               <MenuItem
                 icon={<Trash2 className="h-3.5 w-3.5" />}
                 label="Delete"
@@ -1098,7 +1117,9 @@ function NodeActions({
                       ? "Permanently delete this folder and everything inside it?"
                       : isChat
                         ? "Permanently delete this chat?"
-                        : "Permanently delete this item?",
+                        : isTask
+                          ? "Permanently delete this automation and its run history?"
+                          : "Permanently delete this item?",
                     confirmLabel: "Delete",
                     danger: true,
                   });

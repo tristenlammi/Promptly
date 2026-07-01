@@ -610,6 +610,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         <NodeInspector
           node={selected}
           boards={boards}
+          inWorkspace={!!task?.workspace_id}
           connectors={connectors ?? []}
           canDelete={selected.type === "ai.prompt"}
           onPatch={patchSelected}
@@ -624,6 +625,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 function NodeInspector({
   node,
   boards,
+  inWorkspace,
   connectors,
   canDelete,
   onPatch,
@@ -632,6 +634,7 @@ function NodeInspector({
 }: {
   node: Node;
   boards: BoardOption[];
+  inWorkspace: boolean;
   connectors: AvailableTaskConnector[];
   canDelete: boolean;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -760,13 +763,14 @@ function NodeInspector({
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
             <FileText className="h-4 w-4 text-[var(--warning)]" /> Output
           </div>
-          {/* What to do with the final AI result. "Board card" only appears
-              when the automation lives in a workspace that has a board to
-              write to (a top-level automation has none). */}
+          {/* What to do with the final AI result. "Board card" is offered for
+              any workspace automation (a top-level one has no boards to write
+              to). Gated on the workspace, not on boards having loaded, so the
+              option is reliably present. */}
           <div className="inline-flex rounded-md border border-[var(--border)] p-0.5 text-xs">
             {[
               { t: "output.report", label: "Report" },
-              ...(boards.length > 0
+              ...(inWorkspace
                 ? [{ t: "output.board_card", label: "Board card" }]
                 : []),
             ].map((o) => (
@@ -801,8 +805,8 @@ function NodeInspector({
           {node.type === "output.board_card" &&
             (boards.length === 0 ? (
               <p className="text-[11px] text-[var(--text-muted)]">
-                No boards here. Board cards need the automation to live in a
-                workspace that has a board.
+                This workspace has no board yet — create a board in it, then pick
+                it here.
               </p>
             ) : (
               <>
