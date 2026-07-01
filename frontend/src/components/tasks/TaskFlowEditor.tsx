@@ -353,12 +353,23 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
+  // Fit the view once, after the graph's nodes first load — the ReactFlow
+  // `fitView` prop runs on mount, before the async graph exists, so without
+  // this the output node can sit off-screen and never get configured.
+  const fitted = useRef(false);
   useEffect(() => {
     if (!graph) return;
     const rf = toRF(graph);
     setNodes(rf.nodes);
     setEdges(rf.edges);
     setDirty(false);
+    if (!fitted.current) {
+      fitted.current = true;
+      window.setTimeout(
+        () => rfInstance.current?.fitView({ padding: 0.25, duration: 250 }),
+        80
+      );
+    }
   }, [graph, setNodes, setEdges]);
 
   const selected = useMemo(
@@ -446,6 +457,20 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     [aiNodes, setNodes]
   );
 
+  // Jump to + select the output node (where "send to a board" is configured)
+  // so it's never lost off-screen.
+  const focusOutput = useCallback(() => {
+    const out = nodes.find(
+      (n) => n.type === "output.report" || n.type === "output.board_card"
+    );
+    if (!out) return;
+    setSelectedId(out.id);
+    rfInstance.current?.setCenter(out.position.x + 120, out.position.y + 40, {
+      zoom: 1,
+      duration: 300,
+    });
+  }, [nodes]);
+
   // Right-click pane menu → add an AI step at the clicked position.
   const addAIStepAtMenu = useCallback(() => {
     if (menu && rfInstance.current) {
@@ -531,6 +556,14 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
             className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
           >
             <Plus className="h-3.5 w-3.5" /> AI step
+          </button>
+          <button
+            type="button"
+            onClick={focusOutput}
+            title="Configure what happens with the result (report or board card)"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+          >
+            <FileText className="h-3.5 w-3.5" /> Output
           </button>
           <button
             type="button"
