@@ -52,6 +52,14 @@ type BgState = "idle" | "working" | "error";
  */
 const TEXT_DEBOUNCE_MS = 1500;
 
+// The canvas background, matched to the app's left rail (--bg light, #FAF9F7).
+// Excalidraw needs a concrete colour string (no CSS vars in appState), and in
+// dark mode it runs the whole <canvas> through `invert(93%) hue-rotate(180deg)`
+// — which turns this warm off-white into a warm near-black (~#181715), almost
+// exactly the dark rail (#1C1917). So one value reads as the rail in BOTH
+// themes; the filter does the dark conversion for us.
+const CANVAS_BG = "#FAF9F7";
+
 export function WorkspaceCanvasPane({
   canvasId,
   readOnly = false,
@@ -84,7 +92,10 @@ export function WorkspaceCanvasPane({
   const initialData = useMemo(
     () => ({
       libraryItems: buildBundledLibraryItems(),
-      appState: { theme: expectedThemeRef.current },
+      appState: {
+        theme: expectedThemeRef.current,
+        viewBackgroundColor: CANVAS_BG,
+      },
     }),
     []
   );
@@ -92,13 +103,31 @@ export function WorkspaceCanvasPane({
   // Follow the app theme: when it changes and the user hasn't overridden the
   // board, push the new theme into Excalidraw. We bump ``expectedThemeRef``
   // first so the resulting ``onChange`` echo isn't mistaken for a manual flip.
+  // Also re-assert our app-matched background each mount so the canvas never
+  // falls back to Excalidraw's white default (which the dark filter renders as
+  // a cool #121212 that doesn't match the rest of the UI).
   useEffect(() => {
     if (!excalidrawAPI) return;
     const store = useCanvasThemeStore.getState();
     store.followApp(appTheme);
-    if (store.overridden || appTheme === expectedThemeRef.current) return;
-    expectedThemeRef.current = appTheme;
-    excalidrawAPI.updateScene({ appState: { theme: appTheme } });
+    const themeChanged =
+      !store.overridden && appTheme !== expectedThemeRef.current;
+    const bgWrong =
+      excalidrawAPI.getAppState().viewBackgroundColor !== CANVAS_BG;
+    if (themeChanged) expectedThemeRef.current = appTheme;
+    // Separate literals (not a Partial<AppState> var) so each satisfies
+    // updateScene under exactOptionalPropertyTypes.
+    if (themeChanged && bgWrong) {
+      excalidrawAPI.updateScene({
+        appState: { theme: appTheme, viewBackgroundColor: CANVAS_BG },
+      });
+    } else if (themeChanged) {
+      excalidrawAPI.updateScene({ appState: { theme: appTheme } });
+    } else if (bgWrong) {
+      excalidrawAPI.updateScene({
+        appState: { viewBackgroundColor: CANVAS_BG },
+      });
+    }
   }, [appTheme, excalidrawAPI]);
 
   const binding = useExcalidrawCanvas({
