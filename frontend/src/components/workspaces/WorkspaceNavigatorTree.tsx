@@ -136,32 +136,45 @@ export function WorkspaceNavigatorTree({
     });
   }, []);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [overPin, setOverPin] = useState(false);
+  const [overId, setOverId] = useState<string | null>(null);
   const [offsetLeft, setOffsetLeft] = useState(0);
 
-  const flatItems = useMemo(
-    () => flattenTree(mainTree, collapsed),
-    [mainTree, collapsed]
+  // One flat list across both sections so pinned items are draggable too, and
+  // dragging between the Pinned area and the tree pins / unpins the item.
+  const flatItems = useMemo(() => {
+    const pinnedFlat = flattenTree(pinnedNodes, collapsed).map((i) => ({
+      ...i,
+      group: "pinned" as const,
+    }));
+    const mainFlat = flattenTree(mainTree, collapsed).map((i) => ({
+      ...i,
+      group: "main" as const,
+    }));
+    return [...pinnedFlat, ...mainFlat];
+  }, [pinnedNodes, mainTree, collapsed]);
+  // While dragging a folder, hide its descendants (can't nest into itself).
+  const visibleItems = useMemo(
+    () => (activeId ? removeChildrenOf(flatItems, activeId) : flatItems),
+    [flatItems, activeId]
   );
-  // While dragging a folder, hide its descendants so it can't nest into itself
-  // and the list animates cleanly.
-  const visibleItems = useMemo(() => {
-    if (!activeId) return flatItems;
-    return removeChildrenOf(flatItems, activeId);
-  }, [flatItems, activeId]);
-  const sortableIds = useMemo(
-    () => visibleItems.map((i) => i.id),
+  const pinnedIds = useMemo(
+    () => visibleItems.filter((i) => i.group === "pinned").map((i) => i.id),
+    [visibleItems]
+  );
+  const mainIds = useMemo(
+    () => visibleItems.filter((i) => i.group === "main").map((i) => i.id),
     [visibleItems]
   );
   const activeItem = activeId
     ? flatItems.find((i) => i.id === activeId) ?? null
     : null;
 
-  const [overId, setOverId] = useState<string | null>(null);
   const projected =
     activeId && overId && overId !== PIN_ZONE_ID
       ? getProjection(visibleItems, activeId, overId, offsetLeft)
       : null;
+  const overItem = overId ? flatItems.find((i) => i.id === overId) : null;
+  const dropInPinned = overId === PIN_ZONE_ID || overItem?.group === "pinned";
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -169,35 +182,39 @@ export function WorkspaceNavigatorTree({
   const resetDrag = () => {
     setActiveId(null);
     setOverId(null);
-    setOverPin(false);
     setOffsetLeft(0);
     document.body.style.removeProperty("cursor");
   };
 
-  const canDragKind = (k: string) =>
-    k !== "chat" && k !== "task"; // synthesised rows have no movable item
+  const canDragKind = (k: string) => k !== "chat" && k !== "task";
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
-    const activeKind = flatItems.find((i) => i.id === active.id)?.node.kind;
+    const activeFlat = flatItems.find((i) => i.id === active.id);
+    const overFlat = over ? flatItems.find((i) => i.id === over.id) : null;
+    const toPinned = over?.id === PIN_ZONE_ID || overFlat?.group === "pinned";
     resetDrag();
-    if (!over || !canEdit || !activeKind || !canDragKind(activeKind)) return;
-
-    // Dropped on the pin zone → pin it.
-    if (over.id === PIN_ZONE_ID) {
-      setPinned.mutate({ itemId: String(active.id), pinned: true });
+    if (!over || !canEdit || !activeFlat || !canDragKind(activeFlat.node.kind))
       return;
+
+    // Crossing the Pinned ↔ tree boundary toggles the pin.
+    const wasPinned = activeFlat.node.pinned === true;
+    if (toPinned !== wasPinned) {
+      setPinned.mutate({ itemId: String(active.id), pinned: toPinned });
     }
-    if (!projected) return;
+    // Reparent + reorder only when the item lands in the tree region.
+    if (toPinned || over.id === PIN_ZONE_ID || !projected) return;
     const { parentId, depth } = projected;
 
-    // Recompute the new sibling order to derive a float position.
     const clone = flatItems.map((i) => ({ ...i }));
     const oldIndex = clone.findIndex((i) => i.id === active.id);
     const newIndex = clone.findIndex((i) => i.id === over.id);
     const ordered = arrayMove(clone, oldIndex, newIndex);
     const at = ordered.findIndex((i) => i.id === active.id);
-    ordered[at] = { ...ordered[at], parentId, depth };
-    const sibs = ordered.filter((i) => i.parentId === parentId);
+    ordered[at] = { ...ordered[at], parentId, depth, group: "main" };
+    // Siblings among the tree (main) items sharing the new parent.
+    const sibs = ordered.filter(
+      (i) => i.parentId === parentId && (i.id === active.id || i.group === "main")
+    );
     const si = sibs.findIndex((i) => i.id === active.id);
     const prev = sibs[si - 1]?.node.position;
     const next = sibs[si + 1]?.node.position;
@@ -351,92 +368,94 @@ export function WorkspaceNavigatorTree({
           document.body.style.cursor = "grabbing";
         }}
         onDragMove={({ delta }) => setOffsetLeft(delta.x)}
-        onDragOver={({ over }) => {
-          setOverPin(over?.id === PIN_ZONE_ID);
-          setOverId(over ? String(over.id) : null);
-        }}
+        onDragOver={({ over }) => setOverId(over ? String(over.id) : null)}
         onDragEnd={handleDragEnd}
         onDragCancel={resetDrag}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-          {/* Drop-to-pin zone — only while dragging, so the rail stays clean. */}
-          {activeId && (
-            <PinDropZone active={overPin} />
-          )}
-          {pinnedNodes.length > 0 && (
-            <div className="mb-2 border-b border-[var(--border)] pb-2">
-              <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                <Pin className="h-3 w-3 fill-current" />
-                Pinned
+          <SortableContext
+            items={[...pinnedIds, ...mainIds]}
+            strategy={verticalListSortingStrategy}
+          >
+            {/* Pinned section — shown when there are pins, or as a drop target
+                while dragging so the first item can be pinned. */}
+            {(pinnedNodes.length > 0 || activeId) && (
+              <div className="mb-2 border-b border-[var(--border)] pb-2">
+                <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  <Pin className="h-3 w-3 fill-current" />
+                  Pinned
+                </div>
+                {pinnedNodes.length === 0 ? (
+                  <PinDropZone active={dropInPinned} />
+                ) : (
+                  <ul>
+                    {visibleItems
+                      .filter((i) => i.group === "pinned")
+                      .map((item) => (
+                        <TreeRow
+                          key={item.id}
+                          workspaceId={workspaceId}
+                          item={item}
+                          selectedId={selectedId}
+                          onSelect={onSelect}
+                          onOpenToSide={onOpenToSide}
+                          canEdit={canEdit}
+                          collapsed={collapsed}
+                          toggleCollapse={toggleCollapse}
+                          sortable={canDragKind(item.node.kind)}
+                        />
+                      ))}
+                  </ul>
+                )}
               </div>
+            )}
+            {tree.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
+                Nothing here yet. Use{" "}
+                <span className="font-medium text-[var(--text)]">+ New</span> to
+                add a chat, note, canvas, or folder.
+              </div>
+            ) : (
               <ul>
-                {pinnedNodes.map((node) => (
-                  <TreeRow
-                    key={`pin-${node.id}`}
-                    workspaceId={workspaceId}
-                    item={{ id: node.id, node, depth: 0, parentId: null }}
-                    selectedId={selectedId}
-                    onSelect={onSelect}
-                    onOpenToSide={onOpenToSide}
-                    canEdit={canEdit}
-                    collapsed={collapsed}
-                    toggleCollapse={toggleCollapse}
-                    sortable={false}
-                  />
-                ))}
+                {visibleItems
+                  .filter((i) => i.group === "main")
+                  .map((item) => (
+                    <TreeRow
+                      key={item.id}
+                      workspaceId={workspaceId}
+                      item={item}
+                      selectedId={selectedId}
+                      onSelect={onSelect}
+                      onOpenToSide={onOpenToSide}
+                      canEdit={canEdit}
+                      collapsed={collapsed}
+                      toggleCollapse={toggleCollapse}
+                      sortable={canDragKind(item.node.kind)}
+                      isDropParent={
+                        !!activeId &&
+                        !dropInPinned &&
+                        item.node.kind === "folder" &&
+                        projected?.parentId === item.id
+                      }
+                    />
+                  ))}
               </ul>
-            </div>
-          )}
-          {tree.length === 0 ? (
-            <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
-              Nothing here yet. Use{" "}
-              <span className="font-medium text-[var(--text)]">+ New</span> to
-              add a chat, note, canvas, or folder.
-            </div>
-          ) : mainTree.length === 0 ? null : (
-            <SortableContext
-              items={sortableIds}
-              strategy={verticalListSortingStrategy}
-            >
-              <ul>
-                {visibleItems.map((item) => (
-                  <TreeRow
-                    key={item.id}
-                    workspaceId={workspaceId}
-                    item={item}
-                    selectedId={selectedId}
-                    onSelect={onSelect}
-                    onOpenToSide={onOpenToSide}
-                    canEdit={canEdit}
-                    collapsed={collapsed}
-                    toggleCollapse={toggleCollapse}
-                    sortable={canDragKind(item.node.kind)}
-                    isDropParent={
-                      !!activeId &&
-                      item.node.kind === "folder" &&
-                      projected?.parentId === item.id
-                    }
-                  />
-                ))}
-              </ul>
-            </SortableContext>
-          )}
+            )}
+          </SortableContext>
         </div>
         <DragOverlay dropAnimation={null}>
           {activeItem ? (
-            <div className="w-56 scale-[0.97] rounded-md bg-[var(--surface)] px-1 opacity-95 shadow-lg ring-1 ring-[var(--accent)]/40">
-              <TreeRow
-                workspaceId={workspaceId}
-                item={{ ...activeItem, depth: 0 }}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                canEdit={false}
-                collapsed={collapsed}
-                toggleCollapse={toggleCollapse}
-                sortable={false}
-                overlay
-              />
-            </div>
+            <TreeRow
+              workspaceId={workspaceId}
+              item={{ ...activeItem, depth: 0 }}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              canEdit={false}
+              collapsed={collapsed}
+              toggleCollapse={toggleCollapse}
+              sortable={false}
+              overlay
+            />
           ) : null}
         </DragOverlay>
       </DndContext>
@@ -458,6 +477,9 @@ interface FlatItem {
   node: WorkspaceItemNode;
   depth: number;
   parentId: string | null;
+  /** Which visual section the row lives in — dropping across the two toggles
+   *  the item's pinned state. */
+  group?: "pinned" | "main";
 }
 
 /** Depth-first flatten of the tree, skipping collapsed folders' children. */
@@ -944,6 +966,10 @@ function TreeRow({
           isDropParent &&
             "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/50",
           isDragging && !overlay && "opacity-40",
+          // The lifted copy: shrink slightly (origin-left keeps it aligned to
+          // the cursor) + shadow/ring so it reads as picked up.
+          overlay &&
+            "origin-left scale-[0.98] cursor-grabbing rounded-md bg-[var(--surface)] shadow-lg ring-1 ring-[var(--accent)]/40",
           sortable && !renaming && "cursor-grab active:cursor-grabbing"
         )}
         style={{ paddingLeft: depth * INDENT + 4 }}
