@@ -35,7 +35,12 @@ import {
   type ReportOutputData,
   type ScheduleTriggerData,
 } from "@/api/tasks";
-import { useSaveTaskGraph, useTask, useTaskGraph } from "@/hooks/useTasks";
+import {
+  useSaveTaskGraph,
+  useTask,
+  useTaskGraph,
+  useUpdateTask,
+} from "@/hooks/useTasks";
 import { useWorkspaceTree } from "@/hooks/useWorkspaces";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { useThemeStore } from "@/store/themeStore";
@@ -53,6 +58,28 @@ interface BoardOption {
 // editor reads as native. Actions/flow-control land in later phases.
 // ---------------------------------------------------------------------
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const FREQUENCIES = ["hourly", "daily", "weekly", "monthly"] as const;
+const WEEKDAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+// AU-only for now (matches the Simple form), plus whatever the task already has.
+const TIMEZONES = [
+  "Australia/Sydney",
+  "Australia/Melbourne",
+  "Australia/Brisbane",
+  "Australia/Adelaide",
+  "Australia/Perth",
+  "Australia/Hobart",
+  "Australia/Darwin",
+];
+const pad = (n: number) => String(n).padStart(2, "0");
 
 function scheduleSummary(d: ScheduleTriggerData): string {
   const t = `${String(d.hour ?? 0).padStart(2, "0")}:${String(d.minute).padStart(2, "0")}`;
@@ -281,6 +308,19 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     return out;
   }, [tree]);
 
+  // Title editing lives in the flow toolbar (it's task metadata, not a node).
+  const updateTask = useUpdateTask();
+  const [title, setTitle] = useState("");
+  useEffect(() => {
+    if (task) setTitle(task.title);
+  }, [task?.title]);
+  const commitTitle = () => {
+    const t = title.trim();
+    if (t && task && t !== task.title) {
+      updateTask.mutate({ id: taskId, input: { title: t } });
+    }
+  };
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -428,6 +468,16 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
       <div className="relative min-w-0 flex-1">
         {/* Toolbar */}
         <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            placeholder="Automation title"
+            className="w-44 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs font-medium text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          />
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium",
@@ -695,19 +745,133 @@ function NodeInspector({
         </>
       )}
 
-      {(node.type ?? "").startsWith("trigger.") && (
-        <>
-          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-            <Clock className="h-4 w-4 text-[var(--success)]" /> Schedule
-          </div>
-          <div className="text-xs text-[var(--text-muted)]">
-            {scheduleSummary(node.data as unknown as ScheduleTriggerData)}
-          </div>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            Edit the schedule in the Simple editor for now.
-          </p>
-        </>
-      )}
+      {(node.type ?? "").startsWith("trigger.") &&
+        (() => {
+          const s = node.data as unknown as ScheduleTriggerData;
+          const selCls =
+            "mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]";
+          const tzOptions = Array.from(
+            new Set([...TIMEZONES, s.timezone].filter(Boolean))
+          );
+          return (
+            <>
+              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                <Clock className="h-4 w-4 text-[var(--success)]" /> Schedule
+              </div>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Frequency
+                <select
+                  value={s.frequency}
+                  className={selCls}
+                  onChange={(e) => {
+                    const f = e.target.value;
+                    const patch: Record<string, unknown> = { frequency: f };
+                    if (f !== "hourly" && s.hour == null) patch.hour = 9;
+                    if (f === "weekly" && s.weekday == null) patch.weekday = 0;
+                    if (f === "monthly" && s.day_of_month == null)
+                      patch.day_of_month = 1;
+                    onPatch(patch);
+                  }}
+                >
+                  {FREQUENCIES.map((f) => (
+                    <option key={f} value={f}>
+                      {f[0].toUpperCase() + f.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {s.frequency === "hourly" ? (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Minute past the hour
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={s.minute}
+                    onChange={(e) =>
+                      onPatch({
+                        minute: Math.max(
+                          0,
+                          Math.min(59, Number(e.target.value) || 0)
+                        ),
+                      })
+                    }
+                    className={selCls}
+                  />
+                </label>
+              ) : (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Time
+                  <input
+                    type="time"
+                    value={`${pad(s.hour ?? 9)}:${pad(s.minute)}`}
+                    onChange={(e) => {
+                      const [h, m] = e.target.value.split(":").map(Number);
+                      onPatch({ hour: h || 0, minute: m || 0 });
+                    }}
+                    className={selCls}
+                  />
+                </label>
+              )}
+
+              {s.frequency === "weekly" && (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Day of week
+                  <select
+                    value={s.weekday ?? 0}
+                    className={selCls}
+                    onChange={(e) => onPatch({ weekday: Number(e.target.value) })}
+                  >
+                    {WEEKDAYS.map((d, i) => (
+                      <option key={d} value={i}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {s.frequency === "monthly" && (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Day of month
+                  <select
+                    value={s.day_of_month ?? 1}
+                    className={selCls}
+                    onChange={(e) =>
+                      onPatch({ day_of_month: Number(e.target.value) })
+                    }
+                  >
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Timezone
+                <select
+                  value={s.timezone}
+                  className={selCls}
+                  onChange={(e) => onPatch({ timezone: e.target.value })}
+                >
+                  {tzOptions.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz.replace("Australia/", "")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Schedule changes take effect on Save.
+              </p>
+            </>
+          );
+        })()}
     </aside>
   );
 }

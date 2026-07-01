@@ -14,11 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.tasks.flow_graph import (
     AIPromptData,
     FlowGraph,
+    NodeType,
+    ReportOutputData,
+    ScheduleTriggerData,
     graph_to_task_fields,
     is_linear_flow,
     is_simple_graph,
     ordered_ai_nodes,
     task_to_graph,
+    terminal_output_node,
 )
 from app.tasks.models import Task, TaskConnector
 
@@ -95,9 +99,31 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
         await _sync_task_connectors(db, task, set(f.connector_ids))
         return
 
-    # Advanced flow. Store the graph; project the first AI node onto the
-    # columns so column-only consumers stay sane, and grant the union of every
-    # AI step's connectors so the whole chain can reach its tools.
+    # Advanced flow. Store the graph; project the trigger onto the schedule
+    # columns (the scheduler fires on those, so the canvas schedule is
+    # authoritative) and the first AI node onto the prompt/model columns
+    # (so column-only consumers — the list view, scheduler labels — stay sane).
+    trig = next(
+        (
+            n
+            for n in graph.nodes
+            if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+        ),
+        None,
+    )
+    if trig is not None:
+        s = ScheduleTriggerData.model_validate(trig.data)
+        task.frequency = s.frequency
+        task.hour = s.hour
+        task.minute = s.minute
+        task.weekday = s.weekday
+        task.day_of_month = s.day_of_month
+        task.timezone = s.timezone
+
+    term = terminal_output_node(graph)
+    if term is not None and term.type == NodeType.OUTPUT_REPORT:
+        task.notify = ReportOutputData.model_validate(term.data).notify
+
     ai_nodes = ordered_ai_nodes(graph)
     first = AIPromptData.model_validate(ai_nodes[0].data)
     task.prompt = first.prompt
