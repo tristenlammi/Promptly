@@ -24,11 +24,13 @@ import {
   Columns3,
   Download,
   FileText,
+  GitBranch,
   Globe,
   Loader2,
   Plus,
   Save,
   Search,
+  Split,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -38,10 +40,13 @@ import {
   type AIPromptData,
   type AvailableTaskConnector,
   type BoardCardOutputData,
+  type ConditionData,
   type FetchPageData,
   type FlowGraph,
   type FlowNodeModel,
   type ReportOutputData,
+  type RouterCategory,
+  type RouterData,
   type ScheduleTriggerData,
   type WebSearchData,
 } from "@/api/tasks";
@@ -62,10 +67,25 @@ function nodeModalTitle(type?: string): string {
   if (type === "ai.prompt") return "AI step";
   if (type === "search.web") return "Web search";
   if (type === "fetch.page") return "Fetch page";
+  if (type === "control.condition") return "Condition";
+  if (type === "control.router") return "Router";
   if (type === "output.report" || type === "output.board_card") return "Output";
   if (type?.startsWith("trigger.")) return "Schedule";
   return "Node";
 }
+
+const CONDITION_OPERATORS: { value: string; label: string; needsValue: boolean }[] =
+  [
+    { value: "contains", label: "contains", needsValue: true },
+    { value: "not_contains", label: "does not contain", needsValue: true },
+    { value: "equals", label: "equals", needsValue: true },
+    { value: "not_equals", label: "does not equal", needsValue: true },
+    { value: "matches", label: "matches regex", needsValue: true },
+    { value: "is_empty", label: "is empty", needsValue: false },
+    { value: "is_not_empty", label: "is not empty", needsValue: false },
+  ];
+
+const genCategoryId = () => "c_" + Math.random().toString(36).slice(2, 8);
 
 interface BoardOption {
   id: string;
@@ -282,6 +302,121 @@ function FetchNode({ data, selected }: NodeProps) {
   );
 }
 
+// A control node with several labelled *source* handles on the right — one per
+// branch. React Flow reads each handle's real DOM position, so absolutely
+// positioning them per-row lets edges leave from the right branch.
+function BranchNode({
+  icon,
+  label,
+  accent,
+  selected,
+  header,
+  branches,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  accent: string;
+  selected?: boolean;
+  header: React.ReactNode;
+  branches: { id: string; label: string; color: string }[];
+}) {
+  return (
+    <div
+      className={cn(
+        "w-60 rounded-card border bg-[var(--surface)] shadow-sm transition",
+        selected
+          ? "border-[var(--accent)] ring-2 ring-[var(--accent)]/30"
+          : "border-[var(--border)]"
+      )}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!h-2.5 !w-2.5 !border-2 !border-[var(--surface)]"
+        style={{ background: accent }}
+      />
+      <div
+        className="flex items-center gap-2 rounded-t-card px-3 py-2 text-xs font-semibold"
+        style={{ color: accent }}
+      >
+        {icon}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="px-3 pb-1 text-xs text-[var(--text-muted)]">{header}</div>
+      <div className="pb-2">
+        {branches.length === 0 ? (
+          <div className="px-3 py-1 text-[11px] italic text-[var(--text-muted)]">
+            No branches yet
+          </div>
+        ) : (
+          branches.map((b) => (
+            <div
+              key={b.id}
+              className="relative flex items-center justify-end py-1 pr-4 text-[11px] font-medium"
+              style={{ color: b.color }}
+            >
+              <span className="truncate">{b.label}</span>
+              <Handle
+                id={b.id}
+                type="source"
+                position={Position.Right}
+                className="!h-2.5 !w-2.5 !border-2 !border-[var(--surface)]"
+                style={{
+                  background: b.color,
+                  right: -5,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                }}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConditionNode({ data, selected }: NodeProps) {
+  const d = data as unknown as ConditionData;
+  const op = CONDITION_OPERATORS.find((o) => o.value === d.operator);
+  return (
+    <BranchNode
+      icon={<GitBranch className="h-3.5 w-3.5" />}
+      label="Condition"
+      accent="#a855f7"
+      selected={selected}
+      header={
+        <span className="text-[var(--text)]">
+          input {op?.label ?? d.operator}
+          {op?.needsValue && d.value ? ` "${d.value}"` : ""}
+        </span>
+      }
+      branches={[
+        { id: "true", label: "✓ true", color: "var(--success)" },
+        { id: "false", label: "✗ false", color: "var(--danger)" },
+      ]}
+    />
+  );
+}
+
+function RouterNode({ data, selected }: NodeProps) {
+  const d = data as unknown as RouterData;
+  return (
+    <BranchNode
+      icon={<Split className="h-3.5 w-3.5" />}
+      label="Router"
+      accent="#a855f7"
+      selected={selected}
+      header={<span>AI classifies into one branch</span>}
+      branches={(d.categories ?? []).map((c) => ({
+        id: c.id,
+        label: c.name || c.id,
+        color: "#a855f7",
+      }))}
+    />
+  );
+}
+
 function OutputNode({ data, selected }: NodeProps) {
   const d = data as unknown as ReportOutputData;
   return (
@@ -328,13 +463,21 @@ const nodeTypes = {
   "ai.prompt": AINode,
   "search.web": SearchNode,
   "fetch.page": FetchNode,
+  "control.condition": ConditionNode,
+  "control.router": RouterNode,
   "output.report": OutputNode,
   "output.board_card": BoardCardNode,
 };
 
-// Interior "do work" node types are all freely deletable; the trigger and
-// terminal output are protected singletons.
-const PROCESSING_NODE_TYPES = new Set(["ai.prompt", "search.web", "fetch.page"]);
+// Interior "do work" node types (processing + control) are freely deletable;
+// the trigger is a protected singleton and outputs are guarded down to the last.
+const PROCESSING_NODE_TYPES = new Set([
+  "ai.prompt",
+  "search.web",
+  "fetch.page",
+  "control.condition",
+  "control.router",
+]);
 
 // --- graph ⇄ react-flow ---------------------------------------------
 function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
@@ -350,9 +493,11 @@ function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
       deletable: !(n.type ?? "").startsWith("trigger."),
     })),
     edges: graph.edges.map((e) => ({
-      id: `${e.source}->${e.target}`,
+      id: `${e.source}:${e.source_handle ?? ""}->${e.target}`,
       source: e.source,
       target: e.target,
+      // Branch nodes (Condition/Router) route via the handle an edge leaves.
+      sourceHandle: e.source_handle ?? undefined,
       animated: false,
     })),
   };
@@ -367,7 +512,11 @@ function fromRF(base: FlowGraph, nodes: Node[], edges: Edge[]): FlowGraph {
       position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
       data: n.data as Record<string, unknown>,
     })) as FlowNodeModel[],
-    edges: edges.map((e) => ({ source: e.source, target: e.target })),
+    edges: edges.map((e) => ({
+      source: e.source,
+      target: e.target,
+      source_handle: e.sourceHandle ?? null,
+    })),
   };
 }
 
@@ -494,7 +643,12 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   // Free-form wiring: drag from one node's handle to another to connect them.
   const onConnect = useCallback(
     (c: Connection) => {
-      setEdges((eds) => addEdge({ ...c, id: `${c.source}->${c.target}` }, eds));
+      setEdges((eds) =>
+        addEdge(
+          { ...c, id: `${c.source}:${c.sourceHandle ?? ""}->${c.target}` },
+          eds
+        )
+      );
       setDirty(true);
     },
     [setEdges]
@@ -506,7 +660,13 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
   const nodeCount = nodes.length;
   const addNode = useCallback(
     (
-      type: "ai.prompt" | "search.web" | "fetch.page" | "output.report",
+      type:
+        | "ai.prompt"
+        | "search.web"
+        | "fetch.page"
+        | "control.condition"
+        | "control.router"
+        | "output.report",
       pos?: { x: number; y: number }
     ) => {
       const model =
@@ -517,21 +677,31 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
       const id = `${prefix}_${Date.now().toString(36)}`;
       const position =
         pos ?? { x: 140 + nodeCount * 40, y: 280 + nodeCount * 22 };
-      const data: Record<string, unknown> =
-        type === "search.web"
-          ? { query: "", count: 5 }
-          : type === "fetch.page"
-            ? { url: "", max_chars: 8000 }
-            : type === "output.report"
-              ? { notify: true }
-              : {
-                  prompt: "Use the previous step's output:\n\n{{upstream_output}}",
-                  provider_id: model?.provider_id ?? null,
-                  model_id: model?.model_id ?? null,
-                  reasoning_effort: model?.reasoning_effort ?? null,
-                  use_web_search: false,
-                  connector_ids: [],
-                };
+      let data: Record<string, unknown>;
+      if (type === "search.web") data = { query: "", count: 5 };
+      else if (type === "fetch.page") data = { url: "", max_chars: 8000 };
+      else if (type === "output.report") data = { notify: true };
+      else if (type === "control.condition")
+        data = { operator: "contains", value: "", case_sensitive: false };
+      else if (type === "control.router")
+        data = {
+          categories: [
+            { id: genCategoryId(), name: "Category A", description: "" },
+            { id: genCategoryId(), name: "Category B", description: "" },
+          ],
+          provider_id: model?.provider_id ?? null,
+          model_id: model?.model_id ?? null,
+          reasoning_effort: model?.reasoning_effort ?? null,
+        };
+      else
+        data = {
+          prompt: "Use the previous step's output:\n\n{{upstream_output}}",
+          provider_id: model?.provider_id ?? null,
+          model_id: model?.model_id ?? null,
+          reasoning_effort: model?.reasoning_effort ?? null,
+          use_web_search: false,
+          connector_ids: [],
+        };
       const newNode: Node = { id, type, position, deletable: true, data };
       setNodes((ns) => ns.concat(newNode));
       setSelectedId(id);
@@ -560,7 +730,15 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
 
   // Right-click pane menu → add a node at the clicked position.
   const addNodeAtMenu = useCallback(
-    (type: "ai.prompt" | "search.web" | "fetch.page" | "output.report") => {
+    (
+      type:
+        | "ai.prompt"
+        | "search.web"
+        | "fetch.page"
+        | "control.condition"
+        | "control.router"
+        | "output.report"
+    ) => {
       if (menu && rfInstance.current) {
         addNode(
           type,
@@ -753,6 +931,21 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
                 <Download className="h-3.5 w-3.5 text-[#3b82f6]" /> Add fetch page
+              </button>
+              <div className="my-1 h-px bg-[var(--border)]" />
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("control.condition")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <GitBranch className="h-3.5 w-3.5 text-[#a855f7]" /> Add condition
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("control.router")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Split className="h-3.5 w-3.5 text-[#a855f7]" /> Add router
               </button>
               <div className="my-1 h-px bg-[var(--border)]" />
               <button
@@ -1030,6 +1223,164 @@ function NodeInspector({
           </label>
         </>
       )}
+
+      {node.type === "control.condition" &&
+        (() => {
+          const c = node.data as unknown as ConditionData;
+          const op = CONDITION_OPERATORS.find((o) => o.value === c.operator);
+          return (
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Tests the upstream text and sends the run down its{" "}
+                <b className="text-[var(--success)]">true</b> or{" "}
+                <b className="text-[var(--danger)]">false</b> branch. Wire each
+                handle to what should happen next — only the matching branch
+                runs.
+              </p>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                The upstream text…
+                <select
+                  value={c.operator}
+                  onChange={(e) => onPatch({ operator: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                >
+                  {CONDITION_OPERATORS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {op?.needsValue && (
+                <>
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Value
+                    <input
+                      value={c.value}
+                      onChange={(e) => onPatch({ value: e.target.value })}
+                      className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                      placeholder={
+                        c.operator === "matches" ? "regular expression" : "text to look for"
+                      }
+                    />
+                  </label>
+                  <label className="flex items-center justify-between text-xs text-[var(--text)]">
+                    <span>Case sensitive</span>
+                    <input
+                      type="checkbox"
+                      checked={c.case_sensitive}
+                      onChange={(e) => onPatch({ case_sensitive: e.target.checked })}
+                      className="h-4 w-4 accent-[var(--accent)]"
+                    />
+                  </label>
+                </>
+              )}
+            </>
+          );
+        })()}
+
+      {node.type === "control.router" &&
+        (() => {
+          const r = node.data as unknown as RouterData;
+          const cats = r.categories ?? [];
+          const modelKey =
+            r.provider_id && r.model_id ? `${r.provider_id}::${r.model_id}` : "";
+          const setCats = (next: RouterCategory[]) =>
+            onPatch({ categories: next });
+          return (
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                The AI reads the upstream text and picks the single best-matching
+                category; that category's branch runs and the others are skipped.
+                Give each a clear description — that's what the classifier reads.
+              </p>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Classifier model
+                <select
+                  value={modelKey}
+                  onChange={(e) => {
+                    const [pid, mid] = e.target.value.split("::");
+                    onPatch({ provider_id: pid || null, model_id: mid || null });
+                  }}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                >
+                  <option value="">No model — set one</option>
+                  {(models ?? []).map((m) => (
+                    <option
+                      key={`${m.provider_id}::${m.model_id}`}
+                      value={`${m.provider_id}::${m.model_id}`}
+                    >
+                      {m.display_name} · {m.provider_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="space-y-2">
+                <span className="text-xs font-medium text-[var(--text-muted)]">
+                  Categories (branches)
+                </span>
+                {cats.map((cat, i) => (
+                  <div
+                    key={cat.id}
+                    className="space-y-1 rounded-md border border-[var(--border)] p-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={cat.name}
+                        onChange={(e) =>
+                          setCats(
+                            cats.map((x, j) =>
+                              j === i ? { ...x, name: e.target.value } : x
+                            )
+                          )
+                        }
+                        placeholder="Branch name"
+                        className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] p-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                      />
+                      <button
+                        type="button"
+                        disabled={cats.length <= 1}
+                        onClick={() => setCats(cats.filter((_, j) => j !== i))}
+                        title="Remove branch"
+                        className="rounded p-1 text-[var(--danger)] transition hover:bg-[var(--danger-bg)] disabled:opacity-30"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <input
+                      value={cat.description}
+                      onChange={(e) =>
+                        setCats(
+                          cats.map((x, j) =>
+                            j === i ? { ...x, description: e.target.value } : x
+                          )
+                        )
+                      }
+                      placeholder="When should the AI pick this?"
+                      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-1.5 text-[11px] text-[var(--text-muted)] outline-none focus:border-[var(--accent)]"
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCats([
+                      ...cats,
+                      { id: genCategoryId(), name: "", description: "" },
+                    ])
+                  }
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add category
+                </button>
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)]">
+                Each category is a branch handle on the node — connect it to the
+                steps for that case. Removing one drops its wire.
+              </p>
+            </>
+          );
+        })()}
 
       {isOutput && (
         <>

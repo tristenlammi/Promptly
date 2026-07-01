@@ -49,6 +49,11 @@ class NodeType:
     # emits text for the next node. The first steps toward an n8n-style catalog.
     SEARCH_WEB = "search.web"
     FETCH_PAGE = "fetch.page"
+    # Control-flow nodes — they don't transform the text, they *route* it. Only
+    # the branch(es) they select run; everything downstream of an unselected
+    # branch is skipped ("active-path" execution).
+    CONDITION = "control.condition"
+    ROUTER = "control.router"
     OUTPUT_REPORT = "output.report"
     # Workspace-output node: files the AI result as a card on a workspace board.
     OUTPUT_BOARD_CARD = "output.board_card"
@@ -70,6 +75,12 @@ OUTPUT_TYPES = frozenset(
 PROCESSING_TYPES = frozenset(
     {NodeType.AI_PROMPT, NodeType.SEARCH_WEB, NodeType.FETCH_PAGE}
 )
+
+
+# Control-flow node kinds. They pass the upstream text straight through on the
+# branch(es) they select and skip the rest — the engine drives active-path
+# execution off the ``source_handle`` an edge leaves them by.
+CONTROL_TYPES = frozenset({NodeType.CONDITION, NodeType.ROUTER})
 
 
 # Stable node ids for the canonical 3-node "simple" graph. Deterministic so a
@@ -170,6 +181,52 @@ class FetchPageData(BaseModel):
 
     url: str = ""
     max_chars: int = 8000  # cap the extracted text handed downstream
+
+
+class ConditionData(BaseModel):
+    """A branch: tests the upstream text and routes to the ``true`` or ``false``
+    handle. String operators only (our pipeline is text-centric); ``value`` is a
+    template. ``matches`` treats ``value`` as a regex."""
+
+    operator: str = "contains"
+    # contains | not_contains | equals | not_equals | matches | is_empty |
+    # is_not_empty
+    value: str = ""
+    case_sensitive: bool = False
+
+
+class RouterCategory(BaseModel):
+    """One branch of a Router — an ``id`` (the edge's ``source_handle``) plus a
+    human name and a description the classifier reads."""
+
+    id: str
+    name: str = ""
+    description: str = ""
+
+
+class RouterData(BaseModel):
+    """An AI classifier branch: the model reads the upstream text and picks one
+    of ``categories``; that category's ``id`` becomes the active handle. Falls
+    back to the first category when the model's answer matches none."""
+
+    categories: list[RouterCategory] = Field(default_factory=list)
+    provider_id: str | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
+
+
+def branch_handles(node: FlowNode) -> list[str]:
+    """The valid ``source_handle`` ids a control node can route to. Empty for a
+    non-control node (its single implicit output handle is ``None``)."""
+    if node.type == NodeType.CONDITION:
+        return ["true", "false"]
+    if node.type == NodeType.ROUTER:
+        try:
+            cats = RouterData.model_validate(node.data).categories
+        except Exception:  # noqa: BLE001 — malformed router → no handles
+            return []
+        return [c.id for c in cats if c.id]
+    return []
 
 
 class ReportOutputData(BaseModel):
@@ -422,10 +479,14 @@ def is_executable_graph(graph: FlowGraph) -> bool:
     ]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
+    controls = [n for n in graph.nodes if n.type in CONTROL_TYPES]
     if len(triggers) != 1 or len(outs) < 1:
         return False
     # No unknown/unsupported node types in the mix.
-    if len(triggers) + len(outs) + len(procs) != len(graph.nodes):
+    if (
+        len(triggers) + len(outs) + len(procs) + len(controls)
+        != len(graph.nodes)
+    ):
         return False
 
     out_adj, in_adj = _adjacency(graph)
@@ -540,10 +601,15 @@ __all__ = [
     "AIPromptData",
     "WebSearchData",
     "FetchPageData",
+    "ConditionData",
+    "RouterData",
+    "RouterCategory",
+    "branch_handles",
     "ReportOutputData",
     "BoardCardOutputData",
     "OUTPUT_TYPES",
     "PROCESSING_TYPES",
+    "CONTROL_TYPES",
     "terminal_output_node",
     "output_nodes",
     "SimpleTaskFields",

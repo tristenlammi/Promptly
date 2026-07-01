@@ -28,12 +28,14 @@ from app.chat.models import WorkspaceItem, WorkspaceTask
 from app.tasks.flow_graph import (
     AIPromptData,
     BoardCardOutputData,
+    ConditionData,
+    CONTROL_TYPES,
     FetchPageData,
     FlowGraph,
     FlowNode,
     NodeType,
     OUTPUT_TYPES,
-    PROCESSING_TYPES,
+    RouterData,
     ScheduleTriggerData,
     WebSearchData,
     is_executable_graph,
@@ -397,6 +399,100 @@ async def _file_board_card(
     return f'Filed "{title}" on "{board.title or "board"}"{suffix}.'
 
 
+def _eval_condition(data: ConditionData, text: str, ctx: dict[str, str]) -> bool:
+    """Evaluate a Condition node against the upstream text → True/False."""
+    op = data.operator
+    if op == "is_empty":
+        return not text.strip()
+    if op == "is_not_empty":
+        return bool(text.strip())
+    value = _interpolate(data.value, ctx)
+    if op == "matches":
+        try:
+            flags = 0 if data.case_sensitive else re.IGNORECASE
+            return re.search(value, text, flags) is not None
+        except re.error:
+            return False
+    hay = text if data.case_sensitive else text.lower()
+    needle = value if data.case_sensitive else value.lower()
+    if op == "contains":
+        return needle in hay
+    if op == "not_contains":
+        return needle not in hay
+    if op == "equals":
+        return hay.strip() == needle.strip()
+    if op == "not_equals":
+        return hay.strip() != needle.strip()
+    return False
+
+
+async def _run_router_node(
+    node: FlowNode,
+    *,
+    db,
+    user: User,
+    upstream: str,
+) -> tuple[str, dict, dict]:
+    """Classify the upstream text into one of the router's categories.
+    Returns ``(selected_handle_id, usage, record)``. Falls back to the first
+    category when the model's answer matches none."""
+    data = RouterData.model_validate(node.data)
+    cats = data.categories
+    if not cats:
+        raise TaskRunError("A Router step has no categories to route to.")
+    provider, model_id = await _resolve_provider(
+        uuid.UUID(data.provider_id) if data.provider_id else None,
+        data.model_id,
+        db,
+    )
+    listing = "\n".join(
+        f'- id "{c.id}": {c.name or c.id}'
+        + (f" — {c.description}" if c.description else "")
+        for c in cats
+    )
+    system = (
+        "You are a routing classifier inside an automation. Read the input and "
+        "choose the single category it best fits. Reply with ONLY that "
+        "category's id — no quotes, no punctuation, no explanation."
+    )
+    prompt = (
+        f"Categories:\n{listing}\n\nInput:\n{upstream or '(empty)'}\n\n"
+        "The best category id is:"
+    )
+    text, _sources, usage = await _generate(
+        provider=provider,
+        model_id=model_id,
+        system=system,
+        prompt=prompt,
+        user=user,
+        use_web_search=False,
+        reasoning_effort=data.reasoning_effort,
+        mcp_schemas=[],
+        mcp_dispatch={},
+        db=db,
+    )
+    answer = text.strip().lower()
+    picked = None
+    for c in cats:
+        cid = c.id.lower()
+        if answer == cid or cid in answer or (c.name and c.name.lower() in answer):
+            picked = c.id
+            break
+    if picked is None:
+        picked = cats[0].id  # fall back to the first branch
+    name = next((c.name for c in cats if c.id == picked), picked)
+    record = {
+        "node_id": node.id,
+        "type": NodeType.ROUTER,
+        "label": f"Route → {name or picked}",
+        "status": "success",
+        "output": picked,
+        "prompt_tokens": usage.get("prompt_tokens") or None,
+        "completion_tokens": usage.get("completion_tokens") or None,
+    }
+    return picked, usage, record
+
+
 def _flow_timezone(graph: FlowGraph, task: Task) -> str:
     """The schedule trigger's timezone, falling back to the task's."""
     for n in graph.nodes:
@@ -408,14 +504,6 @@ def _flow_timezone(graph: FlowGraph, task: Task) -> str:
     return task.timezone
 
 
-def _predecessors(graph: FlowGraph) -> dict[str, list[str]]:
-    """node_id → its immediate upstream node ids, in edge declaration order."""
-    inc: dict[str, list[str]] = {}
-    for e in graph.edges:
-        inc.setdefault(e.target, []).append(e.source)
-    return inc
-
-
 def _successor_types(graph: FlowGraph) -> dict[str, set[str]]:
     """node_id → the set of node types it feeds into (its downstream kinds)."""
     out: dict[str, set[str]] = {}
@@ -425,13 +513,6 @@ def _successor_types(graph: FlowGraph) -> dict[str, set[str]]:
         if tgt is not None:
             out.setdefault(e.source, set()).add(tgt.type)
     return out
-
-
-def _merge_upstream(preds: list[str], outputs: dict[str, str]) -> str:
-    """The text handed to a node: its predecessors' outputs, joined. A single
-    predecessor (the linear case) passes straight through unchanged."""
-    parts = [outputs[p] for p in preds if outputs.get(p)]
-    return "\n\n".join(parts)
 
 
 async def run_graph_flow(
@@ -452,9 +533,12 @@ async def run_graph_flow(
     the immediate next node, ``{{upstream_output}}``.
 
     Fan-out (a node feeding several downstream nodes) and multiple output sinks
-    are supported: every reachable node runs. The run report is the text feeding
-    an ``output.report`` node if present, else the last processing node's output;
-    each action sink (board card, …) appends a one-line note.
+    are supported. **Control nodes (Condition / Router) drive active-path
+    execution**: a node runs only if at least one incoming edge is *active*, and
+    an edge leaving a control node is active only via the handle that node
+    selected. Everything downstream of an unselected branch is skipped. The run
+    report is the text feeding an active ``output.report`` node if present, else
+    the last processing node's output; each active action sink appends a note.
     """
     if not is_executable_graph(graph):
         raise TaskRunError(
@@ -464,13 +548,18 @@ async def run_graph_flow(
 
     order = topological_order(graph)
     by_id = {n.id: n for n in graph.nodes}
-    preds = _predecessors(graph)
     succ_types = _successor_types(graph)
+    control_ids = {n.id for n in graph.nodes if n.type in CONTROL_TYPES}
+    in_edges: dict[str, list] = {}
+    for e in graph.edges:
+        in_edges.setdefault(e.target, []).append(e)
 
     tz = _flow_timezone(graph, task)
     now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
 
     outputs: dict[str, str] = {}  # node_id → text output (for {{node_x.output}})
+    active: set[str] = set()  # nodes that actually ran (on the taken path)
+    selected: dict[str, set[str]] = {}  # control node_id → handles it fired
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
     node_runs: list[dict] = []
@@ -480,9 +569,46 @@ async def run_graph_flow(
     report_from_output: str | None = None  # an output.report node's input, if any
     action_notes: list[str] = []
 
+    def _edge_active(e) -> bool:
+        if e.source not in active:
+            return False
+        if e.source in control_ids:
+            return (e.source_handle or "") in selected.get(e.source, set())
+        return True
+
+    def _accum_usage(u: dict) -> None:
+        if u.get("prompt_tokens"):
+            usage["prompt_tokens"] += u["prompt_tokens"]
+        if u.get("completion_tokens"):
+            usage["completion_tokens"] += u["completion_tokens"]
+        if u.get("cost_usd") is not None:
+            usage["cost_usd"] = (usage["cost_usd"] or 0.0) + u["cost_usd"]
+
     for nid in order:
         node = by_id[nid]
-        upstream = _merge_upstream(preds.get(nid, []), outputs)
+
+        if node.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL):
+            active.add(nid)
+            outputs[nid] = trigger_payload or ""
+            continue
+
+        # A node runs only if an incoming edge is active. All-inactive → skip
+        # (and it stays inactive, so its own downstream skips too).
+        active_srcs = [e.source for e in in_edges.get(nid, []) if _edge_active(e)]
+        if not active_srcs:
+            outputs[nid] = ""
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Skipped",
+                    "status": "skipped",
+                    "output": "",
+                }
+            )
+            continue
+        active.add(nid)
+        upstream = "\n\n".join(outputs[s] for s in active_srcs if outputs.get(s))
         ctx = _step_context(
             upstream=upstream,
             trigger_payload=trigger_payload or "",
@@ -490,11 +616,31 @@ async def run_graph_flow(
             outputs=outputs,
         )
 
-        if node.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL):
-            outputs[nid] = trigger_payload or ""
-            continue
+        if node.type == NodeType.CONDITION:
+            data = ConditionData.model_validate(node.data)
+            result = _eval_condition(data, upstream, ctx)
+            selected[nid] = {"true" if result else "false"}
+            outputs[nid] = upstream  # pass the text through on the taken branch
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": NodeType.CONDITION,
+                    "label": "Condition",
+                    "status": "success",
+                    "output": f"{data.operator} → {'true' if result else 'false'}",
+                }
+            )
 
-        if node.type == NodeType.SEARCH_WEB:
+        elif node.type == NodeType.ROUTER:
+            picked, router_usage, record = await _run_router_node(
+                node, db=db, user=user, upstream=upstream
+            )
+            _accum_usage(router_usage)
+            selected[nid] = {picked}
+            outputs[nid] = upstream
+            node_runs.append(record)
+
+        elif node.type == NodeType.SEARCH_WEB:
             text, node_sources, record = await _run_search_node(
                 node, ctx, db=db, user=user
             )
@@ -556,14 +702,7 @@ async def run_graph_flow(
                 db=db,
             )
             sources.extend(node_sources)
-            if node_usage.get("prompt_tokens"):
-                usage["prompt_tokens"] += node_usage["prompt_tokens"]
-            if node_usage.get("completion_tokens"):
-                usage["completion_tokens"] += node_usage["completion_tokens"]
-            if node_usage.get("cost_usd") is not None:
-                usage["cost_usd"] = (usage["cost_usd"] or 0.0) + node_usage[
-                    "cost_usd"
-                ]
+            _accum_usage(node_usage)
             node_runs.append(
                 {
                     "node_id": nid,

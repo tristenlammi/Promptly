@@ -180,6 +180,8 @@ export type FlowNodeType =
   | "ai.prompt"
   | "search.web"
   | "fetch.page"
+  | "control.condition"
+  | "control.router"
   | "output.report"
   | "output.board_card";
 
@@ -225,6 +227,25 @@ export interface AIPromptData {
 export interface WebSearchData {
   query: string;
   count: number;
+}
+
+export interface ConditionData {
+  operator: string;
+  value: string;
+  case_sensitive: boolean;
+}
+
+export interface RouterCategory {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface RouterData {
+  categories: RouterCategory[];
+  provider_id: string | null;
+  model_id: string | null;
+  reasoning_effort: string | null;
 }
 
 export interface FetchPageData {
