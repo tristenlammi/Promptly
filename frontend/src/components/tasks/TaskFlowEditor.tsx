@@ -22,11 +22,13 @@ import {
   Brain,
   Clock,
   Columns3,
+  Download,
   FileText,
   Globe,
   Loader2,
   Plus,
   Save,
+  Search,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -36,10 +38,12 @@ import {
   type AIPromptData,
   type AvailableTaskConnector,
   type BoardCardOutputData,
+  type FetchPageData,
   type FlowGraph,
   type FlowNodeModel,
   type ReportOutputData,
   type ScheduleTriggerData,
+  type WebSearchData,
 } from "@/api/tasks";
 import {
   useSaveTaskGraph,
@@ -56,6 +60,8 @@ import { cn } from "@/utils/cn";
 
 function nodeModalTitle(type?: string): string {
   if (type === "ai.prompt") return "AI step";
+  if (type === "search.web") return "Web search";
+  if (type === "fetch.page") return "Fetch page";
   if (type === "output.report" || type === "output.board_card") return "Output";
   if (type?.startsWith("trigger.")) return "Schedule";
   return "Node";
@@ -222,6 +228,60 @@ function AINode({ data, selected }: NodeProps) {
   );
 }
 
+function SearchNode({ data, selected }: NodeProps) {
+  const d = data as unknown as WebSearchData;
+  return (
+    <NodeShell
+      icon={<Search className="h-3.5 w-3.5" />}
+      label="Web search"
+      accent="#3b82f6"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="line-clamp-2 text-[var(--text)]">
+        {d.query || (
+          <span className="italic text-[var(--text-muted)]">
+            Searches the upstream text
+          </span>
+        )}
+      </div>
+      <div className="mt-1">
+        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          {d.count || 5} results
+        </span>
+      </div>
+    </NodeShell>
+  );
+}
+
+function FetchNode({ data, selected }: NodeProps) {
+  const d = data as unknown as FetchPageData;
+  return (
+    <NodeShell
+      icon={<Download className="h-3.5 w-3.5" />}
+      label="Fetch page"
+      accent="#3b82f6"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="truncate text-[var(--text)]">
+        {d.url || (
+          <span className="italic text-[var(--text-muted)]">
+            First URL from upstream
+          </span>
+        )}
+      </div>
+      <div className="mt-1">
+        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          reader text
+        </span>
+      </div>
+    </NodeShell>
+  );
+}
+
 function OutputNode({ data, selected }: NodeProps) {
   const d = data as unknown as ReportOutputData;
   return (
@@ -266,9 +326,15 @@ const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
   "ai.prompt": AINode,
+  "search.web": SearchNode,
+  "fetch.page": FetchNode,
   "output.report": OutputNode,
   "output.board_card": BoardCardNode,
 };
+
+// Interior "do work" node types are all freely deletable; the trigger and
+// terminal output are protected singletons.
+const PROCESSING_NODE_TYPES = new Set(["ai.prompt", "search.web", "fetch.page"]);
 
 // --- graph ⇄ react-flow ---------------------------------------------
 function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
@@ -279,8 +345,8 @@ function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
       position: n.position,
       data: { ...n.data },
       // Trigger + output are required singletons — don't let a stray Delete
-      // remove them. AI steps are freely deletable.
-      deletable: n.type === "ai.prompt",
+      // remove them. Processing steps (AI / search / fetch) are deletable.
+      deletable: PROCESSING_NODE_TYPES.has(n.type),
     })),
     edges: graph.edges.map((e) => ({
       id: `${e.source}->${e.target}`,
@@ -433,36 +499,43 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     [setEdges]
   );
 
-  // Add a *disconnected* AI step — the user wires it in themselves. New steps
-  // inherit an existing step's model so they're runnable once connected.
-  const addAIStep = useCallback(
-    (pos?: { x: number; y: number }) => {
+  // Add a *disconnected* processing node — the user wires it in themselves.
+  // New AI steps inherit an existing step's model so they're runnable once
+  // connected. Search/fetch nodes default to consuming the upstream text.
+  const nodeCount = nodes.length;
+  const addNode = useCallback(
+    (type: "ai.prompt" | "search.web" | "fetch.page", pos?: { x: number; y: number }) => {
       const model =
         (aiNodes[aiNodes.length - 1]?.data as unknown as
           | AIPromptData
           | undefined) ?? null;
-      const id = `ai_${Date.now().toString(36)}`;
+      const prefix = type.split(".")[0];
+      const id = `${prefix}_${Date.now().toString(36)}`;
       const position =
-        pos ?? { x: 140 + aiNodes.length * 48, y: 280 + aiNodes.length * 24 };
-      const newNode: Node = {
-        id,
-        type: "ai.prompt",
-        position,
-        deletable: true,
-        data: {
-          prompt: "Use the previous step's output:\n\n{{upstream_output}}",
-          provider_id: model?.provider_id ?? null,
-          model_id: model?.model_id ?? null,
-          reasoning_effort: model?.reasoning_effort ?? null,
-          use_web_search: false,
-          connector_ids: [],
-        } as unknown as Record<string, unknown>,
-      };
+        pos ?? { x: 140 + nodeCount * 40, y: 280 + nodeCount * 22 };
+      const data: Record<string, unknown> =
+        type === "search.web"
+          ? { query: "", count: 5 }
+          : type === "fetch.page"
+            ? { url: "", max_chars: 8000 }
+            : {
+                prompt: "Use the previous step's output:\n\n{{upstream_output}}",
+                provider_id: model?.provider_id ?? null,
+                model_id: model?.model_id ?? null,
+                reasoning_effort: model?.reasoning_effort ?? null,
+                use_web_search: false,
+                connector_ids: [],
+              };
+      const newNode: Node = { id, type, position, deletable: true, data };
       setNodes((ns) => ns.concat(newNode));
       setSelectedId(id);
       setDirty(true);
     },
-    [aiNodes, setNodes]
+    [aiNodes, nodeCount, setNodes]
+  );
+  const addAIStep = useCallback(
+    (pos?: { x: number; y: number }) => addNode("ai.prompt", pos),
+    [addNode]
   );
 
   // Jump to + select the output node (where "send to a board" is configured)
@@ -479,17 +552,21 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
     });
   }, [nodes]);
 
-  // Right-click pane menu → add an AI step at the clicked position.
-  const addAIStepAtMenu = useCallback(() => {
-    if (menu && rfInstance.current) {
-      addAIStep(
-        rfInstance.current.screenToFlowPosition({ x: menu.x, y: menu.y })
-      );
-    } else {
-      addAIStep();
-    }
-    setMenu(null);
-  }, [menu, addAIStep]);
+  // Right-click pane menu → add a node at the clicked position.
+  const addNodeAtMenu = useCallback(
+    (type: "ai.prompt" | "search.web" | "fetch.page") => {
+      if (menu && rfInstance.current) {
+        addNode(
+          type,
+          rfInstance.current.screenToFlowPosition({ x: menu.x, y: menu.y })
+        );
+      } else {
+        addNode(type);
+      }
+      setMenu(null);
+    },
+    [menu, addNode]
+  );
 
   // Remove a node + its edges; if it sat mid-chain (one in, one out), heal the
   // gap so the surrounding chain stays connected.
@@ -567,6 +644,22 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
           </button>
           <button
             type="button"
+            onClick={() => addNode("search.web")}
+            title="Add a web-search step (right-click the canvas for more)"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+          >
+            <Search className="h-3.5 w-3.5" /> Search
+          </button>
+          <button
+            type="button"
+            onClick={() => addNode("fetch.page")}
+            title="Add a fetch-page step that extracts a URL's readable text"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+          >
+            <Download className="h-3.5 w-3.5" /> Fetch
+          </button>
+          <button
+            type="button"
             onClick={focusOutput}
             title="Configure what happens with the result (report or board card)"
             className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
@@ -636,10 +729,24 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
             >
               <button
                 type="button"
-                onClick={addAIStepAtMenu}
+                onClick={() => addNodeAtMenu("ai.prompt")}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
                 <Brain className="h-3.5 w-3.5 text-[var(--accent)]" /> Add AI step
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("search.web")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Search className="h-3.5 w-3.5 text-[#3b82f6]" /> Add web search
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("fetch.page")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Download className="h-3.5 w-3.5 text-[#3b82f6]" /> Add fetch page
               </button>
             </div>
           </>
@@ -686,7 +793,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
             boards={boards}
             inWorkspace={!!task?.workspace_id}
             connectors={connectors ?? []}
-            canDelete={selected.type === "ai.prompt"}
+            canDelete={PROCESSING_NODE_TYPES.has(selected.type ?? "")}
             onPatch={patchSelected}
             onSetOutputType={setOutputType}
             onDelete={() => {
@@ -821,15 +928,86 @@ function NodeInspector({
               </p>
             </div>
           )}
-          {canDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="mt-2 inline-flex items-center gap-1.5 self-start rounded-md px-2 py-1 text-xs text-[var(--danger)] transition hover:bg-[var(--danger-bg)]"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Remove step
-            </button>
-          )}
+        </>
+      )}
+
+      {node.type === "search.web" && (
+        <>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Search query
+            <textarea
+              value={(node.data as unknown as WebSearchData).query}
+              onChange={(e) => onPatch({ query: e.target.value })}
+              rows={3}
+              className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              placeholder="Leave blank to search the previous step's output"
+            />
+          </label>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Runs against your configured search provider (SearXNG). Insert{" "}
+            <code className="rounded bg-[var(--surface-2)] px-1">
+              {"{{upstream_output}}"}
+            </code>{" "}
+            to build the query from an earlier step. Feed the results into an AI
+            step or a Fetch page step.
+          </p>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Number of results
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={(node.data as unknown as WebSearchData).count}
+              onChange={(e) =>
+                onPatch({
+                  count: Math.max(1, Math.min(20, Number(e.target.value) || 5)),
+                })
+              }
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+          </label>
+        </>
+      )}
+
+      {node.type === "fetch.page" && (
+        <>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            URL
+            <input
+              value={(node.data as unknown as FetchPageData).url}
+              onChange={(e) => onPatch({ url: e.target.value })}
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              placeholder="Leave blank to fetch the first URL from upstream"
+            />
+          </label>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Fetches the page (SSRF-guarded) and extracts its readable article
+            text. Blank + a Web search step above = "fetch the top result".
+            Supports{" "}
+            <code className="rounded bg-[var(--surface-2)] px-1">
+              {"{{upstream_output}}"}
+            </code>
+            .
+          </p>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Max characters
+            <input
+              type="number"
+              min={500}
+              max={50000}
+              step={500}
+              value={(node.data as unknown as FetchPageData).max_chars}
+              onChange={(e) =>
+                onPatch({
+                  max_chars: Math.max(
+                    500,
+                    Math.min(50000, Number(e.target.value) || 8000)
+                  ),
+                })
+              }
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+          </label>
         </>
       )}
 
@@ -1101,6 +1279,16 @@ function NodeInspector({
             </>
           );
         })()}
+
+      {canDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="mt-1 inline-flex items-center gap-1.5 self-start rounded-md px-2 py-1 text-xs text-[var(--danger)] transition hover:bg-[var(--danger-bg)]"
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Remove step
+        </button>
+      )}
     </div>
   );
 }

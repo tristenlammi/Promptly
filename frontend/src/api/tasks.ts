@@ -178,6 +178,8 @@ export type FlowNodeType =
   | "trigger.schedule"
   | "trigger.manual"
   | "ai.prompt"
+  | "search.web"
+  | "fetch.page"
   | "output.report"
   | "output.board_card";
 
@@ -218,6 +220,16 @@ export interface AIPromptData {
   reasoning_effort: string | null;
   use_web_search: boolean;
   connector_ids: string[];
+}
+
+export interface WebSearchData {
+  query: string;
+  count: number;
+}
+
+export interface FetchPageData {
+  url: string;
+  max_chars: number;
 }
 
 export interface ReportOutputData {

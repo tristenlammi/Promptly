@@ -124,13 +124,19 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
     if term is not None and term.type == NodeType.OUTPUT_REPORT:
         task.notify = ReportOutputData.model_validate(term.data).notify
 
+    # Project the first AI node onto the prompt/model columns when there is one.
+    # A flow can now be AI-free (e.g. search → report), in which case the
+    # column projection just keeps whatever the task already had.
     ai_nodes = ordered_ai_nodes(graph)
-    first = AIPromptData.model_validate(ai_nodes[0].data)
-    task.prompt = first.prompt
-    task.provider_id = uuid.UUID(first.provider_id) if first.provider_id else None
-    task.model_id = first.model_id
-    task.reasoning_effort = first.reasoning_effort
-    task.use_web_search = first.use_web_search
+    if ai_nodes:
+        first = AIPromptData.model_validate(ai_nodes[0].data)
+        task.prompt = first.prompt
+        task.provider_id = (
+            uuid.UUID(first.provider_id) if first.provider_id else None
+        )
+        task.model_id = first.model_id
+        task.reasoning_effort = first.reasoning_effort
+        task.use_web_search = first.use_web_search
     task.flow_graph = graph.model_dump(mode="json")
 
     union: set[uuid.UUID] = set()

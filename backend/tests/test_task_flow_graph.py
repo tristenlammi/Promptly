@@ -243,3 +243,44 @@ def test_unknown_node_type_is_not_linear():
     graph.edges.append(FlowEdge(source="x", target="output"))
     # 'output' now has two incoming; and an unsupported node type is present.
     assert is_linear_flow(graph) is False
+
+
+# ---------------------------------------------------------------------
+# Non-AI processing nodes (search / fetch) in the linear chain.
+# ---------------------------------------------------------------------
+def test_search_and_fetch_nodes_are_linear_and_ordered():
+    from app.tasks.flow_graph import ordered_flow_nodes
+
+    nodes = [
+        FlowNode(id="trigger", type=NodeType.TRIGGER_SCHEDULE, data={"frequency": "daily"}),
+        FlowNode(id="search", type=NodeType.SEARCH_WEB, data={"query": "q", "count": 3}),
+        FlowNode(id="fetch", type=NodeType.FETCH_PAGE, data={"url": ""}),
+        FlowNode(id="ai0", type=NodeType.AI_PROMPT, data={"prompt": "sum {{upstream_output}}"}),
+        FlowNode(id="output", type=NodeType.OUTPUT_REPORT, data={"notify": False}),
+    ]
+    chain = ["trigger", "search", "fetch", "ai0", "output"]
+    edges = [FlowEdge(source=a, target=b) for a, b in zip(chain, chain[1:])]
+    g = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+
+    assert is_linear_flow(g) is True
+    assert is_simple_graph(g) is False
+    # Interior processing nodes come back in path order…
+    assert [n.id for n in ordered_flow_nodes(g)] == ["search", "fetch", "ai0"]
+    # …and the AI-only subset still filters correctly.
+    assert [n.id for n in ordered_ai_nodes(g)] == ["ai0"]
+
+
+def test_ai_free_search_flow_is_linear():
+    # trigger → search → output, no AI node at all.
+    nodes = [
+        FlowNode(id="trigger", type=NodeType.TRIGGER_SCHEDULE, data={"frequency": "daily"}),
+        FlowNode(id="search", type=NodeType.SEARCH_WEB, data={"query": "q"}),
+        FlowNode(id="output", type=NodeType.OUTPUT_REPORT, data={"notify": False}),
+    ]
+    edges = [
+        FlowEdge(source="trigger", target="search"),
+        FlowEdge(source="search", target="output"),
+    ]
+    g = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    assert is_linear_flow(g) is True
+    assert ordered_ai_nodes(g) == []

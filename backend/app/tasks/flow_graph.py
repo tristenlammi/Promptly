@@ -45,6 +45,10 @@ class NodeType:
     TRIGGER_SCHEDULE = "trigger.schedule"
     TRIGGER_MANUAL = "trigger.manual"
     AI_PROMPT = "ai.prompt"
+    # Non-AI processing nodes — each takes the upstream text, does one job, and
+    # emits text for the next node. The first steps toward an n8n-style catalog.
+    SEARCH_WEB = "search.web"
+    FETCH_PAGE = "fetch.page"
     OUTPUT_REPORT = "output.report"
     # Workspace-output node: files the AI result as a card on a workspace board.
     OUTPUT_BOARD_CARD = "output.board_card"
@@ -55,6 +59,16 @@ class NodeType:
 # task's home workspace and are Advanced-only.
 OUTPUT_TYPES = frozenset(
     {NodeType.OUTPUT_REPORT, NodeType.OUTPUT_BOARD_CARD}
+)
+
+
+# Interior "do work" node kinds — everything that sits between the trigger and
+# the terminal output on the execution path. Each consumes the upstream text and
+# produces text of its own (available downstream as ``{{node_<id>.output}}`` and,
+# for the immediate next node, ``{{upstream_output}}``). The graph runner has an
+# executor registered for each of these.
+PROCESSING_TYPES = frozenset(
+    {NodeType.AI_PROMPT, NodeType.SEARCH_WEB, NodeType.FETCH_PAGE}
 )
 
 
@@ -132,6 +146,30 @@ class AIPromptData(BaseModel):
     reasoning_effort: str | None = None
     use_web_search: bool = False
     connector_ids: list[str] = Field(default_factory=list)
+
+
+class WebSearchData(BaseModel):
+    """A web-search step (SearXNG or whichever provider is configured).
+
+    ``query`` is a template — leave it blank to search for the upstream text
+    verbatim, or write ``{{upstream_output}}`` / ``{{node_<id>.output}}`` to
+    compose one. The step emits a numbered, model-friendly list of hits (which
+    a downstream Fetch Page or AI step consumes) and records the structured
+    citations on the run."""
+
+    query: str = ""
+    count: int = 5  # 1..20
+
+
+class FetchPageData(BaseModel):
+    """A fetch-and-extract step: pulls the readable text of a web page.
+
+    ``url`` is a template; when blank it uses the first URL found in the
+    upstream text (so it pairs naturally with a Web Search step). Fetches are
+    SSRF-guarded and the body is capped."""
+
+    url: str = ""
+    max_chars: int = 8000  # cap the extracted text handed downstream
 
 
 class ReportOutputData(BaseModel):
@@ -302,11 +340,11 @@ def is_linear_flow(graph: FlowGraph) -> bool:
         if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
     ]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
-    ais = graph.nodes_of_type(NodeType.AI_PROMPT)
-    if len(triggers) != 1 or len(outs) != 1 or len(ais) < 1:
+    procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
+    if len(triggers) != 1 or len(outs) != 1 or len(procs) < 1:
         return False
     # No unknown/unsupported node types in the mix.
-    if len(triggers) + len(outs) + len(ais) != len(graph.nodes):
+    if len(triggers) + len(outs) + len(procs) != len(graph.nodes):
         return False
 
     out_adj, in_adj = _adjacency(graph)
@@ -346,9 +384,9 @@ def terminal_output_node(graph: FlowGraph) -> FlowNode | None:
     return outs[0] if len(outs) == 1 else None
 
 
-def ordered_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
-    """The ``ai.prompt`` nodes in execution order along the linear path.
-    Assumes :func:`is_linear_flow` holds (call it first)."""
+def ordered_flow_nodes(graph: FlowGraph) -> list[FlowNode]:
+    """Every interior processing node (AI / search / fetch / …) in execution
+    order along the linear path. Assumes :func:`is_linear_flow` holds."""
     out_adj, _ = _adjacency(graph)
     trig = [
         n
@@ -363,9 +401,16 @@ def ordered_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
             break
         cur = nxts[0]
         node = graph.node(cur)
-        if node and node.type == NodeType.AI_PROMPT:
+        if node and node.type in PROCESSING_TYPES:
             ordered.append(node)
     return ordered
+
+
+def ordered_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
+    """The ``ai.prompt`` nodes in execution order along the linear path — the
+    AI-only subset of :func:`ordered_flow_nodes`. Assumes
+    :func:`is_linear_flow` holds (call it first)."""
+    return [n for n in ordered_flow_nodes(graph) if n.type == NodeType.AI_PROMPT]
 
 
 def graph_to_task_fields(graph: FlowGraph) -> SimpleTaskFields:
@@ -412,15 +457,19 @@ __all__ = [
     "FlowGraph",
     "ScheduleTriggerData",
     "AIPromptData",
+    "WebSearchData",
+    "FetchPageData",
     "ReportOutputData",
     "BoardCardOutputData",
     "OUTPUT_TYPES",
+    "PROCESSING_TYPES",
     "terminal_output_node",
     "SimpleTaskFields",
     "task_to_graph",
     "graph_to_task_fields",
     "is_simple_graph",
     "is_linear_flow",
+    "ordered_flow_nodes",
     "ordered_ai_nodes",
     "SIMPLE_TRIGGER_ID",
     "SIMPLE_AI_ID",

@@ -28,11 +28,14 @@ from app.chat.models import WorkspaceItem, WorkspaceTask
 from app.tasks.flow_graph import (
     AIPromptData,
     BoardCardOutputData,
+    FetchPageData,
     FlowGraph,
+    FlowNode,
     NodeType,
     ScheduleTriggerData,
+    WebSearchData,
     is_linear_flow,
-    ordered_ai_nodes,
+    ordered_flow_nodes,
     terminal_output_node,
 )
 from app.tasks.models import Task
@@ -48,14 +51,151 @@ logger = logging.getLogger("promptly.tasks.graph_runner")
 
 # ``{{ var }}`` — literal, no-eval interpolation. Only whitelisted keys resolve;
 # an unknown reference is left verbatim so a stray brace can never blow up a run
-# (and there is no code execution path — just string substitution).
-_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")
+# (and there is no code execution path — just string substitution). Hyphens are
+# allowed so React-Flow node ids (``ai_ab12``, ``node-3``) resolve in
+# ``{{node_<id>.output}}`` references.
+_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.\-]+)\s*\}\}")
 
 
 def _interpolate(template: str, context: dict[str, str]) -> str:
     return _VAR_RE.sub(
         lambda m: context.get(m.group(1), m.group(0)), template
     )
+
+
+def _step_context(
+    *, upstream: str, trigger_payload: str, now_local: str, outputs: dict[str, str]
+) -> dict[str, str]:
+    """The variable context a node's templates resolve against: the immediate
+    upstream text, the trigger payload/timestamp, and every completed node's
+    output as ``node_<id>.output``."""
+    ctx = {
+        "upstream_output": upstream,
+        "trigger.payload": trigger_payload,
+        "trigger.timestamp": now_local,
+    }
+    for nid, txt in outputs.items():
+        ctx[f"node_{nid}.output"] = txt
+    return ctx
+
+
+# Empty usage record shared by non-AI steps (they don't spend model tokens).
+def _empty_usage() -> dict:
+    return {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
+
+
+# First http(s) URL in a blob of text — how Fetch Page finds its target when
+# fed the output of a Web Search step.
+_URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"'\)\]]+")
+
+
+async def _run_search_node(
+    node: FlowNode,
+    ctx: dict[str, str],
+    *,
+    db,
+    user: User,
+) -> tuple[str, list[dict], dict]:
+    """Execute a ``search.web`` node → (text, sources, record). Queries the
+    configured search provider (SearXNG et al.) and renders numbered hits the
+    next node can read."""
+    from app.search.providers import SearchError, run_search
+    from app.search.service import pick_search_provider
+
+    data = WebSearchData.model_validate(node.data)
+    query = (
+        _interpolate(data.query, ctx).strip()
+        if data.query.strip()
+        else ctx.get("upstream_output", "").strip()
+    )
+    query = query[:400]
+    if not query:
+        raise TaskRunError(
+            "The web-search step has no query and no upstream text to search for."
+        )
+    provider = await pick_search_provider(db, user)
+    if provider is None:
+        raise TaskRunError(
+            "No web-search provider is configured — add one in Search settings."
+        )
+    count = max(1, min(20, data.count or 5))
+    try:
+        results = await run_search(provider, query, count)
+    except SearchError as e:
+        raise TaskRunError(f"Web search failed: {e}") from e
+
+    lines: list[str] = []
+    sources: list[dict] = []
+    for i, r in enumerate(results, 1):
+        snippet = (r.snippet or "").strip()
+        block = f"[{i}] {r.title}\n{r.url}"
+        if snippet:
+            block += f"\n{snippet}"
+        lines.append(block)
+        sources.append({"title": r.title, "url": r.url, "snippet": snippet})
+    body = "\n\n".join(lines) if lines else "(no results)"
+    text = f'Web search results for "{query}":\n\n{body}'
+    record = {
+        "node_id": node.id,
+        "type": NodeType.SEARCH_WEB,
+        "label": "Web search",
+        "status": "success",
+        "output": text,
+    }
+    return text, sources, record
+
+
+async def _run_fetch_node(
+    node: FlowNode, ctx: dict[str, str]
+) -> tuple[str, list[dict], dict]:
+    """Execute a ``fetch.page`` node → (text, sources, record). Fetches a URL
+    (SSRF-guarded) and extracts its readable main text via trafilatura."""
+    import httpx
+    import trafilatura
+
+    from app.net.safe_fetch import UnsafeURLError, safe_fetch
+
+    data = FetchPageData.model_validate(node.data)
+    raw = (
+        _interpolate(data.url, ctx).strip()
+        if data.url.strip()
+        else ctx.get("upstream_output", "")
+    )
+    m = _URL_IN_TEXT_RE.search(raw)
+    if not m:
+        raise TaskRunError(
+            "The fetch step has no URL — none was configured and none was found "
+            "in the upstream text."
+        )
+    url = m.group(0)
+    try:
+        resp = await safe_fetch("GET", url)
+        resp.raise_for_status()
+    except UnsafeURLError as e:
+        raise TaskRunError(f"Refused to fetch an unsafe URL ({url}).") from e
+    except httpx.HTTPError as e:
+        raise TaskRunError(f"Couldn't fetch {url}: {type(e).__name__}.") from e
+
+    extracted = (trafilatura.extract(resp.text) or "").strip()
+    if not extracted:
+        # trafilatura found no article body — fall back to a tag strip so the
+        # step still yields *something* usable downstream.
+        from bs4 import BeautifulSoup
+
+        extracted = BeautifulSoup(resp.text, "html.parser").get_text(
+            " ", strip=True
+        )
+    cap = max(500, min(50000, data.max_chars or 8000))
+    extracted = extracted[:cap]
+    text = f"Fetched {url}:\n\n{extracted}" if extracted else f"Fetched {url} (no readable text)."
+    record = {
+        "node_id": node.id,
+        "type": NodeType.FETCH_PAGE,
+        "label": "Fetch page",
+        "status": "success",
+        "output": text,
+    }
+    return text, [{"title": url, "url": url, "snippet": ""}], record
 
 
 def _first_line_title(text: str) -> str:
@@ -286,16 +426,16 @@ async def run_graph_flow(
     if not is_linear_flow(graph):
         raise TaskRunError(
             "This flow isn't a supported shape yet — Advanced flows currently "
-            "run as a linear chain of AI steps (branching and loops are coming)."
+            "run as a linear chain of steps (branching and loops are coming)."
         )
-    ai_nodes = ordered_ai_nodes(graph)
-    if not ai_nodes:
-        raise TaskRunError("This flow has no AI step to run.")
+    flow_nodes = ordered_flow_nodes(graph)
+    if not flow_nodes:
+        raise TaskRunError("This flow has no step to run.")
 
     tz = _flow_timezone(graph, task)
     now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
 
-    # The terminal output decides how the *last* AI step should shape its
+    # The terminal output decides how the *last AI* step should shape its
     # result (a report vs. a board card) — earlier steps are intermediate.
     out_node = terminal_output_node(graph)
     terminal_kind = (
@@ -305,67 +445,94 @@ async def run_graph_flow(
     )
 
     upstream = ""
+    outputs: dict[str, str] = {}  # node_id → its text output (for {{node_x.output}})
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
     # Per-node record for the run inspector.
     node_runs: list[dict] = []
+    ai_count = sum(1 for n in flow_nodes if n.type == NodeType.AI_PROMPT)
+    ai_seen = 0
 
-    for i, node in enumerate(ai_nodes):
-        is_last = i == len(ai_nodes) - 1
-        data = AIPromptData.model_validate(node.data)
-        provider, model_id = await _resolve_provider(
-            uuid.UUID(data.provider_id) if data.provider_id else None,
-            data.model_id,
-            db,
+    for i, node in enumerate(flow_nodes):
+        is_last = i == len(flow_nodes) - 1
+        ctx = _step_context(
+            upstream=upstream,
+            trigger_payload=trigger_payload or "",
+            now_local=now_local,
+            outputs=outputs,
         )
-        schemas, dispatch, names = await _resolve_connectors_by_ids(
-            db,
-            user_id=task.user_id,
-            workspace_id=task.workspace_id,
-            connector_ids=[uuid.UUID(c) for c in data.connector_ids],
-        )
-        system = _build_system_prompt(
-            timezone=tz,
-            use_web_search=data.use_web_search,
-            now_local_iso=now_local,
-            connector_names=names,
-            output_kind=terminal_kind if is_last else "step",
-        )
-        prompt = _interpolate(
-            data.prompt,
-            {"upstream_output": upstream, "trigger.payload": trigger_payload or ""},
-        )
-        text, node_sources, node_usage = await _generate(
-            provider=provider,
-            model_id=model_id,
-            system=system,
-            prompt=prompt,
-            user=user,
-            use_web_search=data.use_web_search,
-            reasoning_effort=data.reasoning_effort,
-            mcp_schemas=schemas,
-            mcp_dispatch=dispatch,
-            db=db,
-        )
+
+        if node.type == NodeType.SEARCH_WEB:
+            text, node_sources, record = await _run_search_node(
+                node, ctx, db=db, user=user
+            )
+            sources.extend(node_sources)
+            node_runs.append(record)
+        elif node.type == NodeType.FETCH_PAGE:
+            text, node_sources, record = await _run_fetch_node(node, ctx)
+            sources.extend(node_sources)
+            node_runs.append(record)
+        else:  # NodeType.AI_PROMPT
+            ai_seen += 1
+            data = AIPromptData.model_validate(node.data)
+            provider, model_id = await _resolve_provider(
+                uuid.UUID(data.provider_id) if data.provider_id else None,
+                data.model_id,
+                db,
+            )
+            schemas, dispatch, names = await _resolve_connectors_by_ids(
+                db,
+                user_id=task.user_id,
+                workspace_id=task.workspace_id,
+                connector_ids=[uuid.UUID(c) for c in data.connector_ids],
+            )
+            system = _build_system_prompt(
+                timezone=tz,
+                use_web_search=data.use_web_search,
+                now_local_iso=now_local,
+                connector_names=names,
+                output_kind=terminal_kind if is_last else "step",
+            )
+            # Blank prompt → default to consuming the upstream text, so an AI
+            # step dropped after a search/fetch "just works" without config.
+            prompt = _interpolate(
+                data.prompt.strip() or "{{upstream_output}}", ctx
+            )
+            text, node_sources, node_usage = await _generate(
+                provider=provider,
+                model_id=model_id,
+                system=system,
+                prompt=prompt,
+                user=user,
+                use_web_search=data.use_web_search,
+                reasoning_effort=data.reasoning_effort,
+                mcp_schemas=schemas,
+                mcp_dispatch=dispatch,
+                db=db,
+            )
+            sources.extend(node_sources)
+            if node_usage.get("prompt_tokens"):
+                usage["prompt_tokens"] += node_usage["prompt_tokens"]
+            if node_usage.get("completion_tokens"):
+                usage["completion_tokens"] += node_usage["completion_tokens"]
+            if node_usage.get("cost_usd") is not None:
+                usage["cost_usd"] = (usage["cost_usd"] or 0.0) + node_usage[
+                    "cost_usd"
+                ]
+            node_runs.append(
+                {
+                    "node_id": node.id,
+                    "type": NodeType.AI_PROMPT,
+                    "label": f"AI step {ai_seen}" if ai_count > 1 else "AI step",
+                    "status": "success",
+                    "output": text,
+                    "prompt_tokens": node_usage.get("prompt_tokens") or None,
+                    "completion_tokens": node_usage.get("completion_tokens") or None,
+                }
+            )
+
         upstream = text
-        sources.extend(node_sources)
-        if node_usage.get("prompt_tokens"):
-            usage["prompt_tokens"] += node_usage["prompt_tokens"]
-        if node_usage.get("completion_tokens"):
-            usage["completion_tokens"] += node_usage["completion_tokens"]
-        if node_usage.get("cost_usd") is not None:
-            usage["cost_usd"] = (usage["cost_usd"] or 0.0) + node_usage["cost_usd"]
-        node_runs.append(
-            {
-                "node_id": node.id,
-                "type": NodeType.AI_PROMPT,
-                "label": f"AI step {i + 1}" if len(ai_nodes) > 1 else "AI step",
-                "status": "success",
-                "output": text,
-                "prompt_tokens": node_usage.get("prompt_tokens") or None,
-                "completion_tokens": node_usage.get("completion_tokens") or None,
-            }
-        )
+        outputs[node.id] = text
 
     # Terminal output node: a plain report, or a workspace-output action that
     # consumes the final AI text (the run still records that text as its
