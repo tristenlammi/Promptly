@@ -141,4 +141,70 @@ export const tasksApi = {
     );
     return data;
   },
+  // ---- Flow graph (Automations Phase 1) ----
+  async getGraph(id: string): Promise<FlowGraph> {
+    const { data } = await apiClient.get<FlowGraph>(`/tasks/${id}/graph`);
+    return data;
+  },
+  async saveGraph(id: string, graph: FlowGraph): Promise<FlowGraph> {
+    const { data } = await apiClient.put<FlowGraph>(`/tasks/${id}/graph`, graph);
+    return data;
+  },
+  async promote(id: string): Promise<FlowGraph> {
+    const { data } = await apiClient.post<FlowGraph>(`/tasks/${id}/promote`);
+    return data;
+  },
 };
+
+// ---------------------------------------------------------------------
+// Flow graph types — mirror app/tasks/flow_graph.py. ``data`` is freeform
+// per node type; the editor narrows it via the typed helpers below.
+// ---------------------------------------------------------------------
+export type FlowNodeType =
+  | "trigger.schedule"
+  | "trigger.manual"
+  | "ai.prompt"
+  | "output.report";
+
+export interface FlowNodeModel {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: Record<string, unknown>;
+}
+
+export interface FlowEdgeModel {
+  source: string;
+  target: string;
+  source_handle?: string | null;
+  target_handle?: string | null;
+}
+
+export interface FlowGraph {
+  version: number;
+  mode: "simple" | "advanced";
+  nodes: FlowNodeModel[];
+  edges: FlowEdgeModel[];
+}
+
+export interface ScheduleTriggerData {
+  frequency: TaskFrequency;
+  hour: number | null;
+  minute: number;
+  weekday: number | null;
+  day_of_month: number | null;
+  timezone: string;
+}
+
+export interface AIPromptData {
+  prompt: string;
+  provider_id: string | null;
+  model_id: string | null;
+  reasoning_effort: string | null;
+  use_web_search: boolean;
+  connector_ids: string[];
+}
+
+export interface ReportOutputData {
+  notify: boolean;
+}

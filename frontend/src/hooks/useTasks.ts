@@ -1,9 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { tasksApi, type Task, type TaskInput } from "@/api/tasks";
+import {
+  tasksApi,
+  type FlowGraph,
+  type Task,
+  type TaskInput,
+} from "@/api/tasks";
 
 const TASKS_KEY = ["tasks"] as const;
 const taskKey = (id: string) => ["tasks", id] as const;
+const graphKey = (id: string) => ["tasks", id, "graph"] as const;
 const runsKey = (id: string) => ["tasks", id, "runs"] as const;
 const runKey = (taskId: string, runId: string) =>
   ["tasks", taskId, "runs", runId] as const;
@@ -21,6 +27,38 @@ export function useTask(id: string | undefined) {
     queryKey: taskKey(id ?? ""),
     queryFn: () => tasksApi.get(id as string),
     enabled: !!id,
+  });
+}
+
+export function useTaskGraph(id: string | undefined) {
+  return useQuery<FlowGraph>({
+    queryKey: graphKey(id ?? ""),
+    queryFn: () => tasksApi.getGraph(id as string),
+    enabled: !!id,
+  });
+}
+
+export function useSaveTaskGraph(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (graph: FlowGraph) => tasksApi.saveGraph(id, graph),
+    onSuccess: (data) => {
+      qc.setQueryData(graphKey(id), data);
+      // The save may rewrite the task's columns (prompt/schedule/etc.).
+      qc.invalidateQueries({ queryKey: taskKey(id) });
+      qc.invalidateQueries({ queryKey: TASKS_KEY });
+    },
+  });
+}
+
+export function usePromoteTask(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => tasksApi.promote(id),
+    onSuccess: (data) => {
+      qc.setQueryData(graphKey(id), data);
+      qc.invalidateQueries({ queryKey: taskKey(id) });
+    },
   });
 }
 

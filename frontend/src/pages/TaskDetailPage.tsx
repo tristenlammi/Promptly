@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Check,
   Copy,
   FileDown,
+  Loader2,
   MessageSquarePlus,
   Pencil,
   Play,
+  Workflow,
 } from "lucide-react";
+
+import { lazyWithRetry } from "@/utils/lazyWithRetry";
 
 import {
   useRunTask,
@@ -23,6 +27,15 @@ import { RunStatusChip } from "@/components/tasks/RunStatusChip";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
+
+// React Flow is a heavy chunk — only load it when the Flow view is opened.
+const TaskFlowEditor = lazyWithRetry(
+  () =>
+    import("@/components/tasks/TaskFlowEditor").then((m) => ({
+      default: m.TaskFlowEditor,
+    })),
+  "TaskFlowEditor"
+);
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -39,6 +52,7 @@ export function TaskDetailPage() {
   const { data: task } = useTask(id);
   const runTask = useRunTask();
   const [editOpen, setEditOpen] = useState(false);
+  const [showFlow, setShowFlow] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const { data: runs } = useTaskRuns(id, true);
@@ -140,6 +154,15 @@ export function TaskDetailPage() {
         actions={
           <>
             <Button
+              variant={showFlow ? "primary" : "secondary"}
+              size="sm"
+              leftIcon={<Workflow className="h-3.5 w-3.5" />}
+              onClick={() => setShowFlow((v) => !v)}
+              title="Open the node-graph flow editor"
+            >
+              Flow
+            </Button>
+            <Button
               variant="secondary"
               size="sm"
               leftIcon={<Pencil className="h-3.5 w-3.5" />}
@@ -160,7 +183,27 @@ export function TaskDetailPage() {
         }
       />
 
-      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-3 px-4 py-4 md:flex-row md:gap-4">
+      {showFlow && id && (
+        <div className="min-h-0 flex-1">
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading flow…
+              </div>
+            }
+          >
+            <TaskFlowEditor taskId={id} />
+          </Suspense>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-3 px-4 py-4 md:flex-row md:gap-4",
+          showFlow && "hidden"
+        )}
+      >
         {/* Mobile run selector — a horizontal strip so the report gets
             the full width instead of a cramped 224px side rail. */}
         {(runs ?? []).length > 0 && (

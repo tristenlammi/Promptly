@@ -136,6 +136,16 @@ export default defineConfig({
           if (id.includes("@fortune-sheet")) {
             return "fortunesheet";
           }
+          // React Flow (node-graph editor) is lazy-loaded on the Tasks flow
+          // view only. Must come BEFORE the react rule below — its
+          // ``@xyflow/react`` path contains the ``react/`` substring that
+          // would otherwise pull this ~300 kB dep into the eager react vendor
+          // chunk. d3 is left unassigned (see charts rule) so Vite can hoist
+          // the low-level modules React Flow and recharts share into a common
+          // async chunk instead of creating a reactflow↔charts cycle.
+          if (id.includes("@xyflow")) {
+            return "reactflow";
+          }
           if (id.includes("@tiptap") || id.includes("prosemirror")) {
             return "tiptap";
           }
@@ -157,7 +167,11 @@ export default defineConfig({
           ) {
             return "highlight";
           }
-          if (id.includes("recharts") || id.includes("d3-")) {
+          // recharts only. d3-* is deliberately left unassigned so Vite
+          // auto-hoists the modules shared with React Flow (d3-color,
+          // d3-interpolate, …) into a common async chunk — assigning them
+          // here would create a reactflow↔charts circular chunk.
+          if (id.includes("recharts")) {
             return "charts";
           }
           if (id.includes("lucide-react")) return "icons";
