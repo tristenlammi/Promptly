@@ -589,11 +589,15 @@ function NodeInspector({
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
             <FileText className="h-4 w-4 text-[var(--warning)]" /> Output
           </div>
-          {/* What to do with the final AI result. */}
+          {/* What to do with the final AI result. "Board card" only appears
+              when the automation lives in a workspace that has a board to
+              write to (a top-level automation has none). */}
           <div className="inline-flex rounded-md border border-[var(--border)] p-0.5 text-xs">
             {[
               { t: "output.report", label: "Report" },
-              { t: "output.board_card", label: "Board card" },
+              ...(boards.length > 0
+                ? [{ t: "output.board_card", label: "Board card" }]
+                : []),
             ].map((o) => (
               <button
                 key={o.t}

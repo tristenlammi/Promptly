@@ -16,8 +16,9 @@ import {
   useTasks,
   useUpdateTask,
 } from "@/hooks/useTasks";
-import type { Task } from "@/api/tasks";
+import { tasksApi, type Task } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
+import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
@@ -35,9 +36,14 @@ export function TasksPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<"simple" | "advanced">("simple");
 
-  const openNew = () => {
+  const openNew = () => setChooserOpen(true);
+  const handleChoose = (mode: "simple" | "advanced") => {
+    setChooserOpen(false);
     setEditing(null);
+    setCreateMode(mode);
     setFormOpen(true);
   };
   const openEdit = (task: Task) => {
@@ -207,12 +213,27 @@ export function TasksPage() {
         </div>
       )}
 
+          <NewAutomationChooser
+            open={chooserOpen}
+            onClose={() => setChooserOpen(false)}
+            onChoose={handleChoose}
+          />
+
           <TaskFormModal
             open={formOpen}
             onClose={() => setFormOpen(false)}
             task={editing}
             onSaved={(t) => {
-              if (!editing) navigate(`/tasks/${t.id}`);
+              if (editing) return;
+              // Advanced → promote to a flow graph and open the flow editor;
+              // Simple → the classic report view.
+              if (createMode === "advanced") {
+                void tasksApi
+                  .promote(t.id)
+                  .finally(() => navigate(`/tasks/${t.id}?flow=1`));
+              } else {
+                navigate(`/tasks/${t.id}`);
+              }
             }}
           />
         </div>

@@ -135,6 +135,9 @@ class TaskResponse(BaseModel):
     enabled: bool
     notify: bool
     retention_runs: int
+    # True when a stored Advanced flow graph exists (drives Simple vs. Advanced
+    # UI). See Task.is_advanced / tasks.flow_graph.
+    is_advanced: bool = False
 
     next_run_at: datetime | None
     last_run_at: datetime | None

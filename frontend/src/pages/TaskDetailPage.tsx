@@ -1,5 +1,5 @@
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Check,
@@ -15,6 +15,7 @@ import {
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 
 import {
+  usePromoteTask,
   useRunTask,
   useTask,
   useTaskRun,
@@ -49,11 +50,33 @@ function fmtDate(iso: string): string {
 export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: task } = useTask(id);
   const runTask = useRunTask();
+  const promote = usePromoteTask(id ?? "");
   const [editOpen, setEditOpen] = useState(false);
   const [showFlow, setShowFlow] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+  // Advanced automations open straight into the flow editor (once, on load);
+  // a ?flow=1 param (set right after an advanced create) does the same.
+  const flowInit = useRef(false);
+  useEffect(() => {
+    if (flowInit.current || !task) return;
+    flowInit.current = true;
+    if (task.is_advanced || searchParams.get("flow") === "1") setShowFlow(true);
+  }, [task, searchParams]);
+
+  const isAdvanced = task?.is_advanced ?? false;
+  const onConvertToFlow = async () => {
+    await promote.mutateAsync();
+    setShowFlow(true);
+  };
+  // In the flow view, clicking a run jumps to the classic report for it.
+  const openRunReport = (runId: string) => {
+    setSelectedRunId(runId);
+    setShowFlow(false);
+  };
 
   const { data: runs } = useTaskRuns(id, true);
   const runsPolling = useMemo(
@@ -153,15 +176,39 @@ export function TaskDetailPage() {
         }
         actions={
           <>
-            <Button
-              variant={showFlow ? "primary" : "secondary"}
-              size="sm"
-              leftIcon={<Workflow className="h-3.5 w-3.5" />}
-              onClick={() => setShowFlow((v) => !v)}
-              title="Open the node-graph flow editor"
-            >
-              Flow
-            </Button>
+            {isAdvanced ? (
+              <div className="inline-flex rounded-md border border-[var(--border)] p-0.5 text-xs">
+                {[
+                  { flow: false, label: "Runs" },
+                  { flow: true, label: "Flow" },
+                ].map((o) => (
+                  <button
+                    key={o.label}
+                    type="button"
+                    onClick={() => setShowFlow(o.flow)}
+                    className={cn(
+                      "rounded px-2.5 py-1 transition",
+                      showFlow === o.flow
+                        ? "bg-[var(--accent)] text-white"
+                        : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Workflow className="h-3.5 w-3.5" />}
+                onClick={() => void onConvertToFlow()}
+                loading={promote.isPending}
+                title="Turn this into an advanced node-graph flow"
+              >
+                Convert to flow
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="sm"
@@ -184,17 +231,42 @@ export function TaskDetailPage() {
       />
 
       {showFlow && id && (
-        <div className="min-h-0 flex-1">
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading flow…
+        <div className="flex min-h-0 flex-1">
+          {/* Runs rail (left) — n8n-style history; click a run to read its
+              report. Per-node run outputs come with the durable runner. */}
+          {(runs ?? []).length > 0 && (
+            <aside className="hidden w-52 shrink-0 flex-col overflow-y-auto border-r border-[var(--border)] bg-[var(--bg)] md:flex">
+              <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                Runs
               </div>
-            }
-          >
-            <TaskFlowEditor taskId={id} />
-          </Suspense>
+              {(runs ?? []).map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => openRunReport(r.id)}
+                  className="flex items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-[var(--hover)]"
+                  title="Open this run's report"
+                >
+                  <RunStatusChip status={r.status} />
+                  <span className="truncate text-[var(--text-muted)]">
+                    {r.title || fmtDate(r.created_at)}
+                  </span>
+                </button>
+              ))}
+            </aside>
+          )}
+          <div className="min-w-0 flex-1">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading flow…
+                </div>
+              }
+            >
+              <TaskFlowEditor taskId={id} />
+            </Suspense>
+          </div>
         </div>
       )}
 

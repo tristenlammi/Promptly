@@ -145,6 +145,7 @@ def _serialize(
         enabled=task.enabled,
         notify=task.notify,
         retention_runs=task.retention_runs,
+        is_advanced=task.is_advanced,
         next_run_at=task.next_run_at,
         last_run_at=task.last_run_at,
         last_status=task.last_status,

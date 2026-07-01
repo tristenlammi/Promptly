@@ -95,6 +95,13 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
     )
     last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+    @property
+    def is_advanced(self) -> bool:
+        """True when this automation has a stored Advanced flow graph (vs. a
+        plain Simple task whose graph is derived from the columns). Drives
+        whether the UI opens the flow editor or the classic single-prompt view."""
+        return self.flow_graph is not None
+
     def __repr__(self) -> str:
         return f"<Task id={self.id} title={self.title!r} freq={self.frequency}>"
 

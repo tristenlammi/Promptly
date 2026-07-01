@@ -43,6 +43,9 @@ export interface Task {
   enabled: boolean;
   notify: boolean;
   retention_runs: number;
+  /** True when the automation has a stored Advanced flow (opens the flow
+   *  editor); false = a Simple single-prompt task. */
+  is_advanced: boolean;
   next_run_at: string | null;
   last_run_at: string | null;
   last_status: TaskRunStatus | null;
