@@ -1767,16 +1767,21 @@ async def build_workspace_injection(
         cfg is not None and indexed_tokens > WORKSPACE_RETRIEVAL_TOKEN_BUDGET
     )
 
+    # The workspace's own authored items (notes/canvases/boards/sheets) are
+    # small, structured, and authoritative — the user expects the chat to
+    # always know them. We inject them in full in BOTH modes (capped): in
+    # retrieval mode a big pinned file (e.g. a 600k-token PDF) would otherwise
+    # dominate top-k and starve a two-task board or a small sheet out of the
+    # context entirely. Retrieval then adds the large pinned files on top.
+    struct_block = _format_context_block(
+        note_rows, canvas_rows, board_rows, sheet_rows
+    )
+
     if not retrieval_active:
-        # Full-dump: pinned files ride the attachment path; notes,
-        # canvases, and boards are injected as text (no attachment form).
+        # Full-dump: pinned files ride the attachment path; the authored
+        # items are injected as text (no attachment form).
         return WorkspaceInjection(
-            system_block=_with_map(
-                map_md,
-                _format_context_block(
-                    note_rows, canvas_rows, board_rows, sheet_rows
-                ),
-            ),
+            system_block=_with_map(map_md, struct_block),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
         )
@@ -1803,9 +1808,12 @@ async def build_workspace_injection(
     if excluded:
         chunks = [c for c in chunks if c.user_file_id not in excluded]
     chunks = chunks[:WORKSPACE_RETRIEVAL_TOP_K]
-    block = format_retrieved_block(chunks) if chunks else None
+    retrieved_block = format_retrieved_block(chunks) if chunks else None
+    # Authored items (always in full) first, then the retrieved pinned-file
+    # context. Either may be empty.
+    combined = "\n\n".join(p for p in (struct_block, retrieved_block) if p)
     return WorkspaceInjection(
-        system_block=_with_map(map_md, block),
+        system_block=_with_map(map_md, combined or None),
         attach_file_ids=attach_ids,
         retrieval_active=True,
     )

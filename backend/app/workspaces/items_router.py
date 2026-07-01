@@ -1209,14 +1209,20 @@ async def delete_workspace_item(
         stack.extend(by_parent.get(cur.id, []))
 
     now = datetime.now(timezone.utc)
+    # Backing-file ids whose RAG chunks must be purged. Trashing the file
+    # alone does NOT drop its chunks (they key off the file id, not a FK
+    # cascade), and retrieval would otherwise keep surfacing a deleted
+    # board/note/sheet/canvas's stale content forever.
+    chunk_file_ids: set[uuid.UUID] = set()
     for it in doomed:
         if it.kind in ("note", "board") and it.ref_id is not None:
             # Notes + boards back their content on a ref_id UserFile; trash
-            # it (its chunks cascade off the file delete). A board's tasks
-            # cascade via the board_item_id FK when the item row is deleted.
+            # it. A board's tasks cascade via the board_item_id FK when the
+            # item row is deleted.
             uf = await db.get(UserFile, it.ref_id)
             if uf is not None and uf.trashed_at is None:
                 uf.trashed_at = now
+            chunk_file_ids.add(it.ref_id)
         elif it.kind == "sheet" and it.ref_id is not None:
             # Drop the backing Spreadsheet row and trash its RAG text file
             # (neither is a tree-cascade target since ref_id isn't a real FK).
@@ -1226,24 +1232,38 @@ async def delete_workspace_item(
                     sf = await db.get(UserFile, sheet.text_file_id)
                     if sf is not None and sf.trashed_at is None:
                         sf.trashed_at = now
+                    chunk_file_ids.add(sheet.text_file_id)
                 await db.delete(sheet)
         elif it.kind == "chat" and it.ref_id is not None:
             # A chat page — delete the backing conversation (and its messages,
             # which cascade off the conversation FK).
             conv = await db.get(Conversation, it.ref_id)
             if conv is not None:
+                if conv.context_file_id is not None:
+                    chunk_file_ids.add(conv.context_file_id)
                 await db.delete(conv)
         elif it.kind == "canvas" and it.ref_id is not None:
-            # Trash the backing text file and drop the canvas row (its
-            # chunks cascade off the file delete; the canvas isn't a
-            # tree-cascade target since ref_id isn't a real FK).
+            # Trash the backing text file and drop the canvas row (the
+            # canvas isn't a tree-cascade target since ref_id isn't a real FK).
             canvas = await db.get(WorkspaceCanvas, it.ref_id)
             if canvas is not None:
                 if canvas.text_file_id is not None:
                     tf = await db.get(UserFile, canvas.text_file_id)
                     if tf is not None and tf.trashed_at is None:
                         tf.trashed_at = now
+                    chunk_file_ids.add(canvas.text_file_id)
                 await db.delete(canvas)
+
+    # Purge the RAG chunks for every backing file we just retired so a
+    # deleted item stops contributing to retrieval (and to the indexed-token
+    # total that flips the workspace into retrieval mode).
+    if chunk_file_ids:
+        from app.custom_models.ingestion import delete_existing_chunks
+
+        for fid in chunk_file_ids:
+            await delete_existing_chunks(
+                db, scope_kind="workspace", scope_id=ws.id, user_file_id=fid
+            )
 
     # Deleting the top row cascades the descendant item rows via the
     # self-FK ON DELETE CASCADE.

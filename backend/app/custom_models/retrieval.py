@@ -122,9 +122,14 @@ async def _similarity_search(
             (1 - (kc.{column} <=> CAST(:qvec AS vector({dim})))) AS score,
             f.original_filename AS filename
         FROM knowledge_chunks AS kc
-        LEFT JOIN files AS f ON f.id = kc.user_file_id
+        JOIN files AS f ON f.id = kc.user_file_id
         WHERE kc.{scope_col} = :sid
           AND kc.{column} IS NOT NULL
+          -- Never retrieve chunks whose source file has been trashed/deleted:
+          -- deleting a workspace item only *trashes* its backing file, so its
+          -- chunks linger. Without this, a deleted board/note/sheet keeps
+          -- feeding stale content into every answer.
+          AND f.trashed_at IS NULL
         ORDER BY kc.{column} <=> CAST(:qvec AS vector({dim}))
         LIMIT :k
         """
