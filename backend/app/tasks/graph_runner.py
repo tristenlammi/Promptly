@@ -153,6 +153,15 @@ async def run_graph_flow(
     tz = _flow_timezone(graph, task)
     now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
 
+    # The terminal output decides how the *last* AI step should shape its
+    # result (a report vs. a board card) — earlier steps are intermediate.
+    out_node = terminal_output_node(graph)
+    terminal_kind = (
+        "board_card"
+        if out_node is not None and out_node.type == NodeType.OUTPUT_BOARD_CARD
+        else "report"
+    )
+
     upstream = ""
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
@@ -160,6 +169,7 @@ async def run_graph_flow(
     node_runs: list[dict] = []
 
     for i, node in enumerate(ai_nodes):
+        is_last = i == len(ai_nodes) - 1
         data = AIPromptData.model_validate(node.data)
         provider, model_id = await _resolve_provider(
             uuid.UUID(data.provider_id) if data.provider_id else None,
@@ -177,6 +187,7 @@ async def run_graph_flow(
             use_web_search=data.use_web_search,
             now_local_iso=now_local,
             connector_names=names,
+            output_kind=terminal_kind if is_last else "step",
         )
         prompt = _interpolate(
             data.prompt,
@@ -218,7 +229,6 @@ async def run_graph_flow(
     # consumes the final AI text (the run still records that text as its
     # report so history stays readable).
     report = upstream
-    out_node = terminal_output_node(graph)
     if out_node is not None and out_node.type == NodeType.OUTPUT_BOARD_CARD:
         note = await _file_board_card(
             db,

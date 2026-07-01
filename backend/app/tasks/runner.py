@@ -106,49 +106,62 @@ def _build_system_prompt(
     use_web_search: bool,
     now_local_iso: str,
     connector_names: list[str] | None = None,
+    output_kind: str = "report",
 ) -> str:
+    """System prompt for one AI step.
+
+    Instruction-first: the model must FOLLOW the user's prompt, not impose a
+    fixed format. The ``output_kind`` only tunes how to shape the result —
+    ``report`` (a Markdown brief), ``board_card`` (task title + description),
+    or ``step`` (an intermediate step feeding the next one)."""
     parts = [
-        "You are Promptly's automation engine running a scheduled task "
-        "with no human watching. Produce a single, self-contained, "
-        "well-formatted Markdown report that stands on its own — assume "
-        "the reader did not see any previous run. Think of it as a clean "
-        "newsletter back-issue the reader will skim in under a minute.",
+        "You are Promptly's automation engine, running one step of an "
+        "automation with no human watching. Do exactly what the user's "
+        "instruction below asks — follow it literally; do not substitute a "
+        "different task or topic. Output only the result: no preamble like "
+        "'Sure, here is', no sign-off, no meta commentary.",
         f"The current date/time is {now_local_iso} ({timezone}).",
-        "Structure:",
-        "- Open with a single `#` title naming the report and the date.",
-        "- Follow with a one- or two-sentence plain-text summary of the "
-        "  most important takeaways.",
-        "- Group the body into clearly labelled `##` sections. Within a "
-        "  section, lead each item with a short **bold** lead-in phrase, "
-        "  then a sentence or two of detail.",
-        "- Prefer short paragraphs and bullet lists over walls of text. "
-        "  Use a Markdown table only when comparing structured data.",
-        "Style rules (important for clean rendering):",
-        "- Write monetary amounts as plain words: `US$965 billion` or "
-        "  `965 billion USD`. NEVER wrap amounts, numbers, or text in "
-        "  `$...$` or `\\(...\\)` — that is LaTeX math and will render as "
-        "  garbled symbols. Do not use LaTeX/math syntax at all unless the "
-        "  task is explicitly about mathematics.",
-        "- Keep bold for emphasis on key terms, not whole sentences.",
-        "- Be concise and factual. No preamble like 'Sure, here is' and no "
-        "  sign-off; the report is the entire response.",
     ]
+
+    if output_kind == "board_card":
+        parts.append(
+            "Your output becomes a card on a task board. The FIRST line is the "
+            "card's title — a short, plain phrase (no markdown, no heading "
+            "marks). Any following lines are the card's description. Keep it "
+            "tight; do not write a report or add sections."
+        )
+    elif output_kind == "step":
+        parts.append(
+            "This is an intermediate step; your output is passed to the next "
+            "step. Return just the content it needs — no framing or headings "
+            "unless the instruction asks for them."
+        )
+    else:  # report
+        parts.append(
+            "Shape the result as a clean, self-contained Markdown report the "
+            "reader can skim in under a minute: a `#` title, a one- or "
+            "two-sentence summary, then `##` sections with short paragraphs or "
+            "bullets. Use a table only for structured data."
+        )
+        parts.append(
+            "Rendering: write monetary amounts as plain words (`965 billion "
+            "USD`); never wrap text in `$...$` or `\\(...\\)` (that renders as "
+            "garbled LaTeX). No LaTeX unless the task is about mathematics."
+        )
+
     if use_web_search:
         parts.append(
             "Sourcing:\n"
             "- You have a web_search tool. Use it to gather current "
             "information rather than relying on memory, and cite sources "
-            "inline with [1], [2], … matching the results you used. Place "
-            "the citation marker at the end of the relevant sentence."
+            "inline with [1], [2], … matching the results you used."
         )
     if connector_names:
         parts.append(
             "Connectors:\n"
-            f"- You have read-only tools from: {', '.join(connector_names)}. "
-            "Call them to gather live data for this report (they are "
-            "namespaced ``mcp__<connector>__<tool>``). Pull what the task "
-            "asks for, then analyse it — call out anything notable or "
-            "anomalous rather than just dumping raw results."
+            f"- You have read-only tools from: {', '.join(connector_names)} "
+            "(namespaced ``mcp__<connector>__<tool>``). Call them to gather "
+            "the live data the instruction needs, then use it."
         )
     return "\n".join(parts)
 
