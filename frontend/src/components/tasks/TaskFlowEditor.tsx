@@ -883,9 +883,44 @@ function NodeInspector({
             ) : (
               <>
                 <p className="text-[11px] text-[var(--text-muted)]">
-                  The AI result becomes a card — its first line is the title,
-                  the rest the description.
+                  The AI result becomes a card on this board. Beyond a title and
+                  description, the AI can fill in a due date, labels, a
+                  checklist, and links — just ask for them in this step's
+                  prompt. The Column and Priority below are defaults the AI can
+                  override.
                 </p>
+                <details className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5">
+                  <summary className="cursor-pointer text-[11px] font-medium text-[var(--text-muted)]">
+                    How to ask the AI for these
+                  </summary>
+                  <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                    <li>
+                      <b>Due date</b> — “…due next Friday”, “…set the deadline to
+                      the 15th”. Relative dates are resolved to the run date.
+                    </li>
+                    <li>
+                      <b>Labels</b> — “tag it Errand and Home”. New labels are
+                      created on the board automatically.
+                    </li>
+                    <li>
+                      <b>Checklist</b> — “add a checklist: buy paint, tape
+                      edges, apply first coat”.
+                    </li>
+                    <li>
+                      <b>Links</b> — include real URLs, e.g. “link to
+                      https://example.com/spec”.
+                    </li>
+                    <li>
+                      <b>Priority</b> — “make it high priority” overrides the
+                      default below.
+                    </li>
+                  </ul>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                    Example prompt: “Create a card to repaint the fence, high
+                    priority, due next Saturday, tagged Home. Checklist: buy
+                    paint, sand the fence, apply two coats.”
+                  </p>
+                </details>
                 <label className="text-xs font-medium text-[var(--text-muted)]">
                   Board
                   <select

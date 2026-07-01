@@ -14,12 +14,14 @@ nodes and wires their outputs together.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
 from datetime import datetime, timezone as _tz
 
 from sqlalchemy import func, select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.models import User
 from app.chat.models import WorkspaceItem, WorkspaceTask
@@ -65,11 +67,85 @@ def _first_line_title(text: str) -> str:
     return "Automation result"
 
 
+# Palette matching the board's label picker (WorkspaceBoardCardDetail).
+_LABEL_COLORS = [
+    "#ef4444", "#f59e0b", "#eab308", "#22c55e", "#14b8a6",
+    "#3b82f6", "#8b5cf6", "#ec4899", "#64748b",
+]
+
+
+def _parse_card_spec(text: str) -> dict | None:
+    """Parse the AI's JSON card spec (tolerating ```code fences```). Returns
+    ``None`` when the output isn't a JSON object, so the caller can fall back to
+    treating the whole text as title + description."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z]*\s*", "", t)
+        t = re.sub(r"\s*```$", "", t.strip())
+    try:
+        obj = json.loads(t)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _parse_due(val) -> datetime | None:
+    """Parse an AI-supplied due date (``YYYY-MM-DD`` or full ISO) to an aware
+    UTC datetime. Returns ``None`` on anything unparseable."""
+    if not isinstance(val, str) or not val.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(val.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=_tz.utc) if dt.tzinfo is None else dt
+
+
+def _resolve_labels(board: WorkspaceItem, names: list[str]) -> list[str]:
+    """Map label names to the board's label ids, creating any that don't exist
+    (mutating ``board.config.labels``). Returns the resolved label ids."""
+    cfg = dict(board.config) if isinstance(board.config, dict) else {}
+    labels = list(cfg.get("labels") or [])
+    by_name = {
+        str(l.get("name", "")).strip().lower(): l
+        for l in labels
+        if isinstance(l, dict)
+    }
+    ids: list[str] = []
+    changed = False
+    for raw in names:
+        name = str(raw).strip()[:50]
+        if not name:
+            continue
+        existing = by_name.get(name.lower())
+        if existing and existing.get("id"):
+            ids.append(str(existing["id"]))
+            continue
+        new = {
+            "id": "l_" + uuid.uuid4().hex[:7],
+            "name": name,
+            "color": _LABEL_COLORS[len(labels) % len(_LABEL_COLORS)],
+        }
+        labels.append(new)
+        by_name[name.lower()] = new
+        ids.append(new["id"])
+        changed = True
+    if changed:
+        cfg["labels"] = labels
+        board.config = cfg
+        flag_modified(board, "config")
+    return ids
+
+
 async def _file_board_card(
     db, *, task: Task, data: BoardCardOutputData, text: str
 ) -> str:
     """Workspace-output: create a card on the target board from the AI result.
-    Returns a one-line note to append to the run report."""
+
+    The AI step emits a JSON card spec (title/description/priority/due_date/
+    labels/links/checklist); we map it onto a full ``WorkspaceTask``. Falls back
+    to title = first line / description = body if the output isn't JSON. Returns
+    a one-line note for the run report."""
     if task.workspace_id is None:
         raise TaskRunError(
             "This automation isn't in a workspace, so it can't file a board card."
@@ -87,6 +163,57 @@ async def _file_board_card(
             "The board this automation writes to no longer exists in its "
             "workspace."
         )
+
+    spec = _parse_card_spec(text) or {}
+    if spec.get("title"):
+        title = str(spec["title"]).strip()[:200] or _first_line_title(text)
+        description = (str(spec.get("description") or "").strip()) or None
+    else:
+        title = _first_line_title(text)
+        description = text
+
+    priority = (
+        spec["priority"]
+        if spec.get("priority") in ("low", "medium", "high")
+        else (data.priority or "medium")
+    )
+    due_at = _parse_due(spec.get("due_date"))
+
+    subtasks = None
+    cl = spec.get("checklist")
+    if isinstance(cl, list):
+        subtasks = [
+            {"id": "s_" + uuid.uuid4().hex[:7], "text": str(s).strip()[:500], "done": False}
+            for s in cl
+            if str(s).strip()
+        ][:50] or None
+
+    links = None
+    lk = spec.get("links")
+    if isinstance(lk, list):
+        built = []
+        for l in lk:
+            if not isinstance(l, dict):
+                continue
+            url = str(l.get("url") or "").strip()
+            if not url:
+                continue
+            built.append(
+                {
+                    "item_id": "url_" + uuid.uuid4().hex[:7],
+                    "kind": "url",
+                    "ref_id": None,
+                    "title": (str(l.get("title") or url).strip())[:200],
+                    "url": url[:2000],
+                }
+            )
+        links = built or None
+
+    label_ids = None
+    lb = spec.get("labels")
+    if isinstance(lb, list) and lb:
+        label_ids = _resolve_labels(board, [str(x) for x in lb]) or None
+
     max_pos = await db.scalar(
         select(func.max(WorkspaceTask.position)).where(
             WorkspaceTask.workspace_id == task.workspace_id
@@ -95,10 +222,14 @@ async def _file_board_card(
     card = WorkspaceTask(
         workspace_id=task.workspace_id,
         board_item_id=board_id,
-        title=_first_line_title(text),
-        description=text,
+        title=title,
+        description=description,
         status=data.column or "todo",
-        priority=data.priority or "medium",
+        priority=priority,
+        subtasks=subtasks,
+        labels=label_ids,
+        links=links,
+        due_at=due_at,
         position=float(max_pos or 0.0) + 1.0,
         created_by=task.user_id,
     )
@@ -111,7 +242,18 @@ async def _file_board_card(
         await index_board_for_workspace(task.workspace_id, board_id)
     except Exception:  # noqa: BLE001 — reindex must never fail the run
         logger.warning("board reindex after card creation failed", exc_info=True)
-    return f'Filed as a card on "{board.title or "board"}".'
+
+    extras = []
+    if due_at:
+        extras.append("due " + due_at.date().isoformat())
+    if label_ids:
+        extras.append(f"{len(label_ids)} label(s)")
+    if subtasks:
+        extras.append(f"{len(subtasks)}-item checklist")
+    if links:
+        extras.append(f"{len(links)} link(s)")
+    suffix = f" ({', '.join(extras)})" if extras else ""
+    return f'Filed "{title}" on "{board.title or "board"}"{suffix}.'
 
 
 def _flow_timezone(graph: FlowGraph, task: Task) -> str:

@@ -125,10 +125,26 @@ def _build_system_prompt(
 
     if output_kind == "board_card":
         parts.append(
-            "Your output becomes a card on a task board. The FIRST line is the "
-            "card's title — a short, plain phrase (no markdown, no heading "
-            "marks). Any following lines are the card's description. Keep it "
-            "tight; do not write a report or add sections."
+            "Your output becomes a card on a task board. Return ONLY a single "
+            "raw JSON object (no markdown, no code fences, no prose around it) "
+            "with these keys:\n"
+            '- "title" (required): a short, plain card title — no markdown.\n'
+            '- "description" (optional): the card body as plain text; keep it '
+            "tight, no report sections.\n"
+            '- "priority" (optional): one of "low", "medium", "high".\n'
+            '- "due_date" (optional): a date "YYYY-MM-DD" (or full ISO 8601) '
+            "ONLY if the instruction implies a deadline; resolve relative dates "
+            "like 'tomorrow' or 'next Friday' against the current date/time "
+            "above.\n"
+            '- "labels" (optional): array of short label names (strings), e.g. '
+            '["Errand", "Home"], ONLY if the instruction implies tags.\n'
+            '- "checklist" (optional): array of sub-item strings, ONLY if the '
+            "instruction implies steps or a to-do list within the card.\n"
+            '- "links" (optional): array of {"title": "...", "url": "https://…"} '
+            "objects, ONLY for real URLs the instruction provides or you found.\n"
+            "Omit any optional key you have no clear value for — do NOT invent "
+            "due dates, labels, checklist items, or links that the instruction "
+            "didn't call for."
         )
     elif output_kind == "step":
         parts.append(
