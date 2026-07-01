@@ -50,8 +50,16 @@ import {
 import { useWorkspaceTree } from "@/hooks/useWorkspaces";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { useThemeStore } from "@/store/themeStore";
+import { Modal } from "@/components/shared/Modal";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+
+function nodeModalTitle(type?: string): string {
+  if (type === "ai.prompt") return "AI step";
+  if (type === "output.report" || type === "output.board_card") return "Output";
+  if (type?.startsWith("trigger.")) return "Schedule";
+  return "Node";
+}
 
 interface BoardOption {
   id: string;
@@ -638,19 +646,56 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         )}
       </div>
 
-      {/* Inspector */}
-      {selected && (
-        <NodeInspector
-          node={selected}
-          boards={boards}
-          inWorkspace={!!task?.workspace_id}
-          connectors={connectors ?? []}
-          canDelete={selected.type === "ai.prompt"}
-          onPatch={patchSelected}
-          onSetOutputType={setOutputType}
-          onDelete={() => removeNode(selected.id)}
-        />
-      )}
+      {/* Node editor — a modal with its own Save so it's right where you edit. */}
+      <Modal
+        open={!!selected}
+        onClose={() => setSelectedId(null)}
+        title={selected ? nodeModalTitle(selected.type) : ""}
+        widthClass="max-w-md"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedId(null)}
+              className="rounded-md px-3 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-[var(--hover)]"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onSave();
+                setSelectedId(null);
+              }}
+              disabled={save.isPending}
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              {save.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save
+            </button>
+          </div>
+        }
+      >
+        {selected && (
+          <NodeInspector
+            node={selected}
+            boards={boards}
+            inWorkspace={!!task?.workspace_id}
+            connectors={connectors ?? []}
+            canDelete={selected.type === "ai.prompt"}
+            onPatch={patchSelected}
+            onSetOutputType={setOutputType}
+            onDelete={() => {
+              removeNode(selected.id);
+              setSelectedId(null);
+            }}
+          />
+        )}
+      </Modal>
     </div>
   );
 }
@@ -681,12 +726,9 @@ function NodeInspector({
   const modelKey =
     ai.provider_id && ai.model_id ? `${ai.provider_id}::${ai.model_id}` : "";
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-l border-[var(--border)] bg-[var(--bg)] p-4">
+    <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
       {node.type === "ai.prompt" && (
         <>
-          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-            <Brain className="h-4 w-4 text-[var(--accent)]" /> AI step
-          </div>
           <label className="text-xs font-medium text-[var(--text-muted)]">
             Prompt
             <textarea
@@ -793,9 +835,6 @@ function NodeInspector({
 
       {isOutput && (
         <>
-          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-            <FileText className="h-4 w-4 text-[var(--warning)]" /> Output
-          </div>
           {/* What to do with the final AI result. "Board card" is offered for
               any workspace automation (a top-level one has no boards to write
               to). Gated on the workspace, not on boards having loaded, so the
@@ -913,9 +952,6 @@ function NodeInspector({
           );
           return (
             <>
-              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-                <Clock className="h-4 w-4 text-[var(--success)]" /> Schedule
-              </div>
               <label className="text-xs font-medium text-[var(--text-muted)]">
                 Frequency
                 <select
@@ -1030,6 +1066,6 @@ function NodeInspector({
             </>
           );
         })()}
-    </aside>
+    </div>
   );
 }
