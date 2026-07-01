@@ -180,6 +180,7 @@ export type FlowNodeType =
   | "ai.prompt"
   | "search.web"
   | "fetch.page"
+  | "research.deep"
   | "control.condition"
   | "control.router"
   | "output.report"
@@ -227,6 +228,14 @@ export interface AIPromptData {
 export interface WebSearchData {
   query: string;
   count: number;
+}
+
+export interface DeepResearchData {
+  query: string;
+  max_pages: number;
+  provider_id: string | null;
+  model_id: string | null;
+  reasoning_effort: string | null;
 }
 
 export interface ConditionData {

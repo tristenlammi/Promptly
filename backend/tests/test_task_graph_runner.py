@@ -17,6 +17,7 @@ from app.tasks.flow_graph import (
     AIPromptData,
     BoardCardOutputData,
     ConditionData,
+    DeepResearchData,
     FlowEdge,
     FlowGraph,
     FlowNode,
@@ -396,6 +397,64 @@ async def test_router_selects_matching_branch(patched_model, monkeypatch):
     assert by["rt"]["output"] == "urgent"
     assert by["out_urgent"]["status"] == "success"
     assert by["out_normal"]["status"] == "skipped"
+
+
+async def test_deep_research_node_synthesises_from_fetched_pages(
+    patched_model, monkeypatch
+):
+    from types import SimpleNamespace
+
+    import trafilatura
+
+    import app.net.safe_fetch as safe_fetch_mod
+    import app.search.providers as search_providers
+    import app.search.service as search_service
+
+    async def fake_pick(db, user, **kw):
+        return object()
+
+    async def fake_run_search(provider, query, count):
+        return [
+            SimpleNamespace(title=f"R{i}", url=f"https://ex/{i}", snippet=f"snip{i}")
+            for i in range(count)
+        ]
+
+    async def fake_safe_fetch(method, url, **kw):
+        return SimpleNamespace(
+            text="<html>body</html>", raise_for_status=lambda: None
+        )
+
+    monkeypatch.setattr(search_service, "pick_search_provider", fake_pick)
+    monkeypatch.setattr(search_providers, "run_search", fake_run_search)
+    monkeypatch.setattr(safe_fetch_mod, "safe_fetch", fake_safe_fetch)
+    monkeypatch.setattr(trafilatura, "extract", lambda html: "EXTRACTED_BODY")
+
+    nodes = [
+        _trigger(),
+        FlowNode(
+            id="dr",
+            type=NodeType.DEEP_RESEARCH,
+            data=DeepResearchData(
+                query="q", max_pages=3, provider_id=str(uuid.uuid4()), model_id="m"
+            ).model_dump(),
+        ),
+        _report("out"),
+    ]
+    edges = [FlowEdge(source="trigger", target="dr"), FlowEdge(source="dr", target="out")]
+    graph = FlowGraph(mode="advanced", nodes=nodes, edges=edges)
+    text, sources, _u, node_runs = await run_graph_flow(
+        task=_task(),
+        graph=graph,
+        user=object(),
+        run_started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        db=None,
+    )
+    assert len(sources) == 3  # one per fetched page
+    by = {n["node_id"]: n for n in node_runs}
+    assert by["dr"]["status"] == "success"
+    # The fetched evidence was fed into the synthesis prompt (echoed by the fake).
+    assert "EXTRACTED_BODY" in text
+    assert "https://ex/0" in text
 
 
 async def test_cyclic_flow_is_rejected(patched_model):

@@ -49,6 +49,8 @@ class NodeType:
     # emits text for the next node. The first steps toward an n8n-style catalog.
     SEARCH_WEB = "search.web"
     FETCH_PAGE = "fetch.page"
+    # Compound node: search → fetch top-N pages → synthesise a cited report.
+    DEEP_RESEARCH = "research.deep"
     # Control-flow nodes — they don't transform the text, they *route* it. Only
     # the branch(es) they select run; everything downstream of an unselected
     # branch is skipped ("active-path" execution).
@@ -73,7 +75,12 @@ OUTPUT_TYPES = frozenset(
 # for the immediate next node, ``{{upstream_output}}``). The graph runner has an
 # executor registered for each of these.
 PROCESSING_TYPES = frozenset(
-    {NodeType.AI_PROMPT, NodeType.SEARCH_WEB, NodeType.FETCH_PAGE}
+    {
+        NodeType.AI_PROMPT,
+        NodeType.SEARCH_WEB,
+        NodeType.FETCH_PAGE,
+        NodeType.DEEP_RESEARCH,
+    }
 )
 
 
@@ -181,6 +188,19 @@ class FetchPageData(BaseModel):
 
     url: str = ""
     max_chars: int = 8000  # cap the extracted text handed downstream
+
+
+class DeepResearchData(BaseModel):
+    """A compound research step: searches the web, fetches the top ``max_pages``
+    results, then has the model synthesise a single cited report answering the
+    query. ``query`` is a template; blank searches the upstream text. Needs a
+    model (the synthesiser)."""
+
+    query: str = ""
+    max_pages: int = 5  # 1..10 pages to read
+    provider_id: str | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
 
 
 class ConditionData(BaseModel):
@@ -601,6 +621,7 @@ __all__ = [
     "AIPromptData",
     "WebSearchData",
     "FetchPageData",
+    "DeepResearchData",
     "ConditionData",
     "RouterData",
     "RouterCategory",

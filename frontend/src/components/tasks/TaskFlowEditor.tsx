@@ -31,6 +31,7 @@ import {
   Save,
   Search,
   Split,
+  Telescope,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import {
   type AvailableTaskConnector,
   type BoardCardOutputData,
   type ConditionData,
+  type DeepResearchData,
   type FetchPageData,
   type FlowGraph,
   type FlowNodeModel,
@@ -67,6 +69,7 @@ function nodeModalTitle(type?: string): string {
   if (type === "ai.prompt") return "AI step";
   if (type === "search.web") return "Web search";
   if (type === "fetch.page") return "Fetch page";
+  if (type === "research.deep") return "Deep research";
   if (type === "control.condition") return "Condition";
   if (type === "control.router") return "Router";
   if (type === "output.report" || type === "output.board_card") return "Output";
@@ -302,6 +305,36 @@ function FetchNode({ data, selected }: NodeProps) {
   );
 }
 
+function DeepResearchNode({ data, selected }: NodeProps) {
+  const d = data as unknown as DeepResearchData;
+  return (
+    <NodeShell
+      icon={<Telescope className="h-3.5 w-3.5" />}
+      label="Deep research"
+      accent="#0ea5e9"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      <div className="line-clamp-2 text-[var(--text)]">
+        {d.query || (
+          <span className="italic text-[var(--text-muted)]">
+            Researches the upstream text
+          </span>
+        )}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          {d.max_pages || 5} pages
+        </span>
+        <span className="truncate rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+          {d.model_id || "no model"}
+        </span>
+      </div>
+    </NodeShell>
+  );
+}
+
 // A control node with several labelled *source* handles on the right — one per
 // branch. React Flow reads each handle's real DOM position, so absolutely
 // positioning them per-row lets edges leave from the right branch.
@@ -463,6 +496,7 @@ const nodeTypes = {
   "ai.prompt": AINode,
   "search.web": SearchNode,
   "fetch.page": FetchNode,
+  "research.deep": DeepResearchNode,
   "control.condition": ConditionNode,
   "control.router": RouterNode,
   "output.report": OutputNode,
@@ -475,6 +509,7 @@ const PROCESSING_NODE_TYPES = new Set([
   "ai.prompt",
   "search.web",
   "fetch.page",
+  "research.deep",
   "control.condition",
   "control.router",
 ]);
@@ -664,6 +699,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         | "ai.prompt"
         | "search.web"
         | "fetch.page"
+        | "research.deep"
         | "control.condition"
         | "control.router"
         | "output.report",
@@ -680,6 +716,14 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
       let data: Record<string, unknown>;
       if (type === "search.web") data = { query: "", count: 5 };
       else if (type === "fetch.page") data = { url: "", max_chars: 8000 };
+      else if (type === "research.deep")
+        data = {
+          query: "",
+          max_pages: 5,
+          provider_id: model?.provider_id ?? null,
+          model_id: model?.model_id ?? null,
+          reasoning_effort: model?.reasoning_effort ?? null,
+        };
       else if (type === "output.report") data = { notify: true };
       else if (type === "control.condition")
         data = { operator: "contains", value: "", case_sensitive: false };
@@ -735,6 +779,7 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
         | "ai.prompt"
         | "search.web"
         | "fetch.page"
+        | "research.deep"
         | "control.condition"
         | "control.router"
         | "output.report"
@@ -931,6 +976,14 @@ export function TaskFlowEditor({ taskId }: { taskId: string }) {
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
                 <Download className="h-3.5 w-3.5 text-[#3b82f6]" /> Add fetch page
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("research.deep")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Telescope className="h-3.5 w-3.5 text-[#0ea5e9]" /> Add deep
+                research
               </button>
               <div className="my-1 h-px bg-[var(--border)]" />
               <button
@@ -1220,6 +1273,75 @@ function NodeInspector({
               }
               className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             />
+          </label>
+        </>
+      )}
+
+      {node.type === "research.deep" && (
+        <>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Research question
+            <textarea
+              value={(node.data as unknown as DeepResearchData).query}
+              onChange={(e) => onPatch({ query: e.target.value })}
+              rows={3}
+              className="mt-1 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              placeholder="Leave blank to research the previous step's output"
+            />
+          </label>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Searches the web (SearXNG), reads the top pages, and writes one cited
+            report answering the question. Supports{" "}
+            <code className="rounded bg-[var(--surface-2)] px-1">
+              {"{{upstream_output}}"}
+            </code>
+            .
+          </p>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Pages to read
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={(node.data as unknown as DeepResearchData).max_pages}
+              onChange={(e) =>
+                onPatch({
+                  max_pages: Math.max(
+                    1,
+                    Math.min(10, Number(e.target.value) || 5)
+                  ),
+                })
+              }
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+          </label>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Synthesiser model
+            <select
+              value={
+                (() => {
+                  const d = node.data as unknown as DeepResearchData;
+                  return d.provider_id && d.model_id
+                    ? `${d.provider_id}::${d.model_id}`
+                    : "";
+                })()
+              }
+              onChange={(e) => {
+                const [pid, mid] = e.target.value.split("::");
+                onPatch({ provider_id: pid || null, model_id: mid || null });
+              }}
+              className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="">No model — set one</option>
+              {(models ?? []).map((m) => (
+                <option
+                  key={`${m.provider_id}::${m.model_id}`}
+                  value={`${m.provider_id}::${m.model_id}`}
+                >
+                  {m.display_name} · {m.provider_name}
+                </option>
+              ))}
+            </select>
           </label>
         </>
       )}

@@ -30,6 +30,7 @@ from app.tasks.flow_graph import (
     BoardCardOutputData,
     ConditionData,
     CONTROL_TYPES,
+    DeepResearchData,
     FetchPageData,
     FlowGraph,
     FlowNode,
@@ -399,6 +400,113 @@ async def _file_board_card(
     return f'Filed "{title}" on "{board.title or "board"}"{suffix}.'
 
 
+async def _run_deep_research_node(
+    node: FlowNode,
+    ctx: dict[str, str],
+    *,
+    db,
+    user: User,
+    tz: str,
+    now_local: str,
+) -> tuple[str, list[dict], dict, dict]:
+    """Compound step: search → fetch the top-N pages (concurrently) → synthesise
+    a single cited report. Returns ``(text, sources, usage, record)``."""
+    import asyncio
+
+    import httpx
+    import trafilatura
+
+    from app.net.safe_fetch import UnsafeURLError, safe_fetch
+    from app.search.providers import SearchError, run_search
+    from app.search.service import pick_search_provider
+
+    data = DeepResearchData.model_validate(node.data)
+    query = (
+        _interpolate(data.query, ctx).strip()
+        if data.query.strip()
+        else ctx.get("upstream_output", "").strip()
+    )
+    query = query[:400]
+    if not query:
+        raise TaskRunError(
+            "The deep-research step has no query and no upstream text to research."
+        )
+    n = max(1, min(10, data.max_pages or 5))
+    provider = await pick_search_provider(db, user)
+    if provider is None:
+        raise TaskRunError(
+            "No web-search provider is configured — add one in Search settings."
+        )
+    try:
+        results = await run_search(provider, query, n)
+    except SearchError as e:
+        raise TaskRunError(f"Deep research search failed: {e}") from e
+    if not results:
+        raise TaskRunError(f'Deep research found no sources for "{query}".')
+
+    async def _grab(r) -> tuple[object, str]:
+        try:
+            resp = await safe_fetch("GET", r.url)
+            resp.raise_for_status()
+            body = (trafilatura.extract(resp.text) or "").strip()
+            return r, body[:2500]
+        except (httpx.HTTPError, UnsafeURLError, ValueError, OSError):
+            return r, ""  # unreachable page → fall back to its snippet
+
+    grabbed = await asyncio.gather(*[_grab(r) for r in results])
+
+    evidence_parts: list[str] = []
+    sources: list[dict] = []
+    for i, (r, body) in enumerate(grabbed, 1):
+        sources.append({"title": r.title, "url": r.url, "snippet": r.snippet})
+        text_for = body or (r.snippet or "").strip() or "(no readable text)"
+        evidence_parts.append(f"[{i}] {r.title} — {r.url}\n{text_for}")
+    evidence = "\n\n".join(evidence_parts)
+
+    synth_provider, model_id = await _resolve_provider(
+        uuid.UUID(data.provider_id) if data.provider_id else None,
+        data.model_id,
+        db,
+    )
+    system = _build_system_prompt(
+        timezone=tz,
+        use_web_search=False,
+        now_local_iso=now_local,
+        connector_names=None,
+        output_kind="report",
+    )
+    prompt = (
+        f"Research question: {query}\n\n"
+        "Using ONLY the numbered sources below, write a thorough, well-organised "
+        "report that answers the question. Cite sources inline as [1], [2], … "
+        "matching their numbers. Note any disagreements or gaps between sources. "
+        "Do not invent facts beyond what the sources support.\n\n"
+        f"Sources:\n{evidence}"
+    )
+    text, synth_sources, usage = await _generate(
+        provider=synth_provider,
+        model_id=model_id,
+        system=system,
+        prompt=prompt,
+        user=user,
+        use_web_search=False,
+        reasoning_effort=data.reasoning_effort,
+        mcp_schemas=[],
+        mcp_dispatch={},
+        db=db,
+    )
+    record = {
+        "node_id": node.id,
+        "type": NodeType.DEEP_RESEARCH,
+        "label": f"Deep research ({len(results)} sources)",
+        "status": "success",
+        "output": text,
+        "prompt_tokens": usage.get("prompt_tokens") or None,
+        "completion_tokens": usage.get("completion_tokens") or None,
+    }
+    return text, sources, usage, record
+
+
 def _eval_condition(data: ConditionData, text: str, ctx: dict[str, str]) -> bool:
     """Evaluate a Condition node against the upstream text → True/False."""
     op = data.operator
@@ -652,6 +760,16 @@ async def run_graph_flow(
         elif node.type == NodeType.FETCH_PAGE:
             text, node_sources, record = await _run_fetch_node(node, ctx)
             sources.extend(node_sources)
+            node_runs.append(record)
+            outputs[nid] = text
+            last_processing_output = text
+
+        elif node.type == NodeType.DEEP_RESEARCH:
+            text, node_sources, dr_usage, record = await _run_deep_research_node(
+                node, ctx, db=db, user=user, tz=tz, now_local=now_local
+            )
+            sources.extend(node_sources)
+            _accum_usage(dr_usage)
             node_runs.append(record)
             outputs[nid] = text
             last_processing_output = text
