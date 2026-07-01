@@ -81,7 +81,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: Promptly-Backend
-    environment:
+    environment: &backend-env
       - DATABASE_URL=postgresql+asyncpg://promptly:${POSTGRES_PASSWORD}@postgres:5432/promptly
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -172,6 +172,38 @@ services:
       # Backend straddles both networks: ``promptly`` for the app
       # services (Postgres, Redis, Ollama, SearXNG) + the internet,
       # and ``sandbox-net`` so it can reach the isolated code sandbox.
+      - promptly
+      - sandbox-net
+
+  arq-worker:
+    # Durable execution of scheduled-automation runs. Same image as the
+    # backend, launched as an Arq worker (``arq …WorkerSettings``) instead of
+    # the API — so an API redeploy never kills an in-flight run: the job waits
+    # in Redis and this worker picks it up. Reuses the backend's environment
+    # (DB, Redis, provider/search/ollama URLs) and data volumes (runs write
+    # generated files just like the API path).
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: Promptly-ArqWorker
+    # Bypass the shared entrypoint (which runs Alembic migrations + singleton
+    # provisioning) — the backend owns those. The worker just needs a migrated
+    # DB, which is ready by the time any job is enqueued. Avoids two containers
+    # racing to migrate on a fresh deploy.
+    entrypoint: ["arq", "app.tasks.worker.WorkerSettings"]
+    environment: *backend-env
+    volumes:
+      - ./data/uploads:/app/uploads
+      - ./data/whiteboard:/app/whiteboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    networks:
       - promptly
       - sandbox-net
 

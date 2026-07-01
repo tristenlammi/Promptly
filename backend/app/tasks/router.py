@@ -5,7 +5,6 @@ to another user 404s (not 403s) so its existence isn't probeable.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -24,8 +23,8 @@ from app.mcp.models import McpConnector
 from app.tasks.models import Task, TaskConnector, TaskRun
 from app.tasks.flow_graph import FlowGraph
 from app.tasks.flow_service import apply_graph, load_or_derive_graph, promote_task
+from app.tasks.queue import enqueue_run
 from app.tasks.recurrence import compute_next_run, describe_schedule
-from app.tasks.runner import execute_run
 from app.tasks.schemas import (
     TaskCreate,
     TaskResponse,
@@ -383,9 +382,9 @@ async def run_task_now(
     db.add(run)
     await db.commit()
     await db.refresh(run)
-    # Detached execution — the request returns immediately with a pending
-    # run the client can poll.
-    asyncio.create_task(execute_run(run.id), name=f"task_run_{run.id}")
+    # Durable execution — enqueue onto Arq for the worker; the request returns
+    # immediately with a pending run the client can poll.
+    await enqueue_run(run.id)
     return TaskRunResponse.model_validate(run)
 
 

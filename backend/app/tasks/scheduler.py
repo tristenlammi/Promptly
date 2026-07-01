@@ -23,8 +23,8 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.tasks.models import Task, TaskRun
+from app.tasks.queue import enqueue_run
 from app.tasks.recurrence import compute_next_run
-from app.tasks.runner import execute_run
 
 logger = logging.getLogger("promptly.tasks.scheduler")
 
@@ -87,9 +87,7 @@ async def _loop() -> None:
         try:
             run_ids = await _claim_due()
             for rid in run_ids:
-                asyncio.create_task(
-                    execute_run(rid), name=f"task_run_{rid}"
-                )
+                await enqueue_run(rid)
             if run_ids:
                 logger.info("scheduler dispatched %d task run(s)", len(run_ids))
         except asyncio.CancelledError:
