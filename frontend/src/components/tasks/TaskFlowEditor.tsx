@@ -26,8 +26,9 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Braces,
   Brain,
   ChevronDown,
   ChevronUp,
@@ -50,6 +51,7 @@ import {
   Search,
   Sheet,
   Split,
+  StickyNote,
   Telescope,
   Timer,
   Trash2,
@@ -69,6 +71,7 @@ import {
   type ExtractData,
   type FetchPageData,
   type LoopData,
+  type MemoryData,
   type MergeData,
   type NoteOutputData,
   type SheetOutputData,
@@ -108,6 +111,8 @@ interface FlowEditCtx {
   connectors: AvailableTaskConnector[];
   inWorkspace: boolean;
   outputsCount: number;
+  memory: import("@/api/tasks").TaskMemory;
+  clearMemory: (nodeId: string) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   setOutputTypeFor: (id: string, type: string) => void;
   removeNode: (id: string) => void;
@@ -177,6 +182,8 @@ function InlineNodeSettings({
         boards={ctx.boards}
         chats={ctx.chats}
         folders={ctx.folders}
+        memory={ctx.memory[node.id]?.entries ?? []}
+        onClearMemory={() => ctx.clearMemory(node.id)}
         inWorkspace={ctx.inWorkspace}
         connectors={ctx.connectors}
         canDelete={canDelete}
@@ -196,6 +203,9 @@ interface FlowVar {
 }
 const DEFAULT_VARS: FlowVar[] = [
   { token: "upstream_output", label: "The previous step's output" },
+  { token: "date", label: "Run date (YYYY-MM-DD)" },
+  { token: "time", label: "Run time (HH:MM)" },
+  { token: "datetime", label: "Run date & time" },
   { token: "trigger.payload", label: "The trigger's payload" },
   { token: "trigger.timestamp", label: "When the run started" },
 ];
@@ -227,10 +237,10 @@ function VariableField({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  // Open the picker when the caret sits just after an unclosed ``{{`` token.
+  // Open the picker when the caret sits just after an unclosed ``{`` / ``{{``.
   const refresh = (val: string, caret: number | null) => {
     if (caret == null) return setOpen(false);
-    const m = val.slice(0, caret).match(/\{\{\s*([\w.]*)$/);
+    const m = val.slice(0, caret).match(/\{\{?\s*([\w.]*)$/);
     if (m) {
       setQuery(m[1]);
       setOpen(true);
@@ -251,10 +261,15 @@ function VariableField({
   const insert = (token: string) => {
     const el = ref.current;
     const caret = el?.selectionStart ?? value.length;
-    const before = value
-      .slice(0, caret)
-      .replace(/\{\{\s*[\w.]*$/, `{{${token}}}`);
-    const next = before + value.slice(caret);
+    const beforeRaw = value.slice(0, caret);
+    const after = value.slice(caret);
+    // Replace an in-progress ``{``/``{{`` token if present, else insert fresh.
+    const m = beforeRaw.match(/\{\{?\s*[\w.]*$/);
+    const before =
+      m && m.index != null
+        ? beforeRaw.slice(0, m.index) + `{{${token}}}`
+        : beforeRaw + `{{${token}}}`;
+    const next = before + after;
     onChange(next);
     setOpen(false);
     requestAnimationFrame(() => {
@@ -262,6 +277,11 @@ function VariableField({
       el.focus();
       el.setSelectionRange(before.length, before.length);
     });
+  };
+  const openPicker = () => {
+    setQuery("");
+    setOpen(true);
+    ref.current?.focus();
   };
 
   const filtered = variables.filter((v) =>
@@ -288,6 +308,17 @@ function VariableField({
       ) : (
         <input ref={ref as React.RefObject<HTMLInputElement>} {...shared} />
       )}
+      <button
+        type="button"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          openPicker();
+        }}
+        className="mt-1 inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)] transition hover:text-[var(--accent)]"
+        title="Insert a variable (or just type {)"
+      >
+        <Braces className="h-3 w-3" /> Insert variable
+      </button>
       {open && filtered.length > 0 && (
         <ul className="nodrag nowheel absolute z-50 mt-1 max-h-44 w-full overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg">
           {filtered.map((v) => (
@@ -321,6 +352,7 @@ function nodeModalTitle(type?: string): string {
   if (type === "fetch.page") return "Fetch page";
   if (type === "research.deep") return "Deep research";
   if (type === "loop.foreach") return "Loop";
+  if (type === "memory.store") return "Memory";
   if (type === "flow.merge") return "Merge";
   if (type === "flow.delay") return "Delay";
   if (type === "control.condition") return "Condition";
@@ -718,6 +750,42 @@ function LoopNode({ id, type, data, selected }: NodeProps) {
   );
 }
 
+function MemoryNode({ id, type, data, selected }: NodeProps) {
+  const d = data as unknown as MemoryData;
+  const ctx = useContext(FlowEditContext);
+  const detail = useDetailed(id, type ?? "memory.store", data);
+  const entries = ctx?.memory[id]?.entries ?? [];
+  const latest = entries[entries.length - 1]?.value ?? "";
+  return (
+    <NodeShell
+      icon={<StickyNote className="h-3.5 w-3.5" />}
+      label={d.name || "Memory"}
+      accent="#eab308"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      {detail ?? (
+        <>
+          {/* Sticky-note face: the last remembered value, or a hint. */}
+          <div className="line-clamp-3 whitespace-pre-wrap rounded bg-[#eab308]/10 px-1.5 py-1 text-[11px] text-[var(--text)]">
+            {latest || (
+              <span className="italic text-[var(--text-muted)]">
+                Captures the previous step's output
+              </span>
+            )}
+          </div>
+          <div className="mt-1">
+            <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
+              {d.remember ? `remembers ${d.max_runs || 5} runs` : "this run only"}
+            </span>
+          </div>
+        </>
+      )}
+    </NodeShell>
+  );
+}
+
 function MergeNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as MergeData;
   const detail = useDetailed(id, type ?? "flow.merge", data);
@@ -1018,6 +1086,7 @@ const nodeTypes = {
   "fetch.page": FetchNode,
   "research.deep": DeepResearchNode,
   "loop.foreach": LoopNode,
+  "memory.store": MemoryNode,
   "flow.merge": MergeNode,
   "flow.delay": DelayNode,
   "control.condition": ConditionNode,
@@ -1039,6 +1108,7 @@ const PROCESSING_NODE_TYPES = new Set([
   "fetch.page",
   "research.deep",
   "loop.foreach",
+  "memory.store",
   "flow.merge",
   "flow.delay",
   "control.condition",
@@ -1173,6 +1243,21 @@ export function TaskFlowEditor({
     queryFn: () => tasksApi.availableConnectors(task?.workspace_id ?? null),
     enabled: !!task,
   });
+
+  // Stored Memory-node contents — shown on the node face + in the inspector.
+  const memoryQuery = useQuery({
+    queryKey: ["task-memory", taskId],
+    queryFn: () => tasksApi.getMemory(taskId),
+  });
+  const qc = useQueryClient();
+  const clearMemory = useCallback(
+    (nodeId: string) => {
+      void tasksApi.clearMemory(taskId, nodeId).then(() =>
+        qc.invalidateQueries({ queryKey: ["task-memory", taskId] })
+      );
+    },
+    [taskId, qc]
+  );
 
   const rfInstance = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1374,6 +1459,7 @@ export function TaskFlowEditor({
         | "fetch.page"
         | "research.deep"
         | "loop.foreach"
+        | "memory.store"
         | "flow.merge"
         | "flow.delay"
         | "control.condition"
@@ -1419,6 +1505,8 @@ export function TaskFlowEditor({
           max_items: 10,
           join_with: "blank",
         };
+      else if (type === "memory.store")
+        data = { name: "Memory", remember: false, max_runs: 5 };
       else if (type === "flow.merge") data = { mode: "all", separator: "blank" };
       else if (type === "flow.delay") data = { seconds: 30 };
       else if (type === "output.report") data = { notify: true };
@@ -1462,6 +1550,7 @@ export function TaskFlowEditor({
         | "fetch.page"
         | "research.deep"
         | "loop.foreach"
+        | "memory.store"
         | "flow.merge"
         | "flow.delay"
         | "control.condition"
@@ -1534,6 +1623,8 @@ export function TaskFlowEditor({
     connectors: connectors ?? [],
     inWorkspace: !!task?.workspace_id,
     outputsCount,
+    memory: memoryQuery.data ?? {},
+    clearMemory,
     updateNodeData,
     setOutputTypeFor,
     removeNode,
@@ -1736,6 +1827,13 @@ export function TaskFlowEditor({
               </button>
               <button
                 type="button"
+                onClick={() => addNodeAtMenu("memory.store")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <StickyNote className="h-3.5 w-3.5 text-[#eab308]" /> Add memory
+              </button>
+              <button
+                type="button"
                 onClick={() => addNodeAtMenu("flow.merge")}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
@@ -1803,6 +1901,8 @@ export function TaskFlowEditor({
             boards={boards}
             chats={chats}
             folders={folders}
+            memory={memoryQuery.data?.[selected.id]?.entries ?? []}
+            onClearMemory={() => clearMemory(selected.id)}
             inWorkspace={!!task?.workspace_id}
             connectors={connectors ?? []}
             canDelete={
@@ -1831,6 +1931,8 @@ function NodeInspector({
   boards,
   chats,
   folders,
+  memory,
+  onClearMemory,
   inWorkspace,
   connectors,
   canDelete,
@@ -1843,6 +1945,8 @@ function NodeInspector({
   boards: BoardOption[];
   chats: BoardOption[];
   folders: BoardOption[];
+  memory: import("@/api/tasks").TaskMemoryEntry[];
+  onClearMemory: () => void;
   inWorkspace: boolean;
   connectors: AvailableTaskConnector[];
   canDelete: boolean;
@@ -2183,6 +2287,94 @@ function NodeInspector({
           </label>
         </>
       )}
+
+      {node.type === "memory.store" &&
+        (() => {
+          const m = node.data as unknown as MemoryData;
+          return (
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Captures the previous step's output. Wire this node into a later
+                step to inject it as context (several Memory nodes can feed one
+                step).
+              </p>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                Name
+                <input
+                  value={m.name}
+                  onChange={(e) => onPatch({ name: e.target.value })}
+                  placeholder="e.g. Device list"
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                />
+              </label>
+              <label className="flex items-center justify-between text-xs text-[var(--text)]">
+                <span>
+                  Remember across runs
+                  <span className="block text-[10px] font-normal text-[var(--text-muted)]">
+                    Persist so a run can compare to previous runs
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={m.remember}
+                  onChange={(e) => onPatch({ remember: e.target.checked })}
+                  className="h-4 w-4 accent-[var(--accent)]"
+                />
+              </label>
+              {m.remember && (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Remember the last N runs
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={m.max_runs}
+                    onChange={(e) =>
+                      onPatch({
+                        max_runs: Math.max(
+                          1,
+                          Math.min(50, Number(e.target.value) || 5)
+                        ),
+                      })
+                    }
+                    className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                  />
+                </label>
+              )}
+              {memory.length > 0 && (
+                <div className="rounded-md border border-[var(--border)] p-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                      Stored ({memory.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onClearMemory}
+                      className="inline-flex items-center gap-1 text-[10px] text-[var(--danger)] transition hover:underline"
+                    >
+                      <Trash2 className="h-3 w-3" /> Clear
+                    </button>
+                  </div>
+                  <div className="max-h-40 space-y-1 overflow-y-auto">
+                    {[...memory].reverse().map((e, i) => (
+                      <div
+                        key={i}
+                        className="rounded bg-[var(--surface-2)] px-1.5 py-1 text-[11px]"
+                      >
+                        <div className="text-[9px] text-[var(--text-muted)]">
+                          {e.at}
+                        </div>
+                        <div className="line-clamp-3 whitespace-pre-wrap text-[var(--text)]">
+                          {e.value || "(empty)"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
       {node.type === "loop.foreach" &&
         (() => {

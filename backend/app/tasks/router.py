@@ -441,6 +441,55 @@ async def promote_task_to_advanced(
     return graph
 
 
+@router.get("/{task_id}/memory")
+async def get_task_memory(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, dict]:
+    """Stored Memory-node state for this task, keyed by node id — so the editor
+    can show each Memory node's current contents on its face."""
+    from app.tasks.models import AutomationNodeMemory
+
+    await _get_owned_task(task_id, user, db)
+    rows = (
+        await db.execute(
+            select(AutomationNodeMemory).where(
+                AutomationNodeMemory.task_id == task_id
+            )
+        )
+    ).scalars()
+    return {
+        r.node_id: {
+            "entries": r.entries or [],
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    }
+
+
+@router.delete("/{task_id}/memory/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_task_memory(
+    task_id: uuid.UUID,
+    node_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    """Wipe a Memory node's stored history."""
+    from sqlalchemy import delete as _delete
+
+    from app.tasks.models import AutomationNodeMemory
+
+    await _get_owned_task(task_id, user, db)
+    await db.execute(
+        _delete(AutomationNodeMemory).where(
+            AutomationNodeMemory.task_id == task_id,
+            AutomationNodeMemory.node_id == node_id,
+        )
+    )
+    await db.commit()
+
+
 @router.get("/{task_id}/runs", response_model=list[TaskRunSummary])
 async def list_runs(
     task_id: uuid.UUID,

@@ -168,6 +168,13 @@ export const tasksApi = {
     const { data } = await apiClient.post<FlowGraph>(`/tasks/${id}/promote`);
     return data;
   },
+  async getMemory(id: string): Promise<TaskMemory> {
+    const { data } = await apiClient.get<TaskMemory>(`/tasks/${id}/memory`);
+    return data;
+  },
+  async clearMemory(id: string, nodeId: string): Promise<void> {
+    await apiClient.delete(`/tasks/${id}/memory/${nodeId}`);
+  },
 };
 
 // ---------------------------------------------------------------------
@@ -184,6 +191,7 @@ export type FlowNodeType =
   | "fetch.page"
   | "research.deep"
   | "loop.foreach"
+  | "memory.store"
   | "flow.merge"
   | "flow.delay"
   | "control.condition"
@@ -273,6 +281,21 @@ export interface SheetOutputData {
   title: string;
   folder_item_id: string | null;
 }
+
+export interface MemoryData {
+  name: string;
+  remember: boolean;
+  max_runs: number;
+}
+
+export interface TaskMemoryEntry {
+  value: string;
+  at: string;
+}
+export type TaskMemory = Record<
+  string,
+  { entries: TaskMemoryEntry[]; updated_at: string | null }
+>;
 
 export interface MergeData {
   mode: string;

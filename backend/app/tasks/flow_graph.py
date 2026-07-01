@@ -56,6 +56,9 @@ class NodeType:
     DEEP_RESEARCH = "research.deep"
     # Map node: split the upstream into items, run an AI body per item, aggregate.
     LOOP = "loop.foreach"
+    # Memory node: a named sticky note that captures the upstream output (and can
+    # persist across runs so a flow remembers state / compares to last time).
+    MEMORY = "memory.store"
     # Flow helpers: join several branches into one, and pause the run.
     MERGE = "flow.merge"
     DELAY = "flow.delay"
@@ -102,6 +105,7 @@ PROCESSING_TYPES = frozenset(
         NodeType.FETCH_PAGE,
         NodeType.DEEP_RESEARCH,
         NodeType.LOOP,
+        NodeType.MEMORY,
         NodeType.MERGE,
         NodeType.DELAY,
     }
@@ -253,6 +257,19 @@ class LoopData(BaseModel):
     connector_ids: list[str] = Field(default_factory=list)
     max_items: int = 10  # 1..50 — a safety cap on iterations
     join_with: str = "blank"  # blank | numbered
+
+
+class MemoryData(BaseModel):
+    """A Memory node — a named sticky note that captures the upstream output so
+    you can wire it into a later node as context (several can feed one node).
+
+    With ``remember`` on it also persists across runs, keeping the last
+    ``max_runs`` captured values, so a run can compare against previous runs
+    ("what changed") or feed the history back in."""
+
+    name: str = "Memory"
+    remember: bool = False
+    max_runs: int = 5  # 1..50 — how many past runs to keep when remembering
 
 
 class MergeData(BaseModel):
@@ -737,6 +754,7 @@ __all__ = [
     "FetchPageData",
     "DeepResearchData",
     "LoopData",
+    "MemoryData",
     "MergeData",
     "DelayData",
     "ConditionData",

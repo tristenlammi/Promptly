@@ -10,7 +10,16 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from typing import Any
@@ -121,6 +130,29 @@ class TaskConnector(Base):
     )
     connector_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("mcp_connectors.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AutomationNodeMemory(UUIDPKMixin, TimestampMixin, Base):
+    """Persistent state for a Memory node in a task's flow.
+
+    One row per (task, memory node). ``entries`` is a rolling list of the last
+    N runs' captured values — ``[{"value": str, "at": iso8601}]``, oldest first
+    — so a run can compare against previous runs ("what changed") or feed the
+    history back in as context. Trimmed to the node's configured run limit.
+    """
+
+    __tablename__ = "automation_node_memory"
+    __table_args__ = (
+        UniqueConstraint("task_id", "node_id", name="uq_automation_memory"),
+    )
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    entries: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
     )
 
 

@@ -45,6 +45,7 @@ from app.tasks.flow_graph import (
     FlowGraph,
     FlowNode,
     LoopData,
+    MemoryData,
     MergeData,
     DelayData,
     NodeType,
@@ -98,6 +99,10 @@ def _step_context(
         "upstream_output": upstream,
         "trigger.payload": trigger_payload,
         "trigger.timestamp": now_local,
+        # Run-time date/time (from the schedule's timezone) for templated titles.
+        "datetime": now_local,
+        "date": now_local[:10],
+        "time": now_local[11:16] if len(now_local) >= 16 else "",
     }
     for nid, txt in outputs.items():
         ctx[f"node_{nid}.output"] = txt
@@ -539,6 +544,74 @@ async def _run_loop_node(
         "completion_tokens": usage.get("completion_tokens") or None,
     }
     return aggregated, sources, usage, record
+
+
+async def _run_memory_node(
+    node: FlowNode, ctx: dict[str, str], *, db, task: Task, now_local: str
+) -> tuple[str, dict]:
+    """A Memory node → (text, record). Captures the upstream output; when the
+    node is set to *remember*, also persists it across runs (keeping the last
+    ``max_runs`` values) and emits the current value plus the recent history."""
+    from sqlalchemy import select as _select
+
+    from app.tasks.models import AutomationNodeMemory
+
+    data = MemoryData.model_validate(node.data)
+    current = ctx.get("upstream_output", "")
+    name = (data.name or "Memory").strip() or "Memory"
+
+    if not data.remember:
+        # Within-run sticky note: relay the captured value (labelled so that a
+        # downstream node merging several memories can tell them apart).
+        text = f"[{name}]\n{current}" if current else f"[{name}] (empty)"
+        record = {
+            "node_id": node.id,
+            "type": NodeType.MEMORY,
+            "label": f"Memory: {name}",
+            "status": "success",
+            "output": current,
+        }
+        return text, record
+
+    cap = max(1, min(50, data.max_runs or 5))
+    row = (
+        await db.execute(
+            _select(AutomationNodeMemory).where(
+                AutomationNodeMemory.task_id == task.id,
+                AutomationNodeMemory.node_id == node.id,
+            )
+        )
+    ).scalar_one_or_none()
+    prev = list(row.entries) if row and row.entries else []
+
+    parts = [f"[{name}] current run:\n{current or '(empty)'}"]
+    recent = list(reversed(prev))[: cap - 1] if cap > 1 else []
+    if recent:
+        parts.append(f"[{name}] previous {len(recent)} run(s), newest first:")
+        for e in recent:
+            parts.append(f"(run {e.get('at', '?')})\n{e.get('value', '')}")
+    text = "\n\n".join(parts)
+
+    new_entries = (prev + [{"value": current, "at": now_local}])[-cap:]
+    if row is not None:
+        row.entries = new_entries
+        flag_modified(row, "entries")
+    else:
+        db.add(
+            AutomationNodeMemory(
+                task_id=task.id, node_id=node.id, entries=new_entries
+            )
+        )
+    await db.commit()  # persist the observation now, even if a later step fails
+
+    record = {
+        "node_id": node.id,
+        "type": NodeType.MEMORY,
+        "label": f"Memory: {name} ({len(new_entries)} kept)",
+        "status": "success",
+        "output": text,
+    }
+    return text, record
 
 
 _SUMMARY_LENGTH = {
@@ -1320,6 +1393,14 @@ async def run_graph_flow(
             )
             sources.extend(node_sources)
             _accum_usage(loop_usage)
+            node_runs.append(record)
+            outputs[nid] = text
+            last_processing_output = text
+
+        elif node.type == NodeType.MEMORY:
+            text, record = await _run_memory_node(
+                node, ctx, db=db, task=task, now_local=now_local
+            )
             node_runs.append(record)
             outputs[nid] = text
             last_processing_output = text
