@@ -90,12 +90,60 @@ def _interpolate(template: str, context: dict[str, str]) -> str:
     )
 
 
+def _try_json(text: str):
+    """Parse ``text`` as JSON (tolerating a ```code fence```); returns a dict/list
+    or None. Lets any node that emits JSON expose fields as ``{{...json.path}}``."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z]*\s*", "", t)
+        t = re.sub(r"\s*```$", "", t.strip())
+    if not (t.startswith("{") or t.startswith("[")):
+        return None
+    try:
+        obj = json.loads(t)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, (dict, list)) else None
+
+
+def _flatten_json(obj, prefix: str, out: dict[str, str], depth: int = 0) -> None:
+    """Flatten a JSON value into ``prefix.path`` → string leaves so templates can
+    reference fields: ``{{json.status}}``, ``{{json.items.0.name}}``. Bounded so a
+    huge object can't explode the context."""
+    if len(out) > 400 or depth > 6:
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _flatten_json(v, f"{prefix}.{k}", out, depth + 1)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj[:50]):
+            _flatten_json(v, f"{prefix}.{i}", out, depth + 1)
+    else:
+        out[prefix] = "" if obj is None else str(obj)
+
+
+def _json_dumps(obj) -> str:
+    try:
+        return json.dumps(obj, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return ""
+
+
 def _step_context(
-    *, upstream: str, trigger_payload: str, now_local: str, outputs: dict[str, str]
+    *,
+    upstream: str,
+    trigger_payload: str,
+    now_local: str,
+    outputs: dict[str, str],
+    structured: dict | None = None,
+    upstream_struct=None,
 ) -> dict[str, str]:
     """The variable context a node's templates resolve against: the immediate
-    upstream text, the trigger payload/timestamp, and every completed node's
-    output as ``node_<id>.output``."""
+    upstream text, trigger payload/timestamp, run date/time, every completed
+    node's ``node_<id>.output`` — and, when a node emitted JSON, its fields via
+    ``{{json.path}}`` (immediate upstream) and ``{{node_<id>.json.path}}``."""
     ctx = {
         "upstream_output": upstream,
         "trigger.payload": trigger_payload,
@@ -107,6 +155,14 @@ def _step_context(
     }
     for nid, txt in outputs.items():
         ctx[f"node_{nid}.output"] = txt
+    # Structured (JSON) field access.
+    if upstream_struct is not None:
+        ctx["json"] = _json_dumps(upstream_struct)
+        _flatten_json(upstream_struct, "json", ctx)
+    for nid, val in (structured or {}).items():
+        if val is not None:
+            ctx[f"node_{nid}.json"] = _json_dumps(val)
+            _flatten_json(val, f"node_{nid}.json", ctx)
     return ctx
 
 
@@ -508,6 +564,10 @@ async def _run_loop_node(
         item_ctx = dict(ctx)
         item_ctx["item"] = item
         item_ctx["item_index"] = str(idx)
+        # If the item is a JSON object, expose its fields as {{item.field}}.
+        item_struct = _try_json(item)
+        if item_struct is not None:
+            _flatten_json(item_struct, "item", item_ctx)
         prompt = _interpolate(data.prompt.strip() or "{{item}}", item_ctx)
         text, item_sources, item_usage = await _generate(
             provider=provider,
@@ -1228,6 +1288,7 @@ async def run_graph_flow(
     now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
 
     outputs: dict[str, str] = {}  # node_id → text output (for {{node_x.output}})
+    structured: dict[str, object] = {}  # node_id → parsed JSON (for {{...json.path}})
     inputs_by_node: dict[str, str] = {}  # node_id → merged input (for the inspector)
     active: set[str] = set()  # nodes that actually ran (on the taken path)
     selected: dict[str, set[str]] = {}  # control node_id → handles it fired
@@ -1265,6 +1326,7 @@ async def run_graph_flow(
         if node.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL):
             active.add(nid)
             outputs[nid] = trigger_payload or ""
+            structured[nid] = _try_json(trigger_payload or "")
             continue
 
         # Pinned (dev-time): use the frozen value instead of executing, so you
@@ -1272,6 +1334,7 @@ async def run_graph_flow(
         if nid in pinned:
             active.add(nid)
             outputs[nid] = pinned[nid]
+            structured[nid] = _try_json(pinned[nid])
             last_processing_output = pinned[nid]
             node_runs.append(
                 {
@@ -1319,11 +1382,17 @@ async def run_graph_flow(
         active.add(nid)
         upstream = "\n\n".join(outputs[s] for s in active_srcs if outputs.get(s))
         inputs_by_node[nid] = upstream
+        # Field access to the immediate upstream's JSON (single predecessor).
+        upstream_struct = (
+            structured.get(active_srcs[0]) if len(active_srcs) == 1 else None
+        )
         ctx = _step_context(
             upstream=upstream,
             trigger_payload=trigger_payload or "",
             now_local=now_local,
             outputs=outputs,
+            structured=structured,
+            upstream_struct=upstream_struct,
         )
 
         # Test runs don't perform output side effects (no note/card/message
@@ -1345,7 +1414,9 @@ async def run_graph_flow(
 
         if node.type == NodeType.CONDITION:
             data = ConditionData.model_validate(node.data)
-            result = _eval_condition(data, upstream, ctx)
+            # Test a specific value (e.g. {{json.status}}) or the whole upstream.
+            left = _interpolate(data.source, ctx) if data.source.strip() else upstream
+            result = _eval_condition(data, left, ctx)
             selected[nid] = {"true" if result else "false"}
             outputs[nid] = upstream  # pass the text through on the taken branch
             node_runs.append(
@@ -1615,6 +1686,9 @@ async def run_graph_flow(
                     "output": "Saved as the run report.",
                 }
             )
+
+        # Expose this node's JSON (if it emitted any) for downstream field refs.
+        structured[nid] = _try_json(outputs.get(nid, ""))
 
     # The run's report: the text feeding a report node if there is one, else the
     # last processing node's output. Action sinks append their one-line notes.

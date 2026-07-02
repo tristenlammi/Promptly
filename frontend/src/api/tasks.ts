@@ -344,6 +344,7 @@ export interface LoopData {
 }
 
 export interface ConditionData {
+  source: string;
   operator: string;
   value: string;
   case_sensitive: boolean;

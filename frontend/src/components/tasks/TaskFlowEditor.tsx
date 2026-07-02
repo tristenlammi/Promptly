@@ -216,6 +216,7 @@ interface FlowVar {
 }
 const DEFAULT_VARS: FlowVar[] = [
   { token: "upstream_output", label: "The previous step's output" },
+  { token: "json.field", label: "A field from upstream JSON (rename 'field')" },
   { token: "date", label: "Run date (YYYY-MM-DD)" },
   { token: "time", label: "Run time (HH:MM)" },
   { token: "datetime", label: "Run date & time" },
@@ -1577,7 +1578,7 @@ export function TaskFlowEditor({
       else if (type === "flow.delay") data = { seconds: 30 };
       else if (type === "output.report") data = { notify: true };
       else if (type === "control.condition")
-        data = { operator: "contains", value: "", case_sensitive: false };
+        data = { source: "", operator: "contains", value: "", case_sensitive: false };
       else if (type === "control.router")
         data = {
           categories: [
@@ -2771,14 +2772,25 @@ function NodeInspector({
           return (
             <>
               <p className="text-[11px] text-[var(--text-muted)]">
-                Tests the upstream text and sends the run down its{" "}
+                Tests a value and sends the run down its{" "}
                 <b className="text-[var(--success)]">true</b> or{" "}
                 <b className="text-[var(--danger)]">false</b> branch. Wire each
                 handle to what should happen next — only the matching branch
                 runs.
               </p>
               <label className="text-xs font-medium text-[var(--text-muted)]">
-                The upstream text…
+                Value to test
+                <div className="mt-1">
+                  <VariableField
+                    value={c.source}
+                    onChange={(v) => onPatch({ source: v })}
+                    variables={DEFAULT_VARS}
+                    placeholder="Blank = the whole upstream. Or a field: {{json.status}}"
+                  />
+                </div>
+              </label>
+              <label className="text-xs font-medium text-[var(--text-muted)]">
+                …
                 <select
                   value={c.operator}
                   onChange={(e) => onPatch({ operator: e.target.value })}

@@ -304,10 +304,14 @@ class DeepResearchData(BaseModel):
 
 
 class ConditionData(BaseModel):
-    """A branch: tests the upstream text and routes to the ``true`` or ``false``
-    handle. String operators only (our pipeline is text-centric); ``value`` is a
-    template. ``matches`` treats ``value`` as a regex."""
+    """A branch: tests a value and routes to the ``true`` or ``false`` handle.
 
+    ``source`` is the value tested — a template, defaulting to the whole upstream
+    text; set it to a field like ``{{json.status}}`` to branch on structured
+    data. String operators only; ``value`` is the comparison (a template), and
+    ``matches`` treats it as a regex."""
+
+    source: str = ""
     operator: str = "contains"
     # contains | not_contains | equals | not_equals | matches | is_empty |
     # is_not_empty
