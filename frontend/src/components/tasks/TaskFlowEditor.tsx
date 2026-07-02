@@ -1406,7 +1406,7 @@ export function TaskFlowEditor({
       const cls =
         st === "skipped"
           ? "flow-node-skipped"
-          : st === "failed"
+          : st === "failed" || st === "error"
             ? "flow-node-failed"
             : "flow-node-success";
       return { ...n, className: cn(n.className, cls) };
@@ -1680,6 +1680,19 @@ export function TaskFlowEditor({
   const outputsCount = nodes.filter((n) =>
     (n.type ?? "").startsWith("output.")
   ).length;
+  // Per-node data shown in the inspector: the selected run's data (base),
+  // overlaid by any newer "Run to here" test results.
+  const mergedNodeData: Record<
+    string,
+    { input: string; output: string; status: string }
+  > = {};
+  for (const r of activeRun?.node_runs ?? [])
+    mergedNodeData[r.node_id] = {
+      input: r.input ?? "",
+      output: r.output ?? "",
+      status: r.status,
+    };
+  Object.assign(mergedNodeData, nodeData);
   const editCtx: FlowEditCtx = {
     detailed,
     expandedIds,
@@ -1692,7 +1705,7 @@ export function TaskFlowEditor({
     outputsCount,
     memory: memoryQuery.data ?? {},
     clearMemory,
-    nodeData,
+    nodeData: mergedNodeData,
     pins,
     runningNode,
     runToHere,
@@ -1983,7 +1996,7 @@ export function TaskFlowEditor({
             folders={folders}
             memory={memoryQuery.data?.[selected.id]?.entries ?? []}
             onClearMemory={() => clearMemory(selected.id)}
-            nodeData={nodeData[selected.id]}
+            nodeData={mergedNodeData[selected.id]}
             pinned={selected.id in pins}
             running={runningNode === selected.id}
             onRunToHere={() => runToHere(selected.id)}
@@ -3299,6 +3312,24 @@ function NodeInspector({
             </>
           );
         })()}
+
+      {/* On-error behaviour — a run-robustness setting for any runnable node. */}
+      {!(node.type ?? "").startsWith("trigger.") && (
+        <label className="mt-1 flex items-center justify-between border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
+          <span>If this step errors</span>
+          <select
+            value={
+              ((node.data as Record<string, unknown>).on_error as string) ??
+              "stop"
+            }
+            onChange={(e) => onPatch({ on_error: e.target.value })}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          >
+            <option value="stop">Stop the run</option>
+            <option value="continue">Continue (skip this step)</option>
+          </select>
+        </label>
+      )}
 
       {canDelete && (
         <button

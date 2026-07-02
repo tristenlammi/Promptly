@@ -1412,280 +1412,297 @@ async def run_graph_flow(
             )
             continue
 
-        if node.type == NodeType.CONDITION:
-            data = ConditionData.model_validate(node.data)
-            # Test a specific value (e.g. {{json.status}}) or the whole upstream.
-            left = _interpolate(data.source, ctx) if data.source.strip() else upstream
-            result = _eval_condition(data, left, ctx)
-            selected[nid] = {"true" if result else "false"}
-            outputs[nid] = upstream  # pass the text through on the taken branch
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": NodeType.CONDITION,
-                    "label": "Condition",
-                    "status": "success",
-                    "output": f"{data.operator} → {'true' if result else 'false'}",
-                }
-            )
+        try:
+            if node.type == NodeType.CONDITION:
+                data = ConditionData.model_validate(node.data)
+                # Test a specific value (e.g. {{json.status}}) or the whole upstream.
+                left = _interpolate(data.source, ctx) if data.source.strip() else upstream
+                result = _eval_condition(data, left, ctx)
+                selected[nid] = {"true" if result else "false"}
+                outputs[nid] = upstream  # pass the text through on the taken branch
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": NodeType.CONDITION,
+                        "label": "Condition",
+                        "status": "success",
+                        "output": f"{data.operator} → {'true' if result else 'false'}",
+                    }
+                )
 
-        elif node.type == NodeType.ROUTER:
-            picked, router_usage, record = await _run_router_node(
-                node, db=db, user=user, upstream=upstream
-            )
-            _accum_usage(router_usage)
-            selected[nid] = {picked}
-            outputs[nid] = upstream
-            node_runs.append(record)
+            elif node.type == NodeType.ROUTER:
+                picked, router_usage, record = await _run_router_node(
+                    node, db=db, user=user, upstream=upstream
+                )
+                _accum_usage(router_usage)
+                selected[nid] = {picked}
+                outputs[nid] = upstream
+                node_runs.append(record)
 
-        elif node.type == NodeType.MERGE:
-            data = MergeData.model_validate(node.data)
-            sep = {"blank": "\n\n", "newline": "\n", "space": " "}.get(
-                data.separator, "\n\n"
-            )
-            merged = sep.join(outputs[s] for s in active_srcs if outputs.get(s))
-            outputs[nid] = merged
-            last_processing_output = merged
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": NodeType.MERGE,
-                    "label": f"Merge ({len(active_srcs)} branch"
-                    + ("es" if len(active_srcs) != 1 else "")
-                    + ")",
-                    "status": "success",
-                    "output": merged,
-                }
-            )
+            elif node.type == NodeType.MERGE:
+                data = MergeData.model_validate(node.data)
+                sep = {"blank": "\n\n", "newline": "\n", "space": " "}.get(
+                    data.separator, "\n\n"
+                )
+                merged = sep.join(outputs[s] for s in active_srcs if outputs.get(s))
+                outputs[nid] = merged
+                last_processing_output = merged
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": NodeType.MERGE,
+                        "label": f"Merge ({len(active_srcs)} branch"
+                        + ("es" if len(active_srcs) != 1 else "")
+                        + ")",
+                        "status": "success",
+                        "output": merged,
+                    }
+                )
 
-        elif node.type == NodeType.DELAY:
-            secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
-            if secs:
-                await asyncio.sleep(secs)
-            outputs[nid] = upstream  # pass the text through unchanged
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": NodeType.DELAY,
-                    "label": f"Delay {secs}s",
-                    "status": "success",
-                    "output": f"Paused {secs}s.",
-                }
-            )
+            elif node.type == NodeType.DELAY:
+                secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
+                if secs:
+                    await asyncio.sleep(secs)
+                outputs[nid] = upstream  # pass the text through unchanged
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": NodeType.DELAY,
+                        "label": f"Delay {secs}s",
+                        "status": "success",
+                        "output": f"Paused {secs}s.",
+                    }
+                )
 
-        elif node.type == NodeType.SEARCH_WEB:
-            text, node_sources, record = await _run_search_node(
-                node, ctx, db=db, user=user
-            )
-            sources.extend(node_sources)
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.SEARCH_WEB:
+                text, node_sources, record = await _run_search_node(
+                    node, ctx, db=db, user=user
+                )
+                sources.extend(node_sources)
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.FETCH_PAGE:
-            text, node_sources, record = await _run_fetch_node(node, ctx)
-            sources.extend(node_sources)
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.FETCH_PAGE:
+                text, node_sources, record = await _run_fetch_node(node, ctx)
+                sources.extend(node_sources)
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.SUMMARISE:
-            text, node_sources, s_usage, record = await _run_summarise_node(
-                node, ctx, db=db, user=user, tz=tz, now_local=now_local
-            )
-            sources.extend(node_sources)
-            _accum_usage(s_usage)
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.SUMMARISE:
+                text, node_sources, s_usage, record = await _run_summarise_node(
+                    node, ctx, db=db, user=user, tz=tz, now_local=now_local
+                )
+                sources.extend(node_sources)
+                _accum_usage(s_usage)
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.EXTRACT:
-            text, node_sources, e_usage, record = await _run_extract_node(
-                node, ctx, db=db, user=user, tz=tz, now_local=now_local
-            )
-            sources.extend(node_sources)
-            _accum_usage(e_usage)
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.EXTRACT:
+                text, node_sources, e_usage, record = await _run_extract_node(
+                    node, ctx, db=db, user=user, tz=tz, now_local=now_local
+                )
+                sources.extend(node_sources)
+                _accum_usage(e_usage)
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.DEEP_RESEARCH:
-            text, node_sources, dr_usage, record = await _run_deep_research_node(
-                node, ctx, db=db, user=user, tz=tz, now_local=now_local
-            )
-            sources.extend(node_sources)
-            _accum_usage(dr_usage)
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.DEEP_RESEARCH:
+                text, node_sources, dr_usage, record = await _run_deep_research_node(
+                    node, ctx, db=db, user=user, tz=tz, now_local=now_local
+                )
+                sources.extend(node_sources)
+                _accum_usage(dr_usage)
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.LOOP:
-            text, node_sources, loop_usage, record = await _run_loop_node(
-                node, ctx, db=db, user=user, task=task, tz=tz, now_local=now_local
-            )
-            sources.extend(node_sources)
-            _accum_usage(loop_usage)
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.LOOP:
+                text, node_sources, loop_usage, record = await _run_loop_node(
+                    node, ctx, db=db, user=user, task=task, tz=tz, now_local=now_local
+                )
+                sources.extend(node_sources)
+                _accum_usage(loop_usage)
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.MEMORY:
-            text, record = await _run_memory_node(
-                node, ctx, db=db, task=task, now_local=now_local, dry_run=dry_run
-            )
-            node_runs.append(record)
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.MEMORY:
+                text, record = await _run_memory_node(
+                    node, ctx, db=db, task=task, now_local=now_local, dry_run=dry_run
+                )
+                node_runs.append(record)
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.AI_PROMPT:
-            ai_seen += 1
-            data = AIPromptData.model_validate(node.data)
-            provider, model_id = await _resolve_provider(
-                uuid.UUID(data.provider_id) if data.provider_id else None,
-                data.model_id,
-                db,
-            )
-            schemas, dispatch, names = await _resolve_connectors_by_ids(
-                db,
-                user_id=task.user_id,
-                workspace_id=task.workspace_id,
-                connector_ids=[uuid.UUID(c) for c in data.connector_ids],
-            )
-            # Shape this step's output for what it feeds: a board card wants JSON,
-            # a report/note wants prose, anything else is an intermediate step.
-            downs = succ_types.get(nid, set())
-            if NodeType.OUTPUT_BOARD_CARD in downs:
-                output_kind = "board_card"
-            elif downs & OUTPUT_TYPES:
-                output_kind = "report"
-            else:
-                output_kind = "step"
-            system = _build_system_prompt(
-                timezone=tz,
-                use_web_search=data.use_web_search,
-                now_local_iso=now_local,
-                connector_names=names,
-                output_kind=output_kind,
-            )
-            # Blank prompt → default to consuming the upstream text, so an AI
-            # step dropped after a search/fetch "just works" without config.
-            prompt = _interpolate(data.prompt.strip() or "{{upstream_output}}", ctx)
-            text, node_sources, node_usage = await _generate(
-                provider=provider,
-                model_id=model_id,
-                system=system,
-                prompt=prompt,
-                user=user,
-                use_web_search=data.use_web_search,
-                reasoning_effort=data.reasoning_effort,
-                mcp_schemas=schemas,
-                mcp_dispatch=dispatch,
-                db=db,
-            )
-            sources.extend(node_sources)
-            _accum_usage(node_usage)
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": NodeType.AI_PROMPT,
-                    "label": f"AI step {ai_seen}" if ai_count > 1 else "AI step",
-                    "status": "success",
-                    "output": text,
-                    "prompt_tokens": node_usage.get("prompt_tokens") or None,
-                    "completion_tokens": node_usage.get("completion_tokens") or None,
-                }
-            )
-            outputs[nid] = text
-            last_processing_output = text
+            elif node.type == NodeType.AI_PROMPT:
+                ai_seen += 1
+                data = AIPromptData.model_validate(node.data)
+                provider, model_id = await _resolve_provider(
+                    uuid.UUID(data.provider_id) if data.provider_id else None,
+                    data.model_id,
+                    db,
+                )
+                schemas, dispatch, names = await _resolve_connectors_by_ids(
+                    db,
+                    user_id=task.user_id,
+                    workspace_id=task.workspace_id,
+                    connector_ids=[uuid.UUID(c) for c in data.connector_ids],
+                )
+                # Shape this step's output for what it feeds: a board card wants JSON,
+                # a report/note wants prose, anything else is an intermediate step.
+                downs = succ_types.get(nid, set())
+                if NodeType.OUTPUT_BOARD_CARD in downs:
+                    output_kind = "board_card"
+                elif downs & OUTPUT_TYPES:
+                    output_kind = "report"
+                else:
+                    output_kind = "step"
+                system = _build_system_prompt(
+                    timezone=tz,
+                    use_web_search=data.use_web_search,
+                    now_local_iso=now_local,
+                    connector_names=names,
+                    output_kind=output_kind,
+                )
+                # Blank prompt → default to consuming the upstream text, so an AI
+                # step dropped after a search/fetch "just works" without config.
+                prompt = _interpolate(data.prompt.strip() or "{{upstream_output}}", ctx)
+                text, node_sources, node_usage = await _generate(
+                    provider=provider,
+                    model_id=model_id,
+                    system=system,
+                    prompt=prompt,
+                    user=user,
+                    use_web_search=data.use_web_search,
+                    reasoning_effort=data.reasoning_effort,
+                    mcp_schemas=schemas,
+                    mcp_dispatch=dispatch,
+                    db=db,
+                )
+                sources.extend(node_sources)
+                _accum_usage(node_usage)
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": NodeType.AI_PROMPT,
+                        "label": f"AI step {ai_seen}" if ai_count > 1 else "AI step",
+                        "status": "success",
+                        "output": text,
+                        "prompt_tokens": node_usage.get("prompt_tokens") or None,
+                        "completion_tokens": node_usage.get("completion_tokens") or None,
+                    }
+                )
+                outputs[nid] = text
+                last_processing_output = text
 
-        elif node.type == NodeType.OUTPUT_BOARD_CARD:
-            note = await _file_board_card(
-                db,
-                task=task,
-                data=BoardCardOutputData.model_validate(node.data),
-                text=upstream,
-            )
-            action_notes.append(note)
-            outputs[nid] = upstream
+            elif node.type == NodeType.OUTPUT_BOARD_CARD:
+                note = await _file_board_card(
+                    db,
+                    task=task,
+                    data=BoardCardOutputData.model_validate(node.data),
+                    text=upstream,
+                )
+                action_notes.append(note)
+                outputs[nid] = upstream
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": node.type,
+                        "label": "Create card",
+                        "status": "success",
+                        "output": note,
+                    }
+                )
+
+            elif node.type == NodeType.OUTPUT_CHAT_MESSAGE:
+                note = await _post_chat_message(
+                    db,
+                    task=task,
+                    data=ChatMessageOutputData.model_validate(node.data),
+                    text=upstream,
+                )
+                action_notes.append(note)
+                outputs[nid] = upstream
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": node.type,
+                        "label": "Send message",
+                        "status": "success",
+                        "output": note,
+                    }
+                )
+
+            elif node.type == NodeType.OUTPUT_NOTE:
+                note = await _write_note(
+                    db,
+                    task=task,
+                    data=NoteOutputData.model_validate(node.data),
+                    text=upstream,
+                )
+                action_notes.append(note)
+                outputs[nid] = upstream
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": node.type,
+                        "label": "Create note",
+                        "status": "success",
+                        "output": note,
+                    }
+                )
+
+            elif node.type == NodeType.OUTPUT_SHEET:
+                note = await _write_sheet(
+                    db,
+                    task=task,
+                    data=SheetOutputData.model_validate(node.data),
+                    text=upstream,
+                )
+                action_notes.append(note)
+                outputs[nid] = upstream
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": node.type,
+                        "label": "Create sheet",
+                        "status": "success",
+                        "output": note,
+                    }
+                )
+
+            else:  # NodeType.OUTPUT_REPORT
+                report_from_output = upstream
+                outputs[nid] = upstream
+                node_runs.append(
+                    {
+                        "node_id": nid,
+                        "type": node.type,
+                        "label": "Report",
+                        "status": "success",
+                        "output": "Saved as the run report.",
+                    }
+                )
+        except Exception as _exc:  # noqa: BLE001 — per-node error handling
+            if (node.data or {}).get("on_error") != "continue":
+                raise
+            outputs[nid] = ""
+            structured[nid] = None
             node_runs.append(
                 {
                     "node_id": nid,
                     "type": node.type,
-                    "label": "Create card",
-                    "status": "success",
-                    "output": note,
+                    "label": "Error (continued)",
+                    "status": "error",
+                    "input": upstream,
+                    "output": str(_exc)[:500],
                 }
             )
-
-        elif node.type == NodeType.OUTPUT_CHAT_MESSAGE:
-            note = await _post_chat_message(
-                db,
-                task=task,
-                data=ChatMessageOutputData.model_validate(node.data),
-                text=upstream,
-            )
-            action_notes.append(note)
-            outputs[nid] = upstream
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": node.type,
-                    "label": "Send message",
-                    "status": "success",
-                    "output": note,
-                }
-            )
-
-        elif node.type == NodeType.OUTPUT_NOTE:
-            note = await _write_note(
-                db,
-                task=task,
-                data=NoteOutputData.model_validate(node.data),
-                text=upstream,
-            )
-            action_notes.append(note)
-            outputs[nid] = upstream
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": node.type,
-                    "label": "Create note",
-                    "status": "success",
-                    "output": note,
-                }
-            )
-
-        elif node.type == NodeType.OUTPUT_SHEET:
-            note = await _write_sheet(
-                db,
-                task=task,
-                data=SheetOutputData.model_validate(node.data),
-                text=upstream,
-            )
-            action_notes.append(note)
-            outputs[nid] = upstream
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": node.type,
-                    "label": "Create sheet",
-                    "status": "success",
-                    "output": note,
-                }
-            )
-
-        else:  # NodeType.OUTPUT_REPORT
-            report_from_output = upstream
-            outputs[nid] = upstream
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": node.type,
-                    "label": "Report",
-                    "status": "success",
-                    "output": "Saved as the run report.",
-                }
-            )
+            continue
 
         # Expose this node's JSON (if it emitted any) for downstream field refs.
         structured[nid] = _try_json(outputs.get(nid, ""))

@@ -19,6 +19,7 @@ export interface NodeRun {
   type: string;
   label: string;
   status: string;
+  input?: string;
   output: string;
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
