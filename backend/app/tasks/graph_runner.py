@@ -234,9 +234,10 @@ async def _run_search_node(
 
 async def _run_fetch_node(
     node: FlowNode, ctx: dict[str, str]
-) -> tuple[str, list[dict], dict]:
-    """Execute a ``fetch.page`` node → (text, sources, record). Fetches a URL
-    (SSRF-guarded) and extracts its readable main text via trafilatura."""
+) -> tuple[str, list[dict], dict, dict]:
+    """Execute a ``fetch.page`` node → (text, sources, structured, record).
+    Fetches a URL (SSRF-guarded) and extracts its readable main text via
+    trafilatura. ``structured`` = ``{url, text}`` for downstream field access."""
     import httpx
     import trafilatura
 
@@ -282,7 +283,8 @@ async def _run_fetch_node(
         "status": "success",
         "output": text,
     }
-    return text, [{"title": url, "url": url, "snippet": ""}], record
+    structured = {"url": url, "text": extracted}
+    return text, [{"title": url, "url": url, "snippet": ""}], structured, record
 
 
 def _first_line_title(text: str) -> str:
@@ -519,14 +521,23 @@ async def _run_loop_node(
     task: Task,
     tz: str,
     now_local: str,
-) -> tuple[str, list[dict], dict, dict]:
-    """Map an AI body over each upstream item → (text, sources, usage, record).
-    Items run sequentially (they share the request's DB session, which isn't
-    safe to use concurrently)."""
+    upstream_struct=None,
+) -> tuple[str, list[dict], dict, dict, list[str]]:
+    """Map an AI body over each upstream item → (text, sources, usage, record,
+    results). If the upstream produced a JSON array (search hits, an extracted
+    list), iterate that directly; otherwise split the upstream text. Items run
+    sequentially (they share the request's DB session)."""
     data = LoopData.model_validate(node.data)
     upstream = ctx.get("upstream_output", "")
     cap = max(1, min(50, data.max_items or 10))
-    items = _split_items(upstream, data.split_mode, cap)
+    # Prefer a real structured array from upstream (e.g. search results); else
+    # split the text by lines / JSON.
+    if isinstance(upstream_struct, list) and upstream_struct:
+        items = [
+            x if isinstance(x, str) else _json_dumps(x) for x in upstream_struct
+        ][:cap]
+    else:
+        items = _split_items(upstream, data.split_mode, cap)
 
     usage = _empty_usage()
     if not items:
@@ -537,7 +548,7 @@ async def _run_loop_node(
             "status": "success",
             "output": "",
         }
-        return "", [], usage, record
+        return "", [], usage, record, []
 
     provider, model_id = await _resolve_provider(
         uuid.UUID(data.provider_id) if data.provider_id else None,
@@ -604,7 +615,7 @@ async def _run_loop_node(
         "prompt_tokens": usage.get("prompt_tokens") or None,
         "completion_tokens": usage.get("completion_tokens") or None,
     }
-    return aggregated, sources, usage, record
+    return aggregated, sources, usage, record, results
 
 
 async def _run_memory_node(
@@ -1226,14 +1237,48 @@ def _flow_timezone(graph: FlowGraph, task: Task) -> str:
     return task.timezone
 
 
+# Control / flow nodes that pass their upstream through unchanged: an AI step
+# feeding one of these still ultimately produces content for whatever lies on
+# the far side (e.g. AI → Condition → Board card should shape a card). So when
+# building successor kinds we look *through* these to the eventual sink types.
+_PASSTHROUGH_TYPES = frozenset(
+    {
+        NodeType.CONDITION,
+        NodeType.ROUTER,
+        NodeType.MERGE,
+        NodeType.DELAY,
+    }
+)
+
+
 def _successor_types(graph: FlowGraph) -> dict[str, set[str]]:
-    """node_id → the set of node types it feeds into (its downstream kinds)."""
-    out: dict[str, set[str]] = {}
+    """node_id → the set of node types it eventually feeds into. Pass-through
+    control nodes (Condition/Router/Merge/Delay) are traversed *through*, so a
+    node's kinds reflect the real sinks on the far side, not the plumbing."""
     by_id = {n.id: n for n in graph.nodes}
+    adj: dict[str, list[str]] = {}
     for e in graph.edges:
-        tgt = by_id.get(e.target)
-        if tgt is not None:
-            out.setdefault(e.source, set()).add(tgt.type)
+        if e.target in by_id:
+            adj.setdefault(e.source, []).append(e.target)
+
+    out: dict[str, set[str]] = {}
+    for src, targets in adj.items():
+        seen: set[str] = set()
+        stack = list(targets)
+        kinds: set[str] = set()
+        while stack:
+            tid = stack.pop()
+            if tid in seen:
+                continue
+            seen.add(tid)
+            tgt = by_id.get(tid)
+            if tgt is None:
+                continue
+            kinds.add(tgt.type)
+            # See past plumbing to the actual downstream sink.
+            if tgt.type in _PASSTHROUGH_TYPES:
+                stack.extend(adj.get(tid, ()))
+        out[src] = kinds
     return out
 
 
@@ -1481,13 +1526,18 @@ async def run_graph_flow(
                 sources.extend(node_sources)
                 node_runs.append(record)
                 outputs[nid] = text
+                # Structured: the hits, so downstream can loop / read fields.
+                structured[nid] = node_sources
                 last_processing_output = text
 
             elif node.type == NodeType.FETCH_PAGE:
-                text, node_sources, record = await _run_fetch_node(node, ctx)
+                text, node_sources, fetch_struct, record = await _run_fetch_node(
+                    node, ctx
+                )
                 sources.extend(node_sources)
                 node_runs.append(record)
                 outputs[nid] = text
+                structured[nid] = fetch_struct  # {url, text}
                 last_processing_output = text
 
             elif node.type == NodeType.SUMMARISE:
@@ -1518,16 +1568,28 @@ async def run_graph_flow(
                 _accum_usage(dr_usage)
                 node_runs.append(record)
                 outputs[nid] = text
+                structured[nid] = {"report": text, "sources": node_sources}
                 last_processing_output = text
 
             elif node.type == NodeType.LOOP:
-                text, node_sources, loop_usage, record = await _run_loop_node(
-                    node, ctx, db=db, user=user, task=task, tz=tz, now_local=now_local
+                text, node_sources, loop_usage, record, loop_results = (
+                    await _run_loop_node(
+                        node,
+                        ctx,
+                        db=db,
+                        user=user,
+                        task=task,
+                        tz=tz,
+                        now_local=now_local,
+                        upstream_struct=upstream_struct,
+                    )
                 )
                 sources.extend(node_sources)
                 _accum_usage(loop_usage)
                 node_runs.append(record)
                 outputs[nid] = text
+                # Structured: the per-item results, so a later step can act on them.
+                structured[nid] = loop_results
                 last_processing_output = text
 
             elif node.type == NodeType.MEMORY:
@@ -1705,7 +1767,9 @@ async def run_graph_flow(
             continue
 
         # Expose this node's JSON (if it emitted any) for downstream field refs.
-        structured[nid] = _try_json(outputs.get(nid, ""))
+        # Nodes with explicit structure (search/fetch/deep/loop) set it above.
+        if nid not in structured:
+            structured[nid] = _try_json(outputs.get(nid, ""))
 
     # The run's report: the text feeding a report node if there is one, else the
     # last processing node's output. Action sinks append their one-line notes.

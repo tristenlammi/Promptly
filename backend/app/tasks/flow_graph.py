@@ -260,15 +260,17 @@ class LoopData(BaseModel):
 
 
 class MemoryData(BaseModel):
-    """A Memory node — a named sticky note that captures the upstream output so
-    you can wire it into a later node as context (several can feed one node).
+    """A Memory node — cross-run state. It captures the upstream output and
+    persists it across runs, keeping the last ``max_runs`` captured values so a
+    run can compare against previous runs ("what changed since last time") or
+    feed the history back in as context.
 
-    With ``remember`` on it also persists across runs, keeping the last
-    ``max_runs`` captured values, so a run can compare against previous runs
-    ("what changed") or feed the history back in."""
+    ``remember`` defaults on: that persistence is the whole point of the node
+    (to pass data *within* a run you just wire nodes together / use
+    ``{{node.output}}``). Turn it off only to use it as an inert sticky note."""
 
     name: str = "Memory"
-    remember: bool = False
+    remember: bool = True
     max_runs: int = 5  # 1..50 — how many past runs to keep when remembering
 
 

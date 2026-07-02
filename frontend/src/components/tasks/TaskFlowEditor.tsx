@@ -791,7 +791,7 @@ function MemoryNode({ id, type, data, selected }: NodeProps) {
           </div>
           <div className="mt-1">
             <span className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px]">
-              {d.remember ? `remembers ${d.max_runs || 5} runs` : "this run only"}
+              {d.remember ? `remembers ${d.max_runs || 5} runs` : "sticky note"}
             </span>
           </div>
         </>
@@ -1573,7 +1573,7 @@ export function TaskFlowEditor({
           join_with: "blank",
         };
       else if (type === "memory.store")
-        data = { name: "Memory", remember: false, max_runs: 5 };
+        data = { name: "Memory", remember: true, max_runs: 5 };
       else if (type === "flow.merge") data = { mode: "all", separator: "blank" };
       else if (type === "flow.delay") data = { seconds: 30 };
       else if (type === "output.report") data = { notify: true };
@@ -2462,9 +2462,11 @@ function NodeInspector({
           return (
             <>
               <p className="text-[11px] text-[var(--text-muted)]">
-                Captures the previous step's output. Wire this node into a later
-                step to inject it as context (several Memory nodes can feed one
-                step).
+                Remembers the previous step's output <em>across runs</em>, so a
+                later run can compare to last time ("what changed") or feed the
+                history back in. Wire it into a later step to inject it as
+                context. To pass data <em>within</em> one run, just wire nodes
+                together — you don't need Memory for that.
               </p>
               <label className="text-xs font-medium text-[var(--text-muted)]">
                 Name
