@@ -44,6 +44,8 @@ import {
   MessageSquare,
   Minimize2,
   NotebookPen,
+  Pin,
+  Play,
   Plus,
   Repeat2,
   ScanText,
@@ -113,6 +115,12 @@ interface FlowEditCtx {
   outputsCount: number;
   memory: import("@/api/tasks").TaskMemory;
   clearMemory: (nodeId: string) => void;
+  // Build-time test loop: last input/output per node, pins, run-to-here.
+  nodeData: Record<string, { input: string; output: string; status: string }>;
+  pins: Record<string, string>;
+  runningNode: string | null;
+  runToHere: (nodeId: string) => void;
+  togglePin: (nodeId: string) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   setOutputTypeFor: (id: string, type: string) => void;
   removeNode: (id: string) => void;
@@ -184,6 +192,11 @@ function InlineNodeSettings({
         folders={ctx.folders}
         memory={ctx.memory[node.id]?.entries ?? []}
         onClearMemory={() => ctx.clearMemory(node.id)}
+        nodeData={ctx.nodeData[node.id]}
+        pinned={node.id in ctx.pins}
+        running={ctx.runningNode === node.id}
+        onRunToHere={() => ctx.runToHere(node.id)}
+        onTogglePin={() => ctx.togglePin(node.id)}
         inWorkspace={ctx.inWorkspace}
         connectors={ctx.connectors}
         canDelete={canDelete}
@@ -1279,6 +1292,59 @@ export function TaskFlowEditor({
     });
   }, []);
 
+  // ---- Build-time test ("Run to here") + pinned data ----
+  const [pins, setPins] = useState<Record<string, string>>({});
+  const [nodeData, setNodeData] = useState<
+    Record<string, { input: string; output: string; status: string }>
+  >({});
+  const [runningNode, setRunningNode] = useState<string | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const runToHere = useCallback(
+    async (nodeId: string) => {
+      if (!graph) return;
+      setRunningNode(nodeId);
+      setTestError(null);
+      try {
+        const res = await tasksApi.testGraph(
+          taskId,
+          fromRF(graph, nodes, edges),
+          nodeId,
+          pins
+        );
+        if (!res.ok) {
+          setTestError(res.error ?? "Test failed.");
+          return;
+        }
+        setNodeData((prev) => {
+          const next = { ...prev };
+          for (const n of res.nodes)
+            next[n.node_id] = {
+              input: n.input ?? "",
+              output: n.output,
+              status: n.status,
+            };
+          return next;
+        });
+      } catch {
+        setTestError("Couldn't run the test.");
+      } finally {
+        setRunningNode(null);
+      }
+    },
+    [graph, nodes, edges, pins, taskId]
+  );
+  const togglePin = useCallback(
+    (nodeId: string) => {
+      setPins((prev) => {
+        const next = { ...prev };
+        if (nodeId in next) delete next[nodeId];
+        else next[nodeId] = nodeData[nodeId]?.output ?? "";
+        return next;
+      });
+    },
+    [nodeData]
+  );
+
   // ---- Run replay: paint each node's status onto the canvas as the run's
   // steps come back, so you watch the flow light up like n8n. ----
   const runDone =
@@ -1625,6 +1691,11 @@ export function TaskFlowEditor({
     outputsCount,
     memory: memoryQuery.data ?? {},
     clearMemory,
+    nodeData,
+    pins,
+    runningNode,
+    runToHere,
+    togglePin,
     updateNodeData,
     setOutputTypeFor,
     removeNode,
@@ -1708,6 +1779,14 @@ export function TaskFlowEditor({
               title={activeRun.error ?? "Run failed"}
             >
               ✗ {activeRun.error ?? "Run failed"}
+            </span>
+          )}
+          {testError && (
+            <span
+              className="inline-flex max-w-xs items-center gap-1 truncate rounded-full border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--danger)]"
+              title={testError}
+            >
+              ✗ {testError}
             </span>
           )}
         </div>
@@ -1903,6 +1982,11 @@ export function TaskFlowEditor({
             folders={folders}
             memory={memoryQuery.data?.[selected.id]?.entries ?? []}
             onClearMemory={() => clearMemory(selected.id)}
+            nodeData={nodeData[selected.id]}
+            pinned={selected.id in pins}
+            running={runningNode === selected.id}
+            onRunToHere={() => runToHere(selected.id)}
+            onTogglePin={() => togglePin(selected.id)}
             inWorkspace={!!task?.workspace_id}
             connectors={connectors ?? []}
             canDelete={
@@ -1933,6 +2017,11 @@ function NodeInspector({
   folders,
   memory,
   onClearMemory,
+  nodeData,
+  pinned,
+  running,
+  onRunToHere,
+  onTogglePin,
   inWorkspace,
   connectors,
   canDelete,
@@ -1947,6 +2036,11 @@ function NodeInspector({
   folders: BoardOption[];
   memory: import("@/api/tasks").TaskMemoryEntry[];
   onClearMemory: () => void;
+  nodeData?: { input: string; output: string; status: string };
+  pinned?: boolean;
+  running?: boolean;
+  onRunToHere?: () => void;
+  onTogglePin?: () => void;
   inWorkspace: boolean;
   connectors: AvailableTaskConnector[];
   canDelete: boolean;
@@ -1968,6 +2062,66 @@ function NodeInspector({
         inline ? "text-left" : "max-h-[60vh] overflow-y-auto"
       )}
     >
+      {/* Build-time test loop: run up to here + see the data in/out, pin it. */}
+      {!(node.type ?? "").startsWith("trigger.") && onRunToHere && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--surface-2)]/40 p-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onRunToHere}
+              disabled={running}
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              {running ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              Run to here
+            </button>
+            {onTogglePin && (
+              <button
+                type="button"
+                onClick={onTogglePin}
+                disabled={!pinned && !nodeData}
+                title="Pin this output so downstream tests reuse it (no re-run)"
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition disabled:opacity-40",
+                  pinned
+                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                )}
+              >
+                <Pin className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
+                {pinned ? "Pinned" : "Pin"}
+              </button>
+            )}
+          </div>
+          {nodeData && (
+            <div className="mt-2 space-y-1.5">
+              {nodeData.input ? (
+                <details className="rounded bg-[var(--surface)] px-2 py-1">
+                  <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Input
+                  </summary>
+                  <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--text)]">
+                    {nodeData.input}
+                  </pre>
+                </details>
+              ) : null}
+              <div className="rounded bg-[var(--surface)] px-2 py-1">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Output {pinned && "(pinned)"}
+                </div>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--text)]">
+                  {nodeData.output || "(empty)"}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {node.type === "ai.prompt" && (
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">

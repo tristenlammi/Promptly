@@ -441,6 +441,47 @@ async def promote_task_to_advanced(
     return graph
 
 
+class GraphTestRequest(BaseModel):
+    """Run-to-here: execute the (possibly unsaved) graph up to ``target_node_id``
+    and return each node's input/output — a build-time test, no persistence."""
+
+    graph: FlowGraph
+    target_node_id: str
+    pinned: dict[str, str] = {}
+
+
+@router.post("/{task_id}/graph/test")
+async def test_task_graph(
+    task_id: uuid.UUID,
+    body: GraphTestRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Synchronously run the flow up to one node and return per-node data. Skips
+    all side effects (no notes/cards/messages created, memory not written)."""
+    from app.models_config.provider import ProviderError
+    from app.tasks.graph_runner import run_graph_flow
+    from app.tasks.runner import TaskRunError
+
+    task = await _get_owned_task(task_id, user, db)
+    try:
+        _report, _sources, _usage, node_runs = await run_graph_flow(
+            task=task,
+            graph=body.graph,
+            user=user,
+            run_started_at=datetime.now(timezone.utc),
+            db=db,
+            stop_at=body.target_node_id,
+            pinned=body.pinned,
+            dry_run=True,
+        )
+    except (TaskRunError, ProviderError) as exc:
+        return {"ok": False, "error": str(exc), "nodes": []}
+    except Exception as exc:  # noqa: BLE001 — surface build errors, don't 500
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "nodes": []}
+    return {"ok": True, "nodes": node_runs}
+
+
 @router.get("/{task_id}/memory")
 async def get_task_memory(
     task_id: uuid.UUID,

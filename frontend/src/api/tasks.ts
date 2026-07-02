@@ -168,6 +168,18 @@ export const tasksApi = {
     const { data } = await apiClient.post<FlowGraph>(`/tasks/${id}/promote`);
     return data;
   },
+  async testGraph(
+    id: string,
+    graph: FlowGraph,
+    targetNodeId: string,
+    pinned: Record<string, string>
+  ): Promise<GraphTestResult> {
+    const { data } = await apiClient.post<GraphTestResult>(
+      `/tasks/${id}/graph/test`,
+      { graph, target_node_id: targetNodeId, pinned }
+    );
+    return data;
+  },
   async getMemory(id: string): Promise<TaskMemory> {
     const { data } = await apiClient.get<TaskMemory>(`/tasks/${id}/memory`);
     return data;
@@ -286,6 +298,19 @@ export interface MemoryData {
   name: string;
   remember: boolean;
   max_runs: number;
+}
+
+export interface GraphTestNode {
+  node_id: string;
+  label: string;
+  status: string;
+  input?: string;
+  output: string;
+}
+export interface GraphTestResult {
+  ok: boolean;
+  error?: string;
+  nodes: GraphTestNode[];
 }
 
 export interface TaskMemoryEntry {

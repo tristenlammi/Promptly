@@ -56,6 +56,7 @@ from app.tasks.flow_graph import (
     SheetOutputData,
     SummariseData,
     WebSearchData,
+    ancestors_of,
     is_executable_graph,
     topological_order,
 )
@@ -547,7 +548,13 @@ async def _run_loop_node(
 
 
 async def _run_memory_node(
-    node: FlowNode, ctx: dict[str, str], *, db, task: Task, now_local: str
+    node: FlowNode,
+    ctx: dict[str, str],
+    *,
+    db,
+    task: Task,
+    now_local: str,
+    dry_run: bool = False,
 ) -> tuple[str, dict]:
     """A Memory node → (text, record). Captures the upstream output; when the
     node is set to *remember*, also persists it across runs (keeping the last
@@ -592,17 +599,18 @@ async def _run_memory_node(
             parts.append(f"(run {e.get('at', '?')})\n{e.get('value', '')}")
     text = "\n\n".join(parts)
 
-    new_entries = (prev + [{"value": current, "at": now_local}])[-cap:]
-    if row is not None:
-        row.entries = new_entries
-        flag_modified(row, "entries")
-    else:
-        db.add(
-            AutomationNodeMemory(
-                task_id=task.id, node_id=node.id, entries=new_entries
+    if not dry_run:
+        new_entries = (prev + [{"value": current, "at": now_local}])[-cap:]
+        if row is not None:
+            row.entries = new_entries
+            flag_modified(row, "entries")
+        else:
+            db.add(
+                AutomationNodeMemory(
+                    task_id=task.id, node_id=node.id, entries=new_entries
+                )
             )
-        )
-    await db.commit()  # persist the observation now, even if a later step fails
+        await db.commit()  # persist now, even if a later step fails
 
     record = {
         "node_id": node.id,
@@ -1177,6 +1185,9 @@ async def run_graph_flow(
     run_started_at: datetime,
     trigger_payload: str | None = None,
     db,
+    stop_at: str | None = None,
+    pinned: dict[str, str] | None = None,
+    dry_run: bool = False,
 ) -> tuple[str, list[dict], dict, list[dict]]:
     """Execute a flow graph as a DAG → ``(report, sources, usage, node_runs)``.
 
@@ -1194,10 +1205,11 @@ async def run_graph_flow(
     report is the text feeding an active ``output.report`` node if present, else
     the last processing node's output; each active action sink appends a note.
     """
-    if not is_executable_graph(graph):
+    partial = stop_at is not None
+    if not is_executable_graph(graph, require_output=not partial):
         raise TaskRunError(
-            "This flow can't run yet — it needs one trigger, at least one "
-            "output, no loops, and every step connected."
+            "This flow can't run yet — it needs one trigger, no loops, and "
+            "connected steps."
         )
 
     order = topological_order(graph)
@@ -1208,10 +1220,15 @@ async def run_graph_flow(
     for e in graph.edges:
         in_edges.setdefault(e.target, []).append(e)
 
+    # "Run to here": only execute the target node and its ancestors.
+    run_set = ancestors_of(graph, stop_at) if partial and stop_at in by_id else None
+    pinned = pinned or {}
+
     tz = _flow_timezone(graph, task)
     now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
 
     outputs: dict[str, str] = {}  # node_id → text output (for {{node_x.output}})
+    inputs_by_node: dict[str, str] = {}  # node_id → merged input (for the inspector)
     active: set[str] = set()  # nodes that actually ran (on the taken path)
     selected: dict[str, set[str]] = {}  # control node_id → handles it fired
     sources: list[dict] = []
@@ -1241,9 +1258,35 @@ async def run_graph_flow(
     for nid in order:
         node = by_id[nid]
 
+        # "Run to here": ignore nodes that aren't the target or its ancestors.
+        if run_set is not None and nid not in run_set:
+            continue
+
         if node.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL):
             active.add(nid)
             outputs[nid] = trigger_payload or ""
+            continue
+
+        # Pinned (dev-time): use the frozen value instead of executing, so you
+        # can iterate downstream without re-calling the model / MCP / search.
+        if nid in pinned:
+            active.add(nid)
+            outputs[nid] = pinned[nid]
+            last_processing_output = pinned[nid]
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Pinned",
+                    "status": "pinned",
+                    "input": "\n\n".join(
+                        outputs[e.source]
+                        for e in in_edges.get(nid, [])
+                        if outputs.get(e.source)
+                    ),
+                    "output": pinned[nid],
+                }
+            )
             continue
 
         # A node runs only if an incoming edge is active. All-inactive → skip
@@ -1275,12 +1318,30 @@ async def run_graph_flow(
             continue
         active.add(nid)
         upstream = "\n\n".join(outputs[s] for s in active_srcs if outputs.get(s))
+        inputs_by_node[nid] = upstream
         ctx = _step_context(
             upstream=upstream,
             trigger_payload=trigger_payload or "",
             now_local=now_local,
             outputs=outputs,
         )
+
+        # Test runs don't perform output side effects (no note/card/message
+        # created) — they just report what *would* happen.
+        if dry_run and node.type in OUTPUT_TYPES:
+            outputs[nid] = upstream
+            if node.type == NodeType.OUTPUT_REPORT:
+                report_from_output = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": "Output (dry run)",
+                    "status": "success",
+                    "output": "(test run — nothing was created)",
+                }
+            )
+            continue
 
         if node.type == NodeType.CONDITION:
             data = ConditionData.model_validate(node.data)
@@ -1399,7 +1460,7 @@ async def run_graph_flow(
 
         elif node.type == NodeType.MEMORY:
             text, record = await _run_memory_node(
-                node, ctx, db=db, task=task, now_local=now_local
+                node, ctx, db=db, task=task, now_local=now_local, dry_run=dry_run
             )
             node_runs.append(record)
             outputs[nid] = text
@@ -1564,6 +1625,12 @@ async def run_graph_flow(
     )
     for note in action_notes:
         report = f"{report}\n\n---\n\n*{note}*"
+
+    # Attach each executed node's input to its record (for the inspector's
+    # "what this step received" panel). Pinned/skip records set their own.
+    for r in node_runs:
+        if "input" not in r:
+            r["input"] = inputs_by_node.get(r["node_id"], "")
 
     # De-dup sources by URL across the whole graph, preserving order.
     seen: set[str] = set()

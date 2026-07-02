@@ -603,7 +603,7 @@ def topological_order(graph: FlowGraph) -> list[str]:
     return order
 
 
-def is_executable_graph(graph: FlowGraph) -> bool:
+def is_executable_graph(graph: FlowGraph, *, require_output: bool = True) -> bool:
     """True when the graph is a runnable DAG (the shape the engine executes):
 
     * exactly one trigger, with no incoming edges;
@@ -617,6 +617,10 @@ def is_executable_graph(graph: FlowGraph) -> bool:
     merging several upstream outputs), and multiple output sinks. Conditional
     branching (Router/Condition) still runs *every* reachable node; active-path
     selection is a later phase.
+
+    ``require_output=False`` relaxes the "≥1 output" and "all reachable" rules
+    for a **partial / test** run (run-to-here), where the user may still be
+    wiring the flow and there's no output on the path yet.
     """
     triggers = [
         n
@@ -626,7 +630,9 @@ def is_executable_graph(graph: FlowGraph) -> bool:
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
     controls = [n for n in graph.nodes if n.type in CONTROL_TYPES]
-    if len(triggers) != 1 or len(outs) < 1:
+    if len(triggers) != 1:
+        return False
+    if require_output and len(outs) < 1:
         return False
     # No unknown/unsupported node types in the mix.
     if (
@@ -647,6 +653,9 @@ def is_executable_graph(graph: FlowGraph) -> bool:
     except ValueError:
         return False
 
+    if not require_output:
+        return True  # partial run: orphans are fine while still building
+
     # Every node must be reachable from the trigger — no silently-ignored orphans.
     seen: set[str] = set()
     stack = [trig.id]
@@ -657,6 +666,21 @@ def is_executable_graph(graph: FlowGraph) -> bool:
         seen.add(cur)
         stack.extend(out_adj.get(cur, []))
     return all(n.id in seen for n in graph.nodes)
+
+
+def ancestors_of(graph: FlowGraph, node_id: str) -> set[str]:
+    """All nodes upstream of ``node_id`` (reverse reachability), inclusive — the
+    set that must run for a "run to here" partial execution."""
+    _out, in_adj = _adjacency(graph)
+    seen: set[str] = set()
+    stack = [node_id]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        stack.extend(in_adj.get(cur, []))
+    return seen
 
 
 def output_nodes(graph: FlowGraph) -> list[FlowNode]:
@@ -774,6 +798,7 @@ __all__ = [
     "is_simple_graph",
     "is_linear_flow",
     "is_executable_graph",
+    "ancestors_of",
     "topological_order",
     "ordered_flow_nodes",
     "ordered_ai_nodes",
