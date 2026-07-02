@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     SINGLE_USER_MODE: bool = False
     ALLOWED_ORIGINS: str = "http://localhost"
 
+    # ---- Auth provider (reversible Clerk migration) ----
+    # "custom" = the built-in JWT auth (default; fully self-contained, includes
+    # MFA/lockout/token-versioning). "clerk" = verify Clerk-issued session
+    # tokens instead. The switch is a single flag so the app reverts to built-in
+    # auth by flipping it back to "custom" and redeploying — no code changes.
+    # The CLERK_* settings are read only when AUTH_PROVIDER == "clerk".
+    AUTH_PROVIDER: str = "custom"
+    CLERK_ISSUER: str = ""  # e.g. https://your-app.clerk.accounts.dev
+    CLERK_JWKS_URL: str = ""  # e.g. {issuer}/.well-known/jwks.json
+    CLERK_SECRET_KEY: str = ""  # backend API key (management + webhook calls)
+    CLERK_WEBHOOK_SECRET: str = ""  # svix signing secret for webhook verification
+
     # ---- Cookies (refresh + future MFA device cookies) ----
     # Defaults to True because production deployments are HTTPS via the
     # Cloudflare tunnel. Override to False *only* in local dev when you

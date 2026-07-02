@@ -46,16 +46,13 @@ async def _get_singleton_user(db: AsyncSession) -> User:
     return user
 
 
-async def get_current_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: AsyncSession = Depends(get_db),
+async def _resolve_custom_user(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: AsyncSession,
 ) -> User:
-    if settings.SINGLE_USER_MODE:
-        single = await _get_singleton_user(db)
-        bind_user(single.id)
-        return single
-
+    """Built-in JWT auth path. Verifies the bearer access token, loads the user,
+    and enforces the disabled/lock/token-version revocation checks. Behaviour is
+    unchanged from before the AUTH_PROVIDER seam was introduced."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -116,6 +113,46 @@ async def get_current_user(
             detail="Session is no longer valid",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return user
+
+
+async def _resolve_clerk_user(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: AsyncSession,
+) -> User:
+    """Clerk auth path (P0, not yet wired).
+
+    TODO(P0): verify the Clerk session JWT against ``settings.CLERK_JWKS_URL``
+    (cache the JWKS), validate issuer == ``settings.CLERK_ISSUER``, read ``sub``
+    (clerk_user_id) + org claims, resolve to the local shadow ``User`` (created
+    via Clerk webhooks; lazy-provision as a fallback), and enforce the same
+    disabled/lock/token_version revocation semantics as the custom path. Until
+    this is implemented the provider stays ``custom`` by default, so this branch
+    is unreachable in normal operation.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Clerk auth provider is selected but not yet configured.",
+    )
+
+
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if settings.SINGLE_USER_MODE:
+        single = await _get_singleton_user(db)
+        bind_user(single.id)
+        return single
+
+    # Reversible auth seam: a single flag selects the verification path. Default
+    # "custom" keeps behaviour byte-identical to the built-in JWT auth; flipping
+    # to "clerk" (once configured) and back is the whole revert story.
+    if (settings.AUTH_PROVIDER or "custom").lower() == "clerk":
+        user = await _resolve_clerk_user(credentials, db)
+    else:
+        user = await _resolve_custom_user(credentials, db)
 
     # Attach to request.state for cheap reuse by other dependencies/middleware.
     request.state.user = user
