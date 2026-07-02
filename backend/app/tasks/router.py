@@ -468,13 +468,13 @@ async def get_task_memory(
     }
 
 
-@router.delete("/{task_id}/memory/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{task_id}/memory/{node_id}")
 async def clear_task_memory(
     task_id: uuid.UUID,
     node_id: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> None:
+) -> dict[str, bool]:
     """Wipe a Memory node's stored history."""
     from sqlalchemy import delete as _delete
 
@@ -488,6 +488,7 @@ async def clear_task_memory(
         )
     )
     await db.commit()
+    return {"ok": True}
 
 
 @router.get("/{task_id}/runs", response_model=list[TaskRunSummary])
