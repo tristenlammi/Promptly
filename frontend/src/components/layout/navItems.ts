@@ -1,6 +1,5 @@
 import {
   BookOpen,
-  CalendarClock,
   FolderKanban,
   FolderOpen,
   MessagesSquare,
@@ -37,11 +36,9 @@ export const OPTIONAL_NAV_KEYS: { key: OptionalNavKey; label: string; descriptio
     label: "Workspaces",
     description: "Group chats, files, and context into shared workspaces.",
   },
-  {
-    key: "tasks",
-    label: "Automations",
-    description: "Scheduled automations that generate recurring reports.",
-  },
+  // "tasks" (Automations) is intentionally not offered here — automations now
+  // live only inside workspaces (a private workspace serves personal use), so
+  // there's no standalone personal automations surface to toggle.
   {
     key: "study",
     label: "Study",
@@ -79,13 +76,6 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Workspaces",
     section: "chat",
     optionalKey: "workspaces",
-  },
-  {
-    to: "/tasks",
-    icon: CalendarClock,
-    label: "Automations",
-    section: "chat",
-    optionalKey: "tasks",
   },
   {
     to: "/study",
