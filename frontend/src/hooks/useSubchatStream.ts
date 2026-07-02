@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { chatApi } from "@/api/chat";
 import { authHeader } from "@/api/client";
 import type { ChatMessage } from "@/api/types";
+import { useSubchatStore } from "@/store/subchatStore";
 
 /**
  * Streaming driver for the floating **Subchat** modal.
@@ -67,6 +68,10 @@ async function* iterateSSE(
   }
 }
 
+/** Stable empty-array reference so the store selector doesn't return a fresh
+ *  ``[]`` each render (which would loop React's snapshot check). */
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
 function tempId(): string {
   // crypto.randomUUID is available in every browser we target; the
   // fallback keeps TS happy and covers ancient runtimes.
@@ -88,7 +93,18 @@ export interface UseSubchatStreamResult {
 export function useSubchatStream(
   subchatId: string | null
 ): UseSubchatStreamResult {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Transcript lives in a module store keyed by subchat id so it survives the
+  // modal unmounting on chat navigation (and re-renders on return). Streaming
+  // in-flight state stays local — a stream is aborted on unmount anyway.
+  const messages = useSubchatStore((s) =>
+    subchatId ? s.transcripts[subchatId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES
+  );
+  const setStoredMessages = useCallback(
+    (updater: (prev: ChatMessage[]) => ChatMessage[]) => {
+      if (subchatId) useSubchatStore.getState().set(subchatId, updater);
+    },
+    [subchatId]
+  );
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -99,10 +115,10 @@ export function useSubchatStream(
     abortRef.current = null;
   }, []);
 
-  // Reset everything when the modal switches to a different subchat (or
-  // closes), and abort any in-flight stream on unmount.
+  // Clear only the transient in-flight state when switching subchats (or
+  // closing); the persisted transcript is intentionally left in the store so
+  // returning to the chat restores it. Abort any in-flight stream on unmount.
   useEffect(() => {
-    setMessages([]);
     setStreamingContent("");
     setError(null);
     return () => cancel();
@@ -125,7 +141,7 @@ export function useSubchatStream(
         content: body,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, optimistic]);
+      setStoredMessages((prev) => [...prev, optimistic]);
       setStreaming(true);
       setStreamingContent("");
 
@@ -155,7 +171,7 @@ export function useSubchatStream(
           { content: body }
         );
         // Swap the optimistic row for the persisted one (real id/metrics).
-        setMessages((prev) =>
+        setStoredMessages((prev) =>
           prev.map((m) => (m.id === optimistic.id ? user_message : m))
         );
 
@@ -209,7 +225,8 @@ export function useSubchatStream(
             break;
           }
         }
-        if (final) setMessages((prev) => [...prev, final as ChatMessage]);
+        if (final)
+          setStoredMessages((prev) => [...prev, final as ChatMessage]);
       } catch (err) {
         if (!ac.signal.aborted) {
           setError(err instanceof Error ? err.message : String(err));
@@ -225,7 +242,7 @@ export function useSubchatStream(
         setStreamingContent("");
       }
     },
-    [subchatId, streaming, cancel]
+    [subchatId, streaming, cancel, setStoredMessages]
   );
 
   return { messages, streaming, streamingContent, error, send, cancel };

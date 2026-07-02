@@ -50,6 +50,7 @@ import { useResearchStore, isResearchActive } from "@/store/researchStore";
 import { useAuthStore } from "@/store/authStore";
 import { useComposerStore } from "@/store/composerStore";
 import { useChatStore } from "@/store/chatStore";
+import { useSubchatStore } from "@/store/subchatStore";
 import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import type {
   ChatMessage,
@@ -150,9 +151,15 @@ export function ChatPage({
   // Phase 9 — per-conversation memory capture pause.
   const [memoryCapturePaused, setMemoryCapturePaused] = useState(false);
 
-  // Subchat — the active floating side-conversation (an ephemeral branch),
-  // or null when closed.
-  const [subchat, setSubchat] = useState<ConversationSummary | null>(null);
+  // Subchat — floating side-conversations (ephemeral branches), keyed by the
+  // *parent* conversation id they were opened from. Keying by parent (rather
+  // than a single slot) scopes each subchat to its own chat: it only renders
+  // in the thread it belongs to, and navigating away and back restores it
+  // instead of leaking it into an unrelated chat.
+  const [subchats, setSubchats] = useState<Record<string, ConversationSummary>>(
+    {}
+  );
+  const subchat = id ? subchats[id] ?? null : null;
 
   // Phase 11 — Deep Research.
   const [researchDialogOpen, setResearchDialogOpen] = useState(false);
@@ -215,36 +222,95 @@ export function ChatPage({
   // context. Implemented as an *ephemeral* branch from the latest message:
   // the backend copies the history (so the model has full context) but the
   // chat is hidden from the sidebar and swept after 24h unless kept.
+  // Branch a fresh ephemeral subchat from the latest message of the current
+  // chat. Shared by open + reset.
+  const spawnSubchat = useCallback(
+    async (parentId: string): Promise<ConversationSummary | null> => {
+      const msgs = useChatStore.getState().messages;
+      const forkPoint = msgs[msgs.length - 1];
+      if (!forkPoint) return null;
+      return chatApi.branch(parentId, forkPoint.id, { ephemeral: true });
+    },
+    []
+  );
+
   const openSubchat = useCallback(async () => {
-    if (!id || subchat) return;
-    const msgs = useChatStore.getState().messages;
-    const forkPoint = msgs[msgs.length - 1];
-    if (!forkPoint) return;
+    if (!id || subchats[id]) return;
     try {
-      const sc = await chatApi.branch(id, forkPoint.id, { ephemeral: true });
-      setSubchat(sc);
+      const sc = await spawnSubchat(id);
+      if (sc) setSubchats((m) => ({ ...m, [id]: sc }));
     } catch (err) {
       console.error("Failed to open subchat", err);
     }
-  }, [id, subchat]);
+  }, [id, subchats, spawnSubchat]);
+
+  // Remove one parent's subchat from the map, returning the removed summary
+  // so callers can clean up the ephemeral conversation server-side. Also purges
+  // its cached transcript so a discarded subchat doesn't linger in memory.
+  const dropSubchat = useCallback(
+    (parentId: string): ConversationSummary | null => {
+      const removed = subchats[parentId] ?? null;
+      setSubchats((m) => {
+        if (!(parentId in m)) return m;
+        const next = { ...m };
+        delete next[parentId];
+        return next;
+      });
+      if (removed) useSubchatStore.getState().clear(removed.id);
+      return removed;
+    },
+    [subchats]
+  );
 
   // Discard: delete the ephemeral conversation (best-effort) and close.
   const closeSubchat = useCallback(() => {
-    const sc = subchat;
-    setSubchat(null);
+    if (!id) return;
+    const sc = subchats[id];
+    dropSubchat(id);
     if (sc) {
       void chatApi.remove(sc.id).catch(() => {
         /* sweeper backstop cleans it up if this fails */
       });
     }
-  }, [subchat]);
+  }, [id, subchats, dropSubchat]);
+
+  // Reset: discard the current subchat and start a fresh one from the latest
+  // message — a clean slate without leaving the chat. Confirmed so an
+  // in-progress tangent isn't wiped by a mis-click.
+  const resetSubchat = useCallback(async () => {
+    if (!id) return;
+    const old = subchats[id];
+    const ok = await confirm({
+      title: "Reset subchat?",
+      message:
+        "This clears the current subchat and starts a fresh one from the " +
+        "latest message. The current tangent is discarded.",
+      confirmLabel: "Reset",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const sc = await spawnSubchat(id);
+      if (!sc) return;
+      setSubchats((m) => ({ ...m, [id]: sc }));
+      if (old) {
+        useSubchatStore.getState().clear(old.id);
+        void chatApi.remove(old.id).catch(() => {
+          /* sweeper backstop */
+        });
+      }
+    } catch (err) {
+      console.error("Failed to reset subchat", err);
+    }
+  }, [id, subchats, spawnSubchat]);
 
   // Keep: promote the subchat to a permanent chat, then navigate to it so
   // it surfaces in the sidebar as a branched chat.
   const keepSubchat = useCallback(async () => {
-    const sc = subchat;
+    if (!id) return;
+    const sc = subchats[id];
     if (!sc) return;
-    setSubchat(null);
+    dropSubchat(id);
     try {
       await chatApi.update(sc.id, { temporary_mode: null });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -252,7 +318,7 @@ export function ChatPage({
     } catch (err) {
       console.error("Failed to keep subchat", err);
     }
-  }, [subchat, queryClient, navigate]);
+  }, [id, subchats, dropSubchat, queryClient, navigate]);
 
   // Drop a subchat answer into the main composer.
   const insertFromSubchat = useCallback((text: string) => {
@@ -1234,11 +1300,13 @@ export function ChatPage({
           while open; the hook resets/aborts on unmount. */}
       {subchat && (
         <SubchatModal
+          key={subchat.id}
           subchat={subchat}
           parentTitle={conversation?.title ?? null}
           modelName={selectedModel?.display_name ?? null}
           onClose={closeSubchat}
           onKeep={keepSubchat}
+          onReset={resetSubchat}
           onInsert={insertFromSubchat}
         />
       )}

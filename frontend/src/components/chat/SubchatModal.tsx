@@ -5,6 +5,7 @@ import {
   CornerDownLeft,
   GripHorizontal,
   MessagesSquare,
+  RotateCcw,
   Save,
   Send,
   Square,
@@ -28,6 +29,9 @@ interface SubchatModalProps {
   /** Promote the subchat to a permanent chat (parent PATCHes
    *  temporary_mode=null and navigates / toasts). */
   onKeep: () => void;
+  /** Discard the current tangent and start a fresh subchat from the latest
+   *  message. Parent owns the confirm prompt. */
+  onReset: () => void;
   /** Drop an assistant answer into the main composer. */
   onInsert: (text: string) => void;
 }
@@ -50,6 +54,7 @@ export function SubchatModal({
   modelName,
   onClose,
   onKeep,
+  onReset,
   onInsert,
 }: SubchatModalProps) {
   const { messages, streaming, streamingContent, error, send, cancel } =
@@ -267,6 +272,15 @@ export function SubchatModal({
             {modelName ? ` · ${modelName}` : ""}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--bg)] hover:text-[var(--text)]"
+          aria-label="Reset subchat (starts a fresh tangent)"
+          title="Reset — discard this tangent and start fresh"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
         <button
           type="button"
           onClick={onKeep}
