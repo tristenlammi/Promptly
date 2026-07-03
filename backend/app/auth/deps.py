@@ -176,7 +176,8 @@ async def get_current_user(
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     """Dependency that rejects non-admin callers with 403.
 
-    Intended for admin-only routes (user management, provider CRUD).
+    Intended for *platform*-admin routes (all-tenant user management, global app
+    settings, audit, console).
     """
     if user.role != "admin":
         raise HTTPException(
@@ -184,3 +185,24 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
             detail="Admin privileges required",
         )
     return user
+
+
+async def require_org_admin(user: User = Depends(get_current_user)) -> User:
+    """Platform admin OR a tenant/org admin. Used by the org-scoped admin
+    surfaces (providers, custom models, groups, connectors, analytics) so a
+    tenant admin can manage *their own* org's config."""
+    if user.role == "admin" or (
+        user.org_role == "admin" and user.org_id is not None
+    ):
+        return user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin privileges required",
+    )
+
+
+def org_scope_for(user: User) -> uuid.UUID | None:
+    """The org a tenant-admin's queries must be filtered to. ``None`` = platform
+    admin (fleet-wide, no org filter); otherwise the caller's ``org_id``.
+    Callers must have passed :func:`require_org_admin` first."""
+    return None if user.role == "admin" else user.org_id

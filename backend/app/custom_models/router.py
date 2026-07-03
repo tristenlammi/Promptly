@@ -39,7 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
-from app.auth.deps import require_admin
+from app.auth.deps import org_scope_for, require_admin, require_org_admin
 from app.auth.models import User
 from app.custom_models.embedding import (
     KNOWN_EMBEDDING_DIMS,
@@ -81,10 +81,17 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_or_404(
-    custom_model_id: uuid.UUID, db: AsyncSession
+    custom_model_id: uuid.UUID, user: User, db: AsyncSession
 ) -> CustomModel:
     cm = await db.get(CustomModel, custom_model_id)
     if cm is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Custom model not found",
+        )
+    # Tenant isolation: an org admin can only touch their own org's assistants.
+    org_id = org_scope_for(user)
+    if org_id is not None and cm.org_id != org_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Custom model not found",
@@ -252,12 +259,14 @@ def _queue_initial_indexing(
 @router.get("/", response_model=list[CustomModelSummary], include_in_schema=False)
 async def list_custom_models(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> list[CustomModelSummary]:
-    """List every custom model in the workspace (admin only)."""
-    rows = (
-        await db.execute(select(CustomModel).order_by(CustomModel.created_at.desc()))
-    ).scalars().all()
+    """List the caller's org's custom models (platform admin sees all)."""
+    stmt = select(CustomModel).order_by(CustomModel.created_at.desc())
+    org_id = org_scope_for(user)
+    if org_id is not None:
+        stmt = stmt.where(CustomModel.org_id == org_id)
+    rows = (await db.execute(stmt)).scalars().all()
     return [await _summarise(cm, db) for cm in rows]
 
 
@@ -276,15 +285,26 @@ async def create_custom_model(
     payload: CustomModelCreate,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> CustomModelDetail:
     await _validate_base_model(payload.base_provider_id, payload.base_model_id, db)
+    org_id = org_scope_for(user)
+    # The base provider must belong to the caller's tenant (an org admin can't
+    # build an assistant on another org's provider/key).
+    if org_id is not None:
+        prov = await db.get(ModelProvider, payload.base_provider_id)
+        if prov is None or prov.org_id != org_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown base provider",
+            )
 
-    # Slug uniqueness is enforced by the DB; we pre-check so the user
-    # gets a friendly 409 instead of a generic IntegrityError 500.
-    existing = (
-        await db.execute(select(CustomModel).where(CustomModel.name == payload.name))
-    ).scalar_one_or_none()
+    # Slug uniqueness (per-org) is enforced by the DB; pre-check for a friendly
+    # 409 instead of a generic IntegrityError 500.
+    dupe_stmt = select(CustomModel).where(CustomModel.name == payload.name)
+    if org_id is not None:
+        dupe_stmt = dupe_stmt.where(CustomModel.org_id == org_id)
+    existing = (await db.execute(dupe_stmt)).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -299,6 +319,7 @@ async def create_custom_model(
         base_provider_id=payload.base_provider_id,
         base_model_id=payload.base_model_id,
         top_k=payload.top_k,
+        org_id=org_id,
         created_by=user.id,
     )
     db.add(cm)
@@ -326,8 +347,11 @@ async def create_custom_model(
 @router.get("/embedding-config", response_model=EmbeddingConfig)
 async def get_embedding_config(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> EmbeddingConfig:
+    # Read-only for org admins: the embedder is app-level (the platform owner
+    # configures it), but org admins need to see it's ready for their Custom
+    # Models' RAG. PUT/test stay platform-only.
     settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
     if settings is None:
         return EmbeddingConfig()
@@ -570,9 +594,9 @@ async def test_embedding_config(
 async def get_custom_model(
     custom_model_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> CustomModelDetail:
-    cm = await _get_or_404(custom_model_id, db)
+    cm = await _get_or_404(custom_model_id, user, db)
     return await _detail(cm, db)
 
 
@@ -581,9 +605,9 @@ async def update_custom_model(
     custom_model_id: uuid.UUID,
     payload: CustomModelUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> CustomModelDetail:
-    cm = await _get_or_404(custom_model_id, db)
+    cm = await _get_or_404(custom_model_id, user, db)
 
     fields = payload.model_fields_set
     if "display_name" in fields and payload.display_name is not None:
@@ -626,9 +650,9 @@ async def update_custom_model(
 async def delete_custom_model(
     custom_model_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> Response:
-    cm = await _get_or_404(custom_model_id, db)
+    cm = await _get_or_404(custom_model_id, user, db)
     await db.delete(cm)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -703,9 +727,9 @@ async def attach_files(
     payload: AttachFilesRequest,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> CustomModelDetail:
-    cm = await _get_or_404(custom_model_id, db)
+    cm = await _get_or_404(custom_model_id, user, db)
     await _attach_files(cm.id, payload.file_ids, db, background)
     await db.commit()
     return await _detail(cm, db)
@@ -720,9 +744,9 @@ async def detach_file(
     custom_model_id: uuid.UUID,
     user_file_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> Response:
-    cm = await _get_or_404(custom_model_id, db)
+    cm = await _get_or_404(custom_model_id, user, db)
     pivot = await db.get(CustomModelFile, (cm.id, user_file_id))
     if pivot is None:
         raise HTTPException(
@@ -744,10 +768,10 @@ async def reindex_file(
     user_file_id: uuid.UUID,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> KnowledgeFile:
     """Manual retry button — useful after a transient embedding failure."""
-    cm = await _get_or_404(custom_model_id, db)
+    cm = await _get_or_404(custom_model_id, user, db)
     pivot = await db.get(CustomModelFile, (cm.id, user_file_id))
     if pivot is None:
         raise HTTPException(

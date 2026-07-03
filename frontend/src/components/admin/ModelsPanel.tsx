@@ -46,9 +46,11 @@ export function ModelsPanel() {
   // Org admins get only Connections (their BYOK keys). Defaults / Custom /
   // Local are still global config — platform-admin only until org-scoped.
   const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // Org admins get Connections (their BYOK keys) + Custom Models (their
+  // assistants). Defaults / Local stay platform-only until org-scoped.
   const visibleTabs = isPlatformAdmin
     ? TABS
-    : TABS.filter((t) => t.id === "connections");
+    : TABS.filter((t) => t.id === "connections" || t.id === "custom");
 
   return (
     <div>

@@ -42,6 +42,11 @@ class CustomModel(Base):
     """
 
     __tablename__ = "custom_models"
+    __table_args__ = (
+        # Slug is unique PER TENANT (not globally) so two orgs can each have an
+        # assistant with the same name.
+        UniqueConstraint("org_id", "name", name="uq_custom_models_org_name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -50,9 +55,18 @@ class CustomModel(Base):
         server_default=func.gen_random_uuid(),
     )
 
-    # Slug — appears in URLs / logs. Unique workspace-wide. Display
-    # name is the human-facing label shown in the picker.
-    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Owning tenant (org). An org admin's custom models are shared with their
+    # members; NULL only for legacy/system rows (never visible to tenants).
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # Slug — appears in URLs / logs, unique per org. Display name is the
+    # human-facing label shown in the picker.
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
