@@ -567,6 +567,9 @@ function UserFooter() {
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
+  // Org admins (+ the platform admin) get the tenant Settings surface; members
+  // inherit models and have no settings page.
+  const canManageOrg = isAdmin || user?.org_role === "admin";
   // Invites live here (account area) rather than the primary nav — they're
   // an account-level collaboration action, not a content surface. Always
   // rendered so the pending-count badge has a stable home.
@@ -635,17 +638,19 @@ function UserFooter() {
           Hosts chat-default preferences plus MFA / trusted devices. The
           route still ends in /security for backwards compatibility but
           the page hosts the broader account surface now. */}
-      {/* Per-user model providers (BYOK) — every authenticated user manages
-          their own API keys / models here. Distinct from the admin panel. */}
-      <button
-        onClick={() => navigate("/settings")}
-        className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        title="Models & API keys"
-        aria-label="Open model settings"
-      >
-        <Boxes className="h-4 w-4" />
-        <span className="font-medium">Models</span>
-      </button>
+      {/* Org-admin settings surface (BYOK models). Members inherit the org's
+          models and don't get this. Distinct from the platform admin panel. */}
+      {canManageOrg && (
+        <button
+          onClick={() => navigate("/settings")}
+          className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+          title="Models & API keys"
+          aria-label="Open model settings"
+        >
+          <Boxes className="h-4 w-4" />
+          <span className="font-medium">Models</span>
+        </button>
+      )}
       <button
         onClick={() => navigate("/account/security")}
         className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"

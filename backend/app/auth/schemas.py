@@ -71,6 +71,10 @@ class UserResponse(BaseModel):
     email: EmailStr
     username: str
     role: UserRole
+    # Tenant membership. ``org_role`` = "admin" (org owner/admin — full settings
+    # + manages providers/members) or "member" (inherits models, no settings).
+    org_id: uuid.UUID | None = None
+    org_role: str | None = None
     # NULL = full access to the admin's curated pool. Admins effectively
     # ignore this field (they always see everything).
     allowed_models: list[str] | None = None

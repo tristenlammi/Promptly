@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -65,19 +65,39 @@ async def _validate_base_url(raw: str | None, *, strict: bool = False) -> None:
         ) from e
 
 
+def _can_manage_providers(user: User) -> bool:
+    """Who may configure providers: the platform admin, or a tenant *admin*
+    (org owner/admin). Tenant members inherit models but can't manage them."""
+    return user.role == "admin" or (
+        user.org_role == "admin" and user.org_id is not None
+    )
+
+
+def _require_provider_admin(user: User) -> None:
+    if not _can_manage_providers(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an organization admin can manage providers.",
+        )
+
+
 async def _get_owned_provider(
     provider_id: uuid.UUID, user: User, db: AsyncSession
 ) -> ModelProvider:
     """Fetch a provider the caller may manage. Platform admins may manage their
-    own providers + system-wide rows; a regular (tenant) user may manage ONLY
-    their own. Anything outside that scope 404s (no existence disclosure)."""
+    own + platform system rows; a tenant admin may manage their org's providers.
+    Anything outside that scope 404s (no existence disclosure)."""
     provider = await db.get(ModelProvider, provider_id)
     if provider is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
     if user.role == "admin":
-        allowed = provider.user_id is None or provider.user_id == user.id
+        allowed = provider.user_id == user.id or (
+            provider.org_id is None and provider.user_id is None
+        )
+    elif user.org_role == "admin" and user.org_id is not None:
+        allowed = provider.org_id == user.org_id
     else:
-        allowed = provider.user_id == user.id
+        allowed = False
     if not allowed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
     return provider
@@ -92,15 +112,16 @@ async def list_providers(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ProviderResponse]:
-    # Platform admins also see system-wide (user_id IS NULL) rows; a regular
-    # tenant user sees only providers they own (BYOK) — never system/other
-    # tenants' providers.
+    # The *management* list. Platform admin: own + platform system rows. Tenant
+    # admin: their org's providers. Everyone else (members): nothing to manage.
     if user.role == "admin":
         provider_filter = (ModelProvider.user_id == user.id) | (
-            ModelProvider.user_id.is_(None)
+            ModelProvider.org_id.is_(None) & ModelProvider.user_id.is_(None)
         )
+    elif user.org_role == "admin" and user.org_id is not None:
+        provider_filter = ModelProvider.org_id == user.org_id
     else:
-        provider_filter = ModelProvider.user_id == user.id
+        provider_filter = false()
     result = await db.execute(
         select(ModelProvider)
         .where(provider_filter)
@@ -118,6 +139,7 @@ async def create_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ProviderResponse:
+    _require_provider_admin(user)
     if payload.type not in SUPPORTED_PROVIDER_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -144,6 +166,10 @@ async def create_provider(
 
     provider = ModelProvider(
         user_id=user.id,
+        # Owning tenant — a tenant admin's provider is shared with their whole
+        # org (members inherit). A platform admin creating for themselves gets
+        # their own org (or NULL = a platform system provider).
+        org_id=user.org_id,
         name=payload.name,
         type=payload.type,
         base_url=str(payload.base_url) if payload.base_url else None,
@@ -180,6 +206,7 @@ async def update_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ProviderResponse:
+    _require_provider_admin(user)
     provider = await _get_owned_provider(provider_id, user, db)
 
     if payload.name is not None:
@@ -231,6 +258,7 @@ async def delete_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
+    _require_provider_admin(user)
     provider = await _get_owned_provider(provider_id, user, db)
     if provider.user_id is None:
         raise HTTPException(
@@ -251,6 +279,7 @@ async def test_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TestConnectionResponse:
+    _require_provider_admin(user)
     provider = await _get_owned_provider(provider_id, user, db)
     result = await model_router.test_connection(provider)
     return TestConnectionResponse(**result)
@@ -265,6 +294,7 @@ async def fetch_provider_models(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ProviderResponse:
+    _require_provider_admin(user)
     provider = await _get_owned_provider(provider_id, user, db)
     try:
         catalog = await model_router.list_models(provider)
@@ -302,16 +332,20 @@ async def list_available_models_for(
     back to its underlying base model before streaming.
     """
     if user.role == "admin":
-        provider_filter = (
-            (ModelProvider.user_id == user.id) | (ModelProvider.user_id.is_(None))
+        # Platform admin: own + platform system providers.
+        provider_filter = (ModelProvider.user_id == user.id) | (
+            ModelProvider.org_id.is_(None) & ModelProvider.user_id.is_(None)
         )
+    elif user.org_id is not None:
+        # BYOK: any member of a tenant sees the models from *their org's*
+        # providers (configured once by the org admin, inherited by everyone).
+        # System/other-tenant providers are never shared. (Custom Models inherit
+        # this — the block below reuses provider_filter.)
+        provider_filter = ModelProvider.org_id == user.org_id
     else:
-        # BYOK: a regular (tenant) user sees models only from providers they
-        # own. System/admin providers are NOT shared — that's what keeps a
-        # personal/org account off the platform owner's local models + keys.
-        # (Custom Models inherit this: the block below reuses provider_filter,
-        # so a custom model on an out-of-scope provider is filtered out too.)
-        provider_filter = ModelProvider.user_id == user.id
+        # No tenant resolved yet (transient) — show nothing rather than risk
+        # matching system providers (org_id IS NULL).
+        provider_filter = false()
 
     result = await db.execute(
         select(ModelProvider)

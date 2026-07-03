@@ -1567,13 +1567,15 @@ async def send_message(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
         )
-    # BYOK ownership: platform admins may use their own providers + system-wide
-    # rows; a regular (tenant) user may use ONLY their own providers — never
-    # system/admin providers or another tenant's.
+    # BYOK ownership: platform admins may use their own + platform system rows;
+    # a tenant user (admin or member) may use any provider owned by THEIR org
+    # (configured by the org admin, inherited by all) — never another tenant's.
     if user.role == "admin":
-        owner_ok = provider.user_id is None or provider.user_id == user.id
+        owner_ok = provider.user_id == user.id or (
+            provider.org_id is None and provider.user_id is None
+        )
     else:
-        owner_ok = provider.user_id == user.id
+        owner_ok = provider.org_id is not None and provider.org_id == user.org_id
     if not owner_ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"

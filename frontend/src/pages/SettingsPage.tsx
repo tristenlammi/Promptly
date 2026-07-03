@@ -1,4 +1,7 @@
+import { Navigate } from "react-router-dom";
+
 import { ProviderConnections } from "@/components/models/ProviderConnections";
+import { useAuthStore } from "@/store/authStore";
 
 /**
  * User-facing settings — the self-service BYOK surface. Every authenticated
@@ -9,6 +12,11 @@ import { ProviderConnections } from "@/components/models/ProviderConnections";
  * per-user settings can become tabs here later.
  */
 export function SettingsPage() {
+  const user = useAuthStore((s) => s.user);
+  const canManageOrg = user?.role === "admin" || user?.org_role === "admin";
+  // Members inherit the org's models and have no settings surface.
+  if (!canManageOrg) return <Navigate to="/chat" replace />;
+
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-8">
       <header className="mb-6">
