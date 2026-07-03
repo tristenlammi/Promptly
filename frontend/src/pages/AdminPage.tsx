@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Users, Users2 } from "lucide-react";
+import { OrganizationProfile } from "@clerk/clerk-react";
+import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, UserPlus, Users, Users2 } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -11,16 +12,13 @@ import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
+import { isClerkAuth } from "@/auth/authMode";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
-// Tabs a tenant/org admin may see. The rest (all-tenant Users, global Analytics,
-// Console, Audit, App settings) are platform-operator only. As Users/Analytics
-// get org-scoped they'll be added here.
-const ORG_ADMIN_TAB_IDS = new Set<TabId>(["models"]);
-
 type TabId =
   | "users"
+  | "members"
   | "groups"
   | "analytics"
   | "console"
@@ -28,6 +26,15 @@ type TabId =
   | "settings"
   | "models"
   | "connectors";
+
+// The org-admin "Members" tab — invite teammates, roles, seats — powered by
+// Clerk's <OrganizationProfile/> (only meaningful in Clerk mode with an org).
+const MEMBERS_TAB: TabDef = {
+  id: "members",
+  label: "Members",
+  icon: <UserPlus className="h-3.5 w-3.5" />,
+  subtitle: "Invite your team, manage roles, and add seats.",
+};
 
 interface TabDef {
   id: TabId;
@@ -90,8 +97,6 @@ const TABS: TabDef[] = [
   },
 ];
 
-const VALID_TAB_IDS = new Set<TabId>(TABS.map((t) => t.id));
-
 export function AdminPage() {
   // Drive the active tab from ``?tab=...`` so deep links land on the
   // right surface (e.g. the ``/models`` legacy route now redirects to
@@ -100,18 +105,23 @@ export function AdminPage() {
   // Platform admin (operator) sees every tab; a tenant/org admin sees only the
   // org-safe subset. Same page, scoped surface.
   const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
-  const visibleTabs = useMemo(
-    () =>
-      isPlatformAdmin
-        ? TABS
-        : TABS.filter((t) => ORG_ADMIN_TAB_IDS.has(t.id)),
-    [isPlatformAdmin]
-  );
+  const hasOrg = useAuthStore((s) => !!s.user?.org_id);
+  const visibleTabs = useMemo(() => {
+    // Platform admin (operator): every tab. Org admin: the org-scoped subset —
+    // Models today, + Members (Clerk) when they have an org. Users/Analytics/
+    // Groups/Connectors are added here as each gets org-scoped.
+    if (isPlatformAdmin) return TABS;
+    const tabs: TabDef[] = [];
+    const modelsTab = TABS.find((t) => t.id === "models");
+    if (modelsTab) tabs.push(modelsTab);
+    if (isClerkAuth && hasOrg) tabs.push(MEMBERS_TAB);
+    return tabs;
+  }, [isPlatformAdmin, hasOrg]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: TabId = useMemo(() => {
     const raw = searchParams.get("tab");
-    if (raw && VALID_TAB_IDS.has(raw as TabId) && visibleTabs.some((t) => t.id === raw)) {
+    if (raw && visibleTabs.some((t) => t.id === raw)) {
       return raw as TabId;
     }
     return visibleTabs[0].id;
@@ -139,6 +149,14 @@ export function AdminPage() {
           <Tabs tabs={visibleTabs} current={tab} onChange={setTab} />
           <div className="mt-5">
             {tab === "users" && <UsersPanel />}
+            {tab === "members" && isClerkAuth && (
+              // Clerk's org member management — invite by email, roles, and
+              // seats (enforced against the org's plan). Membership syncs back
+              // to our shadow users via webhooks.
+              <div className="flex justify-center">
+                <OrganizationProfile routing="hash" />
+              </div>
+            )}
             {tab === "groups" && <GroupsPanel />}
             {tab === "models" && <ModelsPanel />}
             {tab === "connectors" && <McpConnectorsPanel />}
