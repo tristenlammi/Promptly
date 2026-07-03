@@ -1,6 +1,8 @@
 import { type ReactNode } from "react";
 import { PricingTable, useAuth } from "@clerk/clerk-react";
 
+import { useAuthStore } from "@/store/authStore";
+
 /**
  * Paywall for Clerk mode. A signed-in user *without* the `pro` entitlement
  * (i.e. on the free plan — no active Personal Plan or trial) sees Clerk's
@@ -14,6 +16,9 @@ import { PricingTable, useAuth } from "@clerk/clerk-react";
  */
 export function ClerkSubscriptionGate({ children }: { children: ReactNode }) {
   const { isLoaded, has, signOut } = useAuth();
+  // Operators aren't customers — admins (the org owner + any admin they
+  // designate) bypass the paywall entirely.
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
   if (!isLoaded) {
     return (
@@ -23,6 +28,7 @@ export function ClerkSubscriptionGate({ children }: { children: ReactNode }) {
     );
   }
 
+  if (isAdmin) return <>{children}</>;
   const entitled = has?.({ feature: "pro" }) ?? false;
   if (entitled) return <>{children}</>;
 
