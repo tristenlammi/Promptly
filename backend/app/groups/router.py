@@ -10,12 +10,26 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import require_admin
+from app.auth.deps import org_scope_for, require_org_admin
 from app.auth.models import User
 from app.database import get_db
 from app.groups.models import UserGroup, UserGroupMember
 
 router = APIRouter()
+
+
+async def _get_owned_group(
+    group_id: uuid.UUID, user: User, db: AsyncSession
+) -> UserGroup:
+    """Fetch a group the caller may manage — their own org's (or any, for the
+    platform admin). Outside that scope 404s."""
+    g = await db.get(UserGroup, group_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    org_id = org_scope_for(user)
+    if org_id is not None and g.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return g
 
 
 class GroupMember(BaseModel):
@@ -72,13 +86,13 @@ async def _to_response(db: AsyncSession, g: UserGroup) -> GroupResponse:
 @router.get("", response_model=list[GroupResponse])
 async def list_groups(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> list[GroupResponse]:
-    groups = (
-        (await db.execute(select(UserGroup).order_by(UserGroup.name.asc())))
-        .scalars()
-        .all()
-    )
+    stmt = select(UserGroup).order_by(UserGroup.name.asc())
+    org_id = org_scope_for(user)
+    if org_id is not None:
+        stmt = stmt.where(UserGroup.org_id == org_id)
+    groups = (await db.execute(stmt)).scalars().all()
     return [await _to_response(db, g) for g in groups]
 
 
@@ -86,11 +100,12 @@ async def list_groups(
 async def create_group(
     payload: GroupCreate,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_org_admin),
 ) -> GroupResponse:
     g = UserGroup(
         name=payload.name.strip(),
         allowed_models=list(payload.allowed_models or []),
+        org_id=org_scope_for(admin),
         created_by=admin.id,
     )
     db.add(g)
@@ -108,11 +123,9 @@ async def update_group(
     group_id: uuid.UUID,
     payload: GroupUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> GroupResponse:
-    g = await db.get(UserGroup, group_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="Group not found")
+    g = await _get_owned_group(group_id, user, db)
     if payload.name is not None:
         g.name = payload.name.strip()
     if payload.allowed_models is not None:
@@ -130,12 +143,11 @@ async def update_group(
 async def delete_group(
     group_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ):
-    g = await db.get(UserGroup, group_id)
-    if g is not None:
-        await db.delete(g)
-        await db.commit()
+    g = await _get_owned_group(group_id, user, db)
+    await db.delete(g)
+    await db.commit()
 
 
 @router.put("/{group_id}/members", response_model=GroupResponse)
@@ -143,21 +155,16 @@ async def set_members(
     group_id: uuid.UUID,
     payload: SetMembersRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_org_admin),
 ) -> GroupResponse:
-    g = await db.get(UserGroup, group_id)
-    if g is None:
-        raise HTTPException(status_code=404, detail="Group not found")
-    # Keep only ids that are real users.
-    valid = set(
-        (
-            await db.execute(
-                select(User.id).where(User.id.in_(payload.user_ids or []))
-            )
-        )
-        .scalars()
-        .all()
-    )
+    g = await _get_owned_group(group_id, user, db)
+    # Keep only ids that are real users — and, for an org admin, only members of
+    # their own org (can't pull another tenant's users into a group).
+    valid_stmt = select(User.id).where(User.id.in_(payload.user_ids or []))
+    org_id = org_scope_for(user)
+    if org_id is not None:
+        valid_stmt = valid_stmt.where(User.org_id == org_id)
+    valid = set((await db.execute(valid_stmt)).scalars().all())
     await db.execute(
         delete(UserGroupMember).where(UserGroupMember.group_id == group_id)
     )

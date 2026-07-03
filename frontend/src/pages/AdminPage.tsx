@@ -111,11 +111,15 @@ export function AdminPage() {
     // Models today, + Members (Clerk) when they have an org. Users/Analytics/
     // Groups/Connectors are added here as each gets org-scoped.
     if (isPlatformAdmin) return TABS;
+    // Org-admin surface, in a sensible order: Models, Members, Groups, Analytics.
+    const pick = (id: TabId) => TABS.find((t) => t.id === id);
     const tabs: TabDef[] = [];
-    const modelsTab = TABS.find((t) => t.id === "models");
+    const modelsTab = pick("models");
     if (modelsTab) tabs.push(modelsTab);
     if (isClerkAuth && hasOrg) tabs.push(MEMBERS_TAB);
-    const analyticsTab = TABS.find((t) => t.id === "analytics");
+    const groupsTab = pick("groups");
+    if (groupsTab) tabs.push(groupsTab);
+    const analyticsTab = pick("analytics");
     if (analyticsTab) tabs.push(analyticsTab);
     return tabs;
   }, [isPlatformAdmin, hasOrg]);

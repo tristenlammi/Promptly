@@ -696,6 +696,14 @@ async def list_directory_users(
         User.id != current_user.id,
         User.disabled.is_(False),
     )
+    # Tenant isolation: a user only ever sees members of their OWN org (never
+    # other tenants). A user with no org (transient) sees nobody. The platform
+    # admin is exempt (operator). This is the fix for the original global-
+    # directory leak.
+    if current_user.role != "admin":
+        if current_user.org_id is None:
+            return []
+        stmt = stmt.where(User.org_id == current_user.org_id)
     if q_norm:
         # Postgres ILIKE is case-insensitive out of the box and
         # cheap enough on the ``users`` table (small cardinality).
