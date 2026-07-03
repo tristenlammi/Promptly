@@ -53,10 +53,62 @@ from app.billing.usage import check_budget
 from app.database import get_db
 from app.files.quota import get_quota
 from app.files.system_folders import seed_system_folders
+from app.config import get_settings
+from app.license import (
+    SeatLimitReached,
+    assert_seat_available,
+    count_active_users,
+    current_license,
+    effective_seat_limit,
+)
 from app.models_config.models import ModelProvider
 
 router = APIRouter()
 logger = logging.getLogger("promptly.admin")
+
+
+async def _enforce_seat(db: AsyncSession, *, adding: int) -> None:
+    """Refuse an account-adding action that would exceed the self-host license
+    seat cap. No-op in Clerk mode (Clerk bills seats) and when under the cap.
+    Self-host is free for one seat; a paid license raises the limit."""
+    try:
+        await assert_seat_available(db, adding=adding)
+    except SeatLimitReached as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                f"Seat limit reached ({e.limit}). Upgrade your license to add "
+                "more accounts."
+            ),
+        ) from e
+
+
+@router.get("/license")
+async def license_status(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> dict:
+    """Self-host license state + seat usage. ``applies`` is false in Clerk mode
+    (seats are billed by Clerk there, so there's no local license)."""
+    s = get_settings()
+    lic = current_license()
+    return {
+        "applies": (s.AUTH_PROVIDER or "custom").lower() == "custom",
+        "present": lic.present,
+        "valid": lic.valid,
+        "signature_ok": lic.signature_ok,
+        "expired": lic.expired,
+        "in_grace": lic.in_grace,
+        "customer": lic.customer,
+        "tier": lic.tier,
+        "license_seats": lic.seats,
+        "effective_seat_limit": effective_seat_limit(),
+        "seats_used": await count_active_users(db),
+        "free_seats": s.LICENSE_FREE_SEATS,
+        "grace_days": s.LICENSE_GRACE_DAYS,
+        "expires_at": lic.expires_at.isoformat() if lic.expires_at else None,
+        "error": lic.error,
+    }
 
 # Analytics + observability live in their own modules to keep this
 # file focused on user/account management. Both routers share the
@@ -144,6 +196,7 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> AdminUserResponse:
+    await _enforce_seat(db, adding=1)
     user = User(
         email=payload.email.lower(),
         username=payload.username,
@@ -281,10 +334,21 @@ async def import_users_csv(
             detail=f"Too many rows (max {_IMPORT_MAX_ROWS}).",
         )
 
+    # Self-host seat cap (None in Clerk mode). Computed once; each successful
+    # create consumes a seat, so overflow rows are skipped rather than 402-ing
+    # the whole import.
+    seat_cap = effective_seat_limit()
+    active_now = await count_active_users(db) if seat_cap is not None else 0
+
     for i, row in enumerate(rows):
         email = _get(row, "email").lower()
         if not email or "@" not in email:
             skipped.append({"row": i + 2, "email": email, "reason": "invalid email"})
+            continue
+        if seat_cap is not None and active_now + len(created) >= seat_cap:
+            skipped.append(
+                {"row": i + 2, "email": email, "reason": f"seat limit reached ({seat_cap})"}
+            )
             continue
         username = _get(row, "username") or email.split("@")[0]
         role = (_get(row, "role") or "user").lower()
@@ -642,6 +706,8 @@ async def enable_user(
 ) -> AdminUserResponse:
     """Reverse a disable. Does *not* unlock — call /unlock for that."""
     target = await _load_target(user_id, db)
+    # Re-enabling consumes a seat again — refuse if that would exceed the cap.
+    await _enforce_seat(db, adding=1)
     target.disabled = False
     await record_event(
         db,

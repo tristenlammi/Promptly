@@ -59,6 +59,26 @@ class Settings(BaseSettings):
     # operator). Set to the owner's email in the hosted deployment.
     PLATFORM_ADMIN_EMAIL: str = ""
 
+    # ---- Self-host licensing (custom-auth path only) ----
+    # Self-host is FREE for a single seat; a paid, seat-tied license unlocks
+    # more accounts. Licenses are offline-signed (Ed25519) — the instance
+    # verifies with the baked-in public key, no phone-home. Only enforced when
+    # AUTH_PROVIDER=custom (Clerk mode has its own seat billing).
+    #
+    # ``LICENSE_PUBLIC_KEY`` — base64 Ed25519 public key of the license issuer
+    #   (you). Baked into the deployment; empty = can't verify any license, so
+    #   the instance stays on the free single-seat tier.
+    # ``LICENSE_KEY`` — the signed license token for this instance (or paste it
+    #   in the admin UI once that lands). Empty = free tier.
+    LICENSE_PUBLIC_KEY: str = ""
+    LICENSE_KEY: str = ""
+    # Days a lapsed (expired) license keeps its full seat count before the
+    # instance drops back to the free tier for *adding* accounts. Existing
+    # users are never disabled — the gate is only on growth.
+    LICENSE_GRACE_DAYS: int = 14
+    # Seats available with no valid license (the free self-host tier).
+    LICENSE_FREE_SEATS: int = 1
+
     # ---- Backend paywall enforcement ----
     # The frontend gate is bypassable via direct API calls; when this is ON the
     # API also refuses an unentitled caller (402). Entitlement is read from the
