@@ -5,6 +5,7 @@ import {
   type AppSettingsPatch,
   type AuthEventsQuery,
   type CreateUserPayload,
+  type OrgDefaultsPatch,
   type ResetPasswordPayload,
   type UpdateUserPayload,
 } from "@/api/admin";
@@ -18,6 +19,7 @@ import type {
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
   AppSettings,
+  OrgModelDefaults,
   AuthEvent,
   ErrorEventDetail,
   ErrorEventRow,
@@ -177,6 +179,28 @@ export function useUpdateAppSettings() {
       // without a refetch round-trip.
       qc.setQueryData(APP_SETTINGS_KEY, data);
       qc.invalidateQueries({ queryKey: AUTH_EVENTS_KEY });
+    },
+  });
+}
+
+// ---------------- Per-org model defaults ----------------
+const ORG_DEFAULTS_KEY = ["admin", "org-defaults"] as const;
+
+export function useOrgDefaults() {
+  return useQuery<OrgModelDefaults>({
+    queryKey: ORG_DEFAULTS_KEY,
+    queryFn: adminApi.getOrgDefaults,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateOrgDefaults() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: OrgDefaultsPatch) => adminApi.updateOrgDefaults(patch),
+    onSuccess: (data) => {
+      // Snapshot the response so the cards flip without a refetch round-trip.
+      qc.setQueryData(ORG_DEFAULTS_KEY, data);
     },
   });
 }

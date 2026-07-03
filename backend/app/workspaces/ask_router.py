@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+from app.app_settings.defaults import load_effective_defaults, org_id_of
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.chat.models import Workspace, WorkspaceCanvas, WorkspaceItem
@@ -73,15 +74,12 @@ async def _resolve_chat_model(
         provider = await db.get(ModelProvider, ws.default_provider_id)
         if provider is not None and provider.enabled:
             return provider, ws.default_model_id
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if (
-        settings is not None
-        and settings.default_chat_provider_id
-        and settings.default_chat_model_id
-    ):
-        provider = await db.get(ModelProvider, settings.default_chat_provider_id)
+    # Per-org default chat model, resolved via the workspace owner's org.
+    eff = await load_effective_defaults(db, await org_id_of(db, ws.user_id))
+    if eff.default_chat_configured:
+        provider = await db.get(ModelProvider, eff.default_chat_provider_id)
         if provider is not None and provider.enabled:
-            return provider, settings.default_chat_model_id
+            return provider, eff.default_chat_model_id
     return None, None
 
 

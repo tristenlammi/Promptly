@@ -33,6 +33,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import AppSettings, SINGLETON_APP_SETTINGS_ID
+from app.app_settings.defaults import load_effective_defaults
 from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
 from app.database import SessionLocal, get_db
@@ -324,16 +325,18 @@ async def _load_study_provider(
     Raises ``HTTP 503`` with a human-readable admin-action message if
     nothing is configured.
     """
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+    # Study + its default-chat fallback are per-ORG defaults (org-scoped BYOK
+    # providers); resolve through the acting user's org.
+    settings = await load_effective_defaults(db, user.org_id)
 
     # 1. Admin-designated study model.
-    if settings and settings.study_configured:
+    if settings.study_configured:
         provider = await db.get(ModelProvider, settings.study_provider_id)
         if provider and provider.enabled:
             return provider, settings.study_model_id  # type: ignore[return-value]
 
     # 2. Workspace default chat model.
-    if settings and settings.default_chat_configured:
+    if settings.default_chat_configured:
         provider = await db.get(ModelProvider, settings.default_chat_provider_id)
         if provider and provider.enabled:
             return provider, settings.default_chat_model_id  # type: ignore[return-value]
@@ -2447,6 +2450,7 @@ async def _stream_generator(
                 unit_id=att["unit_id"],
                 objective_index=att["objective_index"],
                 objective_text=att["objective_text"],
+                org_id=user.org_id,
             )
 
         # Emit board_updated for every block the tutor just pinned.
@@ -2812,11 +2816,11 @@ async def set_session_goal(
 )
 async def get_assessor_status(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
 ) -> AssessorStatusResponse:
     """Coverage stats for the independent assessor model (admin only)."""
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    configured = bool(settings and settings.study_assessor_configured)
+    settings = await load_effective_defaults(db, user.org_id)
+    configured = settings.study_assessor_configured
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     total_result = await db.execute(
@@ -2984,7 +2988,7 @@ async def quick_review(
 
     # Grade the answer.
     grade_result = await grade_for_review(
-        db, mastery_row.objective_text, body.answer
+        db, mastery_row.objective_text, body.answer, org_id=user.org_id
     ) if body.answer.strip() else None
 
     assessor_unavailable = grade_result is None and not body.answer.strip() is False

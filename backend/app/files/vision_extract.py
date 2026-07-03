@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import io
 import logging
+import uuid
 
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+from app.app_settings.defaults import load_effective_defaults, org_id_of
 from app.chat.vision_relay import caption_image, caption_index_image_part
 from app.files.models import UserFile
 from app.files.prompt import _looks_pdf, build_image_part_from_bytes, looks_image
@@ -57,14 +59,16 @@ def supports_vision_extraction(file: UserFile) -> bool:
 
 async def _resolve_relay(
     db: AsyncSession,
+    org_id: uuid.UUID | None,
 ) -> tuple[ModelProvider, str] | None:
-    """Resolve the admin-configured Vision relay provider + model id.
+    """Resolve the Vision relay provider + model id for ``org_id``.
 
-    Returns ``None`` when the relay isn't configured (or its provider was
-    deleted) — the signal to callers that vision extraction is off.
+    The relay is a per-ORG default (org-scoped BYOK provider); pass the file
+    owner's org. Returns ``None`` when the relay isn't configured (or its
+    provider was deleted) — the signal to callers that vision extraction is off.
     """
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if settings is None or not settings.vision_relay_configured:
+    settings = await load_effective_defaults(db, org_id)
+    if not settings.vision_relay_configured:
         return None
     if settings.vision_relay_model_id is None:
         return None
@@ -83,7 +87,7 @@ async def extract_text_via_vision(
     configured, the file type isn't supported, or extraction failed. Never
     raises — a flaky relay just means the file stays unindexed.
     """
-    relay = await _resolve_relay(db)
+    relay = await _resolve_relay(db, await org_id_of(db, file.user_id))
     if relay is None:
         return None
     provider, model_id = relay

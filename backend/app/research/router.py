@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import AppSettings, SINGLETON_APP_SETTINGS_ID
+from app.app_settings.defaults import load_effective_defaults
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.billing.usage import check_budget
@@ -52,8 +53,8 @@ async def _resolve_research_model(
     """Pick the research model: admin-configured first, else the user's
     current chat model from the request. Raises HTTPException on a bad
     fallback provider."""
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if settings and settings.research_configured:
+    settings = await load_effective_defaults(db, user.org_id)
+    if settings.research_configured:
         rp = await db.get(ModelProvider, settings.research_provider_id)
         if rp is not None and rp.enabled:
             return rp, settings.research_model_id  # type: ignore[return-value]
@@ -124,11 +125,11 @@ async def start_research(
     # ----- Model resolution ------------------------------------------------
     # Prefer the admin-configured research model; fall back to the user's
     # current chat model (from the request).
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+    settings = await load_effective_defaults(db, user.org_id)
     research_provider: ModelProvider | None = None
     research_model_id: str = payload.model_id
 
-    if settings and settings.research_configured:
+    if settings.research_configured:
         rp = await db.get(ModelProvider, settings.research_provider_id)
         if rp is not None and rp.enabled:
             research_provider = rp
@@ -277,8 +278,8 @@ async def get_research_config(
     Returns ``{"model_display": null}`` when no admin model is configured
     (falls back to the user's chat model, which the frontend knows).
     """
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if not settings or not settings.research_configured:
+    settings = await load_effective_defaults(db, _user.org_id)
+    if not settings.research_configured:
         return {"model_display": None, "configured": False}
 
     # Try to surface a human-readable name via the catalog.

@@ -28,6 +28,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+from app.app_settings.defaults import load_effective_defaults
 from app.auth.audit import (
     EVENT_BUDGET_EXCEEDED,
     EVENT_TOOL_FAILED,
@@ -1000,17 +1001,18 @@ async def create_conversation(
     # empty — i.e. a fresh user starting a top-level chat with no
     # preferences set anywhere.
     if payload.model_id is None or payload.provider_id is None:
-        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-        if app_settings_row is not None and app_settings_row.default_chat_configured:
+        # Per-org default chat model (org-scoped BYOK provider): resolve via
+        # the creating user's org, falling back to the global default only for
+        # no-org (self-host) callers — see app_settings.defaults precedence.
+        eff = await load_effective_defaults(db, user.org_id)
+        if eff.default_chat_configured:
             if payload.model_id is None:
                 payload = payload.model_copy(
-                    update={"model_id": app_settings_row.default_chat_model_id}
+                    update={"model_id": eff.default_chat_model_id}
                 )
             if payload.provider_id is None:
                 payload = payload.model_copy(
-                    update={
-                        "provider_id": app_settings_row.default_chat_provider_id
-                    }
+                    update={"provider_id": eff.default_chat_provider_id}
                 )
 
     conv = Conversation(
@@ -3908,16 +3910,19 @@ async def _stream_generator(
         # once so an admin editing the row mid-stream can't cause the
         # two reads to disagree.
         app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+        # The vision-relay model is a PER-ORG default (it points at an
+        # org-scoped BYOK provider), so resolve it through the acting user's
+        # org rather than the global singleton. The tool-cap below stays global.
+        eff_defaults = await load_effective_defaults(db, user.org_id)
         relay_provider_row: ModelProvider | None = None
         relay_will_run = (
             has_image
             and not model_supports_vision
-            and app_settings_row is not None
-            and app_settings_row.vision_relay_configured
+            and eff_defaults.vision_relay_configured
         )
-        if relay_will_run and app_settings_row is not None:
+        if relay_will_run:
             relay_provider_row = await db.get(
-                ModelProvider, app_settings_row.vision_relay_provider_id
+                ModelProvider, eff_defaults.vision_relay_provider_id
             )
             if relay_provider_row is None:
                 # Provider was deleted between settings-write and now;

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.app_settings.models import AppSettings, SINGLETON_APP_SETTINGS_ID
+from app.app_settings.defaults import load_effective_defaults
 from app.database import SessionLocal
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, ProviderError, model_router
@@ -120,13 +121,14 @@ async def _run_assessor_task(
     unit_id: uuid.UUID,
     objective_index: int,
     objective_text: str,
+    org_id: uuid.UUID | None = None,
 ) -> None:
     """Background task body — owns its own DB session."""
     try:
         async with SessionLocal() as db:
-            # --- Load assessor model config ---
-            settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-            if settings is None or not settings.study_assessor_configured:
+            # --- Load assessor model config (per-org default) ---
+            settings = await load_effective_defaults(db, org_id)
+            if not settings.study_assessor_configured:
                 return
 
             provider = await db.get(ModelProvider, settings.study_assessor_provider_id)
@@ -225,13 +227,15 @@ def dispatch_assessor_if_configured(
     unit_id: uuid.UUID,
     objective_index: int,
     objective_text: str,
+    org_id: uuid.UUID | None = None,
 ) -> None:
     """Schedule the assessor pass as a fire-and-forget asyncio task.
 
     Called from the SSE generator after the main DB commit so the
     student's answer is guaranteed to be visible to the new session the
     assessor task opens.  Returns immediately; the caller does NOT
-    await the result.
+    await the result. ``org_id`` (the acting student's org) selects that
+    tenant's assessor-model default.
     """
     asyncio.create_task(
         _run_assessor_task(
@@ -240,6 +244,7 @@ def dispatch_assessor_if_configured(
             unit_id=unit_id,
             objective_index=objective_index,
             objective_text=objective_text,
+            org_id=org_id,
         ),
         name=f"assessor-{attempt_id}",
     )
@@ -276,15 +281,17 @@ async def grade_teachback(
     db: AsyncSession,
     unit: "StudyUnit",
     student_messages: list[str],
+    org_id: uuid.UUID | None = None,
 ) -> bool | None:
     """Grade a student's teach-back explanation against the unit's objectives.
 
     Returns ``True`` (passed), ``False`` (rejected), or ``None`` when the
     assessor is not configured or a call error occurs — callers should treat
-    ``None`` as "pass-through" and not gate on it.
+    ``None`` as "pass-through" and not gate on it. ``org_id`` selects the
+    acting tenant's assessor-model default.
     """
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if settings is None or not settings.study_assessor_configured:
+    settings = await load_effective_defaults(db, org_id)
+    if not settings.study_assessor_configured:
         return None
 
     provider = await db.get(ModelProvider, settings.study_assessor_provider_id)
@@ -359,14 +366,16 @@ async def grade_for_review(
     db: AsyncSession,
     objective_text: str,
     student_answer: str,
+    org_id: uuid.UUID | None = None,
 ) -> tuple[bool, str] | None:
     """Grade a free-recall answer for the standalone daily review loop.
 
     Returns ``(correct, feedback_sentence)`` or ``None`` if the assessor
     model is not configured — callers should fall back to self-grading.
+    ``org_id`` selects the acting tenant's assessor-model default.
     """
-    settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-    if settings is None or not settings.study_assessor_configured:
+    settings = await load_effective_defaults(db, org_id)
+    if not settings.study_assessor_configured:
         return None
 
     provider = await db.get(ModelProvider, settings.study_assessor_provider_id)

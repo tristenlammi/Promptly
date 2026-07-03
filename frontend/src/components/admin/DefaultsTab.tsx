@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Bot, BookOpen, CheckCircle2, Eye, FlaskConical, GraduationCap } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
-import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
+import { useOrgDefaults, useUpdateOrgDefaults } from "@/hooks/useAdminUsers";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { cn } from "@/utils/cn";
-import type { AppSettings, AvailableModel } from "@/api/types";
-import type { AppSettingsPatch } from "@/api/admin";
+import type { OrgModelDefaults, AvailableModel } from "@/api/types";
+import type { OrgDefaultsPatch } from "@/api/admin";
 import { useModelStore } from "@/store/modelStore";
+import { useAuthStore } from "@/store/authStore";
 
 import { EmbeddingConfigCard } from "./CustomModelsPanel";
 import { SettingsCard } from "./SettingsCard";
@@ -39,8 +40,13 @@ import { SettingsCard } from "./SettingsCard";
  * page. Admins land here once during install and rarely again.
  */
 export function DefaultsTab() {
-  const { data, isLoading, isError } = useAppSettings();
-  const update = useUpdateAppSettings();
+  const { data, isLoading, isError } = useOrgDefaults();
+  const update = useUpdateOrgDefaults();
+  // Embedding is an app-wide (RAG) setting, not a per-org one — only the
+  // platform operator configures it.
+  const isPlatformAdmin = useAuthStore(
+    (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
+  );
 
   if (isLoading) {
     return (
@@ -50,21 +56,22 @@ export function DefaultsTab() {
   if (isError || !data) {
     return (
       <div className="text-sm text-red-600 dark:text-red-400">
-        Couldn't load workspace defaults. Refresh and try again.
+        Couldn't load your organisation's model defaults. Refresh and try again.
       </div>
     );
   }
 
-  const submit = (patch: AppSettingsPatch) => update.mutateAsync(patch);
+  const submit = (patch: OrgDefaultsPatch) => update.mutateAsync(patch);
 
   return (
     <div className="space-y-4">
       <header className="mb-2">
         <h2 className="text-sm font-semibold">Default models</h2>
         <p className="text-xs text-[var(--text-muted)]">
-          Workspace-wide picks for the model roles Promptly needs to fill
-          when a user hasn't customised one. None of these override a
-          user's personal default on their Account page.
+          Your organisation's picks for the model roles Promptly needs to fill
+          when a member hasn't customised one. These apply to everyone in your
+          org and reference your org's connected providers. None of them
+          override a member's personal default on their Account page.
         </p>
       </header>
 
@@ -93,7 +100,7 @@ export function DefaultsTab() {
         onSubmit={submit}
         busy={update.isPending}
       />
-      <EmbeddingConfigCard />
+      {isPlatformAdmin && <EmbeddingConfigCard />}
     </div>
   );
 }
@@ -103,8 +110,8 @@ export function DefaultsTab() {
 // --------------------------------------------------------------------
 
 interface CardProps {
-  settings: AppSettings;
-  onSubmit: (patch: AppSettingsPatch) => Promise<unknown>;
+  settings: OrgModelDefaults;
+  onSubmit: (patch: OrgDefaultsPatch) => Promise<unknown>;
   busy: boolean;
 }
 

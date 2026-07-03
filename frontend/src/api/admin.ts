@@ -9,6 +9,7 @@ import type {
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
   AppSettings,
+  OrgModelDefaults,
   AuthEvent,
   ErrorEventDetail,
   ErrorEventRow,
@@ -156,6 +157,25 @@ export interface OriginPreview {
   warnings: string[];
 }
 
+/**
+ * Partial update for the caller's per-org model-role defaults. Each pair
+ * moves together: send both halves to set, both as `null` to clear, or omit
+ * both to leave unchanged. The backend rejects a single-half patch and rejects
+ * a provider that doesn't belong to the caller's org.
+ */
+export interface OrgDefaultsPatch {
+  default_chat_provider_id?: string | null;
+  default_chat_model_id?: string | null;
+  vision_relay_provider_id?: string | null;
+  vision_relay_model_id?: string | null;
+  research_provider_id?: string | null;
+  research_model_id?: string | null;
+  study_provider_id?: string | null;
+  study_model_id?: string | null;
+  study_assessor_provider_id?: string | null;
+  study_assessor_model_id?: string | null;
+}
+
 export const adminApi = {
   // ---------------- Users ----------------
   async listUsers(): Promise<AdminUser[]> {
@@ -279,6 +299,19 @@ export const adminApi = {
     const { data } = await apiClient.post<OriginPreview>(
       "/admin/app-settings/preview-origin",
       { public_origin }
+    );
+    return data;
+  },
+
+  // ---------------- Per-org model defaults ----------------
+  async getOrgDefaults(): Promise<OrgModelDefaults> {
+    const { data } = await apiClient.get<OrgModelDefaults>("/admin/org-defaults");
+    return data;
+  },
+  async updateOrgDefaults(patch: OrgDefaultsPatch): Promise<OrgModelDefaults> {
+    const { data } = await apiClient.patch<OrgModelDefaults>(
+      "/admin/org-defaults",
+      patch
     );
     return data;
   },

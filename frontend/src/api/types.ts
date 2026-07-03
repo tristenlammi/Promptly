@@ -214,6 +214,30 @@ export interface AuthEvent {
  * UI can render "Configured" / "Not configured" without ever holding
  * the cleartext.
  */
+/**
+ * Per-ORG model-role defaults (Admin → Models → Defaults). Which model an
+ * org reaches for when it needs role X. Scoped to the caller's own org;
+ * references that org's BYOK providers. The app-wide embedding model and all
+ * platform-global settings stay on {@link AppSettings}.
+ */
+export interface OrgModelDefaults {
+  default_chat_provider_id: string | null;
+  default_chat_model_id: string | null;
+  default_chat_configured: boolean;
+  vision_relay_provider_id: string | null;
+  vision_relay_model_id: string | null;
+  vision_relay_configured: boolean;
+  research_provider_id: string | null;
+  research_model_id: string | null;
+  research_configured: boolean;
+  study_provider_id: string | null;
+  study_model_id: string | null;
+  study_configured: boolean;
+  study_assessor_provider_id: string | null;
+  study_assessor_model_id: string | null;
+  study_assessor_configured: boolean;
+}
+
 export interface AppSettings {
   mfa_required: boolean;
   smtp_host: string | null;

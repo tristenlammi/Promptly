@@ -20,6 +20,7 @@ from app.redis_client import redis
 from app.study import config as study_config
 from app.study import review as study_review
 from app.study.assessor import grade_teachback
+from app.app_settings.defaults import org_id_of
 from app.study.models import (
     StudyBoardBlock,
     StudyExam,
@@ -2580,6 +2581,7 @@ async def handle_teachback_passed(
     session: StudySession,
     payload: dict[str, Any],
     unit: StudyUnit | None = None,
+    org_id: uuid.UUID | None = None,
 ) -> bool:
     """Stamp ``teachback_passed_at`` on the session.
 
@@ -2607,7 +2609,7 @@ async def handle_teachback_passed(
                 )
             ).scalars().all()
         ]
-        verdict = await grade_teachback(db, unit, recent_user_msgs)
+        verdict = await grade_teachback(db, unit, recent_user_msgs, org_id=org_id)
         if verdict is False:
             logger.info(
                 "teachback gate: assessor rejected (session=%s)", session.id
@@ -3375,7 +3377,11 @@ async def _apply_single_capture(
             return
         if action_type == "teachback_passed" and session is not None:
             await handle_teachback_passed(
-                db=db, session=session, payload=payload, unit=unit
+                db=db,
+                session=session,
+                payload=payload,
+                unit=unit,
+                org_id=await org_id_of(db, project.user_id) if project else None,
             )
             return
         if action_type == "capture_confidence" and session is not None:

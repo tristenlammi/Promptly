@@ -43,14 +43,18 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 
 export function ModelsPanel() {
   const [tab, setTab] = useState<TabId>("connections");
-  // Org admins get only Connections (their BYOK keys). Defaults / Custom /
-  // Local are still global config — platform-admin only until org-scoped.
-  const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
-  // Org admins get Connections (their BYOK keys) + Custom Models (their
-  // assistants). Defaults / Local stay platform-only until org-scoped.
+  // Org admins get Connections (their BYOK keys), Defaults (their org's
+  // model-role picks), and Custom Models (their assistants) — all org-scoped.
+  // Local Models (Ollama = platform infra) stays platform-operator only.
+  const isPlatformAdmin = useAuthStore(
+    (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
+  );
   const visibleTabs = isPlatformAdmin
     ? TABS
-    : TABS.filter((t) => t.id === "connections" || t.id === "custom");
+    : TABS.filter(
+        (t) =>
+          t.id === "connections" || t.id === "defaults" || t.id === "custom"
+      );
 
   return (
     <div>

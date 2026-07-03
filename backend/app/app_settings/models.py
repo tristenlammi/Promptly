@@ -299,3 +299,104 @@ class AppSettings(Base):
             f"<AppSettings mfa_required={self.mfa_required} "
             f"smtp_configured={self.smtp_configured}>"
         )
+
+
+class OrgModelDefaults(Base):
+    """Per-org overrides for the "which model fills role X?" defaults.
+
+    In the hosted multi-tenant product each org (tenant) picks its own
+    default chat / vision-relay / research / study models — they reference
+    that org's own BYOK providers, so a single global default is meaningless
+    across tenants. One row per org, lazily created on first save.
+
+    Only the *model-role* defaults live here. Genuinely platform-global
+    settings (MFA, SMTP, CORS origins, quota defaults, VAPID keys, and the
+    app-wide **embedding** model used for RAG) stay on the ``AppSettings``
+    singleton. Resolution precedence lives in ``app.app_settings.defaults``:
+    an org uses its own row; a caller with no org (self-host / custom auth)
+    falls back to the ``AppSettings`` global defaults.
+    """
+
+    __tablename__ = "org_model_defaults"
+
+    # PK == FK: exactly one defaults row per org.
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    default_chat_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    default_chat_model_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
+    vision_relay_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    vision_relay_model_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
+    research_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    research_model_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
+    study_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    study_model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    study_assessor_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("model_providers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    study_assessor_model_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    @property
+    def default_chat_configured(self) -> bool:
+        return bool(self.default_chat_provider_id and self.default_chat_model_id)
+
+    @property
+    def vision_relay_configured(self) -> bool:
+        return bool(self.vision_relay_provider_id and self.vision_relay_model_id)
+
+    @property
+    def research_configured(self) -> bool:
+        return bool(self.research_provider_id and self.research_model_id)
+
+    @property
+    def study_configured(self) -> bool:
+        return bool(self.study_provider_id and self.study_model_id)
+
+    @property
+    def study_assessor_configured(self) -> bool:
+        return bool(
+            self.study_assessor_provider_id and self.study_assessor_model_id
+        )
