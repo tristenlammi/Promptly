@@ -1,12 +1,15 @@
 """Models tab API — CRUD for provider configs + auto-fetch model catalog.
 
-Writes (create / update / delete / test / fetch-models) are admin-only. The
-read endpoints have different audiences:
+BYOK: every authenticated user manages *their own* providers (rows they own via
+``ModelProvider.user_id``). Platform admins additionally manage system-wide
+rows (``user_id IS NULL``). Ownership is enforced per-request:
 
-* ``GET /``           → admin-only (exposes raw provider rows incl. masked key).
-* ``GET /available``  → every authenticated user; the list is filtered down
-                        to what each user is actually allowed to pick
-                        (see ``allowed_models`` on the User model).
+* ``GET /``           → the caller's own providers (admins also see system rows).
+* create/update/delete/test/fetch-models → scoped to a provider the caller owns
+                        (``_get_owned_provider``); non-admins get a stricter
+                        SSRF check on ``base_url`` (no private/loopback targets).
+* ``GET /available``  → every authenticated user; filtered to models the user
+                        can actually pick (see ``allowed_models`` on User).
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
-from app.auth.deps import get_current_user, require_admin
+from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.custom_models.embedding import is_embedding_model_id
 from app.database import get_db
@@ -43,17 +46,18 @@ from app.models_config.service import encrypt_api_key, provider_to_response
 router = APIRouter()
 
 
-async def _validate_base_url(raw: str | None) -> None:
-    """Reject a provider ``base_url`` that targets a cloud metadata endpoint.
-
-    Loopback / private hosts stay allowed (self-hosted model servers). DNS
-    resolution runs in a thread so it can't stall the event loop. Raises a
-    400 on refusal.
+async def _validate_base_url(raw: str | None, *, strict: bool = False) -> None:
+    """Reject an unsafe provider ``base_url``. Always blocks cloud metadata
+    endpoints. ``strict=True`` (untrusted / non-admin hosted callers) also blocks
+    private/loopback so a tenant can't SSRF our internal network; admins keep the
+    loose check so self-hosted model servers work. Raises 400 on refusal.
     """
     if not raw:
         return
     try:
-        await run_in_threadpool(assert_provider_url_safe, raw, resolve=True)
+        await run_in_threadpool(
+            assert_provider_url_safe, raw, resolve=True, strict=strict
+        )
     except UnsafeURLError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -64,11 +68,17 @@ async def _validate_base_url(raw: str | None) -> None:
 async def _get_owned_provider(
     provider_id: uuid.UUID, user: User, db: AsyncSession
 ) -> ModelProvider:
-    """Admin-scoped fetch: admins see their own providers + system-wide rows."""
+    """Fetch a provider the caller may manage. Platform admins may manage their
+    own providers + system-wide rows; a regular (tenant) user may manage ONLY
+    their own. Anything outside that scope 404s (no existence disclosure)."""
     provider = await db.get(ModelProvider, provider_id)
     if provider is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
-    if provider.user_id is not None and provider.user_id != user.id:
+    if user.role == "admin":
+        allowed = provider.user_id is None or provider.user_id == user.id
+    else:
+        allowed = provider.user_id == user.id
+    if not allowed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
     return provider
 
@@ -80,11 +90,20 @@ async def _get_owned_provider(
 @router.get("/", response_model=list[ProviderResponse], include_in_schema=False)
 async def list_providers(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> list[ProviderResponse]:
+    # Platform admins also see system-wide (user_id IS NULL) rows; a regular
+    # tenant user sees only providers they own (BYOK) — never system/other
+    # tenants' providers.
+    if user.role == "admin":
+        provider_filter = (ModelProvider.user_id == user.id) | (
+            ModelProvider.user_id.is_(None)
+        )
+    else:
+        provider_filter = ModelProvider.user_id == user.id
     result = await db.execute(
         select(ModelProvider)
-        .where((ModelProvider.user_id == user.id) | (ModelProvider.user_id.is_(None)))
+        .where(provider_filter)
         .order_by(ModelProvider.created_at.desc())
     )
     return [provider_to_response(p) for p in result.scalars().all()]
@@ -97,7 +116,7 @@ async def list_providers(
 async def create_provider(
     payload: ProviderCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> ProviderResponse:
     if payload.type not in SUPPORTED_PROVIDER_TYPES:
         raise HTTPException(
@@ -118,7 +137,10 @@ async def create_provider(
             detail=f"Provider type {payload.type!r} requires an api_key",
         )
 
-    await _validate_base_url(str(payload.base_url) if payload.base_url else None)
+    await _validate_base_url(
+        str(payload.base_url) if payload.base_url else None,
+        strict=(user.role != "admin"),
+    )
 
     provider = ModelProvider(
         user_id=user.id,
@@ -156,14 +178,16 @@ async def update_provider(
     provider_id: uuid.UUID,
     payload: ProviderUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> ProviderResponse:
     provider = await _get_owned_provider(provider_id, user, db)
 
     if payload.name is not None:
         provider.name = payload.name
     if payload.base_url is not None:
-        await _validate_base_url(str(payload.base_url))
+        await _validate_base_url(
+            str(payload.base_url), strict=(user.role != "admin")
+        )
         provider.base_url = str(payload.base_url)
     if payload.api_key is not None:
         if payload.api_key.strip() == "":
@@ -205,7 +229,7 @@ async def update_provider(
 async def delete_provider(
     provider_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> Response:
     provider = await _get_owned_provider(provider_id, user, db)
     if provider.user_id is None:
@@ -225,7 +249,7 @@ async def delete_provider(
 async def test_provider(
     provider_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> TestConnectionResponse:
     provider = await _get_owned_provider(provider_id, user, db)
     result = await model_router.test_connection(provider)
@@ -239,7 +263,7 @@ async def test_provider(
 async def fetch_provider_models(
     provider_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> ProviderResponse:
     provider = await _get_owned_provider(provider_id, user, db)
     try:

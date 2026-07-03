@@ -283,27 +283,36 @@ def _ip_is_metadata(ip: ipaddress._BaseAddress) -> bool:
     return False
 
 
-def assert_provider_url_safe(url: str, *, resolve: bool = True) -> str:
-    """Validate an admin-supplied model-provider ``base_url``.
+def _ip_is_public(ip: ipaddress._BaseAddress) -> bool:
+    """True only for globally-routable addresses. Used by ``strict`` mode to
+    refuse loopback / private / link-local / reserved / multicast — the check we
+    want for *untrusted* (non-admin, hosted-tenant) provider URLs, where a
+    private target would be an SSRF pivot into our own network."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return bool(ip.is_global) and not ip.is_multicast
 
-    Looser than :func:`assert_url_is_safe`: loopback / private / docker
-    addresses are **allowed**, because self-hosted model servers (Ollama,
-    LM Studio, vLLM) legitimately live there and the default Ollama
-    provider points at ``http://localhost:11434``. What it refuses:
 
-    * non-http(s) schemes;
-    * cloud instance-metadata endpoints — the link-local 169.254/16 +
-      fe80::/10 range and the known IMDS hostnames.
+def assert_provider_url_safe(
+    url: str, *, resolve: bool = True, strict: bool = False
+) -> str:
+    """Validate a model-provider ``base_url``.
 
-    This closes the gap where a compromised admin token could repoint a
-    provider at ``http://169.254.169.254/latest/meta-data/…`` and read the
-    instance's IAM credentials back through the "test connection" /
-    list-models responses.
+    Default (admin / self-host) is loose: loopback / private / docker addresses
+    are **allowed**, because self-hosted model servers (Ollama, LM Studio, vLLM)
+    legitimately live there and the default Ollama provider points at
+    ``http://localhost:11434``. It refuses non-http(s) schemes and cloud
+    instance-metadata endpoints (169.254/16 + fe80::/10 + known IMDS hostnames).
 
-    ``resolve=True`` (create/update time) also runs DNS and refuses a
-    hostname that resolves to a metadata IP. ``resolve=False`` (the hot
-    request path) checks only literals + hostnames so we never block the
-    async event loop on ``getaddrinfo``.
+    ``strict=True`` is for **untrusted callers** — a regular hosted user adding
+    their own BYOK provider. It additionally refuses any non-public address, so
+    a tenant can't point a provider at ``http://localhost:6379`` /
+    ``http://10.0.0.5`` and use our server to probe the internal network. Public
+    cloud provider endpoints (OpenAI, Anthropic, OpenRouter, …) all pass.
+
+    ``resolve=True`` (create/update time) also runs DNS and re-checks every
+    resolved IP. ``resolve=False`` (the hot request path) checks only literals +
+    hostnames so we never block the async event loop on ``getaddrinfo``.
     """
     parsed = urlparse(url)
     if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
@@ -321,26 +330,39 @@ def assert_provider_url_safe(url: str, *, resolve: bool = True) -> str:
             f"Refusing a provider URL pointing at the metadata service ({hostname!r})",
         )
 
+    def _check(ip: ipaddress._BaseAddress, *, resolved: bool) -> None:
+        if _ip_is_metadata(ip):
+            raise UnsafeURLError(
+                "blocked_metadata",
+                f"Refusing a provider URL pointing at the metadata service ({hostname!r})",
+            )
+        if strict and not _ip_is_public(ip):
+            raise UnsafeURLError(
+                "blocked_private",
+                f"Refusing a non-public provider URL ({hostname!r}) — hosted "
+                "accounts can only reach public model endpoints.",
+            )
+
     try:
         literal = ipaddress.ip_address(hostname)
     except ValueError:
         literal = None
 
     if literal is not None:
-        if _ip_is_metadata(literal):
-            raise UnsafeURLError(
-                "blocked_metadata",
-                f"Refusing a provider URL pointing at the metadata service ({hostname!r})",
-            )
+        _check(literal, resolved=False)
         return url
 
-    if resolve:
+    # A bare hostname (not an IP literal). In strict mode a non-IP host like
+    # "localhost" must be resolved to be judged, so force resolution there.
+    if resolve or strict:
+        resolved_any = False
         for ip in _resolve_all(hostname):
-            if _ip_is_metadata(ip):
-                raise UnsafeURLError(
-                    "blocked_metadata",
-                    f"Refusing {hostname!r} — it resolves to the metadata service",
-                )
+            resolved_any = True
+            _check(ip, resolved=True)
+        if strict and not resolved_any:
+            raise UnsafeURLError(
+                "bad_url", f"Could not resolve provider host {hostname!r}"
+            )
     return url
 
 
