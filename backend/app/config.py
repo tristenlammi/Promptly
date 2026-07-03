@@ -60,10 +60,15 @@ class Settings(BaseSettings):
     PLATFORM_ADMIN_EMAIL: str = ""
 
     # ---- Self-host licensing (custom-auth path only) ----
-    # Self-host is FREE for a single seat; a paid, seat-tied license unlocks
-    # more accounts. Licenses are offline-signed (Ed25519) — the instance
-    # verifies with the baked-in public key, no phone-home. Only enforced when
-    # AUTH_PROVIDER=custom (Clerk mode has its own seat billing).
+    # Self-host is FREE and UNLIMITED by default — add as many accounts as you
+    # like, no license needed. Seat-limited licensing is an OPT-IN capability:
+    # flip ``LICENSE_ENFORCED`` on (for a commercial self-host offering) and the
+    # instance enforces the free-tier/license seat cap below. Off (default) =
+    # no cap. Only relevant when AUTH_PROVIDER=custom (Clerk mode bills seats).
+    LICENSE_ENFORCED: bool = False
+    #
+    # When enforced: licenses are offline-signed (Ed25519) — the instance
+    # verifies with the baked-in public key, no phone-home.
     #
     # ``LICENSE_PUBLIC_KEY`` — base64 Ed25519 public key of the license issuer
     #   (you). Baked into the deployment; empty = can't verify any license, so

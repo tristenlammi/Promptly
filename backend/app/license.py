@@ -1,9 +1,14 @@
 """Self-host licensing (custom-auth path only).
 
-Self-host is free for a single seat; a paid, **seat-tied** license unlocks more
-accounts. Licenses are **offline-signed** (Ed25519): the issuer (you) signs a
-tiny JSON payload with a private key; every instance verifies it with the baked-
-in public key — no phone-home, works air-gapped.
+Self-host is **free and unlimited by default** (``LICENSE_ENFORCED=false``) —
+add as many accounts as you like, no license. Seat-limited licensing is an
+**opt-in** capability for a commercial self-host offering: flip
+``LICENSE_ENFORCED`` on and the instance enforces a free-tier/license seat cap.
+
+When enforced, self-host is free for a single seat and a paid, **seat-tied**
+license unlocks more accounts. Licenses are **offline-signed** (Ed25519): the
+issuer (you) signs a tiny JSON payload with a private key; every instance
+verifies it with the baked-in public key — no phone-home, works air-gapped.
 
 License token format (compact, self-contained)::
 
@@ -132,13 +137,17 @@ def current_license() -> LicenseState:
 def effective_seat_limit() -> int | None:
     """Max active accounts allowed right now.
 
-    ``None`` = no cap (Clerk mode — seats billed by Clerk). Otherwise the free
-    tier (default 1), raised to the license's seats while it's valid or in
-    grace. An expired-past-grace license falls back to the free tier for
-    *adding* accounts (existing users are untouched)."""
+    ``None`` = no cap. That's the case for hosted/Clerk mode (seats billed by
+    Clerk) AND for free self-host (``LICENSE_ENFORCED`` off, the default) — so
+    a self-hoster adds users freely. When enforcement is on, it's the free tier
+    (default 1), raised to the license's seats while valid or in grace; an
+    expired-past-grace license falls back to the free tier for *adding*
+    accounts (existing users are untouched)."""
     s = get_settings()
     if (s.AUTH_PROVIDER or "custom").lower() != "custom":
         return None  # hosted/Clerk: seat billing is Clerk's job
+    if not s.LICENSE_ENFORCED:
+        return None  # free, unlimited self-host (the default)
     free = max(int(s.LICENSE_FREE_SEATS or 1), 1)
     lic = current_license()
     if lic.valid and lic.seats > 0:

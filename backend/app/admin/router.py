@@ -92,8 +92,12 @@ async def license_status(
     (seats are billed by Clerk there, so there's no local license)."""
     s = get_settings()
     lic = current_license()
+    is_self_host = (s.AUTH_PROVIDER or "custom").lower() == "custom"
     return {
-        "applies": (s.AUTH_PROVIDER or "custom").lower() == "custom",
+        # ``applies`` = self-host mode; ``enforced`` = seat cap actually on.
+        # Free self-host (the default) is self-host + not enforced = unlimited.
+        "applies": is_self_host,
+        "enforced": bool(is_self_host and s.LICENSE_ENFORCED),
         "present": lic.present,
         "valid": lic.valid,
         "signature_ok": lic.signature_ok,
