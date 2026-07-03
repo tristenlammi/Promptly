@@ -97,6 +97,8 @@ services:
       - AUTH_PROVIDER=${AUTH_PROVIDER:-custom}
       - CLERK_ISSUER=${CLERK_ISSUER:-}
       - CLERK_JWKS_URL=${CLERK_JWKS_URL:-}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
+      - CLERK_WEBHOOK_SECRET=${CLERK_WEBHOOK_SECRET:-}
       - SEARXNG_URL=http://searxng:8080
       # CORS allow-list and provider/search API keys are now configured
       # through the first-run wizard and Admin → Settings — not via
