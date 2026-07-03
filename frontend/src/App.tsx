@@ -16,6 +16,7 @@ import { WorkspaceDetailPage } from "@/pages/WorkspaceDetailPage";
 import { WorkspacesPage } from "@/pages/WorkspacesPage";
 import { RecentFilesPage } from "@/pages/RecentFilesPage";
 import { SearchResultsPage } from "@/pages/SearchResultsPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { ShareLinkLandingPage } from "@/pages/ShareLinkLandingPage";
 import { StarredFilesPage } from "@/pages/StarredFilesPage";
@@ -257,6 +258,7 @@ export default function App() {
         <Route path="/files/search" element={<SearchResultsPage />} />
         <Route path="/archive" element={<ArchivePage />} />
         <Route path="/account/security" element={<AccountSecurityPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="/admin"
           element={isAdmin ? <AdminPage /> : <Navigate to="/chat" replace />}

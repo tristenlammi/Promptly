@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
+  Boxes,
   Clock,
   LogOut,
   MoreHorizontal,
@@ -634,6 +635,17 @@ function UserFooter() {
           Hosts chat-default preferences plus MFA / trusted devices. The
           route still ends in /security for backwards compatibility but
           the page hosts the broader account surface now. */}
+      {/* Per-user model providers (BYOK) — every authenticated user manages
+          their own API keys / models here. Distinct from the admin panel. */}
+      <button
+        onClick={() => navigate("/settings")}
+        className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+        title="Models & API keys"
+        aria-label="Open model settings"
+      >
+        <Boxes className="h-4 w-4" />
+        <span className="font-medium">Models</span>
+      </button>
       <button
         onClick={() => navigate("/account/security")}
         className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
