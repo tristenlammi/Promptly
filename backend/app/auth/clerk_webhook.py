@@ -22,8 +22,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.clerk import _unusable_password_hash
-from app.auth.models import User
+from app.auth.clerk import (
+    _unusable_password_hash,
+    normalize_org_role,
+    upsert_org,
+)
+from app.auth.models import Organization, User
 from app.config import get_settings
 from app.database import get_db
 
@@ -151,6 +155,73 @@ async def _disable_user(data: dict, db: AsyncSession) -> None:
     await db.commit()
 
 
+async def _sync_org(data: dict, db: AsyncSession) -> None:
+    """organization.created / .updated → upsert the org shadow (name/id)."""
+    clerk_org_id = data.get("id")
+    if not clerk_org_id:
+        return
+    await upsert_org(clerk_org_id, data.get("name"), db)
+
+
+async def _delete_org(data: dict, db: AsyncSession) -> None:
+    """organization.deleted → drop the shadow (FK SET NULL clears members)."""
+    clerk_org_id = data.get("id")
+    if not clerk_org_id:
+        return
+    result = await db.execute(
+        select(Organization).where(Organization.clerk_org_id == clerk_org_id)
+    )
+    org = result.scalar_one_or_none()
+    if org is not None:
+        await db.delete(org)
+        await db.commit()
+
+
+async def _sync_membership(data: dict, db: AsyncSession) -> None:
+    """organizationMembership.created / .updated → set the member's org + role."""
+    org_data = data.get("organization") or {}
+    clerk_org_id = org_data.get("id")
+    pud = data.get("public_user_data") or {}
+    clerk_user_id = pud.get("user_id")
+    if not (clerk_org_id and clerk_user_id):
+        return
+    org = await upsert_org(clerk_org_id, org_data.get("name"), db)
+    result = await db.execute(
+        select(User).where(User.clerk_user_id == clerk_user_id)
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        # The user.created webhook hasn't landed yet — the token org-sync will
+        # fill this in on their first authenticated request.
+        return
+    role = normalize_org_role(data.get("role"))
+    changed = False
+    if user.org_id != org.id:
+        user.org_id = org.id
+        changed = True
+    if user.org_role != role:
+        user.org_role = role
+        changed = True
+    if changed:
+        await db.commit()
+
+
+async def _remove_membership(data: dict, db: AsyncSession) -> None:
+    """organizationMembership.deleted → detach the member from the org."""
+    pud = data.get("public_user_data") or {}
+    clerk_user_id = pud.get("user_id")
+    if not clerk_user_id:
+        return
+    result = await db.execute(
+        select(User).where(User.clerk_user_id == clerk_user_id)
+    )
+    user = result.scalar_one_or_none()
+    if user is not None and user.org_id is not None:
+        user.org_id = None
+        user.org_role = None
+        await db.commit()
+
+
 @router.post("/webhook")
 async def clerk_webhook(
     request: Request, db: AsyncSession = Depends(get_db)
@@ -183,5 +254,16 @@ async def clerk_webhook(
         await _sync_user(data, db)
     elif event_type == "user.deleted":
         await _disable_user(data, db)
+    elif event_type in ("organization.created", "organization.updated"):
+        await _sync_org(data, db)
+    elif event_type == "organization.deleted":
+        await _delete_org(data, db)
+    elif event_type in (
+        "organizationMembership.created",
+        "organizationMembership.updated",
+    ):
+        await _sync_membership(data, db)
+    elif event_type == "organizationMembership.deleted":
+        await _remove_membership(data, db)
     # Ack all events (even unhandled types) so Clerk doesn't retry them.
     return {"received": True}

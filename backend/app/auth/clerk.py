@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.models import User
+from app.auth.models import Organization, User
 from app.config import get_settings
 
 settings = get_settings()
@@ -129,6 +129,75 @@ def _unusable_password_hash() -> str:
     return hash_password("clerk:" + uuid.uuid4().hex)
 
 
+def normalize_org_role(role: str | None) -> str:
+    """Clerk org roles are ``org:admin`` / ``org:member``. Collapse to our
+    two-value ``admin`` / ``member`` (anything unknown → member)."""
+    if not role:
+        return "member"
+    return "admin" if role.split(":")[-1].lower() == "admin" else "member"
+
+
+async def upsert_org(
+    clerk_org_id: str, name: str | None, db: AsyncSession
+) -> Organization:
+    """Find-or-create the local shadow of a Clerk organization."""
+    result = await db.execute(
+        select(Organization).where(Organization.clerk_org_id == clerk_org_id)
+    )
+    org = result.scalar_one_or_none()
+    if org is None:
+        org = Organization(clerk_org_id=clerk_org_id, name=name or "Organization")
+        db.add(org)
+        try:
+            await db.commit()
+            await db.refresh(org)
+        except IntegrityError:
+            await db.rollback()
+            result = await db.execute(
+                select(Organization).where(
+                    Organization.clerk_org_id == clerk_org_id
+                )
+            )
+            org = result.scalar_one_or_none()
+            if org is None:
+                raise
+    elif name and org.name != name:
+        org.name = name
+        await db.commit()
+    return org
+
+
+async def _sync_user_org(user: User, claims: dict, db: AsyncSession) -> None:
+    """Set ``user.org_id`` / ``user.org_role`` from the active org in the token.
+
+    Clerk exposes the active org either as flat ``org_id`` / ``org_role`` claims
+    or (v2 tokens) an ``o`` object ``{id, rol, slg}``. If there's no active org
+    (transient — e.g. the org is still being auto-created) we leave the user's
+    tenant untouched; the membership webhook will fill it in."""
+    org_id = claims.get("org_id")
+    org_role = claims.get("org_role")
+    slug = claims.get("org_slug")
+    o = claims.get("o")
+    if not org_id and isinstance(o, dict):
+        org_id = o.get("id")
+        org_role = o.get("rol")
+        slug = o.get("slg") or slug
+    if not org_id:
+        return
+
+    org = await upsert_org(org_id, slug, db)
+    role = normalize_org_role(org_role)
+    changed = False
+    if user.org_id != org.id:
+        user.org_id = org.id
+        changed = True
+    if user.org_role != role:
+        user.org_role = role
+        changed = True
+    if changed:
+        await db.commit()
+
+
 async def resolve_or_provision_user(claims: dict, db: AsyncSession) -> User:
     """Map verified Clerk claims to a local ``User``.
 
@@ -149,51 +218,52 @@ async def resolve_or_provision_user(claims: dict, db: AsyncSession) -> User:
         select(User).where(User.clerk_user_id == clerk_user_id)
     )
     user = result.scalar_one_or_none()
-    if user is not None:
-        return user
 
-    email = (claims.get("email") or "").strip().lower()
-    username = (claims.get("username") or "").strip()
+    if user is None:
+        email = (claims.get("email") or "").strip().lower()
+        username = (claims.get("username") or "").strip()
 
-    # Link an existing (Clerk-verified) email to migrate a password account.
-    if email:
-        result = await db.execute(select(User).where(User.email == email))
-        existing = result.scalar_one_or_none()
-        if existing is not None:
-            existing.clerk_user_id = clerk_user_id
-            await db.commit()
-            await db.refresh(existing)
-            return existing
+        # Link an existing (Clerk-verified) email to migrate a password account.
+        if email:
+            result = await db.execute(select(User).where(User.email == email))
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                existing.clerk_user_id = clerk_user_id
+                await db.commit()
+                await db.refresh(existing)
+                user = existing
 
-    short = clerk_user_id.replace("user_", "")[:24]
-    if not email:
-        email = f"{short}@clerk.local"
-    if not username:
-        username = f"clerk_{short}"[:64]
-
-    user = User(
-        email=email,
-        username=username,
-        password_hash=_unusable_password_hash(),
-        clerk_user_id=clerk_user_id,
-        role="user",
-    )
-    db.add(user)
-    try:
-        await db.commit()
-    except IntegrityError:
-        # Concurrent provision or a placeholder-handle collision — re-fetch by
-        # the Clerk id, which is the authoritative unique key.
-        await db.rollback()
-        result = await db.execute(
-            select(User).where(User.clerk_user_id == clerk_user_id)
-        )
-        user = result.scalar_one_or_none()
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to provision Clerk user",
+            short = clerk_user_id.replace("user_", "")[:24]
+            new_user = User(
+                email=email or f"{short}@clerk.local",
+                username=username or f"clerk_{short}"[:64],
+                password_hash=_unusable_password_hash(),
+                clerk_user_id=clerk_user_id,
+                role="user",
             )
-        return user
-    await db.refresh(user)
+            db.add(new_user)
+            try:
+                await db.commit()
+            except IntegrityError:
+                # Concurrent provision / placeholder-handle collision — re-fetch
+                # by the Clerk id, the authoritative unique key.
+                await db.rollback()
+                result = await db.execute(
+                    select(User).where(User.clerk_user_id == clerk_user_id)
+                )
+                user = result.scalar_one_or_none()
+                if user is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to provision Clerk user",
+                    )
+            else:
+                await db.refresh(new_user)
+                user = new_user
+
+    # Keep the caller's tenant (org_id / org_role) in sync with the active org
+    # in their token. Webhooks are the primary sync; this covers the window
+    # before they fire (and the very first request after sign-up).
+    await _sync_user_org(user, claims, db)
     return user
