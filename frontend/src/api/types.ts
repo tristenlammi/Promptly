@@ -219,6 +219,31 @@ export interface AuthEvent {
  * UI can render "Configured" / "Not configured" without ever holding
  * the cleartext.
  */
+/** One soft-deleted user awaiting purge (operator "Data & deletion" view). */
+export interface PendingDeletionUser {
+  id: string;
+  email: string;
+  username: string;
+  deleted_at: string;
+  /** When the daily purge job will hard-delete this account. */
+  purge_after: string;
+}
+
+/** One soft-deleted organization awaiting purge. */
+export interface PendingDeletionOrg {
+  id: string;
+  name: string;
+  deleted_at: string;
+  purge_after: string;
+}
+
+/** Everything currently soft-deleted, plus the configured grace window. */
+export interface PendingDeletions {
+  grace_days: number;
+  users: PendingDeletionUser[];
+  orgs: PendingDeletionOrg[];
+}
+
 /**
  * Per-ORG model-role defaults (Admin → Models → Defaults). Which model an
  * org reaches for when it needs role X. Scoped to the caller's own org;

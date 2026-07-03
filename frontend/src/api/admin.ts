@@ -10,6 +10,7 @@ import type {
   AnalyticsUserRow,
   AppSettings,
   OrgModelDefaults,
+  PendingDeletions,
   AuthEvent,
   ErrorEventDetail,
   ErrorEventRow,
@@ -301,6 +302,26 @@ export const adminApi = {
       { public_origin }
     );
     return data;
+  },
+
+  // ---------------- Data deletion / retention (operator only) ----------------
+  async pendingDeletions(): Promise<PendingDeletions> {
+    const { data } = await apiClient.get<PendingDeletions>(
+      "/admin/deletion/pending"
+    );
+    return data;
+  },
+  async purgeDeletionUser(id: string): Promise<void> {
+    await apiClient.post(`/admin/deletion/users/${id}/purge`);
+  },
+  async restoreDeletionUser(id: string): Promise<void> {
+    await apiClient.post(`/admin/deletion/users/${id}/restore`);
+  },
+  async purgeDeletionOrg(id: string): Promise<void> {
+    await apiClient.post(`/admin/deletion/orgs/${id}/purge`);
+  },
+  async restoreDeletionOrg(id: string): Promise<void> {
+    await apiClient.post(`/admin/deletion/orgs/${id}/restore`);
   },
 
   // ---------------- Per-org model defaults ----------------
