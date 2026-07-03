@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
-  Boxes,
   Clock,
   LogOut,
   MoreHorizontal,
@@ -638,19 +637,6 @@ function UserFooter() {
           Hosts chat-default preferences plus MFA / trusted devices. The
           route still ends in /security for backwards compatibility but
           the page hosts the broader account surface now. */}
-      {/* Org-admin settings surface (BYOK models). Members inherit the org's
-          models and don't get this. Distinct from the platform admin panel. */}
-      {canManageOrg && (
-        <button
-          onClick={() => navigate("/settings")}
-          className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          title="Models & API keys"
-          aria-label="Open model settings"
-        >
-          <Boxes className="h-4 w-4" />
-          <span className="font-medium">Models</span>
-        </button>
-      )}
       <button
         onClick={() => navigate("/account/security")}
         className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
@@ -660,16 +646,17 @@ function UserFooter() {
         <ShieldCheck className="h-4 w-4" />
         <span className="font-medium">Account</span>
       </button>
-      {/* Admin-only settings entry, sits just above the identity row. */}
-      {isAdmin && (
+      {/* Admin surface. Org admins get the tenant-scoped view (Models, etc.);
+          the platform admin gets every tab. Members don't see it. */}
+      {canManageOrg && (
         <button
           onClick={() => navigate("/admin")}
           className="mb-2 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          title="Admin settings"
-          aria-label="Open admin settings"
+          title={isAdmin ? "Platform admin" : "Organization admin"}
+          aria-label="Open admin"
         >
           <Settings className="h-4 w-4" />
-          <span className="font-medium">Settings</span>
+          <span className="font-medium">Admin</span>
         </button>
       )}
       <div className="flex items-center gap-2.5">

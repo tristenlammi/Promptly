@@ -11,7 +11,13 @@ import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
+
+// Tabs a tenant/org admin may see. The rest (all-tenant Users, global Analytics,
+// Console, Audit, App settings) are platform-operator only. As Users/Analytics
+// get org-scoped they'll be added here.
+const ORG_ADMIN_TAB_IDS = new Set<TabId>(["models"]);
 
 type TabId =
   | "users"
@@ -91,11 +97,25 @@ export function AdminPage() {
   // right surface (e.g. the ``/models`` legacy route now redirects to
   // ``/admin?tab=models``) and the back button steps through tabs the
   // user actually visited.
+  // Platform admin (operator) sees every tab; a tenant/org admin sees only the
+  // org-safe subset. Same page, scoped surface.
+  const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const visibleTabs = useMemo(
+    () =>
+      isPlatformAdmin
+        ? TABS
+        : TABS.filter((t) => ORG_ADMIN_TAB_IDS.has(t.id)),
+    [isPlatformAdmin]
+  );
+
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: TabId = useMemo(() => {
     const raw = searchParams.get("tab");
-    return raw && VALID_TAB_IDS.has(raw as TabId) ? (raw as TabId) : "users";
-  }, [searchParams]);
+    if (raw && VALID_TAB_IDS.has(raw as TabId) && visibleTabs.some((t) => t.id === raw)) {
+      return raw as TabId;
+    }
+    return visibleTabs[0].id;
+  }, [searchParams, visibleTabs]);
   const setTab = useCallback(
     (next: TabId) => {
       const params = new URLSearchParams(searchParams);
@@ -108,15 +128,15 @@ export function AdminPage() {
     },
     [searchParams, setSearchParams]
   );
-  const active = TABS.find((t) => t.id === tab) ?? TABS[0];
+  const active = visibleTabs.find((t) => t.id === tab) ?? visibleTabs[0];
 
   return (
     <>
-      <TopNav title="Settings" subtitle={active.subtitle} />
+      <TopNav title={isPlatformAdmin ? "Admin" : "Settings"} subtitle={active.subtitle} />
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-5 md:px-6 md:py-6">
-          <Tabs current={tab} onChange={setTab} />
+          <Tabs tabs={visibleTabs} current={tab} onChange={setTab} />
           <div className="mt-5">
             {tab === "users" && <UsersPanel />}
             {tab === "groups" && <GroupsPanel />}
@@ -134,9 +154,11 @@ export function AdminPage() {
 }
 
 function Tabs({
+  tabs,
   current,
   onChange,
 }: {
+  tabs: TabDef[];
   current: TabId;
   onChange: (next: TabId) => void;
 }) {
@@ -146,7 +168,7 @@ function Tabs({
       aria-label="Admin sections"
       className="flex flex-wrap gap-1 border-b border-[var(--border)]"
     >
-      {TABS.map((t) => {
+      {tabs.map((t) => {
         const isActive = t.id === current;
         return (
           <button

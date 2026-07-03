@@ -4,6 +4,7 @@ import { ProviderConnections } from "@/components/models/ProviderConnections";
 import { CustomModelsPanel } from "@/components/admin/CustomModelsPanel";
 import { LocalModelsPanel } from "@/components/admin/LocalModelsPanel";
 import { DefaultsTab } from "@/components/admin/DefaultsTab";
+import { useAuthStore } from "@/store/authStore";
 
 /**
  * The Models management surface.
@@ -42,12 +43,18 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 
 export function ModelsPanel() {
   const [tab, setTab] = useState<TabId>("connections");
+  // Org admins get only Connections (their BYOK keys). Defaults / Custom /
+  // Local are still global config — platform-admin only until org-scoped.
+  const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const visibleTabs = isPlatformAdmin
+    ? TABS
+    : TABS.filter((t) => t.id === "connections");
 
   return (
     <div>
       <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-1" role="tablist">
-          {TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const active = tab === t.id;
             return (
               <button

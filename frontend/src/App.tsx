@@ -16,7 +16,6 @@ import { WorkspaceDetailPage } from "@/pages/WorkspaceDetailPage";
 import { WorkspacesPage } from "@/pages/WorkspacesPage";
 import { RecentFilesPage } from "@/pages/RecentFilesPage";
 import { SearchResultsPage } from "@/pages/SearchResultsPage";
-import { SettingsPage } from "@/pages/SettingsPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { ShareLinkLandingPage } from "@/pages/ShareLinkLandingPage";
 import { StarredFilesPage } from "@/pages/StarredFilesPage";
@@ -45,6 +44,10 @@ export default function App() {
   useDrivePwaManifest();
   const status = useAuthStore((s) => s.status);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // Org admins (+ platform admin) reach the admin surface; it scopes itself.
+  const canManageOrg = useAuthStore(
+    (s) => s.user?.role === "admin" || s.user?.org_role === "admin"
+  );
 
   // Keep the model store's "default model" mirror in sync with
   // ``user.settings`` so every new chat starts on the user's preferred
@@ -258,10 +261,11 @@ export default function App() {
         <Route path="/files/search" element={<SearchResultsPage />} />
         <Route path="/archive" element={<ArchivePage />} />
         <Route path="/account/security" element={<AccountSecurityPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="/admin"
-          element={isAdmin ? <AdminPage /> : <Navigate to="/chat" replace />}
+          element={
+            canManageOrg ? <AdminPage /> : <Navigate to="/chat" replace />
+          }
         />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
