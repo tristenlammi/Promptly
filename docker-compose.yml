@@ -103,6 +103,10 @@ services:
       # NOT sufficient — the account must also match this exact email. Empty
       # (self-host/dev) → role alone governs.
       - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-}
+      # Backend paywall. OFF by default; flip to true only after confirming via
+      # GET /api/usage/entitlement that Clerk tokens carry the feature.
+      - PAYWALL_ENFORCED=${PAYWALL_ENFORCED:-false}
+      - PAYWALL_FEATURE=${PAYWALL_FEATURE:-pro}
       - SEARXNG_URL=http://searxng:8080
       # CORS allow-list and provider/search API keys are now configured
       # through the first-run wizard and Admin → Settings — not via

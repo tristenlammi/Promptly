@@ -165,6 +165,14 @@ if _trusted_hosts:
         allowed_hosts=[*_trusted_hosts, "localhost", "127.0.0.1", "backend"],
     )
 
+# Paywall enforcement. Added before the RequestContext + CORS layers so those
+# stay OUTER — a 402 from here still bubbles out through them (CORS headers +
+# request logging intact). Inert unless PAYWALL_ENFORCED; pass-through for
+# allowed requests so SSE streams aren't buffered. See app.paywall.
+from app.paywall import PaywallMiddleware  # noqa: E402
+
+app.add_middleware(PaywallMiddleware)
+
 # Request-context middleware first so the request id and route are
 # bound in contextvars before CORS / auth start logging.
 app.add_middleware(RequestContextMiddleware)

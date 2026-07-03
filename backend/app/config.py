@@ -59,6 +59,18 @@ class Settings(BaseSettings):
     # operator). Set to the owner's email in the hosted deployment.
     PLATFORM_ADMIN_EMAIL: str = ""
 
+    # ---- Backend paywall enforcement ----
+    # The frontend gate is bypassable via direct API calls; when this is ON the
+    # API also refuses an unentitled caller (402). Entitlement is read from the
+    # verified Clerk session JWT (same feature `has({feature})` checks client-
+    # side). Defaults OFF and FAILS OPEN, so shipping it can't lock anyone out
+    # — verify with GET /api/usage/entitlement that your token actually carries
+    # the feature, THEN set this true. Ignored for custom/self-host auth.
+    PAYWALL_ENFORCED: bool = False
+    # The Clerk billing feature that marks an entitled org (matches the plan's
+    # feature key + the frontend's `has({feature:"pro"})`).
+    PAYWALL_FEATURE: str = "pro"
+
     # ---- Data deletion / retention ----
     # Grace window (days) between a user/org being soft-deleted (marked in the
     # Clerk deletion webhooks) and the scheduled purge job hard-deleting the
