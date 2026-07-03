@@ -7,7 +7,6 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
 import { ChatPage } from "@/pages/ChatPage";
-import { ClerkAuthPage } from "@/pages/ClerkAuthPage";
 import { FilesPage, SharedWithMePage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
@@ -28,9 +27,6 @@ import { ArchivePage } from "@/pages/ArchivePage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
-import { isClerkAuth } from "@/auth/authMode";
-import { ClerkSubscriptionGate } from "@/auth/ClerkSubscriptionGate";
-import { OrgOnboardingGate } from "@/components/onboarding/OrgOnboardingGate";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
 import { useAuthStore } from "@/store/authStore";
@@ -160,15 +156,6 @@ export default function App() {
   }
 
   if (status === "unauthenticated") {
-    // Public share links must work for anonymous visitors in either auth mode.
-    if (isClerkAuth) {
-      return (
-        <Routes>
-          <Route path="/s/:token" element={<ShareLinkLandingPage />} />
-          <Route path="*" element={<ClerkAuthPage />} />
-        </Routes>
-      );
-    }
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -275,13 +262,7 @@ export default function App() {
 
   return (
     <>
-      {isClerkAuth ? (
-        <ClerkSubscriptionGate>
-          <OrgOnboardingGate>{authedApp}</OrgOnboardingGate>
-        </ClerkSubscriptionGate>
-      ) : (
-        authedApp
-      )}
+      {authedApp}
       <ToastViewport />
       <ConfirmHost />
     </>

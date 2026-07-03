@@ -13,7 +13,7 @@ gates the user's next turn.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import AnalyticsModelRow, AnalyticsTimeseriesPoint
@@ -23,21 +23,8 @@ from app.billing import aggregates
 from app.billing.schemas import MyUsageSummary
 from app.billing.usage import check_budget
 from app.database import get_db
-from app.paywall import entitlement_status
 
 router = APIRouter()
-
-
-@router.get("/entitlement")
-async def entitlement(
-    request: Request,
-    _: User = Depends(get_current_user),
-) -> dict:
-    """Whether the caller's session is entitled, plus the raw feature/plan
-    claims it carries. Deliberately on the always-open ``/api/usage`` prefix so
-    it's reachable even when the paywall is enforcing — use it to confirm the
-    token carries the feature BEFORE turning ``PAYWALL_ENFORCED`` on."""
-    return await entitlement_status(request)
 
 
 @router.get("/me/summary", response_model=MyUsageSummary)

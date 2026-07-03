@@ -1,7 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { OrganizationProfile } from "@clerk/clerk-react";
-import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Trash2, UserPlus, Users, Users2 } from "lucide-react";
+import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Trash2, Users, Users2 } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -13,13 +12,11 @@ import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
-import { isClerkAuth } from "@/auth/authMode";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 type TabId =
   | "users"
-  | "members"
   | "groups"
   | "analytics"
   | "console"
@@ -28,15 +25,6 @@ type TabId =
   | "models"
   | "connectors"
   | "deletion";
-
-// The org-admin "Members" tab — invite teammates, roles, seats — powered by
-// Clerk's <OrganizationProfile/> (only meaningful in Clerk mode with an org).
-const MEMBERS_TAB: TabDef = {
-  id: "members",
-  label: "Members",
-  icon: <UserPlus className="h-3.5 w-3.5" />,
-  subtitle: "Invite your team, manage roles, and add seats.",
-};
 
 interface TabDef {
   id: TabId;
@@ -115,18 +103,14 @@ export function AdminPage() {
   const isPlatformAdmin = useAuthStore(
     (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
   );
-  const hasOrg = useAuthStore((s) => !!s.user?.org_id);
   const visibleTabs = useMemo(() => {
     const pick = (id: TabId) => TABS.find((t) => t.id === id);
     const push = (id: TabId, out: TabDef[]) => {
       const t = pick(id);
       if (t) out.push(t);
     };
-    // Everyone (INCLUDING the platform admin) manages only their OWN org's
-    // resources here — Models, Members, Groups, Connectors, Analytics.
     const tabs: TabDef[] = [];
     push("models", tabs);
-    if (isClerkAuth && hasOrg) tabs.push(MEMBERS_TAB);
     push("groups", tabs);
     push("connectors", tabs);
     push("analytics", tabs);
@@ -139,7 +123,7 @@ export function AdminPage() {
       push("deletion", tabs);
     }
     return tabs;
-  }, [isPlatformAdmin, hasOrg]);
+  }, [isPlatformAdmin]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: TabId = useMemo(() => {
@@ -172,14 +156,6 @@ export function AdminPage() {
           <Tabs tabs={visibleTabs} current={tab} onChange={setTab} />
           <div className="mt-5">
             {tab === "users" && <UsersPanel />}
-            {tab === "members" && isClerkAuth && (
-              // Clerk's org member management — invite by email, roles, and
-              // seats (enforced against the org's plan). Membership syncs back
-              // to our shadow users via webhooks.
-              <div className="flex justify-center">
-                <OrganizationProfile routing="hash" />
-              </div>
-            )}
             {tab === "groups" && <GroupsPanel />}
             {tab === "models" && <ModelsPanel />}
             {tab === "connectors" && <McpConnectorsPanel />}

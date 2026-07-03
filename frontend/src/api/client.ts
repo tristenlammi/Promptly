@@ -11,41 +11,9 @@ export const apiClient = axios.create({
   timeout: 30_000,
 });
 
-// ---- Clerk auth bridge (only wired when AUTH_PROVIDER=clerk) ----
-// In Clerk mode the bearer token comes from Clerk's short-lived session token
-// (auto-refreshed by the SDK), not our custom JWT. ``ClerkBridge`` registers a
-// getter here; when null (the default custom mode) the client reads the token
-// from the auth store exactly as before.
-type ClerkTokenGetter = (opts?: {
-  skipCache?: boolean;
-}) => Promise<string | null>;
-let clerkTokenGetter: ClerkTokenGetter | null = null;
-let clerkSignOut: (() => Promise<void>) | null = null;
-
-export function setClerkTokenGetter(fn: ClerkTokenGetter | null): void {
-  clerkTokenGetter = fn;
-}
-export function setClerkSignOut(fn: (() => Promise<void>) | null): void {
-  clerkSignOut = fn;
-}
-/** Present only in Clerk mode — the logout handler calls it to end the Clerk
- *  session instead of hitting /auth/logout. */
-export function getClerkSignOut(): (() => Promise<void>) | null {
-  return clerkSignOut;
-}
-
 // ---- Request: attach access token ----
-apiClient.interceptors.request.use(async (config) => {
-  let token: string | null;
-  if (clerkTokenGetter) {
-    // Clerk caches/refreshes internally, so calling per-request is cheap and
-    // always yields a valid token. Mirror it into the store so the sync
-    // ``authHeader()`` path (streaming fetch) stays fresh too.
-    token = await clerkTokenGetter();
-    if (token) useAuthStore.getState().setAccessToken(token);
-  } else {
-    token = useAuthStore.getState().accessToken;
-  }
+apiClient.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken;
   if (token) {
     config.headers = config.headers ?? {};
     config.headers.Authorization = `Bearer ${token}`;
@@ -57,17 +25,6 @@ apiClient.interceptors.request.use(async (config) => {
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
-  // Clerk mode: force a fresh Clerk token rather than hitting /auth/refresh
-  // (there's no custom refresh cookie). Clerk dedupes the underlying refresh.
-  if (clerkTokenGetter) {
-    try {
-      const t = await clerkTokenGetter({ skipCache: true });
-      if (t) useAuthStore.getState().setAccessToken(t);
-      return t ?? null;
-    } catch {
-      return null;
-    }
-  }
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {

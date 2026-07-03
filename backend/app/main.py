@@ -165,14 +165,6 @@ if _trusted_hosts:
         allowed_hosts=[*_trusted_hosts, "localhost", "127.0.0.1", "backend"],
     )
 
-# Paywall enforcement. Added before the RequestContext + CORS layers so those
-# stay OUTER — a 402 from here still bubbles out through them (CORS headers +
-# request logging intact). Inert unless PAYWALL_ENFORCED; pass-through for
-# allowed requests so SSE streams aren't buffered. See app.paywall.
-from app.paywall import PaywallMiddleware  # noqa: E402
-
-app.add_middleware(PaywallMiddleware)
-
 # Request-context middleware first so the request id and route are
 # bound in contextvars before CORS / auth start logging.
 app.add_middleware(RequestContextMiddleware)
@@ -283,7 +275,6 @@ from app.app_settings.public_router import (  # noqa: E402
     router as workspace_defaults_router,
 )
 from app.auth.router import router as auth_router  # noqa: E402
-from app.auth.clerk_webhook import router as clerk_webhook_router  # noqa: E402
 from app.workspaces.shares import invite_router as workspace_invite_router  # noqa: E402
 from app.workspaces.shares import router as workspace_shares_router  # noqa: E402
 from app.workspaces.router import router as workspaces_router  # noqa: E402
@@ -315,9 +306,6 @@ from app.tasks.router import router as tasks_router  # noqa: E402
 from app.voice.router import router as voice_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
-app.include_router(
-    clerk_webhook_router, prefix="/api/auth/clerk", tags=["clerk"]
-)
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(

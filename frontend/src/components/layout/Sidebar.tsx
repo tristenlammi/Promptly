@@ -30,7 +30,6 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
 import { authApi } from "@/api/auth";
-import { getClerkSignOut } from "@/api/client";
 import type { ConversationSummary } from "@/api/types";
 import { Inbox } from "lucide-react";
 
@@ -577,20 +576,6 @@ function UserFooter() {
   const inviteCount = workspaceInvites?.length ?? 0;
 
   const onLogout = async () => {
-    // Clerk mode: end the Clerk session; ClerkBridge then flips the app to
-    // "unauthenticated" and the Clerk sign-in screen shows. No /auth/logout
-    // (there's no custom session) and no /login navigation (that route is the
-    // Clerk page in this mode).
-    const clerkSignOut = getClerkSignOut();
-    if (clerkSignOut) {
-      try {
-        await clerkSignOut();
-      } catch {
-        // Ignore — clearing local state is the point.
-      }
-      clear();
-      return;
-    }
     try {
       await authApi.logout();
     } catch {

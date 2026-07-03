@@ -38,18 +38,6 @@ class Settings(BaseSettings):
     SINGLE_USER_MODE: bool = False
     ALLOWED_ORIGINS: str = "http://localhost"
 
-    # ---- Auth provider (reversible Clerk migration) ----
-    # "custom" = the built-in JWT auth (default; fully self-contained, includes
-    # MFA/lockout/token-versioning). "clerk" = verify Clerk-issued session
-    # tokens instead. The switch is a single flag so the app reverts to built-in
-    # auth by flipping it back to "custom" and redeploying — no code changes.
-    # The CLERK_* settings are read only when AUTH_PROVIDER == "clerk".
-    AUTH_PROVIDER: str = "custom"
-    CLERK_ISSUER: str = ""  # e.g. https://your-app.clerk.accounts.dev
-    CLERK_JWKS_URL: str = ""  # e.g. {issuer}/.well-known/jwks.json
-    CLERK_SECRET_KEY: str = ""  # backend API key (management + webhook calls)
-    CLERK_WEBHOOK_SECRET: str = ""  # svix signing secret for webhook verification
-
     # ---- Platform (super) admin ----
     # The hosted SaaS has exactly ONE super admin, ever: the app owner. Being
     # role=="admin" is necessary but NOT sufficient — the account must also
@@ -58,43 +46,6 @@ class Settings(BaseSettings):
     # dev, where ``role=admin`` alone governs (the first registered user is the
     # operator). Set to the owner's email in the hosted deployment.
     PLATFORM_ADMIN_EMAIL: str = ""
-
-    # ---- Self-host licensing (custom-auth path only) ----
-    # Self-host is FREE and UNLIMITED by default — add as many accounts as you
-    # like, no license needed. Seat-limited licensing is an OPT-IN capability:
-    # flip ``LICENSE_ENFORCED`` on (for a commercial self-host offering) and the
-    # instance enforces the free-tier/license seat cap below. Off (default) =
-    # no cap. Only relevant when AUTH_PROVIDER=custom (Clerk mode bills seats).
-    LICENSE_ENFORCED: bool = False
-    #
-    # When enforced: licenses are offline-signed (Ed25519) — the instance
-    # verifies with the baked-in public key, no phone-home.
-    #
-    # ``LICENSE_PUBLIC_KEY`` — base64 Ed25519 public key of the license issuer
-    #   (you). Baked into the deployment; empty = can't verify any license, so
-    #   the instance stays on the free single-seat tier.
-    # ``LICENSE_KEY`` — the signed license token for this instance (or paste it
-    #   in the admin UI once that lands). Empty = free tier.
-    LICENSE_PUBLIC_KEY: str = ""
-    LICENSE_KEY: str = ""
-    # Days a lapsed (expired) license keeps its full seat count before the
-    # instance drops back to the free tier for *adding* accounts. Existing
-    # users are never disabled — the gate is only on growth.
-    LICENSE_GRACE_DAYS: int = 14
-    # Seats available with no valid license (the free self-host tier).
-    LICENSE_FREE_SEATS: int = 1
-
-    # ---- Backend paywall enforcement ----
-    # The frontend gate is bypassable via direct API calls; when this is ON the
-    # API also refuses an unentitled caller (402). Entitlement is read from the
-    # verified Clerk session JWT (same feature `has({feature})` checks client-
-    # side). Defaults OFF and FAILS OPEN, so shipping it can't lock anyone out
-    # — verify with GET /api/usage/entitlement that your token actually carries
-    # the feature, THEN set this true. Ignored for custom/self-host auth.
-    PAYWALL_ENFORCED: bool = False
-    # The Clerk billing feature that marks an entitled org (matches the plan's
-    # feature key + the frontend's `has({feature:"pro"})`).
-    PAYWALL_FEATURE: str = "pro"
 
     # ---- Data deletion / retention ----
     # Grace window (days) between a user/org being soft-deleted (marked in the

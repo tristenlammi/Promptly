@@ -116,37 +116,6 @@ async def _resolve_custom_user(
     return user
 
 
-async def _resolve_clerk_user(
-    credentials: HTTPAuthorizationCredentials | None,
-    db: AsyncSession,
-) -> User:
-    """Clerk auth path. Verifies the Clerk session JWT (RS256/JWKS), maps it to
-    a local shadow ``User`` (lazy-provisioned on first sign-in), and enforces the
-    disabled/lock checks. Clerk tokens don't carry our ``tv`` claim, so
-    token-version revocation is a no-op here — Clerk session revocation + the
-    ``disabled`` flag cover it instead. Imported lazily so the default custom
-    path never pulls in the Clerk module."""
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing bearer token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    from app.auth.clerk import resolve_or_provision_user, verify_clerk_token
-
-    claims = await verify_clerk_token(credentials.credentials)
-    user = await resolve_or_provision_user(claims, db)
-
-    if user.disabled or user.is_locked:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session is no longer valid",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return user
-
-
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -157,13 +126,7 @@ async def get_current_user(
         bind_user(single.id)
         return single
 
-    # Reversible auth seam: a single flag selects the verification path. Default
-    # "custom" keeps behaviour byte-identical to the built-in JWT auth; flipping
-    # to "clerk" (once configured) and back is the whole revert story.
-    if (settings.AUTH_PROVIDER or "custom").lower() == "clerk":
-        user = await _resolve_clerk_user(credentials, db)
-    else:
-        user = await _resolve_custom_user(credentials, db)
+    user = await _resolve_custom_user(credentials, db)
 
     # Attach to request.state for cheap reuse by other dependencies/middleware.
     request.state.user = user
