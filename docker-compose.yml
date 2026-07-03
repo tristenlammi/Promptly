@@ -65,12 +65,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      # Auth provider baked into the Vite build. Defaults to the built-in JWT
-      # auth; set VITE_AUTH_PROVIDER=clerk + VITE_CLERK_PUBLISHABLE_KEY in the
-      # environment (or .env) to build the Clerk variant.
-      args:
-        - VITE_AUTH_PROVIDER=${VITE_AUTH_PROVIDER:-custom}
-        - VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY:-}
     container_name: Promptly-Frontend
     environment:
       - VITE_API_BASE_URL=/api
@@ -92,29 +86,6 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - SINGLE_USER_MODE=${SINGLE_USER_MODE:-false}
-      # Reversible Clerk auth. Defaults keep the built-in JWT auth; set
-      # AUTH_PROVIDER=clerk + CLERK_ISSUER to verify Clerk session tokens.
-      - AUTH_PROVIDER=${AUTH_PROVIDER:-custom}
-      - CLERK_ISSUER=${CLERK_ISSUER:-}
-      - CLERK_JWKS_URL=${CLERK_JWKS_URL:-}
-      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
-      - CLERK_WEBHOOK_SECRET=${CLERK_WEBHOOK_SECRET:-}
-      # The single hosted-SaaS super admin. Being role=admin is necessary but
-      # NOT sufficient — the account must also match this exact email. Empty
-      # (self-host/dev) → role alone governs.
-      - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-}
-      # Backend paywall. OFF by default; flip to true only after confirming via
-      # GET /api/usage/entitlement that Clerk tokens carry the feature.
-      - PAYWALL_ENFORCED=${PAYWALL_ENFORCED:-false}
-      - PAYWALL_FEATURE=${PAYWALL_FEATURE:-pro}
-      # Self-host licensing (AUTH_PROVIDER=custom only). FREE + UNLIMITED by
-      # default. Set LICENSE_ENFORCED=true only for a commercial seat-limited
-      # self-host offering (then set the public key + license token). Inert in
-      # hosted/Clerk mode.
-      - LICENSE_ENFORCED=${LICENSE_ENFORCED:-false}
-      - LICENSE_PUBLIC_KEY=${LICENSE_PUBLIC_KEY:-}
-      - LICENSE_KEY=${LICENSE_KEY:-}
-      - LICENSE_GRACE_DAYS=${LICENSE_GRACE_DAYS:-14}
       - SEARXNG_URL=http://searxng:8080
       # CORS allow-list and provider/search API keys are now configured
       # through the first-run wizard and Admin → Settings — not via

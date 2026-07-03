@@ -1,12 +1,11 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Trash2, Users, Users2 } from "lucide-react";
+import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Users, Users2 } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
-import { DeletionPanel } from "@/components/admin/DeletionPanel";
 import { GroupsPanel } from "@/components/admin/GroupsPanel";
 import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
@@ -23,8 +22,7 @@ type TabId =
   | "audit"
   | "settings"
   | "models"
-  | "connectors"
-  | "deletion";
+  | "connectors";
 
 interface TabDef {
   id: TabId;
@@ -85,12 +83,6 @@ const TABS: TabDef[] = [
     icon: <Settings className="h-3.5 w-3.5" />,
     subtitle: "MFA enforcement and SMTP server configuration.",
   },
-  {
-    id: "deletion",
-    label: "Data & deletion",
-    icon: <Trash2 className="h-3.5 w-3.5" />,
-    subtitle: "Accounts and orgs pending deletion — restore or purge now.",
-  },
 ];
 
 export function AdminPage() {
@@ -120,7 +112,6 @@ export function AdminPage() {
       push("console", tabs);
       push("audit", tabs);
       push("settings", tabs);
-      push("deletion", tabs);
     }
     return tabs;
   }, [isPlatformAdmin]);
@@ -163,7 +154,6 @@ export function AdminPage() {
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}
             {tab === "settings" && <AppSettingsPanel />}
-            {tab === "deletion" && <DeletionPanel />}
           </div>
         </div>
       </div>

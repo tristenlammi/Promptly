@@ -266,7 +266,6 @@ async def health() -> JSONResponse:
 
 # ---- Router registration ----
 from app.admin.router import router as admin_router  # noqa: E402
-from app.admin.deletion_router import router as deletion_router  # noqa: E402
 from app.app_settings.router import router as app_settings_router  # noqa: E402
 from app.app_settings.public_router import (  # noqa: E402
     router as workspace_defaults_router,
@@ -305,9 +304,6 @@ from app.voice.router import router as voice_router  # noqa: E402
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
-app.include_router(
-    deletion_router, prefix="/api/admin/deletion", tags=["admin"]
-)
 app.include_router(
     app_settings_router, prefix="/api/admin/app-settings", tags=["admin"]
 )

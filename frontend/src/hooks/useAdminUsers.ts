@@ -17,7 +17,6 @@ import type {
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
   AppSettings,
-  PendingDeletions,
   AuthEvent,
   ErrorEventDetail,
   ErrorEventRow,
@@ -181,36 +180,6 @@ export function useUpdateAppSettings() {
   });
 }
 
-// ---------------- Data deletion / retention (operator only) ----------------
-const PENDING_DELETIONS_KEY = ["admin", "deletion", "pending"] as const;
-
-export function usePendingDeletions() {
-  return useQuery<PendingDeletions>({
-    queryKey: PENDING_DELETIONS_KEY,
-    queryFn: adminApi.pendingDeletions,
-    staleTime: 15_000,
-  });
-}
-
-/** Purge/restore mutations all refetch the pending list on success. */
-function useDeletionAction(fn: (id: string) => Promise<void>) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => fn(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: PENDING_DELETIONS_KEY });
-    },
-  });
-}
-
-export const usePurgeDeletionUser = () =>
-  useDeletionAction(adminApi.purgeDeletionUser);
-export const useRestoreDeletionUser = () =>
-  useDeletionAction(adminApi.restoreDeletionUser);
-export const usePurgeDeletionOrg = () =>
-  useDeletionAction(adminApi.purgeDeletionOrg);
-export const useRestoreDeletionOrg = () =>
-  useDeletionAction(adminApi.restoreDeletionOrg);
 
 // ---------------- Analytics (Phase 3) ----------------
 export function useAnalyticsSummary(days = 30) {
