@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
 import { ChatPage } from "@/pages/ChatPage";
+import { ClerkAuthPage } from "@/pages/ClerkAuthPage";
 import { FilesPage, SharedWithMePage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
@@ -27,6 +28,7 @@ import { ArchivePage } from "@/pages/ArchivePage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
+import { isClerkAuth } from "@/auth/authMode";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
 import { useAuthStore } from "@/store/authStore";
@@ -152,11 +154,19 @@ export default function App() {
   }
 
   if (status === "unauthenticated") {
+    // Public share links must work for anonymous visitors in either auth mode.
+    if (isClerkAuth) {
+      return (
+        <Routes>
+          <Route path="/s/:token" element={<ShareLinkLandingPage />} />
+          <Route path="*" element={<ClerkAuthPage />} />
+        </Routes>
+      );
+    }
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        {/* Public share links must work for anonymous visitors.
-            The landing page itself enforces any password / sign-in
+        {/* The landing page itself enforces any password / sign-in
             requirements via the backend, so we let the route
             through without the global redirect-to-login. */}
         <Route path="/s/:token" element={<ShareLinkLandingPage />} />

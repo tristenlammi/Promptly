@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { authApi } from "@/api/auth";
+import { isClerkAuth } from "@/auth/authMode";
 import { useAuthStore } from "@/store/authStore";
 
 /**
@@ -17,6 +18,10 @@ export function useAuthBootstrap() {
   const setStatus = useAuthStore((s) => s.setStatus);
 
   useEffect(() => {
+    // Clerk mode: ``ClerkBridge`` owns auth state; the custom setup/me/refresh
+    // probe would fight it (and there's no custom refresh cookie).
+    if (isClerkAuth) return;
+
     let cancelled = false;
 
     (async () => {

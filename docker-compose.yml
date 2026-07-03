@@ -65,6 +65,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # Auth provider baked into the Vite build. Defaults to the built-in JWT
+      # auth; set VITE_AUTH_PROVIDER=clerk + VITE_CLERK_PUBLISHABLE_KEY in the
+      # environment (or .env) to build the Clerk variant.
+      args:
+        - VITE_AUTH_PROVIDER=${VITE_AUTH_PROVIDER:-custom}
+        - VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY:-}
     container_name: Promptly-Frontend
     environment:
       - VITE_API_BASE_URL=/api

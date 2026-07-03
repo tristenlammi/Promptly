@@ -3,8 +3,12 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 
+import { ClerkProvider } from "@clerk/clerk-react";
+
 import App from "./App";
 import { ErrorBoundary } from "./components/system/ErrorBoundary";
+import { CLERK_PUBLISHABLE_KEY, isClerkAuth } from "./auth/authMode";
+import { ClerkBridge } from "./auth/ClerkBridge";
 import "./index.css";
 
 // Tell Excalidraw to load its fonts + locales from our self-hosted copy
@@ -30,7 +34,7 @@ const queryClient = new QueryClient({
   },
 });
 
-createRoot(document.getElementById("root")!).render(
+const appTree = (
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
@@ -40,4 +44,17 @@ createRoot(document.getElementById("root")!).render(
       </QueryClientProvider>
     </ErrorBoundary>
   </StrictMode>
+);
+
+createRoot(document.getElementById("root")!).render(
+  isClerkAuth ? (
+    // Clerk mode: wrap the app so Clerk hooks work, and mount the bridge that
+    // reflects Clerk's session into the existing auth store + API client.
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+      <ClerkBridge />
+      {appTree}
+    </ClerkProvider>
+  ) : (
+    appTree
+  )
 );

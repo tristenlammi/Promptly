@@ -15,6 +15,13 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
 # ---- Build stage ----
 FROM base AS build
 COPY . .
+# Auth provider is baked at build time (Vite inlines import.meta.env). Defaults
+# keep the built app on the custom JWT auth; pass VITE_AUTH_PROVIDER=clerk +
+# the publishable key to build the Clerk variant.
+ARG VITE_AUTH_PROVIDER=custom
+ARG VITE_CLERK_PUBLISHABLE_KEY=
+ENV VITE_AUTH_PROVIDER=$VITE_AUTH_PROVIDER
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
 RUN npm run build
 
 # ---- Production target (nginx serving built SPA) ----
