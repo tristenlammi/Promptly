@@ -1,15 +1,46 @@
-"""User ORM model."""
+"""User + Organization ORM models."""
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 from app.db_types import CreatedAtMixin, UUIDPKMixin
+
+
+class Organization(UUIDPKMixin, CreatedAtMixin, Base):
+    """A tenant. Every account is an Organization (a solo user is just a 1-seat
+    org). Shadow of a Clerk Organization — Clerk owns membership/billing; this
+    row anchors app-side foreign keys (providers, workspaces) and the seat/plan
+    mirror. Auto-created for each account at sign-up (Clerk 'create first
+    organization automatically')."""
+
+    __tablename__ = "organizations"
+
+    clerk_org_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True, index=True, default=None
+    )
+    name: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="Organization"
+    )
+    # Mirror of the Clerk subscription so the backend can gate without a Clerk
+    # API call per request. Synced by billing webhooks (later step).
+    plan: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    seat_limit: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    # Org-wide storage cap (bytes). NULL → fall back to the app default.
+    storage_cap_bytes: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
 
 class User(UUIDPKMixin, CreatedAtMixin, Base):
@@ -25,6 +56,21 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     # allowed_models, quotas, org membership); Clerk only owns authentication.
     clerk_user_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True, default=None
+    )
+
+    # Tenant membership. Every account belongs to exactly one Organization (its
+    # own solo org, or the org they were invited to). NULL only transiently
+    # before the org is synced. ``org_role`` = "admin" (owner / can configure
+    # providers + invite) or "member" (uses inherited models, no settings).
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        default=None,
+    )
+    org_role: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
     )
 
     # "admin" (full access + can manage users/providers) or "user" (chat only,
