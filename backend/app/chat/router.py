@@ -804,7 +804,7 @@ async def list_mention_candidates(
         from app.mcp.service import connectors_for_turn
 
         conns = await connectors_for_turn(
-            db, user_id=user.id, workspace_id=workspace_id
+            db, org_id=user.org_id, user_id=user.id, workspace_id=workspace_id
         )
         for c in conns:
             if q_norm and q_norm not in c.name.lower() and q_norm not in c.slug:
@@ -4193,6 +4193,7 @@ async def _stream_generator(
 
                 _mcp_connectors = await connectors_for_turn(
                     db,
+                    org_id=user.org_id,
                     user_id=user.id,
                     workspace_id=conv.workspace_id,
                 )
@@ -4553,7 +4554,10 @@ async def _stream_generator(
                     )
 
                     reachable = await connectors_for_turn(
-                        db, user_id=user.id, workspace_id=conv.workspace_id
+                        db,
+                        org_id=user.org_id,
+                        user_id=user.id,
+                        workspace_id=conv.workspace_id,
                     )
                     wanted = {m.connector_id for m in connector_mentions}
                     already = {cid for cid, _ in mcp_dispatch.values()}

@@ -119,6 +119,8 @@ export function AdminPage() {
     if (isClerkAuth && hasOrg) tabs.push(MEMBERS_TAB);
     const groupsTab = pick("groups");
     if (groupsTab) tabs.push(groupsTab);
+    const connectorsTab = pick("connectors");
+    if (connectorsTab) tabs.push(connectorsTab);
     const analyticsTab = pick("analytics");
     if (analyticsTab) tabs.push(analyticsTab);
     return tabs;

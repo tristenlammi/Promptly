@@ -91,22 +91,23 @@ async def _connector_ids_for(
 async def _set_task_connectors(
     db: AsyncSession, task_id: uuid.UUID, connector_ids: list[uuid.UUID]
 ) -> None:
-    """Replace a task's connector set with the valid ids among ``connector_ids``."""
+    """Replace a task's connector set with the valid ids among ``connector_ids``
+    that belong to the task owner's org (tenant isolation — a task can't
+    reference another org's connector)."""
     await db.execute(
         delete(TaskConnector).where(TaskConnector.task_id == task_id)
     )
     if connector_ids:
-        valid = set(
-            (
-                await db.execute(
-                    select(McpConnector.id).where(
-                        McpConnector.id.in_(connector_ids)
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        task = await db.get(Task, task_id)
+        owner = await db.get(User, task.user_id) if task else None
+        org_id = owner.org_id if owner else None
+        stmt = select(McpConnector.id).where(
+            McpConnector.id.in_(connector_ids),
+            # ``== org_id`` with org_id=None yields ``IS NULL``-false semantics
+            # so a no-org owner attaches nothing (never a system/NULL row).
+            McpConnector.org_id == org_id,
         )
+        valid = set((await db.execute(stmt)).scalars().all())
         for cid in dict.fromkeys(connector_ids):
             if cid in valid:
                 db.add(TaskConnector(task_id=task_id, connector_id=cid))
@@ -229,7 +230,7 @@ async def available_connectors(
     from app.mcp.service import connectors_for_turn
 
     conns = await connectors_for_turn(
-        db, user_id=user.id, workspace_id=workspace_id
+        db, org_id=user.org_id, user_id=user.id, workspace_id=workspace_id
     )
     return [
         AvailableConnector(

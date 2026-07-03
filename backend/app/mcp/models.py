@@ -21,8 +21,10 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -31,11 +33,25 @@ from app.db_types import TimestampMixin, UUIDPKMixin
 
 class McpConnector(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "mcp_connectors"
+    __table_args__ = (
+        # Slug namespaces tools (``mcp__<slug>__<tool>``); unique PER TENANT so
+        # two orgs can each have e.g. a "unifi" connector without colliding.
+        UniqueConstraint("org_id", "slug", name="uq_mcp_connectors_org_slug"),
+    )
+
+    # Owning tenant (org). An org admin's connectors are usable only within
+    # their org; NULL only for legacy/system rows (never surfaced to tenants).
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     # Stable slug derived from the name; used to namespace tools as
-    # ``mcp__<slug>__<tool>`` so two servers can't collide. Unique.
-    slug: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    # ``mcp__<slug>__<tool>``. Unique per org.
+    slug: Mapped[str] = mapped_column(String(40), nullable=False)
     # Connector kind: 'mcp' (remote MCP server) | 'unifi' | 'omada' (native
     # first-party connectors that call an appliance's official API directly).
     # For native kinds the tool catalog is fixed and dispatch routes to our
