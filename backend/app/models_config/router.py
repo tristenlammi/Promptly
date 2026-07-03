@@ -306,14 +306,12 @@ async def list_available_models_for(
             (ModelProvider.user_id == user.id) | (ModelProvider.user_id.is_(None))
         )
     else:
-        # Providers owned by any admin are shared with regular users. We
-        # intentionally don't look up admin user IDs separately — a subquery
-        # keeps the set correct even if admins are added/demoted.
-        admin_ids_subq = select(User.id).where(User.role == "admin").scalar_subquery()
-        provider_filter = (
-            ModelProvider.user_id.in_(admin_ids_subq)
-            | ModelProvider.user_id.is_(None)
-        )
+        # BYOK: a regular (tenant) user sees models only from providers they
+        # own. System/admin providers are NOT shared — that's what keeps a
+        # personal/org account off the platform owner's local models + keys.
+        # (Custom Models inherit this: the block below reuses provider_filter,
+        # so a custom model on an out-of-scope provider is filtered out too.)
+        provider_filter = ModelProvider.user_id == user.id
 
     result = await db.execute(
         select(ModelProvider)

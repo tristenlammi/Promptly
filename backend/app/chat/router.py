@@ -1567,19 +1567,17 @@ async def send_message(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
         )
-    # Admins may use their own providers + system-wide. Normal users may use
-    # any provider owned by an admin + system-wide — never a different
-    # non-admin's provider.
-    owner_ok = provider.user_id is None or provider.user_id == user.id
+    # BYOK ownership: platform admins may use their own providers + system-wide
+    # rows; a regular (tenant) user may use ONLY their own providers — never
+    # system/admin providers or another tenant's.
+    if user.role == "admin":
+        owner_ok = provider.user_id is None or provider.user_id == user.id
+    else:
+        owner_ok = provider.user_id == user.id
     if not owner_ok:
-        owner = await db.get(User, provider.user_id)
-        owner_ok = owner is not None and owner.role == "admin" and user.role != "admin"
-        # (Admins fall through here because "not owner_ok" already means the
-        # provider belongs to someone else, which admins shouldn't touch.)
-        if not owner_ok:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
-            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
+        )
     if not provider.enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Provider is disabled"
