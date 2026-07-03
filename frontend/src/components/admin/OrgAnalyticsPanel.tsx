@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Activity,
+  Building2,
   CircleDollarSign,
   MessageSquare,
   Users as UsersIcon,
@@ -21,10 +21,11 @@ import {
 
 import {
   useAnalyticsByModel,
+  useAnalyticsOrgByModel,
+  useAnalyticsOrgTimeseries,
+  useAnalyticsOrgs,
   useAnalyticsSummary,
   useAnalyticsTimeseries,
-  useAnalyticsUsers,
-  useAnalyticsUserTimeseries,
 } from "@/hooks/useAdminUsers";
 import { Modal } from "@/components/shared/Modal";
 import {
@@ -50,91 +51,77 @@ import {
 } from "@/components/usage/shared";
 import { cn } from "@/utils/cn";
 import { USD_TO_AUD, formatAud } from "@/utils/currency";
-import { useAuthStore } from "@/store/authStore";
-import { OrgAnalyticsPanel } from "@/components/admin/OrgAnalyticsPanel";
-import type { AnalyticsUserRow } from "@/api/types";
+import type { AnalyticsOrgRow } from "@/api/types";
 
-export function AnalyticsPanel() {
-  // The platform operator sees the fleet grouped PER ORG (cost/usage of each
-  // tenant as a whole) — never another tenant's individual users. An org admin
-  // falls through to the per-user view below, scoped to their own org.
-  const isPlatformAdmin = useAuthStore(
-    (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
-  );
-  if (isPlatformAdmin) {
-    return <OrgAnalyticsPanel />;
-  }
-  return <OrgAdminAnalyticsPanel />;
-}
-
-function OrgAdminAnalyticsPanel() {
+/**
+ * The platform operator's analytics view. The super admin sees the fleet
+ * **per organization** — cost/usage of each tenant as a whole, never another
+ * tenant's individual users. (Org admins get the per-user view in
+ * {@link AnalyticsPanel}; this component is only rendered for the operator.)
+ */
+export function OrgAnalyticsPanel() {
   const [days, setDays] = useState<RangeDays>(30);
-  // Tokens is the default because it's the most universally-useful
-  // view — cost swings with provider pricing, messages undercounts
-  // heavy turns, and tokens are what actually bill against quota
-  // downstream.
   const [metric, setMetric] = useState<Metric>("tokens");
-  const [chartUserId, setChartUserId] = useState<string | null>(null);
-  const [drillUserId, setDrillUserId] = useState<string | null>(null);
+  const [chartOrgId, setChartOrgId] = useState<string | null>(null);
+  const [drillOrgId, setDrillOrgId] = useState<string | null>(null);
 
   const summary = useAnalyticsSummary(days);
-  const allUsersSeries = useAnalyticsTimeseries(days);
-  // The per-user endpoint is only fetched when a specific user is
-  // picked; ``enabled`` on the underlying ``useQuery`` guards it.
-  const perUserSeries = useAnalyticsUserTimeseries(chartUserId, days);
-  const users = useAnalyticsUsers(days);
+  const orgs = useAnalyticsOrgs(days);
+  const fleetSeries = useAnalyticsTimeseries(days);
+  const perOrgSeries = useAnalyticsOrgTimeseries(chartOrgId, days);
   const byModel = useAnalyticsByModel(days);
 
-  const activeSeries = chartUserId ? perUserSeries : allUsersSeries;
-
+  const activeSeries = chartOrgId ? perOrgSeries : fleetSeries;
   const filledSeries = useMemo(
     () => fillMissingDays(activeSeries.data ?? [], days),
     [activeSeries.data, days]
   );
 
-  const selectedUsername = useMemo(() => {
-    if (!chartUserId) return null;
-    return (
-      users.data?.find((u) => u.user_id === chartUserId)?.username ?? null
-    );
-  }, [chartUserId, users.data]);
+  const orgRows = orgs.data ?? [];
+  const activeOrgs = useMemo(
+    () => orgRows.filter((o) => o.messages_window > 0).length,
+    [orgRows]
+  );
+  const selectedOrgName = useMemo(() => {
+    if (!chartOrgId) return null;
+    return orgRows.find((o) => o.org_id === chartOrgId)?.org_name ?? null;
+  }, [chartOrgId, orgRows]);
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-[var(--text-muted)]">
-          Showing the last <strong>{days}</strong> days. Costs shown in
-          <span className="font-mono"> AUD</span> (converted from provider USD
-          at ~A${USD_TO_AUD.toFixed(2)}/USD).
+          Fleet-wide, grouped <strong>per organisation</strong>. Last{" "}
+          <strong>{days}</strong> days. Costs in
+          <span className="font-mono"> AUD</span> (≈ A${USD_TO_AUD.toFixed(2)}
+          /USD).
         </div>
         <RangePicker value={days} onChange={setDays} />
       </div>
 
-      {summary.isError && (
-        <ErrorBanner message="Failed to load analytics summary." />
+      {(summary.isError || orgs.isError) && (
+        <ErrorBanner message="Failed to load fleet analytics." />
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          label="Active users"
-          icon={<UsersIcon className="h-4 w-4" />}
-          loading={summary.isLoading}
-          value={summary.data ? `${summary.data.active_users_window}` : "—"}
-          hint={
-            summary.data ? `of ${summary.data.total_users} total` : undefined
-          }
+          label="Organisations"
+          icon={<Building2 className="h-4 w-4" />}
+          loading={orgs.isLoading}
+          value={`${orgRows.length}`}
+          hint={`${activeOrgs} active this window`}
           sparklineSeries={filledSeries}
           sparklineKey="messages"
           sparklineColor="var(--accent)"
         />
         <StatCard
-          label={`Messages (${days}d)`}
-          icon={<MessageSquare className="h-4 w-4" />}
+          label="Members"
+          icon={<UsersIcon className="h-4 w-4" />}
           loading={summary.isLoading}
-          value={summary.data ? formatInt(summary.data.messages_window) : "—"}
+          value={summary.data ? formatInt(summary.data.total_users) : "—"}
           hint={
             summary.data
-              ? `${formatInt(summary.data.messages_today)} today`
+              ? `${formatInt(summary.data.active_users_window)} active`
               : undefined
           }
           sparklineSeries={filledSeries}
@@ -143,14 +130,14 @@ function OrgAdminAnalyticsPanel() {
         />
         <StatCard
           label={`Tokens (${days}d)`}
-          icon={<Activity className="h-4 w-4" />}
+          icon={<MessageSquare className="h-4 w-4" />}
           loading={summary.isLoading}
-          value={summary.data ? formatInt(summary.data.total_tokens_window) : "—"}
+          value={
+            summary.data ? formatInt(summary.data.total_tokens_window) : "—"
+          }
           hint={
             summary.data
-              ? `${formatInt(summary.data.prompt_tokens_window)} prompt · ${formatInt(
-                  summary.data.completion_tokens_window
-                )} completion`
+              ? `${formatInt(summary.data.messages_window)} messages`
               : undefined
           }
           sparklineSeries={filledSeries}
@@ -177,17 +164,17 @@ function OrgAdminAnalyticsPanel() {
         <CardHeader
           title={`Daily ${METRIC_LABELS[metric].toLowerCase()}`}
           subtitle={
-            chartUserId
-              ? `Filtered to ${selectedUsername ?? "the selected user"}.`
-              : "Summed across every user."
+            chartOrgId
+              ? `Filtered to ${selectedOrgName ?? "the selected org"}.`
+              : "Summed across every organisation."
           }
           right={
             <div className="flex flex-wrap items-center gap-2">
-              <UserFilter
-                value={chartUserId}
-                onChange={setChartUserId}
-                users={users.data ?? []}
-                loading={users.isLoading}
+              <OrgFilter
+                value={chartOrgId}
+                onChange={setChartOrgId}
+                orgs={orgRows}
+                loading={orgs.isLoading}
               />
               <MetricToggle value={metric} onChange={setMetric} />
             </div>
@@ -208,18 +195,18 @@ function OrgAdminAnalyticsPanel() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader
-            title="Cost by user"
-            subtitle="Top 10 spenders in the window. Click a row for the per-user trend."
+            title="Cost by organisation"
+            subtitle="Top 10 tenants in the window. Click a row below for the per-org trend."
           />
           <div className="h-72 w-full px-2 pb-3">
-            {users.isLoading ? (
+            {orgs.isLoading ? (
               <ChartLoading />
-            ) : (users.data ?? []).length === 0 ? (
-              <EmptyState message="No spend recorded yet." />
+            ) : orgRows.length === 0 ? (
+              <EmptyState message="No organisations yet." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={(users.data ?? []).slice(0, 10)}
+                  data={orgRows.slice(0, 10)}
                   margin={{ top: 8, right: 12, left: -12, bottom: 0 }}
                 >
                   <CartesianGrid
@@ -228,7 +215,7 @@ function OrgAdminAnalyticsPanel() {
                     opacity={0.4}
                   />
                   <XAxis
-                    dataKey="username"
+                    dataKey="org_name"
                     tick={{ fontSize: 11, fill: "var(--text-muted)" }}
                     stroke="var(--border)"
                     interval={0}
@@ -244,12 +231,15 @@ function OrgAdminAnalyticsPanel() {
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    formatter={(value) => [formatAud(Number(value ?? 0)), "Cost"]}
+                    formatter={(value) => [
+                      formatAud(Number(value ?? 0)),
+                      "Cost",
+                    ]}
                   />
                   <Bar dataKey="cost_usd_window" radius={[4, 4, 0, 0]}>
-                    {(users.data ?? []).slice(0, 10).map((row, i) => (
+                    {orgRows.slice(0, 10).map((row, i) => (
                       <Cell
-                        key={row.user_id}
+                        key={row.org_id}
                         fill={USER_COLORS[i % USER_COLORS.length]}
                       />
                     ))}
@@ -261,7 +251,10 @@ function OrgAdminAnalyticsPanel() {
         </Card>
 
         <Card>
-          <CardHeader title="By model" subtitle="Spend split per model." />
+          <CardHeader
+            title="By model"
+            subtitle="Fleet-wide spend split per model."
+          />
           <div className="max-h-72 overflow-y-auto px-1 pb-2">
             {byModel.isLoading ? (
               <ChartLoading />
@@ -272,9 +265,15 @@ function OrgAdminAnalyticsPanel() {
                 <thead className="text-left uppercase tracking-wider text-[10px] text-[var(--text-muted)]">
                   <tr>
                     <th className="px-2 py-1.5 font-semibold">Model</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Msgs</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Tokens</th>
-                    <th className="px-2 py-1.5 font-semibold text-right">Cost</th>
+                    <th className="px-2 py-1.5 font-semibold text-right">
+                      Msgs
+                    </th>
+                    <th className="px-2 py-1.5 font-semibold text-right">
+                      Tokens
+                    </th>
+                    <th className="px-2 py-1.5 font-semibold text-right">
+                      Cost
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -313,50 +312,48 @@ function OrgAdminAnalyticsPanel() {
 
       <Card>
         <CardHeader
-          title="Per user"
-          subtitle="Sorted by cost. Click a row for the per-user trend."
+          title="Per organisation"
+          subtitle="Sorted by cost. Click a row for the per-org trend and model split."
         />
         <div className="overflow-x-auto">
-          {users.isLoading ? (
+          {orgs.isLoading ? (
             <div className="px-4 py-8">
               <ChartLoading />
             </div>
-          ) : (users.data ?? []).length === 0 ? (
-            <EmptyState message="No usage recorded yet." />
+          ) : orgRows.length === 0 ? (
+            <EmptyState message="No organisations yet." />
           ) : (
-            <UserTable
-              rows={users.data ?? []}
-              onPick={(id) => setDrillUserId(id)}
-            />
+            <OrgTable rows={orgRows} onPick={(id) => setDrillOrgId(id)} />
           )}
         </div>
       </Card>
 
-      <UserDrillDialog
-        userId={drillUserId}
+      <OrgDrillDialog
+        orgId={drillOrgId}
         days={days}
-        username={users.data?.find((u) => u.user_id === drillUserId)?.username}
-        onClose={() => setDrillUserId(null)}
+        org={orgRows.find((o) => o.org_id === drillOrgId)}
+        onClose={() => setDrillOrgId(null)}
       />
     </div>
   );
 }
 
 // --------------------------------------------------------------------
-// User drill-down dialog
+// Per-org drill-down dialog — trend + model split for one tenant
 // --------------------------------------------------------------------
-function UserDrillDialog({
-  userId,
+function OrgDrillDialog({
+  orgId,
   days,
-  username,
+  org,
   onClose,
 }: {
-  userId: string | null;
+  orgId: string | null;
   days: RangeDays;
-  username?: string;
+  org?: AnalyticsOrgRow;
   onClose: () => void;
 }) {
-  const series = useAnalyticsUserTimeseries(userId, days);
+  const series = useAnalyticsOrgTimeseries(orgId, days);
+  const byModel = useAnalyticsOrgByModel(orgId, days);
   const filled = useMemo(
     () => fillMissingDays(series.data ?? [], days),
     [series.data, days]
@@ -364,16 +361,37 @@ function UserDrillDialog({
 
   return (
     <Modal
-      open={userId !== null}
+      open={orgId !== null}
       onClose={onClose}
-      title={username ? `Usage — ${username}` : "Usage"}
+      title={org ? `Usage — ${org.org_name}` : "Usage"}
       widthClass="max-w-3xl"
     >
-      <div className="space-y-3">
-        <div className="text-xs text-[var(--text-muted)]">
-          Last {days} days of activity for this user.
-        </div>
-        <div className="h-72 w-full">
+      <div className="space-y-4">
+        {org && (
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-[var(--text-muted)]">
+            <span>
+              Plan:{" "}
+              <span className="font-medium text-[var(--text)]">
+                {org.plan ?? "—"}
+              </span>
+            </span>
+            <span>
+              Seats:{" "}
+              <span className="font-medium text-[var(--text)]">
+                {org.member_count}
+                {org.seat_limit != null ? ` / ${org.seat_limit}` : ""}
+              </span>
+            </span>
+            <span>
+              Cost ({days}d):{" "}
+              <span className="font-medium text-[var(--text)]">
+                {formatAud(org.cost_usd_window)}
+              </span>
+            </span>
+          </div>
+        )}
+
+        <div className="h-64 w-full">
           {series.isLoading ? (
             <ChartLoading />
           ) : filled.length === 0 ? (
@@ -432,23 +450,75 @@ function UserDrillDialog({
             </ResponsiveContainer>
           )}
         </div>
+
+        <div>
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            By model
+          </div>
+          {byModel.isLoading ? (
+            <ChartLoading />
+          ) : (byModel.data ?? []).length === 0 ? (
+            <EmptyState message="No assistant turns recorded." />
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="text-left uppercase tracking-wider text-[10px] text-[var(--text-muted)]">
+                <tr>
+                  <th className="px-2 py-1.5 font-semibold">Model</th>
+                  <th className="px-2 py-1.5 font-semibold text-right">Msgs</th>
+                  <th className="px-2 py-1.5 font-semibold text-right">
+                    Tokens
+                  </th>
+                  <th className="px-2 py-1.5 font-semibold text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(byModel.data ?? []).map((row) => (
+                  <tr
+                    key={row.model_id}
+                    className="border-t border-[var(--border)] first:border-t-0"
+                  >
+                    <td
+                      className="px-2 py-1.5 font-mono text-[11px] text-[var(--text)]"
+                      title={row.model_id}
+                    >
+                      <span className="block max-w-[24ch] truncate">
+                        {row.model_id}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]">
+                      {formatInt(row.messages_window)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]">
+                      {formatInt(
+                        row.prompt_tokens_window + row.completion_tokens_window
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums font-medium text-[var(--text)]">
+                      {formatAud(row.cost_usd_window)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </Modal>
   );
 }
 
 // --------------------------------------------------------------------
-// User table
+// Per-org table
 // --------------------------------------------------------------------
-function UserTable({
+function OrgTable({
   rows,
   onPick,
 }: {
-  rows: AnalyticsUserRow[];
+  rows: AnalyticsOrgRow[];
   onPick: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<keyof AnalyticsUserRow>(
+  const [sortKey, setSortKey] = useState<keyof AnalyticsOrgRow>(
     "cost_usd_window"
   );
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -458,8 +528,8 @@ function UserTable({
     const list = q
       ? rows.filter(
           (r) =>
-            r.username.toLowerCase().includes(q) ||
-            r.email.toLowerCase().includes(q)
+            r.org_name.toLowerCase().includes(q) ||
+            (r.plan ?? "").toLowerCase().includes(q)
         )
       : rows;
     const sorted = [...list].sort((a, b) => {
@@ -468,16 +538,14 @@ function UserTable({
       const an = typeof av === "number" ? av : av === null ? -Infinity : 0;
       const bn = typeof bv === "number" ? bv : bv === null ? -Infinity : 0;
       if (typeof av === "string" && typeof bv === "string") {
-        return sortDir === "asc"
-          ? av.localeCompare(bv)
-          : bv.localeCompare(av);
+        return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
       }
       return sortDir === "asc" ? an - bn : bn - an;
     });
     return sorted;
   }, [rows, query, sortKey, sortDir]);
 
-  const flipSort = (key: keyof AnalyticsUserRow) => {
+  const flipSort = (key: keyof AnalyticsOrgRow) => {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -491,7 +559,7 @@ function UserTable({
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <input
           type="text"
-          placeholder="Search users…"
+          placeholder="Search organisations…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className={cn(
@@ -501,18 +569,26 @@ function UserTable({
           )}
         />
         <div className="text-[11px] text-[var(--text-muted)]">
-          {filtered.length} {filtered.length === 1 ? "user" : "users"}
+          {filtered.length} {filtered.length === 1 ? "org" : "orgs"}
         </div>
       </div>
       <table className="w-full border-collapse text-xs">
         <thead>
           <tr className="border-b border-[var(--border)] bg-black/[0.02] text-left text-[10px] uppercase tracking-wider text-[var(--text-muted)] dark:bg-white/[0.03]">
             <SortableHeader
-              label="User"
-              col="username"
+              label="Organisation"
+              col="org_name"
               currentKey={sortKey}
               currentDir={sortDir}
               onClick={flipSort}
+            />
+            <SortableHeader
+              label="Members"
+              col="member_count"
+              currentKey={sortKey}
+              currentDir={sortDir}
+              onClick={flipSort}
+              align="right"
             />
             <SortableHeader
               label="Messages"
@@ -550,23 +626,36 @@ function UserTable({
         <tbody>
           {filtered.map((r) => (
             <tr
-              key={r.user_id}
+              key={r.org_id}
               className="cursor-pointer border-t border-[var(--border)] first:border-t-0 hover:bg-[var(--surface-hover)]"
-              onClick={() => onPick(r.user_id)}
+              onClick={() => onPick(r.org_id)}
             >
               <td className="px-3 py-2">
                 <div className="text-xs font-medium text-[var(--text)]">
-                  {r.username}
+                  {r.org_name}
                 </div>
-                <div className="text-[10px] text-[var(--text-muted)]">
-                  {r.email}
-                </div>
+                {r.plan && (
+                  <div className="text-[10px] text-[var(--text-muted)]">
+                    {r.plan}
+                  </div>
+                )}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {r.member_count}
+                {r.seat_limit != null && (
+                  <span className="text-[var(--text-muted)]">
+                    {" "}
+                    / {r.seat_limit}
+                  </span>
+                )}
               </td>
               <td className="px-3 py-2 text-right tabular-nums">
                 {formatInt(r.messages_window)}
               </td>
               <td className="px-3 py-2 text-right tabular-nums">
-                {formatInt(r.prompt_tokens_window + r.completion_tokens_window)}
+                {formatInt(
+                  r.prompt_tokens_window + r.completion_tokens_window
+                )}
               </td>
               <td className="px-3 py-2 text-right tabular-nums font-medium">
                 {formatAud(r.cost_usd_window)}
@@ -593,10 +682,10 @@ function SortableHeader({
   align,
 }: {
   label: string;
-  col: keyof AnalyticsUserRow;
-  currentKey: keyof AnalyticsUserRow;
+  col: keyof AnalyticsOrgRow;
+  currentKey: keyof AnalyticsOrgRow;
   currentDir: "asc" | "desc";
-  onClick: (col: keyof AnalyticsUserRow) => void;
+  onClick: (col: keyof AnalyticsOrgRow) => void;
   align?: "right";
 }) {
   const isActive = currentKey === col;
@@ -616,39 +705,30 @@ function SortableHeader({
   );
 }
 
-/**
- * Dropdown that scopes the main trend chart to a single user. The
- * options are sourced from ``useAnalyticsUsers`` (already loaded for
- * the top-10 bar chart and the user table), so opening this picker
- * doesn't trigger a new fetch.
- */
-function UserFilter({
+/** Dropdown that scopes the main trend chart to a single organisation. */
+function OrgFilter({
   value,
   onChange,
-  users,
+  orgs,
   loading,
 }: {
   value: string | null;
   onChange: (id: string | null) => void;
-  users: AnalyticsUserRow[];
+  orgs: AnalyticsOrgRow[];
   loading: boolean;
 }) {
-  // Sort by cost desc (same ordering as the backend's ``analytics/users``
-  // endpoint returns) so the heaviest users float to the top of the
-  // dropdown. Preserves alphabetical as a tiebreaker for zero-spend
-  // accounts.
   const sorted = useMemo(() => {
-    return [...users].sort((a, b) => {
+    return [...orgs].sort((a, b) => {
       if (b.cost_usd_window !== a.cost_usd_window) {
         return b.cost_usd_window - a.cost_usd_window;
       }
-      return a.username.localeCompare(b.username);
+      return a.org_name.localeCompare(b.org_name);
     });
-  }, [users]);
+  }, [orgs]);
 
   return (
     <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-      <UsersIcon className="h-3 w-3" />
+      <Building2 className="h-3 w-3" />
       <select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
@@ -660,10 +740,10 @@ function UserFilter({
           "disabled:cursor-not-allowed disabled:opacity-60"
         )}
       >
-        <option value="">All users</option>
-        {sorted.map((u) => (
-          <option key={u.user_id} value={u.user_id}>
-            {u.username}
+        <option value="">All organisations</option>
+        {sorted.map((o) => (
+          <option key={o.org_id} value={o.org_id}>
+            {o.org_name}
           </option>
         ))}
       </select>

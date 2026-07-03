@@ -176,10 +176,12 @@ async def get_current_user(
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     """Dependency that rejects non-admin callers with 403.
 
-    Intended for *platform*-admin routes (all-tenant user management, global app
-    settings, audit, console).
+    Intended for *platform*-operator routes (fleet-wide app settings, audit,
+    console, per-org analytics). Gates on :attr:`User.is_platform_admin` — the
+    single configured super-admin account — NOT a bare ``role == "admin"``, so
+    a promoted-by-accident admin row can never reach these surfaces.
     """
-    if user.role != "admin":
+    if not user.is_platform_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
@@ -191,7 +193,7 @@ async def require_org_admin(user: User = Depends(get_current_user)) -> User:
     """Platform admin OR a tenant/org admin. Used by the org-scoped admin
     surfaces (providers, custom models, groups, connectors, analytics) so a
     tenant admin can manage *their own* org's config."""
-    if user.role == "admin" or (
+    if user.is_platform_admin or (
         user.org_role == "admin" and user.org_id is not None
     ):
         return user

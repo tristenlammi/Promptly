@@ -99,6 +99,10 @@ services:
       - CLERK_JWKS_URL=${CLERK_JWKS_URL:-}
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
       - CLERK_WEBHOOK_SECRET=${CLERK_WEBHOOK_SECRET:-}
+      # The single hosted-SaaS super admin. Being role=admin is necessary but
+      # NOT sufficient — the account must also match this exact email. Empty
+      # (self-host/dev) → role alone governs.
+      - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-}
       - SEARXNG_URL=http://searxng:8080
       # CORS allow-list and provider/search API keys are now configured
       # through the first-run wizard and Admin → Settings — not via

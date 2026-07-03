@@ -13,6 +13,7 @@ import type {
   AdminUser,
   AdminUserUsage,
   AnalyticsModelRow,
+  AnalyticsOrgRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
@@ -221,6 +222,33 @@ export function useAnalyticsUserTimeseries(
     queryKey: ["admin", "analytics", "user-timeseries", userId, days] as const,
     queryFn: () => adminApi.analyticsUserTimeseries(userId as string, days),
     enabled: userId !== null,
+    staleTime: 60_000,
+  });
+}
+
+// ---------------- Per-org analytics (platform operator only) ----------------
+export function useAnalyticsOrgs(days = 30) {
+  return useQuery<AnalyticsOrgRow[]>({
+    queryKey: ["admin", "analytics", "orgs", days] as const,
+    queryFn: () => adminApi.analyticsOrgs(days),
+    staleTime: 60_000,
+  });
+}
+
+export function useAnalyticsOrgTimeseries(orgId: string | null, days = 30) {
+  return useQuery<AnalyticsTimeseriesPoint[]>({
+    queryKey: ["admin", "analytics", "org-timeseries", orgId, days] as const,
+    queryFn: () => adminApi.analyticsOrgTimeseries(orgId as string, days),
+    enabled: orgId !== null,
+    staleTime: 60_000,
+  });
+}
+
+export function useAnalyticsOrgByModel(orgId: string | null, days = 30) {
+  return useQuery<AnalyticsModelRow[]>({
+    queryKey: ["admin", "analytics", "org-by-model", orgId, days] as const,
+    queryFn: () => adminApi.analyticsOrgByModel(orgId as string, days),
+    enabled: orgId !== null,
     staleTime: 60_000,
   });
 }

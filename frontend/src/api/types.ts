@@ -113,6 +113,10 @@ export interface User {
   email: string;
   username: string;
   role: UserRole;
+  /** The single hosted-SaaS super admin (the app owner). Derived server-side
+   *  from role + the configured operator email — gate operator-only UI
+   *  (Console, Audit, per-org analytics) off THIS, not a bare `role` check. */
+  is_platform_admin?: boolean;
   /** Tenant membership. `org_role` = "admin" (org owner/admin — full settings,
    *  manages providers/members) or "member" (inherits models, no settings). */
   org_id?: string | null;
@@ -354,6 +358,22 @@ export interface AnalyticsModelRow {
   prompt_tokens_window: number;
   completion_tokens_window: number;
   cost_usd_window: number;
+}
+
+/** Per-ORG roll-up for the platform operator's fleet analytics. Cost/usage
+ *  is aggregated across the whole org — never broken out per user. */
+export interface AnalyticsOrgRow {
+  org_id: string;
+  org_name: string;
+  plan: string | null;
+  seat_limit: number | null;
+  member_count: number;
+  active_users_window: number;
+  messages_window: number;
+  prompt_tokens_window: number;
+  completion_tokens_window: number;
+  cost_usd_window: number;
+  last_active_at: string | null;
 }
 
 // ---- End-user usage dashboard (Phase 8) ----

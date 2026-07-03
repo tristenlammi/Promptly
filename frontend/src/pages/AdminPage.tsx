@@ -104,7 +104,9 @@ export function AdminPage() {
   // user actually visited.
   // Platform admin (operator) sees every tab; a tenant/org admin sees only the
   // org-safe subset. Same page, scoped surface.
-  const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const isPlatformAdmin = useAuthStore(
+    (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
+  );
   const hasOrg = useAuthStore((s) => !!s.user?.org_id);
   const visibleTabs = useMemo(() => {
     const pick = (id: TabId) => TABS.find((t) => t.id === id);

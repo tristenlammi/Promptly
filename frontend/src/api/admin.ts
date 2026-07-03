@@ -4,6 +4,7 @@ import type {
   AdminUser,
   AdminUserUsage,
   AnalyticsModelRow,
+  AnalyticsOrgRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
@@ -317,6 +318,35 @@ export const adminApi = {
   ): Promise<AnalyticsTimeseriesPoint[]> {
     const { data } = await apiClient.get<AnalyticsTimeseriesPoint[]>(
       `/admin/analytics/users/${userId}/timeseries`,
+      { params: { days } }
+    );
+    return data;
+  },
+
+  // ---------------- Per-org analytics (platform operator only) ----------------
+  async analyticsOrgs(days = 30): Promise<AnalyticsOrgRow[]> {
+    const { data } = await apiClient.get<AnalyticsOrgRow[]>(
+      "/admin/analytics/orgs",
+      { params: { days } }
+    );
+    return data;
+  },
+  async analyticsOrgTimeseries(
+    orgId: string,
+    days = 30
+  ): Promise<AnalyticsTimeseriesPoint[]> {
+    const { data } = await apiClient.get<AnalyticsTimeseriesPoint[]>(
+      `/admin/analytics/orgs/${orgId}/timeseries`,
+      { params: { days } }
+    );
+    return data;
+  },
+  async analyticsOrgByModel(
+    orgId: string,
+    days = 30
+  ): Promise<AnalyticsModelRow[]> {
+    const { data } = await apiClient.get<AnalyticsModelRow[]>(
+      `/admin/analytics/orgs/${orgId}/by-model`,
       { params: { days } }
     );
     return data;

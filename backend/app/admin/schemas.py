@@ -399,6 +399,32 @@ class AnalyticsModelRow(BaseModel):
     cost_usd_window: float
 
 
+class AnalyticsOrgRow(BaseModel):
+    """Per-ORG roll-up for the platform operator's fleet view.
+
+    One row per tenant (Organization) — usage and cost aggregated across all
+    the org's members, never broken out per user. This is the only shape the
+    super admin sees for other tenants: cost/usage *of the org as a whole*.
+    Idle orgs (no usage in the window) still appear so the operator sees the
+    full tenant list, not just active ones. ``member_count`` / ``seat_limit``
+    surface seat utilisation at a glance.
+    """
+
+    org_id: uuid.UUID
+    org_name: str
+    plan: str | None = None
+    seat_limit: int | None = None
+
+    member_count: int
+    active_users_window: int
+
+    messages_window: int
+    prompt_tokens_window: int
+    completion_tokens_window: int
+    cost_usd_window: float
+    last_active_at: datetime | None
+
+
 # --------------------------------------------------------------------
 # Observability (admin "Console" tab)
 # --------------------------------------------------------------------

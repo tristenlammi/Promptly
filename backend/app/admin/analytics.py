@@ -19,12 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import (
     AnalyticsModelRow,
+    AnalyticsOrgRow,
     AnalyticsSummary,
     AnalyticsTimeseriesPoint,
     AnalyticsUserRow,
 )
-from app.auth.deps import get_current_user
-from app.auth.models import User
+from app.auth.deps import get_current_user, require_admin
+from app.auth.models import Organization, User
 from app.billing import aggregates
 from app.billing.aggregates import micros_to_usd as _micros_to_usd
 from app.billing.aggregates import window_start as _window_start
@@ -39,7 +40,7 @@ def _analytics_scope(user: User) -> uuid.UUID | None:
     (fleet-wide). Org admin → their ``org_id`` (that tenant only). Anyone else
     → 403. The returned org_id is threaded into every query so a tenant admin
     can never see another org's usage/cost."""
-    if user.role == "admin":
+    if user.is_platform_admin:
         return None
     if user.org_role == "admin" and user.org_id is not None:
         return user.org_id
@@ -256,6 +257,64 @@ async def analytics_user_timeseries(
 
     return await aggregates.timeseries(
         db, start=_window_start(days), user_id=user_id
+    )
+
+
+# --------------------------------------------------------------------
+# Per-ORG fleet view — platform operator ONLY
+# --------------------------------------------------------------------
+# These endpoints gate on ``require_admin`` (the single super admin), NOT
+# ``require_org_admin``: a tenant admin must never see another org's numbers.
+# The operator sees cost/usage *per org as a whole* — never another tenant's
+# individual users (that's why there's no per-user drill here, unlike the
+# same-org ``/analytics/users`` view above).
+
+
+@router.get("/analytics/orgs", response_model=list[AnalyticsOrgRow])
+async def analytics_orgs(
+    days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[AnalyticsOrgRow]:
+    """Per-org roll-up across the whole fleet (operator only)."""
+    return await aggregates.by_org(db, start=_window_start(days))
+
+
+@router.get(
+    "/analytics/orgs/{org_id}/timeseries",
+    response_model=list[AnalyticsTimeseriesPoint],
+)
+async def analytics_org_timeseries(
+    org_id: uuid.UUID,
+    days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[AnalyticsTimeseriesPoint]:
+    """Single-org trend for the operator's per-org drill-down."""
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return await aggregates.timeseries(
+        db, start=_window_start(days), org_id=org_id
+    )
+
+
+@router.get(
+    "/analytics/orgs/{org_id}/by-model",
+    response_model=list[AnalyticsModelRow],
+)
+async def analytics_org_by_model(
+    org_id: uuid.UUID,
+    days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[AnalyticsModelRow]:
+    """Per-model spend for a single org (operator drill-down)."""
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return await aggregates.by_model(
+        db, start=_window_start(days), org_id=org_id
     )
 
 
