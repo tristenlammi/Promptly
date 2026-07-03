@@ -17,7 +17,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import org_scope_for, require_org_admin
+from app.auth.deps import require_admin
 from app.auth.models import User
 from app.auth.utils import encrypt_secret
 from app.database import get_db
@@ -203,78 +203,56 @@ async def _to_response(
 async def _get_owned_connector(
     connector_id: uuid.UUID, user: User, db: AsyncSession
 ) -> McpConnector:
-    """Fetch a connector the caller may manage — their org's (or any, for the
-    platform admin). Outside that scope 404s (no existence disclosure)."""
+    """Fetch a connector the admin may manage. Single-tenant: the admin manages
+    every connector; a missing id 404s."""
     c = await db.get(McpConnector, connector_id)
     if c is None:
-        raise HTTPException(status_code=404, detail="Connector not found")
-    org_id = org_scope_for(user)
-    if org_id is not None and c.org_id != org_id:
         raise HTTPException(status_code=404, detail="Connector not found")
     return c
 
 
-async def _org_valid_targets(
+async def _valid_targets(
     db: AsyncSession,
-    org_id: uuid.UUID | None,
     *,
     group_ids: list[uuid.UUID],
     user_ids: list[uuid.UUID],
     workspace_ids: list[uuid.UUID],
 ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
-    """Restrict grant targets to the caller's own org — silently drops any
-    group / user / workspace from another tenant, so an org admin can never
-    grant a connector to (or reference) another org's principals. Platform
-    admin (``org_id is None``) is unrestricted."""
-    if org_id is None:
-        return list(group_ids or []), list(user_ids or []), list(workspace_ids or [])
+    """Validate grant targets globally (single-tenant) — silently drops any
+    group / user / workspace id that doesn't exist."""
     from app.chat.models import Workspace
 
     g = list(
         (
             await db.execute(
-                select(UserGroup.id).where(
-                    UserGroup.id.in_(group_ids or []), UserGroup.org_id == org_id
-                )
+                select(UserGroup.id).where(UserGroup.id.in_(group_ids or []))
             )
         ).scalars().all()
     )
     u = list(
         (
             await db.execute(
-                select(User.id).where(
-                    User.id.in_(user_ids or []), User.org_id == org_id
-                )
+                select(User.id).where(User.id.in_(user_ids or []))
             )
         ).scalars().all()
     )
-    # Workspaces have no org_id column — a workspace's org is its owner's org.
     w = list(
         (
             await db.execute(
-                select(Workspace.id)
-                .join(User, User.id == Workspace.user_id)
-                .where(Workspace.id.in_(workspace_ids or []), User.org_id == org_id)
+                select(Workspace.id).where(Workspace.id.in_(workspace_ids or []))
             )
         ).scalars().all()
     )
     return g, u, w
 
 
-async def _unique_slug(
-    db: AsyncSession, name: str, org_id: uuid.UUID | None
-) -> str:
+async def _unique_slug(db: AsyncSession, name: str) -> str:
     base = slugify(name)
     slug = base
     i = 2
-    scope = (
-        McpConnector.org_id.is_(None)
-        if org_id is None
-        else (McpConnector.org_id == org_id)
-    )
     while (
         await db.execute(
-            select(McpConnector.id).where(McpConnector.slug == slug, scope)
+            select(McpConnector.id).where(McpConnector.slug == slug)
         )
     ).first() is not None:
         slug = f"{base[:36]}-{i}"
@@ -298,10 +276,10 @@ class WorkspaceOption(BaseModel):
 @router.get("/workspaces", response_model=list[WorkspaceOption])
 async def list_all_workspaces(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_org_admin),
+    user: User = Depends(require_admin),
 ) -> list[WorkspaceOption]:
-    """Workspaces the admin can attach a restricted connector to. Scoped to the
-    caller's org (a workspace's org = its owner's org); platform admin sees all."""
+    """Workspaces the admin can attach a restricted connector to. Single-tenant:
+    all workspaces are visible."""
     from app.chat.models import Workspace
 
     stmt = (
@@ -309,9 +287,6 @@ async def list_all_workspaces(
         .join(User, User.id == Workspace.user_id, isouter=True)
         .order_by(Workspace.title.asc())
     )
-    org_id = org_scope_for(user)
-    if org_id is not None:
-        stmt = stmt.where(User.org_id == org_id)
     rows = (await db.execute(stmt)).all()
     return [WorkspaceOption(id=r[0], title=r[1], owner=r[2]) for r in rows]
 
@@ -319,12 +294,9 @@ async def list_all_workspaces(
 @router.get("/connectors", response_model=list[ConnectorResponse])
 async def list_connectors(
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_org_admin),
+    user: User = Depends(require_admin),
 ) -> list[ConnectorResponse]:
     stmt = select(McpConnector).order_by(McpConnector.created_at.asc())
-    org_id = org_scope_for(user)
-    if org_id is not None:
-        stmt = stmt.where(McpConnector.org_id == org_id)
     rows = (await db.execute(stmt)).scalars().all()
     return [await _to_response(db, c) for c in rows]
 
@@ -337,16 +309,14 @@ async def list_connectors(
 async def create_connector(
     payload: ConnectorCreate,
     db: AsyncSession = Depends(get_db),
-    admin: User = Depends(require_org_admin),
+    admin: User = Depends(require_admin),
 ) -> ConnectorResponse:
     _valid_availability(payload.availability)
     if payload.kind not in ("mcp", "unifi"):
         raise HTTPException(status_code=400, detail="Unsupported connector kind")
-    org_id = org_scope_for(admin)
     connector = McpConnector(
-        org_id=org_id,
         name=payload.name.strip(),
-        slug=await _unique_slug(db, payload.name, org_id),
+        slug=await _unique_slug(db, payload.name),
         kind=payload.kind,
         url=payload.url.strip(),
         auth_header_name=(payload.auth_header_name or None),
@@ -368,10 +338,9 @@ async def create_connector(
     await db.refresh(connector)
 
     if payload.availability == "restricted":
-        # Grant targets are filtered to the caller's own org.
-        g, u, w = await _org_valid_targets(
+        # Grant targets are validated globally (single-tenant).
+        g, u, w = await _valid_targets(
             db,
-            org_id,
             group_ids=payload.group_ids,
             user_ids=payload.user_ids,
             workspace_ids=payload.workspace_ids,
@@ -395,10 +364,9 @@ async def update_connector(
     connector_id: uuid.UUID,
     payload: ConnectorUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_org_admin),
+    user: User = Depends(require_admin),
 ) -> ConnectorResponse:
     c = await _get_owned_connector(connector_id, user, db)
-    org_id = org_scope_for(user)
     if payload.name is not None:
         c.name = payload.name.strip()
     if payload.url is not None:
@@ -417,20 +385,20 @@ async def update_connector(
     if payload.allowed_tools is not None:
         c.allowed_tools = payload.allowed_tools
     # Each list is independently optional (None = leave, [] = clear). Whatever
-    # is sent is filtered to the caller's own org before being persisted.
+    # is sent is validated globally (single-tenant) before being persisted.
     if payload.group_ids is not None:
-        g, _u, _w = await _org_valid_targets(
-            db, org_id, group_ids=payload.group_ids, user_ids=[], workspace_ids=[]
+        g, _u, _w = await _valid_targets(
+            db, group_ids=payload.group_ids, user_ids=[], workspace_ids=[]
         )
         await _set_groups(db, c.id, g)
     if payload.user_ids is not None:
-        _g, u, _w = await _org_valid_targets(
-            db, org_id, group_ids=[], user_ids=payload.user_ids, workspace_ids=[]
+        _g, u, _w = await _valid_targets(
+            db, group_ids=[], user_ids=payload.user_ids, workspace_ids=[]
         )
         await _set_users(db, c.id, u)
     if payload.workspace_ids is not None:
-        _g, _u, w = await _org_valid_targets(
-            db, org_id, group_ids=[], user_ids=[], workspace_ids=payload.workspace_ids
+        _g, _u, w = await _valid_targets(
+            db, group_ids=[], user_ids=[], workspace_ids=payload.workspace_ids
         )
         await _set_workspaces(db, c.id, w)
     # Going back to global drops any restricted scoping so it can't linger.
@@ -449,7 +417,7 @@ async def update_connector(
 async def delete_connector(
     connector_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_org_admin),
+    user: User = Depends(require_admin),
 ):
     c = await _get_owned_connector(connector_id, user, db)
     await db.delete(c)
@@ -460,7 +428,7 @@ async def delete_connector(
 async def refresh_connector(
     connector_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_org_admin),
+    user: User = Depends(require_admin),
 ) -> ConnectorResponse:
     c = await _get_owned_connector(connector_id, user, db)
     try:
@@ -481,7 +449,7 @@ class TestRequest(BaseModel):
 @router.post("/test")
 async def test_connection(
     payload: TestRequest,
-    _: User = Depends(require_org_admin),
+    _: User = Depends(require_admin),
 ) -> dict:
     """Probe a connector without saving — returns the tools (or a clean
     error) so the admin can validate before creating it."""

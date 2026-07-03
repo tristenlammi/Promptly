@@ -118,14 +118,6 @@ export interface User {
   email: string;
   username: string;
   role: UserRole;
-  /** The single hosted-SaaS super admin (the app owner). Derived server-side
-   *  from role + the configured operator email — gate operator-only UI
-   *  (Console, Audit, per-org analytics) off THIS, not a bare `role` check. */
-  is_platform_admin?: boolean;
-  /** Tenant membership. `org_role` = "admin" (org owner/admin — full settings,
-   *  manages providers/members) or "member" (inherits models, no settings). */
-  org_id?: string | null;
-  org_role?: "admin" | "member" | null;
   /**
    * Per-user whitelist of model IDs surfaced in the chat picker.
    * `null` means "full access to the admin-curated pool". Admins

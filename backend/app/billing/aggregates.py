@@ -22,15 +22,8 @@ from app.admin.schemas import (
     AnalyticsModelRow,
     AnalyticsTimeseriesPoint,
 )
-from app.auth.models import User
 from app.billing.models import UsageDaily
 from app.chat.models import Conversation, Message
-
-
-def _org_user_ids(org_id: uuid.UUID):
-    """Scalar subquery of the user ids in an org — used to scope fleet
-    analytics down to a single tenant."""
-    return select(User.id).where(User.org_id == org_id).scalar_subquery()
 
 
 def window_start(days: int) -> datetime:
@@ -58,7 +51,6 @@ async def timeseries(
     *,
     start: datetime,
     user_id: uuid.UUID | None = None,
-    org_id: uuid.UUID | None = None,
 ) -> list[AnalyticsTimeseriesPoint]:
     """Daily totals off ``usage_daily``, one point per day.
 
@@ -81,8 +73,6 @@ async def timeseries(
     )
     if user_id is not None:
         stmt = stmt.where(UsageDaily.user_id == user_id)
-    if org_id is not None:
-        stmt = stmt.where(UsageDaily.user_id.in_(_org_user_ids(org_id)))
 
     rows = (await db.execute(stmt)).all()
     return [
@@ -102,7 +92,6 @@ async def by_model(
     *,
     start: datetime,
     user_id: uuid.UUID | None = None,
-    org_id: uuid.UUID | None = None,
 ) -> list[AnalyticsModelRow]:
     """Per-model breakdown.
 
@@ -136,8 +125,6 @@ async def by_model(
     sender = func.coalesce(Message.author_user_id, Conversation.user_id)
     if user_id is not None:
         stmt = stmt.where(sender == user_id)
-    if org_id is not None:
-        stmt = stmt.where(sender.in_(_org_user_ids(org_id)))
 
     rows = (await db.execute(stmt)).all()
     return [

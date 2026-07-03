@@ -327,7 +327,7 @@ async def _load_study_provider(
     """
     # Study + its default-chat fallback are per-ORG defaults (org-scoped BYOK
     # providers); resolve through the acting user's org.
-    settings = await load_effective_defaults(db, user.org_id)
+    settings = await load_effective_defaults(db)
 
     # 1. Admin-designated study model.
     if settings.study_configured:
@@ -2450,7 +2450,6 @@ async def _stream_generator(
                 unit_id=att["unit_id"],
                 objective_index=att["objective_index"],
                 objective_text=att["objective_text"],
-                org_id=user.org_id,
             )
 
         # Emit board_updated for every block the tutor just pinned.
@@ -2819,7 +2818,7 @@ async def get_assessor_status(
     user: User = Depends(require_admin),
 ) -> AssessorStatusResponse:
     """Coverage stats for the independent assessor model (admin only)."""
-    settings = await load_effective_defaults(db, user.org_id)
+    settings = await load_effective_defaults(db)
     configured = settings.study_assessor_configured
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -2988,7 +2987,7 @@ async def quick_review(
 
     # Grade the answer.
     grade_result = await grade_for_review(
-        db, mastery_row.objective_text, body.answer, org_id=user.org_id
+        db, mastery_row.objective_text, body.answer
     ) if body.answer.strip() else None
 
     assessor_unavailable = grade_result is None and not body.answer.strip() is False

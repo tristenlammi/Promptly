@@ -805,7 +805,7 @@ async def list_mention_candidates(
         from app.mcp.service import connectors_for_turn
 
         conns = await connectors_for_turn(
-            db, org_id=user.org_id, user_id=user.id, workspace_id=workspace_id
+            db, user_id=user.id, workspace_id=workspace_id
         )
         for c in conns:
             if q_norm and q_norm not in c.name.lower() and q_norm not in c.slug:
@@ -1004,7 +1004,7 @@ async def create_conversation(
         # Per-org default chat model (org-scoped BYOK provider): resolve via
         # the creating user's org, falling back to the global default only for
         # no-org (self-host) callers — see app_settings.defaults precedence.
-        eff = await load_effective_defaults(db, user.org_id)
+        eff = await load_effective_defaults(db)
         if eff.default_chat_configured:
             if payload.model_id is None:
                 payload = payload.model_copy(
@@ -3902,7 +3902,7 @@ async def _stream_generator(
         # The vision-relay model is a PER-ORG default (it points at an
         # org-scoped BYOK provider), so resolve it through the acting user's
         # org rather than the global singleton. The tool-cap below stays global.
-        eff_defaults = await load_effective_defaults(db, user.org_id)
+        eff_defaults = await load_effective_defaults(db)
         relay_provider_row: ModelProvider | None = None
         relay_will_run = (
             has_image
@@ -4187,7 +4187,6 @@ async def _stream_generator(
 
                 _mcp_connectors = await connectors_for_turn(
                     db,
-                    org_id=user.org_id,
                     user_id=user.id,
                     workspace_id=conv.workspace_id,
                 )
@@ -4549,7 +4548,6 @@ async def _stream_generator(
 
                     reachable = await connectors_for_turn(
                         db,
-                        org_id=user.org_id,
                         user_id=user.id,
                         workspace_id=conv.workspace_id,
                     )

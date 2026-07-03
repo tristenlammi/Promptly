@@ -15,18 +15,11 @@ from app.db_types import CreatedAtMixin, UUIDPKMixin
 class ModelProvider(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "model_providers"
 
-    # NULL user_id = system-wide provider (e.g. from env vars / admin defaults).
-    # Kept as the "created by" record; tenant scoping is via ``org_id``.
+    # NULL user_id = system-wide provider (e.g. from env vars / bootstrap).
+    # Kept as the "created by" record. Single-tenant: every enabled provider is
+    # part of the shared admin-managed pool visible to all users.
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-
-    # Owning tenant (BYOK). Providers configured by an org admin are shared with
-    # every member of that org (members inherit the models). NULL = a platform
-    # system provider (org_id AND user_id both NULL), used for the app-level
-    # embedder etc. — never visible to tenants.
-    org_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     name: Mapped[str] = mapped_column(String(128), nullable=False)

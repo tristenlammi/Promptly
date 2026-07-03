@@ -1,53 +1,15 @@
-"""User + Organization ORM models."""
+"""User ORM model."""
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 from app.db_types import CreatedAtMixin, UUIDPKMixin
-
-
-class Organization(UUIDPKMixin, CreatedAtMixin, Base):
-    """A tenant. Every account is an Organization (a solo user is just a 1-seat
-    org). Shadow of a Clerk Organization — Clerk owns membership/billing; this
-    row anchors app-side foreign keys (providers, workspaces) and the seat/plan
-    mirror. Auto-created for each account at sign-up (Clerk 'create first
-    organization automatically')."""
-
-    __tablename__ = "organizations"
-
-    clerk_org_id: Mapped[str | None] = mapped_column(
-        String(255), unique=True, nullable=True, index=True, default=None
-    )
-    name: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="Organization"
-    )
-    # Mirror of the Clerk subscription so the backend can gate without a Clerk
-    # API call per request. Synced by billing webhooks (later step).
-    plan: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
-    seat_limit: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, default=None
-    )
-    # Org-wide storage cap (bytes). NULL → fall back to the app default.
-    storage_cap_bytes: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True, default=None
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
-    )
-    # Soft-delete clock. Set when the org is deleted in Clerk — we mark
-    # rather than run ``db.delete(org)`` so the CASCADE (providers + encrypted
-    # keys, custom models, groups, connectors, defaults) doesn't fire until the
-    # grace window elapses and the purge job runs. NULL = live.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
-    )
 
 
 class User(UUIDPKMixin, CreatedAtMixin, Base):
@@ -56,29 +18,6 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-
-    # External identity link when AUTH_PROVIDER="clerk". NULL for built-in
-    # (password) accounts. Unique so a Clerk user maps to exactly one local
-    # shadow row. The local row still owns all app-specific state (role,
-    # allowed_models, quotas, org membership); Clerk only owns authentication.
-    clerk_user_id: Mapped[str | None] = mapped_column(
-        String(255), unique=True, nullable=True, index=True, default=None
-    )
-
-    # Tenant membership. Every account belongs to exactly one Organization (its
-    # own solo org, or the org they were invited to). NULL only transiently
-    # before the org is synced. ``org_role`` = "admin" (owner / can configure
-    # providers + invite) or "member" (uses inherited models, no settings).
-    org_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        default=None,
-    )
-    org_role: Mapped[str | None] = mapped_column(
-        String(16), nullable=True, default=None
-    )
 
     # "admin" (full access + can manage users/providers) or "user" (chat only,
     # restricted by allowed_models).
@@ -117,14 +56,6 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     # authenticated request (no waiting for the access token to expire).
     disabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
-    )
-    # Soft-delete clock. Set (alongside ``disabled``) when the account is
-    # deleted in Clerk — we mark rather than destroy so a deletion never
-    # cascades a user's content away instantly. A scheduled purge job hard-
-    # deletes the row + all content once ``deleted_at`` is older than
-    # ``DELETION_GRACE_DAYS``. NULL = live. Cleared on re-link (they came back).
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, default=None
     )
     # Force the user through a password-change screen on next login.
     # Set when an admin creates an account (so the temp password isn't
@@ -166,7 +97,7 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     # ------------------------------------------------------------------
     # Quota overrides (added in 0009_phase3_quotas)
     # ------------------------------------------------------------------
-    # NULL on every column means "fall back to the org-wide default"
+    # NULL on every column means "fall back to the instance-wide default"
     # configured in ``app_settings``. A non-NULL value here always wins
     # (including 0, which is "this user gets nothing"). All three are
     # BIGINT so ``cap > used`` comparisons can never overflow.
@@ -186,13 +117,6 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
 
     @property
     def is_admin(self) -> bool:
-        return self.role == "admin"
-
-    @property
-    def is_platform_admin(self) -> bool:
-        """Vestigial synonym for :attr:`is_admin` in single-tenant self-host —
-        there's no platform-vs-org-admin tier. Kept so the remaining call sites
-        (analytics scoping, ``/me`` payload) don't need touching yet."""
         return self.role == "admin"
 
     @property

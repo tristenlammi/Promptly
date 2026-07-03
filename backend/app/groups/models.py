@@ -23,16 +23,10 @@ class UserGroup(UUIDPKMixin, TimestampMixin, Base):
 
     __tablename__ = "user_groups"
     __table_args__ = (
-        UniqueConstraint("org_id", "name", name="uq_user_groups_org_name"),
+        # Single-tenant: group names are globally unique across the instance.
+        UniqueConstraint("name", name="uq_user_groups_name"),
     )
 
-    # Owning tenant (org). NULL only for legacy/system rows.
-    org_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True

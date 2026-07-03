@@ -205,13 +205,8 @@ async def _resolve_connectors_by_ids(
         connectors_for_turn,
     )
 
-    # Scope to the task owner's org (connectors are tenant-isolated).
-    from app.auth.models import User as _User
-
-    owner = await db.get(_User, user_id)
     reachable = await connectors_for_turn(
         db,
-        org_id=owner.org_id if owner else None,
         user_id=user_id,
         workspace_id=workspace_id,
     )

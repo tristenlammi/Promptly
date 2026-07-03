@@ -145,10 +145,6 @@ async def create_provider(
 
     provider = ModelProvider(
         user_id=user.id,
-        # Owning tenant — a tenant admin's provider is shared with their whole
-        # org (members inherit). A platform admin creating for themselves gets
-        # their own org (or NULL = a platform system provider).
-        org_id=user.org_id,
         name=payload.name,
         type=payload.type,
         base_url=str(payload.base_url) if payload.base_url else None,

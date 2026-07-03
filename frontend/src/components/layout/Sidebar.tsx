@@ -565,9 +565,8 @@ function UserFooter() {
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
-  // Org admins (+ the platform admin) get the tenant Settings surface; members
-  // inherit models and have no settings page.
-  const canManageOrg = isAdmin || user?.org_role === "admin";
+  // The admin gets the admin surface.
+  const canManageOrg = isAdmin;
   // Invites live here (account area) rather than the primary nav — they're
   // an account-level collaboration action, not a content surface. Always
   // rendered so the pending-count badge has a stable home.

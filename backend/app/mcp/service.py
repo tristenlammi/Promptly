@@ -82,34 +82,27 @@ def _auth_headers(connector: McpConnector) -> dict[str, str]:
 async def connectors_for_turn(
     db: AsyncSession,
     *,
-    org_id: uuid.UUID | None,
     user_id: uuid.UUID | None = None,
     workspace_id: uuid.UUID | None = None,
 ) -> list[McpConnector]:
     """Enabled connectors available for this turn.
 
-    TENANT ISOLATION (security-critical): every branch is hard-filtered by
-    ``org_id`` — a user can only ever reach connectors owned by their OWN org,
-    regardless of the availability/grant logic. ``org_id=None`` (no tenant
-    context) returns nothing (never matches NULL system rows).
+    SINGLE-TENANT / GLOBAL: connectors are resolved globally — every enabled
+    connector reachable by the grant logic is available to the acting user.
 
-    Within the org, four ways a connector reaches a turn (OR'd, de-duplicated):
+    Four ways a connector reaches a turn (OR'd, de-duplicated):
 
-    * ``global`` — available to everyone *in the org*.
+    * ``global`` — available to everyone.
     * ``restricted`` + attached to ``workspace_id`` — context scope.
     * ``restricted`` + granted to a group ``user_id`` belongs to — identity scope.
     * ``restricted`` + granted to ``user_id`` directly — identity scope.
     """
-    if org_id is None:
-        return []
-
     by_id: dict[uuid.UUID, McpConnector] = {}
 
     rows = (
         (
             await db.execute(
                 select(McpConnector).where(
-                    McpConnector.org_id == org_id,
                     McpConnector.enabled.is_(True),
                     McpConnector.availability == "global",
                 )
@@ -131,7 +124,6 @@ async def connectors_for_turn(
                         WorkspaceMcpConnector.connector_id == McpConnector.id,
                     )
                     .where(
-                        McpConnector.org_id == org_id,
                         McpConnector.enabled.is_(True),
                         McpConnector.availability == "restricted",
                         WorkspaceMcpConnector.workspace_id == workspace_id,
@@ -158,7 +150,6 @@ async def connectors_for_turn(
                         UserGroupMember.group_id == ConnectorGroup.group_id,
                     )
                     .where(
-                        McpConnector.org_id == org_id,
                         McpConnector.enabled.is_(True),
                         McpConnector.availability == "restricted",
                         UserGroupMember.user_id == user_id,
@@ -180,7 +171,6 @@ async def connectors_for_turn(
                         ConnectorUser.connector_id == McpConnector.id,
                     )
                     .where(
-                        McpConnector.org_id == org_id,
                         McpConnector.enabled.is_(True),
                         McpConnector.availability == "restricted",
                         ConnectorUser.user_id == user_id,
@@ -256,12 +246,10 @@ async def call_connector_tool(
     Routes by ``kind``: native connectors (UniFi/Omada) hit our first-party
     client; ``mcp`` connectors speak the MCP protocol.
 
-    TENANT-ISOLATION INVARIANT: ``connector_id`` is ONLY ever taken from a
-    per-turn dispatch map built by ``build_tools_from_connectors`` over the
-    output of the org-scoped ``connectors_for_turn`` — so it is always a
-    connector in the acting user's own org. There is no path that reaches here
-    with an arbitrary connector id, which is why the org check lives at
-    resolution time (one choke point) rather than being re-plumbed here.
+    ``connector_id`` is ONLY ever taken from a per-turn dispatch map built by
+    ``build_tools_from_connectors`` over the output of ``connectors_for_turn``
+    (which resolves enabled connectors globally for the single-tenant app), so
+    connectors are gated at resolution time rather than being re-checked here.
     """
     connector = await db.get(McpConnector, connector_id)
     if connector is None or not connector.enabled:

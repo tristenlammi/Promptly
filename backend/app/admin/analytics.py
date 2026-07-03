@@ -51,46 +51,32 @@ async def analytics_summary(
     user: User = Depends(get_current_user),
 ) -> AnalyticsSummary:
     """Headline numbers: messages, tokens, cost, active users."""
-    org_id = _analytics_scope(user)
+    _analytics_scope(user)
     start = _window_start(days)
     today = datetime.now(timezone.utc).date()
 
-    users_stmt = select(func.count(User.id))
-    if org_id is not None:
-        users_stmt = users_stmt.where(User.org_id == org_id)
-    total_users = (await db.execute(users_stmt)).scalar_one()
-
-    def _scoped(stmt):
-        if org_id is not None:
-            return stmt.where(
-                UsageDaily.user_id.in_(
-                    select(User.id).where(User.org_id == org_id).scalar_subquery()
-                )
-            )
-        return stmt
+    total_users = (
+        await db.execute(select(func.count(User.id)))
+    ).scalar_one()
 
     window_row = (
         await db.execute(
-            _scoped(
-                select(
-                    func.coalesce(func.sum(UsageDaily.messages_sent), 0),
-                    func.coalesce(func.sum(UsageDaily.prompt_tokens), 0),
-                    func.coalesce(func.sum(UsageDaily.completion_tokens), 0),
-                    func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
-                    func.count(func.distinct(UsageDaily.user_id)),
-                ).where(UsageDaily.day >= start.date())
-            )
+            select(
+                func.coalesce(func.sum(UsageDaily.messages_sent), 0),
+                func.coalesce(func.sum(UsageDaily.prompt_tokens), 0),
+                func.coalesce(func.sum(UsageDaily.completion_tokens), 0),
+                func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
+                func.count(func.distinct(UsageDaily.user_id)),
+            ).where(UsageDaily.day >= start.date())
         )
     ).one()
 
     today_row = (
         await db.execute(
-            _scoped(
-                select(
-                    func.coalesce(func.sum(UsageDaily.messages_sent), 0),
-                    func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
-                ).where(UsageDaily.day == today)
-            )
+            select(
+                func.coalesce(func.sum(UsageDaily.messages_sent), 0),
+                func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
+            ).where(UsageDaily.day == today)
         )
     ).one()
 
@@ -123,9 +109,8 @@ async def analytics_timeseries(
     frontend fills the gaps so the X axis stays continuous), which
     keeps the payload tiny on a quiet instance.
     """
-    return await aggregates.timeseries(
-        db, start=_window_start(days), org_id=_analytics_scope(user)
-    )
+    _analytics_scope(user)
+    return await aggregates.timeseries(db, start=_window_start(days))
 
 
 @router.get(
@@ -146,7 +131,7 @@ async def analytics_users(
     token volume so two zero-cost users still come back in a
     stable order.
     """
-    org_id = _analytics_scope(user)
+    _analytics_scope(user)
     start = _window_start(days)
 
     # Sub-aggregate per user inside the window so we can left-join
@@ -178,9 +163,6 @@ async def analytics_users(
         )
         .outerjoin(sub, sub.c.user_id == User.id)
     )
-    # Org admin only sees their own tenant's users; platform admin sees all.
-    if org_id is not None:
-        stmt = stmt.where(User.org_id == org_id)
     stmt = (
         stmt.order_by(
             func.coalesce(sub.c.cost_micros, 0).desc(),
@@ -223,9 +205,8 @@ async def analytics_by_model(
     to ``conversations``. Bounded to the requested window via
     ``messages.created_at`` and grouped by ``conversations.model_id``.
     """
-    return await aggregates.by_model(
-        db, start=_window_start(days), org_id=_analytics_scope(user)
-    )
+    _analytics_scope(user)
+    return await aggregates.by_model(db, start=_window_start(days))
 
 
 # --------------------------------------------------------------------
@@ -242,12 +223,9 @@ async def analytics_user_timeseries(
     user: User = Depends(get_current_user),
 ) -> list[AnalyticsTimeseriesPoint]:
     """Single-user trend, used in the per-user drill-down dialog."""
-    org_id = _analytics_scope(user)
+    _analytics_scope(user)
     target = await db.get(User, user_id)
     if target is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    # An org admin can only drill into members of their own tenant.
-    if org_id is not None and target.org_id != org_id:
         raise HTTPException(status_code=404, detail="User not found")
 
     return await aggregates.timeseries(

@@ -2,18 +2,12 @@
 
 Every runtime site that asks "which model fills role X (chat / vision-relay /
 research / study / assessor)?" resolves it through :func:`load_effective_defaults`
-so the org→global precedence lives in exactly one place and the call sites stay a
-one-line swap from the old ``db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)``.
+so the lookup lives in exactly one place and the call sites stay a one-line swap
+from the old ``db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)``.
 
-Precedence
-----------
-* ``org_id`` set   → the org's own :class:`OrgModelDefaults` row. An unset pair
-  stays unset (``None``) — it does NOT fall back to the global default, because
-  the global default points at *another* tenant's provider and would be
-  inaccessible / a cross-tenant leak. Unset simply means "off / catalog
-  fallback" for that role, exactly as a fresh install behaves.
-* ``org_id`` None  → self-host / custom-auth (no tenancy): use the
-  ``AppSettings`` singleton's global defaults, preserving historical behaviour.
+Single-tenant self-host: the defaults are read straight off the global
+``AppSettings`` singleton. The ``org_id`` parameter is vestigial (always ignored)
+— kept only so the many call sites don't need touching.
 
 The returned object exposes the SAME attribute + ``*_configured`` names as
 ``AppSettings`` so callers read it identically.
@@ -32,8 +26,8 @@ from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 class EffectiveDefaults:
     """The resolved model-role defaults for one caller.
 
-    Field + property names mirror ``AppSettings`` / ``OrgModelDefaults`` so a
-    call site can swap the source without touching how it reads the values.
+    Field + property names mirror ``AppSettings`` so a call site can read the
+    values without caring about the source.
     """
 
     default_chat_provider_id: uuid.UUID | None = None
@@ -80,7 +74,7 @@ _PAIR_FIELDS = (
 
 
 def _from_source(src) -> EffectiveDefaults:
-    """Copy the 10 default columns off an ``AppSettings`` / ``OrgModelDefaults``."""
+    """Copy the 10 default columns off an ``AppSettings`` row."""
     values: dict[str, object] = {}
     for pid, mid in _PAIR_FIELDS:
         values[pid] = getattr(src, pid, None)

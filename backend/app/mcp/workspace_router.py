@@ -49,22 +49,18 @@ async def list_workspace_connectors(
 ) -> list[WorkspaceConnector]:
     await get_accessible_workspace(workspace_id, user, db)
 
-    # Only the user's OWN org's restricted connectors are attachable/visible.
-    if user.org_id is None:
-        connectors = []
-    else:
-        connectors = (
-            (
-                await db.execute(
-                    select(McpConnector).where(
-                        McpConnector.availability == "restricted",
-                        McpConnector.org_id == user.org_id,
-                    )
+    # Single-tenant: all restricted connectors are attachable/visible.
+    connectors = (
+        (
+            await db.execute(
+                select(McpConnector).where(
+                    McpConnector.availability == "restricted",
                 )
             )
-            .scalars()
-            .all()
         )
+        .scalars()
+        .all()
+    )
     attached_ids = set(
         (
             await db.execute(
@@ -99,24 +95,20 @@ async def set_workspace_connectors(
     # Only the owner reshapes which connectors a workspace uses.
     await is_owner_of_workspace(workspace_id, user, db)
 
-    # Keep only ids that exist, are restricted, AND belong to the owner's org
-    # — silently drop anything stale/global/other-tenant so a bad id can't 500
-    # the call or attach a connector the org doesn't own.
-    valid: set[uuid.UUID] = set()
-    if user.org_id is not None:
-        valid = set(
-            (
-                await db.execute(
-                    select(McpConnector.id).where(
-                        McpConnector.id.in_(payload.connector_ids or []),
-                        McpConnector.availability == "restricted",
-                        McpConnector.org_id == user.org_id,
-                    )
+    # Keep only ids that exist and are restricted — silently drop anything
+    # stale/global so a bad id can't 500 the call. Single-tenant: global scope.
+    valid: set[uuid.UUID] = set(
+        (
+            await db.execute(
+                select(McpConnector.id).where(
+                    McpConnector.id.in_(payload.connector_ids or []),
+                    McpConnector.availability == "restricted",
                 )
             )
-            .scalars()
-            .all()
         )
+        .scalars()
+        .all()
+    )
     await db.execute(
         delete(WorkspaceMcpConnector).where(
             WorkspaceMcpConnector.workspace_id == workspace_id

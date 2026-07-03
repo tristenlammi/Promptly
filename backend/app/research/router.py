@@ -53,7 +53,7 @@ async def _resolve_research_model(
     """Pick the research model: admin-configured first, else the user's
     current chat model from the request. Raises HTTPException on a bad
     fallback provider."""
-    settings = await load_effective_defaults(db, user.org_id)
+    settings = await load_effective_defaults(db)
     if settings.research_configured:
         rp = await db.get(ModelProvider, settings.research_provider_id)
         if rp is not None and rp.enabled:
@@ -125,7 +125,7 @@ async def start_research(
     # ----- Model resolution ------------------------------------------------
     # Prefer the admin-configured research model; fall back to the user's
     # current chat model (from the request).
-    settings = await load_effective_defaults(db, user.org_id)
+    settings = await load_effective_defaults(db)
     research_provider: ModelProvider | None = None
     research_model_id: str = payload.model_id
 
@@ -278,7 +278,7 @@ async def get_research_config(
     Returns ``{"model_display": null}`` when no admin model is configured
     (falls back to the user's chat model, which the frontend knows).
     """
-    settings = await load_effective_defaults(db, _user.org_id)
+    settings = await load_effective_defaults(db)
     if not settings.research_configured:
         return {"model_display": None, "configured": False}
 

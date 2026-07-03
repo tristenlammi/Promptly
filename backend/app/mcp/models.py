@@ -34,18 +34,9 @@ from app.db_types import TimestampMixin, UUIDPKMixin
 class McpConnector(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "mcp_connectors"
     __table_args__ = (
-        # Slug namespaces tools (``mcp__<slug>__<tool>``); unique PER TENANT so
-        # two orgs can each have e.g. a "unifi" connector without colliding.
-        UniqueConstraint("org_id", "slug", name="uq_mcp_connectors_org_slug"),
-    )
-
-    # Owning tenant (org). An org admin's connectors are usable only within
-    # their org; NULL only for legacy/system rows (never surfaced to tenants).
-    org_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
+        # Slug namespaces tools (``mcp__<slug>__<tool>``); single-tenant so it is
+        # globally unique across the instance.
+        UniqueConstraint("slug", name="uq_mcp_connectors_slug"),
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)

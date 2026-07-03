@@ -71,15 +71,6 @@ class UserResponse(BaseModel):
     email: EmailStr
     username: str
     role: UserRole
-    # The single hosted-SaaS super admin (the app owner). Derived server-side
-    # from ``role == "admin"`` AND (when configured) the operator email — never
-    # a bare role check — so the frontend gates the operator-only surfaces
-    # (Console, Audit, per-org analytics) off the same truth the API enforces.
-    is_platform_admin: bool = False
-    # Tenant membership. ``org_role`` = "admin" (org owner/admin — full settings
-    # + manages providers/members) or "member" (inherits models, no settings).
-    org_id: uuid.UUID | None = None
-    org_role: str | None = None
     # NULL = full access to the admin's curated pool. Admins effectively
     # ignore this field (they always see everything).
     allowed_models: list[str] | None = None

@@ -41,10 +41,8 @@ export default function App() {
   useDrivePwaManifest();
   const status = useAuthStore((s) => s.status);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-  // Org admins (+ platform admin) reach the admin surface; it scopes itself.
-  const canManageOrg = useAuthStore(
-    (s) => s.user?.role === "admin" || s.user?.org_role === "admin"
-  );
+  // The admin reaches the admin surface.
+  const canManageOrg = useAuthStore((s) => s.user?.role === "admin");
 
   // Keep the model store's "default model" mirror in sync with
   // ``user.settings`` so every new chat starts on the user's preferred

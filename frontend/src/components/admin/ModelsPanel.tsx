@@ -4,7 +4,6 @@ import { ProviderConnections } from "@/components/models/ProviderConnections";
 import { CustomModelsPanel } from "@/components/admin/CustomModelsPanel";
 import { LocalModelsPanel } from "@/components/admin/LocalModelsPanel";
 import { DefaultsTab } from "@/components/admin/DefaultsTab";
-import { useAuthStore } from "@/store/authStore";
 
 /**
  * The Models management surface.
@@ -43,18 +42,8 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 
 export function ModelsPanel() {
   const [tab, setTab] = useState<TabId>("connections");
-  // Org admins get Connections (their BYOK keys), Defaults (their org's
-  // model-role picks), and Custom Models (their assistants) — all org-scoped.
-  // Local Models (Ollama = platform infra) stays platform-operator only.
-  const isPlatformAdmin = useAuthStore(
-    (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
-  );
-  const visibleTabs = isPlatformAdmin
-    ? TABS
-    : TABS.filter(
-        (t) =>
-          t.id === "connections" || t.id === "defaults" || t.id === "custom"
-      );
+  // Single-tenant self-host: the admin sees every model sub-tab.
+  const visibleTabs = TABS;
 
   return (
     <div>

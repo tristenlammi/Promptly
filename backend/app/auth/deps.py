@@ -146,17 +146,3 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
             detail="Admin privileges required",
         )
     return user
-
-
-# Back-compat alias: several admin routers still import ``require_org_admin``.
-# In single-tenant self-host there's no org tier — admin is admin.
-require_org_admin = require_admin
-
-
-def org_scope_for(user: User) -> uuid.UUID | None:
-    """The org a caller's resource queries filter to — their own ``org_id``.
-
-    Vestigial in single-tenant self-host (kept only until the org columns are
-    dropped). Still consumed by the not-yet-un-scoped subsystems (connectors,
-    custom models, groups)."""
-    return user.org_id
