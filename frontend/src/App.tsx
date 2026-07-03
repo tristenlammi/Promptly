@@ -29,6 +29,7 @@ import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
 import { isClerkAuth } from "@/auth/authMode";
+import { ClerkSubscriptionGate } from "@/auth/ClerkSubscriptionGate";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
 import { useAuthStore } from "@/store/authStore";
@@ -198,8 +199,7 @@ export default function App() {
     );
   }
 
-  return (
-    <>
+  const authedApp = (
     <Routes>
       <Route path="/login" element={<Navigate to="/chat" replace />} />
       <Route path="/setup" element={<Navigate to="/chat" replace />} />
@@ -264,8 +264,17 @@ export default function App() {
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Route>
     </Routes>
-    <ToastViewport />
-    <ConfirmHost />
+  );
+
+  return (
+    <>
+      {isClerkAuth ? (
+        <ClerkSubscriptionGate>{authedApp}</ClerkSubscriptionGate>
+      ) : (
+        authedApp
+      )}
+      <ToastViewport />
+      <ConfirmHost />
     </>
   );
 }
