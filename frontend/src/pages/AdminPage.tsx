@@ -11,7 +11,6 @@ import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
-import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 type TabId =
@@ -90,29 +89,10 @@ export function AdminPage() {
   // right surface (e.g. the ``/models`` legacy route now redirects to
   // ``/admin?tab=models``) and the back button steps through tabs the
   // user actually visited.
-  // Platform admin (operator) sees every tab; a tenant/org admin sees only the
-  // org-safe subset. Same page, scoped surface.
-  const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
-  const visibleTabs = useMemo(() => {
-    const pick = (id: TabId) => TABS.find((t) => t.id === id);
-    const push = (id: TabId, out: TabDef[]) => {
-      const t = pick(id);
-      if (t) out.push(t);
-    };
-    const tabs: TabDef[] = [];
-    push("models", tabs);
-    push("groups", tabs);
-    push("connectors", tabs);
-    push("analytics", tabs);
-    // The platform admin (operator) additionally gets the fleet-level surfaces.
-    // NOT the all-tenant Users tab — user management lives in Clerk.
-    if (isPlatformAdmin) {
-      push("console", tabs);
-      push("audit", tabs);
-      push("settings", tabs);
-    }
-    return tabs;
-  }, [isPlatformAdmin]);
+  // Single-tenant self-host: the admin manages the whole instance, so every
+  // tab is shown (Users, Models, Groups, Connectors, Analytics, Console,
+  // Audit, App settings).
+  const visibleTabs = TABS;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: TabId = useMemo(() => {
@@ -138,7 +118,7 @@ export function AdminPage() {
 
   return (
     <>
-      <TopNav title={isPlatformAdmin ? "Admin" : "Settings"} subtitle={active.subtitle} />
+      <TopNav title="Admin" subtitle={active.subtitle} />
 
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-5 md:px-6 md:py-6">

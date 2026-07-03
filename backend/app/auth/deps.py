@@ -51,8 +51,7 @@ async def _resolve_custom_user(
     db: AsyncSession,
 ) -> User:
     """Built-in JWT auth path. Verifies the bearer access token, loads the user,
-    and enforces the disabled/lock/token-version revocation checks. Behaviour is
-    unchanged from before the AUTH_PROVIDER seam was introduced."""
+    and enforces the disabled/lock/token-version revocation checks."""
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
