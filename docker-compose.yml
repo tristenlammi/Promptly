@@ -92,6 +92,11 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - SINGLE_USER_MODE=${SINGLE_USER_MODE:-false}
+      # Reversible Clerk auth. Defaults keep the built-in JWT auth; set
+      # AUTH_PROVIDER=clerk + CLERK_ISSUER to verify Clerk session tokens.
+      - AUTH_PROVIDER=${AUTH_PROVIDER:-custom}
+      - CLERK_ISSUER=${CLERK_ISSUER:-}
+      - CLERK_JWKS_URL=${CLERK_JWKS_URL:-}
       - SEARXNG_URL=http://searxng:8080
       # CORS allow-list and provider/search API keys are now configured
       # through the first-run wizard and Admin → Settings — not via
