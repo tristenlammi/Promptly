@@ -19,6 +19,14 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # External identity link when AUTH_PROVIDER="clerk". NULL for built-in
+    # (password) accounts. Unique so a Clerk user maps to exactly one local
+    # shadow row. The local row still owns all app-specific state (role,
+    # allowed_models, quotas, org membership); Clerk only owns authentication.
+    clerk_user_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True, index=True, default=None
+    )
+
     # "admin" (full access + can manage users/providers) or "user" (chat only,
     # restricted by allowed_models).
     role: Mapped[str] = mapped_column(

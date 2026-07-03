@@ -120,20 +120,31 @@ async def _resolve_clerk_user(
     credentials: HTTPAuthorizationCredentials | None,
     db: AsyncSession,
 ) -> User:
-    """Clerk auth path (P0, not yet wired).
+    """Clerk auth path. Verifies the Clerk session JWT (RS256/JWKS), maps it to
+    a local shadow ``User`` (lazy-provisioned on first sign-in), and enforces the
+    disabled/lock checks. Clerk tokens don't carry our ``tv`` claim, so
+    token-version revocation is a no-op here — Clerk session revocation + the
+    ``disabled`` flag cover it instead. Imported lazily so the default custom
+    path never pulls in the Clerk module."""
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    TODO(P0): verify the Clerk session JWT against ``settings.CLERK_JWKS_URL``
-    (cache the JWKS), validate issuer == ``settings.CLERK_ISSUER``, read ``sub``
-    (clerk_user_id) + org claims, resolve to the local shadow ``User`` (created
-    via Clerk webhooks; lazy-provision as a fallback), and enforce the same
-    disabled/lock/token_version revocation semantics as the custom path. Until
-    this is implemented the provider stays ``custom`` by default, so this branch
-    is unreachable in normal operation.
-    """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Clerk auth provider is selected but not yet configured.",
-    )
+    from app.auth.clerk import resolve_or_provision_user, verify_clerk_token
+
+    claims = await verify_clerk_token(credentials.credentials)
+    user = await resolve_or_provision_user(claims, db)
+
+    if user.disabled or user.is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session is no longer valid",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 
 async def get_current_user(
