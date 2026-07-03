@@ -40,10 +40,12 @@ export function ClerkSubscriptionGate({ children }: { children: ReactNode }) {
             Choose a plan to continue
           </h1>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Start your 7-day free trial — you won't be charged until it ends.
+            Start your free trial— you won't be charged until it ends.
           </p>
         </div>
-        <PricingTable />
+        {/* Bill the account's Organization (the tenant, seat-priced) — not the
+            individual user. Every account is an org. */}
+        <PricingTable for="organization" />
         <div className="mt-6 text-center">
           <button
             type="button"
