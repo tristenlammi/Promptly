@@ -53,6 +53,9 @@ export interface UserSettings {
    *  sidebar (purely cosmetic — routes still work). One of
    *  ``"workspaces" | "study" | "tasks"``. Absent / ``[]`` = show all. */
   hidden_nav?: string[];
+  /** One-shot marker: the org admin has finished (or skipped) the
+   *  post-signup onboarding wizard. Absent/false = still to onboard. */
+  onboarding_completed?: boolean;
   /** Legacy master switch for cross-chat memory (Phase 6). Superseded by
    *  ``memory_mode``; kept for back-compat reads. */
   memory_enabled?: boolean;
@@ -93,6 +96,8 @@ export interface UserPreferencesUpdate {
   default_provider_id?: string;
   /** Replace the full set of hidden nav surfaces. ``[]`` shows all. */
   hidden_nav?: string[];
+  /** Mark the post-signup onboarding wizard as finished/skipped. */
+  onboarding_completed?: boolean;
   /** Toggle cross-chat memory capture + injection (legacy). */
   memory_enabled?: boolean;
   /** Memory behaviour: off / auto / manual. */

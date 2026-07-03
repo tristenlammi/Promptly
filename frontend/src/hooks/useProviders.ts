@@ -10,10 +10,11 @@ import { useModelStore } from "@/store/modelStore";
 export const PROVIDERS_KEY = ["providers"] as const;
 export const AVAILABLE_MODELS_KEY = ["available-models"] as const;
 
-export function useProviders() {
+export function useProviders(enabled = true) {
   return useQuery({
     queryKey: PROVIDERS_KEY,
     queryFn: () => modelsApi.list(),
+    enabled,
   });
 }
 

@@ -170,6 +170,10 @@ class UserPreferencesUpdate(BaseModel):
     # or its routes, it just declutters the nav. Unknown keys are dropped
     # so a stale client can't poison the list. ``[]`` = show everything.
     hidden_nav: list[str] | None = None
+    # One-shot flag: the org admin has finished (or skipped) the post-signup
+    # onboarding wizard. Gates the wizard so it shows once and never nags again,
+    # even if they later remove every provider. Purely a client-driven marker.
+    onboarding_completed: bool | None = None
     # Master switch for cross-chat memory (Phase 6). When off, the
     # post-turn extraction pass is skipped and saved facts are not
     # injected into the system prompt. Absent = on (the default).

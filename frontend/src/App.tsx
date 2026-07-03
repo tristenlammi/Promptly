@@ -30,6 +30,7 @@ import { TasksPage } from "@/pages/TasksPage";
 import { TrashPage } from "@/pages/TrashPage";
 import { isClerkAuth } from "@/auth/authMode";
 import { ClerkSubscriptionGate } from "@/auth/ClerkSubscriptionGate";
+import { OrgOnboardingGate } from "@/components/onboarding/OrgOnboardingGate";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
 import { useAuthStore } from "@/store/authStore";
@@ -275,7 +276,9 @@ export default function App() {
   return (
     <>
       {isClerkAuth ? (
-        <ClerkSubscriptionGate>{authedApp}</ClerkSubscriptionGate>
+        <ClerkSubscriptionGate>
+          <OrgOnboardingGate>{authedApp}</OrgOnboardingGate>
+        </ClerkSubscriptionGate>
       ) : (
         authedApp
       )}

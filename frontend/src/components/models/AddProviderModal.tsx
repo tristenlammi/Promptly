@@ -12,7 +12,7 @@ import type { ProviderType } from "@/api/types";
  * is selected; ``keyless`` toggles whether the API-key field is
  * required and labels it accordingly.
  */
-interface ProviderSpec {
+export interface ProviderSpec {
   value: ProviderType;
   label: string;
   defaultName: string;
@@ -22,7 +22,7 @@ interface ProviderSpec {
   hint?: string;
 }
 
-const PROVIDER_SPECS: ProviderSpec[] = [
+export const PROVIDER_SPECS: ProviderSpec[] = [
   {
     value: "openrouter",
     label: "OpenRouter",
@@ -77,7 +77,7 @@ const PROVIDER_SPECS: ProviderSpec[] = [
   },
 ];
 
-function specFor(type: ProviderType): ProviderSpec {
+export function specFor(type: ProviderType): ProviderSpec {
   return PROVIDER_SPECS.find((s) => s.value === type) ?? PROVIDER_SPECS[0];
 }
 
