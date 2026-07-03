@@ -423,8 +423,17 @@ async def delete_user(
     target = await db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    await db.delete(target)
-    await db.commit()
+    # Route through the shared purge helper so the file BYTES on disk are
+    # cleaned up too — a bare ``db.delete`` cascades the DB rows but leaves the
+    # blobs orphaned. Returns False only for protected (operator) accounts.
+    from app.tasks.deletion import purge_user
+
+    purged = await purge_user(db, target)
+    if not purged:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is protected and cannot be deleted.",
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

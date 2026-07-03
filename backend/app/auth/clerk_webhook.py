@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -101,6 +102,12 @@ async def _sync_user(data: dict, db: AsyncSession) -> None:
         if username and user.username != username:
             user.username = username
             changed = True
+        # A create/update event means the account is live in Clerk — reverse a
+        # pending soft-delete so the purge job never erases a returning user.
+        if user.deleted_at is not None or user.disabled:
+            user.deleted_at = None
+            user.disabled = False
+            changed = True
         if changed:
             try:
                 await db.commit()
@@ -115,6 +122,9 @@ async def _sync_user(data: dict, db: AsyncSession) -> None:
         existing = result.scalar_one_or_none()
         if existing is not None:
             existing.clerk_user_id = clerk_id
+            # Returning under a fresh Clerk id — un-soft-delete the account.
+            existing.deleted_at = None
+            existing.disabled = False
             try:
                 await db.commit()
             except IntegrityError:
@@ -138,9 +148,12 @@ async def _sync_user(data: dict, db: AsyncSession) -> None:
 
 
 async def _disable_user(data: dict, db: AsyncSession) -> None:
-    """Deactivate the shadow user on a Clerk ``user.deleted``. We disable +
-    bump ``token_version`` (kills live sessions) rather than hard-delete, so a
-    deletion in Clerk never cascades away the user's workspaces/files."""
+    """Soft-delete the shadow user on a Clerk ``user.deleted``. We disable +
+    bump ``token_version`` (kills live sessions) and stamp ``deleted_at`` —
+    never hard-delete inline, so a deletion in Clerk can't instantly cascade
+    away the user's workspaces/files. The scheduled purge job erases the row +
+    all content once the grace window (``DELETION_GRACE_DAYS``) elapses; an
+    operator can restore before then."""
     clerk_id = data.get("id")
     if not clerk_id:
         return
@@ -152,19 +165,33 @@ async def _disable_user(data: dict, db: AsyncSession) -> None:
         return
     user.disabled = True
     user.token_version = (user.token_version or 0) + 1
+    if user.deleted_at is None:
+        user.deleted_at = datetime.now(timezone.utc)
     await db.commit()
 
 
 async def _sync_org(data: dict, db: AsyncSession) -> None:
-    """organization.created / .updated → upsert the org shadow (name/id)."""
+    """organization.created / .updated → upsert the org shadow (name/id) and
+    reverse a pending soft-delete (a live create/update event means the org is
+    back)."""
     clerk_org_id = data.get("id")
     if not clerk_org_id:
         return
-    await upsert_org(clerk_org_id, data.get("name"), db)
+    org = await upsert_org(clerk_org_id, data.get("name"), db)
+    if org.deleted_at is not None:
+        org.deleted_at = None
+        await db.commit()
 
 
 async def _delete_org(data: dict, db: AsyncSession) -> None:
-    """organization.deleted → drop the shadow (FK SET NULL clears members)."""
+    """organization.deleted → SOFT-delete the shadow (stamp ``deleted_at``).
+
+    Deliberately does NOT ``db.delete(org)`` — that would instantly cascade the
+    org's config (providers + encrypted keys, custom models, groups, connectors,
+    defaults) away with zero grace. Marking instead keeps everything intact and
+    recoverable until the purge job runs past ``DELETION_GRACE_DAYS``. (Clerk
+    still fires ``organizationMembership.deleted`` for each member, so members
+    are detached — ``org_id`` NULL — immediately regardless.)"""
     clerk_org_id = data.get("id")
     if not clerk_org_id:
         return
@@ -172,8 +199,8 @@ async def _delete_org(data: dict, db: AsyncSession) -> None:
         select(Organization).where(Organization.clerk_org_id == clerk_org_id)
     )
     org = result.scalar_one_or_none()
-    if org is not None:
-        await db.delete(org)
+    if org is not None and org.deleted_at is None:
+        org.deleted_at = datetime.now(timezone.utc)
         await db.commit()
 
 

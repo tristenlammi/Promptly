@@ -41,6 +41,13 @@ class Organization(UUIDPKMixin, CreatedAtMixin, Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # Soft-delete clock. Set when the org is deleted in Clerk — we mark
+    # rather than run ``db.delete(org)`` so the CASCADE (providers + encrypted
+    # keys, custom models, groups, connectors, defaults) doesn't fire until the
+    # grace window elapses and the purge job runs. NULL = live.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
 
 class User(UUIDPKMixin, CreatedAtMixin, Base):
@@ -110,6 +117,14 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     # authenticated request (no waiting for the access token to expire).
     disabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Soft-delete clock. Set (alongside ``disabled``) when the account is
+    # deleted in Clerk — we mark rather than destroy so a deletion never
+    # cascades a user's content away instantly. A scheduled purge job hard-
+    # deletes the row + all content once ``deleted_at`` is older than
+    # ``DELETION_GRACE_DAYS``. NULL = live. Cleared on re-link (they came back).
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
     # Force the user through a password-change screen on next login.
     # Set when an admin creates an account (so the temp password isn't

@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     # operator). Set to the owner's email in the hosted deployment.
     PLATFORM_ADMIN_EMAIL: str = ""
 
+    # ---- Data deletion / retention ----
+    # Grace window (days) between a user/org being soft-deleted (marked in the
+    # Clerk deletion webhooks) and the scheduled purge job hard-deleting the
+    # row + all its content. Recoverable within the window via an operator
+    # restore. 0 = purge on the next daily run (no grace). Keep this <= your
+    # DB/backup retention so nothing is irreversibly gone while a backup holds
+    # it. 30 is a standard, GDPR-defensible default.
+    DELETION_GRACE_DAYS: int = 30
+
     # ---- Cookies (refresh + future MFA device cookies) ----
     # Defaults to True because production deployments are HTTPS via the
     # Cloudflare tunnel. Override to False *only* in local dev when you
