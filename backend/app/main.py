@@ -268,9 +268,6 @@ async def health() -> JSONResponse:
 from app.admin.router import router as admin_router  # noqa: E402
 from app.admin.deletion_router import router as deletion_router  # noqa: E402
 from app.app_settings.router import router as app_settings_router  # noqa: E402
-from app.app_settings.org_defaults_router import (  # noqa: E402
-    router as org_defaults_router,
-)
 from app.app_settings.public_router import (  # noqa: E402
     router as workspace_defaults_router,
 )
@@ -313,10 +310,6 @@ app.include_router(
 )
 app.include_router(
     app_settings_router, prefix="/api/admin/app-settings", tags=["admin"]
-)
-# Per-org model-role defaults (org admins). Scoped to the caller's own org.
-app.include_router(
-    org_defaults_router, prefix="/api/admin/org-defaults", tags=["admin"]
 )
 # Non-admin read of the workspace-wide model defaults — every
 # authenticated user needs to see this so the chat picker can

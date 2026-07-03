@@ -20,10 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import (
     AnalyticsModelRow,
-    AnalyticsOrgRow,
     AnalyticsTimeseriesPoint,
 )
-from app.auth.models import Organization, User
+from app.auth.models import User
 from app.billing.models import UsageDaily
 from app.chat.models import Conversation, Message
 
@@ -153,95 +152,6 @@ async def by_model(
     ]
 
 
-async def by_org(
-    db: AsyncSession,
-    *,
-    start: datetime,
-) -> list[AnalyticsOrgRow]:
-    """Per-ORG roll-up for the platform operator's fleet view.
-
-    One row per :class:`Organization`, aggregating every member's usage in the
-    window — never per user. Left-joins so idle orgs (no usage yet) still show,
-    giving the operator the full tenant list. ``member_count`` is the org's
-    total shadow-user count; ``active_users_window`` is the distinct users who
-    actually spent in the window. Sorted costliest-first.
-
-    Note: usage from users with no ``org_id`` (there shouldn't normally be any
-    in hosted mode) is simply not attributed to any org row — this view is a
-    tenant breakdown, not a fleet reconciliation of every last token.
-    """
-    # Total members per org (independent of the usage window).
-    member_sub = (
-        select(
-            User.org_id.label("org_id"),
-            func.count(User.id).label("members"),
-        )
-        .where(User.org_id.isnot(None))
-        .group_by(User.org_id)
-        .subquery()
-    )
-
-    # Usage per org within the window: join usage_daily → users to reach org_id.
-    usage_sub = (
-        select(
-            User.org_id.label("org_id"),
-            func.coalesce(func.sum(UsageDaily.messages_sent), 0).label("messages"),
-            func.coalesce(func.sum(UsageDaily.prompt_tokens), 0).label("prompt_tokens"),
-            func.coalesce(func.sum(UsageDaily.completion_tokens), 0).label(
-                "completion_tokens"
-            ),
-            func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0).label("cost_micros"),
-            func.max(UsageDaily.updated_at).label("last_active"),
-            func.count(func.distinct(UsageDaily.user_id)).label("active_users"),
-        )
-        .join(User, User.id == UsageDaily.user_id)
-        .where(UsageDaily.day >= start.date(), User.org_id.isnot(None))
-        .group_by(User.org_id)
-        .subquery()
-    )
-
-    stmt = (
-        select(
-            Organization.id,
-            Organization.name,
-            Organization.plan,
-            Organization.seat_limit,
-            func.coalesce(member_sub.c.members, 0),
-            func.coalesce(usage_sub.c.active_users, 0),
-            func.coalesce(usage_sub.c.messages, 0),
-            func.coalesce(usage_sub.c.prompt_tokens, 0),
-            func.coalesce(usage_sub.c.completion_tokens, 0),
-            func.coalesce(usage_sub.c.cost_micros, 0),
-            usage_sub.c.last_active,
-        )
-        .outerjoin(member_sub, member_sub.c.org_id == Organization.id)
-        .outerjoin(usage_sub, usage_sub.c.org_id == Organization.id)
-        .order_by(
-            func.coalesce(usage_sub.c.cost_micros, 0).desc(),
-            func.coalesce(usage_sub.c.messages, 0).desc(),
-            Organization.name.asc(),
-        )
-    )
-
-    rows = (await db.execute(stmt)).all()
-    return [
-        AnalyticsOrgRow(
-            org_id=r[0],
-            org_name=r[1] or "Organization",
-            plan=r[2],
-            seat_limit=r[3],
-            member_count=int(r[4] or 0),
-            active_users_window=int(r[5] or 0),
-            messages_window=int(r[6] or 0),
-            prompt_tokens_window=int(r[7] or 0),
-            completion_tokens_window=int(r[8] or 0),
-            cost_usd_window=micros_to_usd(r[9]),
-            last_active_at=r[10],
-        )
-        for r in rows
-    ]
-
-
 async def window_totals(
     db: AsyncSession,
     *,
@@ -289,7 +199,6 @@ async def today_totals(
 
 __all__ = [
     "by_model",
-    "by_org",
     "micros_to_usd",
     "timeseries",
     "today_totals",

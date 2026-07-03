@@ -244,30 +244,6 @@ export interface PendingDeletions {
   orgs: PendingDeletionOrg[];
 }
 
-/**
- * Per-ORG model-role defaults (Admin → Models → Defaults). Which model an
- * org reaches for when it needs role X. Scoped to the caller's own org;
- * references that org's BYOK providers. The app-wide embedding model and all
- * platform-global settings stay on {@link AppSettings}.
- */
-export interface OrgModelDefaults {
-  default_chat_provider_id: string | null;
-  default_chat_model_id: string | null;
-  default_chat_configured: boolean;
-  vision_relay_provider_id: string | null;
-  vision_relay_model_id: string | null;
-  vision_relay_configured: boolean;
-  research_provider_id: string | null;
-  research_model_id: string | null;
-  research_configured: boolean;
-  study_provider_id: string | null;
-  study_model_id: string | null;
-  study_configured: boolean;
-  study_assessor_provider_id: string | null;
-  study_assessor_model_id: string | null;
-  study_assessor_configured: boolean;
-}
-
 export interface AppSettings {
   mfa_required: boolean;
   smtp_host: string | null;
@@ -412,22 +388,6 @@ export interface AnalyticsModelRow {
   prompt_tokens_window: number;
   completion_tokens_window: number;
   cost_usd_window: number;
-}
-
-/** Per-ORG roll-up for the platform operator's fleet analytics. Cost/usage
- *  is aggregated across the whole org — never broken out per user. */
-export interface AnalyticsOrgRow {
-  org_id: string;
-  org_name: string;
-  plan: string | null;
-  seat_limit: number | null;
-  member_count: number;
-  active_users_window: number;
-  messages_window: number;
-  prompt_tokens_window: number;
-  completion_tokens_window: number;
-  cost_usd_window: number;
-  last_active_at: string | null;
 }
 
 // ---- End-user usage dashboard (Phase 8) ----

@@ -38,15 +38,6 @@ class Settings(BaseSettings):
     SINGLE_USER_MODE: bool = False
     ALLOWED_ORIGINS: str = "http://localhost"
 
-    # ---- Platform (super) admin ----
-    # The hosted SaaS has exactly ONE super admin, ever: the app owner. Being
-    # role=="admin" is necessary but NOT sufficient — the account must also
-    # match this exact (Clerk-verified) email, so a stray or maliciously
-    # promoted ``role=admin`` row grants nothing. Leave EMPTY for self-host /
-    # dev, where ``role=admin`` alone governs (the first registered user is the
-    # operator). Set to the owner's email in the hosted deployment.
-    PLATFORM_ADMIN_EMAIL: str = ""
-
     # ---- Data deletion / retention ----
     # Grace window (days) between a user/org being soft-deleted (marked in the
     # Clerk deletion webhooks) and the scheduled purge job hard-deleting the

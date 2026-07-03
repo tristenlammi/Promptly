@@ -5,7 +5,6 @@ import {
   type AppSettingsPatch,
   type AuthEventsQuery,
   type CreateUserPayload,
-  type OrgDefaultsPatch,
   type ResetPasswordPayload,
   type UpdateUserPayload,
 } from "@/api/admin";
@@ -14,12 +13,10 @@ import type {
   AdminUser,
   AdminUserUsage,
   AnalyticsModelRow,
-  AnalyticsOrgRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
   AppSettings,
-  OrgModelDefaults,
   PendingDeletions,
   AuthEvent,
   ErrorEventDetail,
@@ -215,28 +212,6 @@ export const usePurgeDeletionOrg = () =>
 export const useRestoreDeletionOrg = () =>
   useDeletionAction(adminApi.restoreDeletionOrg);
 
-// ---------------- Per-org model defaults ----------------
-const ORG_DEFAULTS_KEY = ["admin", "org-defaults"] as const;
-
-export function useOrgDefaults() {
-  return useQuery<OrgModelDefaults>({
-    queryKey: ORG_DEFAULTS_KEY,
-    queryFn: adminApi.getOrgDefaults,
-    staleTime: 30_000,
-  });
-}
-
-export function useUpdateOrgDefaults() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (patch: OrgDefaultsPatch) => adminApi.updateOrgDefaults(patch),
-    onSuccess: (data) => {
-      // Snapshot the response so the cards flip without a refetch round-trip.
-      qc.setQueryData(ORG_DEFAULTS_KEY, data);
-    },
-  });
-}
-
 // ---------------- Analytics (Phase 3) ----------------
 export function useAnalyticsSummary(days = 30) {
   return useQuery<AnalyticsSummary>({
@@ -282,32 +257,6 @@ export function useAnalyticsUserTimeseries(
   });
 }
 
-// ---------------- Per-org analytics (platform operator only) ----------------
-export function useAnalyticsOrgs(days = 30) {
-  return useQuery<AnalyticsOrgRow[]>({
-    queryKey: ["admin", "analytics", "orgs", days] as const,
-    queryFn: () => adminApi.analyticsOrgs(days),
-    staleTime: 60_000,
-  });
-}
-
-export function useAnalyticsOrgTimeseries(orgId: string | null, days = 30) {
-  return useQuery<AnalyticsTimeseriesPoint[]>({
-    queryKey: ["admin", "analytics", "org-timeseries", orgId, days] as const,
-    queryFn: () => adminApi.analyticsOrgTimeseries(orgId as string, days),
-    enabled: orgId !== null,
-    staleTime: 60_000,
-  });
-}
-
-export function useAnalyticsOrgByModel(orgId: string | null, days = 30) {
-  return useQuery<AnalyticsModelRow[]>({
-    queryKey: ["admin", "analytics", "org-by-model", orgId, days] as const,
-    queryFn: () => adminApi.analyticsOrgByModel(orgId as string, days),
-    enabled: orgId !== null,
-    staleTime: 60_000,
-  });
-}
 
 // ---------------- Console — error groups + events ----------------
 const ERROR_GROUPS_KEY = ["admin", "errors", "groups"] as const;

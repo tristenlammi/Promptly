@@ -4,12 +4,10 @@ import type {
   AdminUser,
   AdminUserUsage,
   AnalyticsModelRow,
-  AnalyticsOrgRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
   AppSettings,
-  OrgModelDefaults,
   PendingDeletions,
   AuthEvent,
   ErrorEventDetail,
@@ -156,25 +154,6 @@ export interface AppSettingsPatch {
 export interface OriginPreview {
   canonical: string;
   warnings: string[];
-}
-
-/**
- * Partial update for the caller's per-org model-role defaults. Each pair
- * moves together: send both halves to set, both as `null` to clear, or omit
- * both to leave unchanged. The backend rejects a single-half patch and rejects
- * a provider that doesn't belong to the caller's org.
- */
-export interface OrgDefaultsPatch {
-  default_chat_provider_id?: string | null;
-  default_chat_model_id?: string | null;
-  vision_relay_provider_id?: string | null;
-  vision_relay_model_id?: string | null;
-  research_provider_id?: string | null;
-  research_model_id?: string | null;
-  study_provider_id?: string | null;
-  study_model_id?: string | null;
-  study_assessor_provider_id?: string | null;
-  study_assessor_model_id?: string | null;
 }
 
 export const adminApi = {
@@ -324,19 +303,6 @@ export const adminApi = {
     await apiClient.post(`/admin/deletion/orgs/${id}/restore`);
   },
 
-  // ---------------- Per-org model defaults ----------------
-  async getOrgDefaults(): Promise<OrgModelDefaults> {
-    const { data } = await apiClient.get<OrgModelDefaults>("/admin/org-defaults");
-    return data;
-  },
-  async updateOrgDefaults(patch: OrgDefaultsPatch): Promise<OrgModelDefaults> {
-    const { data } = await apiClient.patch<OrgModelDefaults>(
-      "/admin/org-defaults",
-      patch
-    );
-    return data;
-  },
-
   // ---------------- Analytics (Phase 3) ----------------
   async analyticsSummary(days = 30): Promise<AnalyticsSummary> {
     const { data } = await apiClient.get<AnalyticsSummary>(
@@ -372,35 +338,6 @@ export const adminApi = {
   ): Promise<AnalyticsTimeseriesPoint[]> {
     const { data } = await apiClient.get<AnalyticsTimeseriesPoint[]>(
       `/admin/analytics/users/${userId}/timeseries`,
-      { params: { days } }
-    );
-    return data;
-  },
-
-  // ---------------- Per-org analytics (platform operator only) ----------------
-  async analyticsOrgs(days = 30): Promise<AnalyticsOrgRow[]> {
-    const { data } = await apiClient.get<AnalyticsOrgRow[]>(
-      "/admin/analytics/orgs",
-      { params: { days } }
-    );
-    return data;
-  },
-  async analyticsOrgTimeseries(
-    orgId: string,
-    days = 30
-  ): Promise<AnalyticsTimeseriesPoint[]> {
-    const { data } = await apiClient.get<AnalyticsTimeseriesPoint[]>(
-      `/admin/analytics/orgs/${orgId}/timeseries`,
-      { params: { days } }
-    );
-    return data;
-  },
-  async analyticsOrgByModel(
-    orgId: string,
-    days = 30
-  ): Promise<AnalyticsModelRow[]> {
-    const { data } = await apiClient.get<AnalyticsModelRow[]>(
-      `/admin/analytics/orgs/${orgId}/by-model`,
       { params: { days } }
     );
     return data;

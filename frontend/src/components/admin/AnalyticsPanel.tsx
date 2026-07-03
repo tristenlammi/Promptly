@@ -50,24 +50,9 @@ import {
 } from "@/components/usage/shared";
 import { cn } from "@/utils/cn";
 import { USD_TO_AUD, formatAud } from "@/utils/currency";
-import { useAuthStore } from "@/store/authStore";
-import { OrgAnalyticsPanel } from "@/components/admin/OrgAnalyticsPanel";
 import type { AnalyticsUserRow } from "@/api/types";
 
 export function AnalyticsPanel() {
-  // The platform operator sees the fleet grouped PER ORG (cost/usage of each
-  // tenant as a whole) — never another tenant's individual users. An org admin
-  // falls through to the per-user view below, scoped to their own org.
-  const isPlatformAdmin = useAuthStore(
-    (s) => s.user?.is_platform_admin ?? s.user?.role === "admin"
-  );
-  if (isPlatformAdmin) {
-    return <OrgAnalyticsPanel />;
-  }
-  return <OrgAdminAnalyticsPanel />;
-}
-
-function OrgAdminAnalyticsPanel() {
   const [days, setDays] = useState<RangeDays>(30);
   // Tokens is the default because it's the most universally-useful
   // view — cost swings with provider pricing, messages undercounts

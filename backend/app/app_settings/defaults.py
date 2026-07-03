@@ -25,12 +25,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.app_settings.models import (
-    SINGLETON_APP_SETTINGS_ID,
-    AppSettings,
-    OrgModelDefaults,
-)
-from app.auth.models import User
+from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 
 
 @dataclass(frozen=True)
@@ -94,20 +89,11 @@ def _from_source(src) -> EffectiveDefaults:
 
 
 async def load_effective_defaults(
-    db: AsyncSession, org_id: uuid.UUID | None
+    db: AsyncSession, org_id: uuid.UUID | None = None
 ) -> EffectiveDefaults:
-    """Resolve the model-role defaults for a caller in ``org_id``.
-
-    See the module docstring for precedence. Never raises — a missing org row
-    or missing singleton collapses to an all-``None`` (everything "off").
-    """
-    if org_id is not None:
-        row = await db.get(OrgModelDefaults, org_id)
-        if row is None:
-            return EffectiveDefaults()
-        return _from_source(row)
-
-    # No tenancy → self-host / custom auth: the global singleton IS the default.
+    """The instance's model-role defaults, read from the global ``app_settings``
+    singleton. ``org_id`` is accepted but ignored (single-tenant self-host —
+    kept so existing call sites don't need touching). Never raises."""
     settings = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
     if settings is None:
         return EffectiveDefaults()
@@ -115,15 +101,10 @@ async def load_effective_defaults(
 
 
 async def org_id_of(db: AsyncSession, user_id: uuid.UUID | None) -> uuid.UUID | None:
-    """Convenience for background/service sites that only hold an owner id.
-
-    Returns the user's ``org_id`` (or ``None`` if the user is missing / has no
-    org), so those sites can resolve defaults for the resource's owner.
-    """
-    if user_id is None:
-        return None
-    user = await db.get(User, user_id)
-    return user.org_id if user is not None else None
+    """Vestigial (single-tenant): defaults are global, so the returned value is
+    only fed to ``load_effective_defaults`` which ignores it. Kept to avoid
+    touching the background/service call sites."""
+    return None
 
 
 __all__ = ["EffectiveDefaults", "load_effective_defaults", "org_id_of"]

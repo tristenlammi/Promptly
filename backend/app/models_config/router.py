@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import false, select
+from sqlalchemy import false, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -66,39 +66,26 @@ async def _validate_base_url(raw: str | None, *, strict: bool = False) -> None:
 
 
 def _can_manage_providers(user: User) -> bool:
-    """Who may configure providers: the platform admin, or a tenant *admin*
-    (org owner/admin). Tenant members inherit models but can't manage them."""
-    return user.role == "admin" or (
-        user.org_role == "admin" and user.org_id is not None
-    )
+    """Who may configure providers: the admin. Single-tenant self-host — the
+    admin manages the shared model pool; everyone else just uses it."""
+    return user.role == "admin"
 
 
 def _require_provider_admin(user: User) -> None:
     if not _can_manage_providers(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only an organization admin can manage providers.",
+            detail="Only an admin can manage providers.",
         )
 
 
 async def _get_owned_provider(
     provider_id: uuid.UUID, user: User, db: AsyncSession
 ) -> ModelProvider:
-    """Fetch a provider the caller may manage. Platform admins may manage their
-    own + platform system rows; a tenant admin may manage their org's providers.
-    Anything outside that scope 404s (no existence disclosure)."""
+    """Fetch a provider the admin may manage (any provider, single-tenant).
+    Missing → 404."""
     provider = await db.get(ModelProvider, provider_id)
-    if provider is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
-    if user.role == "admin":
-        allowed = provider.user_id == user.id or (
-            provider.org_id is None and provider.user_id is None
-        )
-    elif user.org_role == "admin" and user.org_id is not None:
-        allowed = provider.org_id == user.org_id
-    else:
-        allowed = False
-    if not allowed:
+    if provider is None or user.role != "admin":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
     return provider
 
@@ -112,16 +99,8 @@ async def list_providers(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ProviderResponse]:
-    # The *management* list. Platform admin: own + platform system rows. Tenant
-    # admin: their org's providers. Everyone else (members): nothing to manage.
-    if user.role == "admin":
-        provider_filter = (ModelProvider.user_id == user.id) | (
-            ModelProvider.org_id.is_(None) & ModelProvider.user_id.is_(None)
-        )
-    elif user.org_role == "admin" and user.org_id is not None:
-        provider_filter = ModelProvider.org_id == user.org_id
-    else:
-        provider_filter = false()
+    # The *management* list — admin only (everyone else manages nothing).
+    provider_filter = true() if user.role == "admin" else false()
     result = await db.execute(
         select(ModelProvider)
         .where(provider_filter)
@@ -331,21 +310,10 @@ async def list_available_models_for(
     the chat dispatcher has to know to resolve the synthetic id
     back to its underlying base model before streaming.
     """
-    if user.role == "admin":
-        # Platform admin: own + platform system providers.
-        provider_filter = (ModelProvider.user_id == user.id) | (
-            ModelProvider.org_id.is_(None) & ModelProvider.user_id.is_(None)
-        )
-    elif user.org_id is not None:
-        # BYOK: any member of a tenant sees the models from *their org's*
-        # providers (configured once by the org admin, inherited by everyone).
-        # System/other-tenant providers are never shared. (Custom Models inherit
-        # this — the block below reuses provider_filter.)
-        provider_filter = ModelProvider.org_id == user.org_id
-    else:
-        # No tenant resolved yet (transient) — show nothing rather than risk
-        # matching system providers (org_id IS NULL).
-        provider_filter = false()
+    # Single-tenant self-host: the admin curates one shared model pool; every
+    # user sees all enabled providers' models (further narrowed per user by
+    # ``allowed_models`` + group grants below).
+    provider_filter = true()
 
     result = await db.execute(
         select(ModelProvider)

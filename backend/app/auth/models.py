@@ -190,24 +190,10 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
 
     @property
     def is_platform_admin(self) -> bool:
-        """The single hosted-SaaS super admin (the app owner).
-
-        ``role == "admin"`` is necessary but not sufficient: when
-        ``PLATFORM_ADMIN_EMAIL`` is configured (hosted mode) the row must ALSO
-        be that exact email, so a stray or injected ``role=admin`` account is
-        inert. Unset (self-host / dev) → role alone governs, preserving the
-        first-user-is-operator behaviour. This is the single source of truth
-        for "is this the operator" — auth deps, analytics scoping, and the
-        ``/me`` payload all read it.
-        """
-        if self.role != "admin":
-            return False
-        from app.config import get_settings
-
-        configured = (get_settings().PLATFORM_ADMIN_EMAIL or "").strip().lower()
-        if not configured:
-            return True
-        return (self.email or "").strip().lower() == configured
+        """Vestigial synonym for :attr:`is_admin` in single-tenant self-host —
+        there's no platform-vs-org-admin tier. Kept so the remaining call sites
+        (analytics scoping, ``/me`` payload) don't need touching yet."""
+        return self.role == "admin"
 
     @property
     def is_locked(self) -> bool:

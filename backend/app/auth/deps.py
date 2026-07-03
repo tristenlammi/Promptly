@@ -137,14 +137,10 @@ async def get_current_user(
 
 
 async def require_admin(user: User = Depends(get_current_user)) -> User:
-    """Dependency that rejects non-admin callers with 403.
-
-    Intended for *platform*-operator routes (fleet-wide app settings, audit,
-    console, per-org analytics). Gates on :attr:`User.is_platform_admin` — the
-    single configured super-admin account — NOT a bare ``role == "admin"``, so
-    a promoted-by-accident admin row can never reach these surfaces.
-    """
-    if not user.is_platform_admin:
+    """Dependency that rejects non-admin callers with 403. Single-tenant
+    self-host: the admin manages everything (models, groups, connectors,
+    settings, analytics) for the whole instance."""
+    if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
@@ -152,28 +148,15 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-async def require_org_admin(user: User = Depends(get_current_user)) -> User:
-    """Platform admin OR a tenant/org admin. Used by the org-scoped admin
-    surfaces (providers, custom models, groups, connectors, analytics) so a
-    tenant admin can manage *their own* org's config."""
-    if user.is_platform_admin or (
-        user.org_role == "admin" and user.org_id is not None
-    ):
-        return user
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Admin privileges required",
-    )
+# Back-compat alias: several admin routers still import ``require_org_admin``.
+# In single-tenant self-host there's no org tier — admin is admin.
+require_org_admin = require_admin
 
 
 def org_scope_for(user: User) -> uuid.UUID | None:
-    """The org a caller's per-tenant RESOURCE queries are filtered to — ALWAYS
-    their own ``org_id``, including for the platform admin.
+    """The org a caller's resource queries filter to — their own ``org_id``.
 
-    The platform admin is an *operator*, not a super-tenant: for connectors,
-    providers, custom models, and groups they see only their OWN org, exactly
-    like any org admin — never another tenant's config. Genuinely fleet-wide
-    operator surfaces (analytics, audit, console, app settings) have their own
-    scoping and do NOT use this helper.
-    """
+    Vestigial in single-tenant self-host (kept only until the org columns are
+    dropped). Still consumed by the not-yet-un-scoped subsystems (connectors,
+    custom models, groups)."""
     return user.org_id
