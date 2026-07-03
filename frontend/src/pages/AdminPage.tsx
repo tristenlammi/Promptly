@@ -115,6 +115,8 @@ export function AdminPage() {
     const modelsTab = TABS.find((t) => t.id === "models");
     if (modelsTab) tabs.push(modelsTab);
     if (isClerkAuth && hasOrg) tabs.push(MEMBERS_TAB);
+    const analyticsTab = TABS.find((t) => t.id === "analytics");
+    if (analyticsTab) tabs.push(analyticsTab);
     return tabs;
   }, [isPlatformAdmin, hasOrg]);
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +23,7 @@ from app.admin.schemas import (
     AnalyticsTimeseriesPoint,
     AnalyticsUserRow,
 )
-from app.auth.deps import require_admin
+from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.billing import aggregates
 from app.billing.aggregates import micros_to_usd as _micros_to_usd
@@ -34,38 +34,67 @@ from app.database import get_db
 router = APIRouter()
 
 
+def _analytics_scope(user: User) -> uuid.UUID | None:
+    """Resolve who the caller may see analytics for. Platform admin → ``None``
+    (fleet-wide). Org admin → their ``org_id`` (that tenant only). Anyone else
+    → 403. The returned org_id is threaded into every query so a tenant admin
+    can never see another org's usage/cost."""
+    if user.role == "admin":
+        return None
+    if user.org_role == "admin" and user.org_id is not None:
+        return user.org_id
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+    )
+
+
 @router.get("/analytics/summary", response_model=AnalyticsSummary)
 async def analytics_summary(
     days: int = Query(default=30, ge=1, le=180),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> AnalyticsSummary:
     """Headline numbers: messages, tokens, cost, active users."""
+    org_id = _analytics_scope(user)
     start = _window_start(days)
     today = datetime.now(timezone.utc).date()
 
-    total_users = (
-        await db.execute(select(func.count(User.id)))
-    ).scalar_one()
+    users_stmt = select(func.count(User.id))
+    if org_id is not None:
+        users_stmt = users_stmt.where(User.org_id == org_id)
+    total_users = (await db.execute(users_stmt)).scalar_one()
+
+    def _scoped(stmt):
+        if org_id is not None:
+            return stmt.where(
+                UsageDaily.user_id.in_(
+                    select(User.id).where(User.org_id == org_id).scalar_subquery()
+                )
+            )
+        return stmt
 
     window_row = (
         await db.execute(
-            select(
-                func.coalesce(func.sum(UsageDaily.messages_sent), 0),
-                func.coalesce(func.sum(UsageDaily.prompt_tokens), 0),
-                func.coalesce(func.sum(UsageDaily.completion_tokens), 0),
-                func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
-                func.count(func.distinct(UsageDaily.user_id)),
-            ).where(UsageDaily.day >= start.date())
+            _scoped(
+                select(
+                    func.coalesce(func.sum(UsageDaily.messages_sent), 0),
+                    func.coalesce(func.sum(UsageDaily.prompt_tokens), 0),
+                    func.coalesce(func.sum(UsageDaily.completion_tokens), 0),
+                    func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
+                    func.count(func.distinct(UsageDaily.user_id)),
+                ).where(UsageDaily.day >= start.date())
+            )
         )
     ).one()
 
     today_row = (
         await db.execute(
-            select(
-                func.coalesce(func.sum(UsageDaily.messages_sent), 0),
-                func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
-            ).where(UsageDaily.day == today)
+            _scoped(
+                select(
+                    func.coalesce(func.sum(UsageDaily.messages_sent), 0),
+                    func.coalesce(func.sum(UsageDaily.cost_usd_micros), 0),
+                ).where(UsageDaily.day == today)
+            )
         )
     ).one()
 
@@ -90,7 +119,7 @@ async def analytics_summary(
 async def analytics_timeseries(
     days: int = Query(default=30, ge=1, le=180),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> list[AnalyticsTimeseriesPoint]:
     """Daily totals for the trend chart.
 
@@ -98,7 +127,9 @@ async def analytics_timeseries(
     frontend fills the gaps so the X axis stays continuous), which
     keeps the payload tiny on a quiet instance.
     """
-    return await aggregates.timeseries(db, start=_window_start(days))
+    return await aggregates.timeseries(
+        db, start=_window_start(days), org_id=_analytics_scope(user)
+    )
 
 
 @router.get(
@@ -109,7 +140,7 @@ async def analytics_users(
     days: int = Query(default=30, ge=1, le=180),
     limit: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> list[AnalyticsUserRow]:
     """Per-user roll-up sorted by cost desc, then tokens desc.
 
@@ -119,6 +150,7 @@ async def analytics_users(
     token volume so two zero-cost users still come back in a
     stable order.
     """
+    org_id = _analytics_scope(user)
     start = _window_start(days)
 
     # Sub-aggregate per user inside the window so we can left-join
@@ -149,7 +181,12 @@ async def analytics_users(
             sub.c.last_active,
         )
         .outerjoin(sub, sub.c.user_id == User.id)
-        .order_by(
+    )
+    # Org admin only sees their own tenant's users; platform admin sees all.
+    if org_id is not None:
+        stmt = stmt.where(User.org_id == org_id)
+    stmt = (
+        stmt.order_by(
             func.coalesce(sub.c.cost_micros, 0).desc(),
             func.coalesce(sub.c.prompt_tokens + sub.c.completion_tokens, 0).desc(),
             User.username.asc(),
@@ -180,7 +217,7 @@ async def analytics_users(
 async def analytics_by_model(
     days: int = Query(default=30, ge=1, le=180),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> list[AnalyticsModelRow]:
     """Per-model breakdown.
 
@@ -190,7 +227,9 @@ async def analytics_by_model(
     to ``conversations``. Bounded to the requested window via
     ``messages.created_at`` and grouped by ``conversations.model_id``.
     """
-    return await aggregates.by_model(db, start=_window_start(days))
+    return await aggregates.by_model(
+        db, start=_window_start(days), org_id=_analytics_scope(user)
+    )
 
 
 # --------------------------------------------------------------------
@@ -204,11 +243,15 @@ async def analytics_user_timeseries(
     user_id: uuid.UUID,
     days: int = Query(default=30, ge=1, le=180),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ) -> list[AnalyticsTimeseriesPoint]:
     """Single-user trend, used in the per-user drill-down dialog."""
+    org_id = _analytics_scope(user)
     target = await db.get(User, user_id)
     if target is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    # An org admin can only drill into members of their own tenant.
+    if org_id is not None and target.org_id != org_id:
         raise HTTPException(status_code=404, detail="User not found")
 
     return await aggregates.timeseries(
