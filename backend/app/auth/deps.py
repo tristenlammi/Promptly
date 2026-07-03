@@ -202,7 +202,13 @@ async def require_org_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def org_scope_for(user: User) -> uuid.UUID | None:
-    """The org a tenant-admin's queries must be filtered to. ``None`` = platform
-    admin (fleet-wide, no org filter); otherwise the caller's ``org_id``.
-    Callers must have passed :func:`require_org_admin` first."""
-    return None if user.role == "admin" else user.org_id
+    """The org a caller's per-tenant RESOURCE queries are filtered to — ALWAYS
+    their own ``org_id``, including for the platform admin.
+
+    The platform admin is an *operator*, not a super-tenant: for connectors,
+    providers, custom models, and groups they see only their OWN org, exactly
+    like any org admin — never another tenant's config. Genuinely fleet-wide
+    operator surfaces (analytics, audit, console, app settings) have their own
+    scoping and do NOT use this helper.
+    """
+    return user.org_id

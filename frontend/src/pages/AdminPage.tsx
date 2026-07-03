@@ -107,22 +107,26 @@ export function AdminPage() {
   const isPlatformAdmin = useAuthStore((s) => s.user?.role === "admin");
   const hasOrg = useAuthStore((s) => !!s.user?.org_id);
   const visibleTabs = useMemo(() => {
-    // Platform admin (operator): every tab. Org admin: the org-scoped subset —
-    // Models today, + Members (Clerk) when they have an org. Users/Analytics/
-    // Groups/Connectors are added here as each gets org-scoped.
-    if (isPlatformAdmin) return TABS;
-    // Org-admin surface, in a sensible order: Models, Members, Groups, Analytics.
     const pick = (id: TabId) => TABS.find((t) => t.id === id);
+    const push = (id: TabId, out: TabDef[]) => {
+      const t = pick(id);
+      if (t) out.push(t);
+    };
+    // Everyone (INCLUDING the platform admin) manages only their OWN org's
+    // resources here — Models, Members, Groups, Connectors, Analytics.
     const tabs: TabDef[] = [];
-    const modelsTab = pick("models");
-    if (modelsTab) tabs.push(modelsTab);
+    push("models", tabs);
     if (isClerkAuth && hasOrg) tabs.push(MEMBERS_TAB);
-    const groupsTab = pick("groups");
-    if (groupsTab) tabs.push(groupsTab);
-    const connectorsTab = pick("connectors");
-    if (connectorsTab) tabs.push(connectorsTab);
-    const analyticsTab = pick("analytics");
-    if (analyticsTab) tabs.push(analyticsTab);
+    push("groups", tabs);
+    push("connectors", tabs);
+    push("analytics", tabs);
+    // The platform admin (operator) additionally gets the fleet-level surfaces.
+    // NOT the all-tenant Users tab — user management lives in Clerk.
+    if (isPlatformAdmin) {
+      push("console", tabs);
+      push("audit", tabs);
+      push("settings", tabs);
+    }
     return tabs;
   }, [isPlatformAdmin, hasOrg]);
 
