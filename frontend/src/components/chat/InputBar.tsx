@@ -24,6 +24,7 @@ import {
   Loader2,
   Mic,
   Paperclip,
+  RotateCw,
   SlidersHorizontal,
   Sparkles,
   Square,
@@ -128,6 +129,9 @@ interface PendingUpload {
   size_bytes: number;
   mime_type: string;
   error?: string;
+  /** The original browser File — kept so a failed upload can be retried
+   *  without making the user re-pick/re-drop it. */
+  file?: File;
 }
 
 export function InputBar({
@@ -337,23 +341,31 @@ export function InputBar({
   // point the user can index them for this chat (RAG) instead of inlining.
   const INLINE_CAP_BYTES = 64 * 1024;
   const attachmentOverflow = useMemo(() => {
-    const ctx = selectedModel?.context_window ?? 0;
-    if (!ctx) return null;
     const textFiles = attachments.filter(
       (a) => !(a.mime_type || "").toLowerCase().startsWith("image/")
     );
     if (textFiles.length === 0) return null;
+    // Two distinct failure modes, one warning surface:
+    //  * truncation — any single file past the 64 KB inline cap loses
+    //    everything beyond it, silently, regardless of context size;
+    //  * crowding — the inlined total eats >40% of the model's window,
+    //    squeezing the conversation + reply.
+    const truncated = textFiles.filter((a) => a.size_bytes > INLINE_CAP_BYTES);
+    const ctx = selectedModel?.context_window ?? 0;
     const estTokens = Math.round(
       textFiles.reduce(
         (sum, a) => sum + Math.min(a.size_bytes, INLINE_CAP_BYTES),
         0
       ) / 4
     );
-    const ratio = estTokens / ctx;
-    // Warn past ~40% of the window — enough headroom for the conversation
-    // + the reply still matters below that.
-    if (ratio < 0.4) return null;
-    return { estTokens, pct: Math.round(ratio * 100) };
+    const crowded = ctx > 0 && estTokens / ctx >= 0.4;
+    if (truncated.length === 0 && !crowded) return null;
+    return {
+      estTokens,
+      pct: ctx > 0 ? Math.round((estTokens / ctx) * 100) : 0,
+      truncated,
+      crowded,
+    };
   }, [attachments, selectedModel?.context_window]);
 
   // Whether to RAG-index the attachments on send (vs inline them). Defaults
@@ -457,6 +469,7 @@ export function InputBar({
           filename: file.name,
           size_bytes: file.size,
           mime_type: file.type || "application/octet-stream",
+          file,
         },
       ]);
       try {
@@ -829,6 +842,14 @@ export function InputBar({
                   key={p.tempId}
                   pending={p}
                   onRemove={() => removePending(p.tempId)}
+                  onRetry={
+                    p.file
+                      ? () => {
+                          removePending(p.tempId);
+                          void uploadDroppedFile(p.file!);
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -860,12 +881,35 @@ export function InputBar({
               <div className="flex items-start gap-1.5">
                 <Layers className="mt-0.5 h-3 w-3 shrink-0" />
                 <span className="leading-snug">
-                  These attachments are large (~
-                  {Math.round(attachmentOverflow.estTokens / 1000)}k tokens —
-                  about {attachmentOverflow.pct}% of{" "}
-                  {selectedModel?.display_name ?? "the model"}'s context).
-                  Inlining them all would crowd out the conversation and cut
-                  long files off.
+                  {attachmentOverflow.truncated.length > 0 ? (
+                    <>
+                      {attachmentOverflow.truncated.length === 1 ? (
+                        <>
+                          <span className="font-medium">
+                            {attachmentOverflow.truncated[0].filename}
+                          </span>{" "}
+                          is bigger than the 64 KB inline limit
+                        </>
+                      ) : (
+                        <>
+                          {attachmentOverflow.truncated.length} attachments are
+                          bigger than the 64 KB inline limit
+                        </>
+                      )}{" "}
+                      — everything past that is cut off before the model sees
+                      it.
+                      {attachmentOverflow.crowded &&
+                        ` They also fill ~${attachmentOverflow.pct}% of ${selectedModel?.display_name ?? "the model"}'s context.`}
+                    </>
+                  ) : (
+                    <>
+                      These attachments are large (~
+                      {Math.round(attachmentOverflow.estTokens / 1000)}k tokens
+                      — about {attachmentOverflow.pct}% of{" "}
+                      {selectedModel?.display_name ?? "the model"}'s context).
+                      Inlining them all would crowd out the conversation.
+                    </>
+                  )}
                 </span>
               </div>
               <label className="ml-4 flex cursor-pointer items-center gap-1.5">
@@ -1365,6 +1409,22 @@ function ComposerMoreMenu({
   const hasResearchSection = !!onResearch;
   const hasAnySection = hasWebSection || hasToolsSection || hasReasoningSection || hasResearchSection;
 
+  // Glanceable state: the menu's settings act on every send, so the closed
+  // button must betray when anything is off the beaten path (web ≠ Auto,
+  // tools off, effort pinned). Web mode also gets its own glyph — it's the
+  // one setting mobile users otherwise have zero visibility into (the
+  // desktop footer hint doesn't render there).
+  const webNonDefault = hasWebSection && webSearchMode !== "auto";
+  const toolsOff = hasToolsSection && !toolsEnabled;
+  const nonDefault = webNonDefault || toolsOff || reasoningActive;
+  const stateSummary = [
+    hasWebSection ? `Web search: ${WEB_LABELS[webSearchMode]}` : null,
+    hasToolsSection ? `Tools: ${toolsEnabled ? "on" : "off"}` : null,
+    reasoningActive ? `Effort: ${displayEffort}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   if (!hasAnySection) return null;
 
   return (
@@ -1375,19 +1435,34 @@ function ComposerMoreMenu({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="More options"
-        title="More — web search, tools, reasoning effort"
+        aria-label={`More options — ${stateSummary}`}
+        title={`More — ${stateSummary}`}
         className={cn(
           "inline-flex items-center rounded-full border transition",
           "disabled:cursor-not-allowed disabled:opacity-40",
-          isMobile ? "h-9 w-9 justify-center" : "h-8 gap-1.5 px-2.5 text-xs",
-          open || reasoningActive
+          isMobile
+            ? webNonDefault
+              ? "h-9 justify-center gap-1 px-2"
+              : "h-9 w-9 justify-center"
+            : "h-8 gap-1.5 px-2.5 text-xs",
+          open || nonDefault
             ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
             : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
         )}
       >
         <SlidersHorizontal className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
         {!isMobile && <span className="font-medium">More</span>}
+        {webNonDefault &&
+          (webSearchMode === "off" ? (
+            <GlobeLock className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+          ) : (
+            <Globe className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
+          ))}
+        {toolsOff && (
+          <Wrench
+            className={cn(isMobile ? "h-3.5 w-3.5" : "h-3 w-3", "opacity-50")}
+          />
+        )}
       </button>
 
       {open && (
@@ -1659,9 +1734,11 @@ function AttachmentChip({
 function PendingChip({
   pending,
   onRemove,
+  onRetry,
 }: {
   pending: PendingUpload;
   onRemove: () => void;
+  onRetry?: () => void;
 }) {
   const errored = Boolean(pending.error);
   return (
@@ -1669,7 +1746,7 @@ function PendingChip({
       className={cn(
         "inline-flex max-w-xs items-center gap-1.5 rounded-full border px-2 py-1 text-xs",
         errored
-          ? "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+          ? "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger)]"
           : "border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]"
       )}
       title={
@@ -1683,7 +1760,27 @@ function PendingChip({
       ) : (
         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
       )}
-      <span className="truncate">{pending.filename}</span>
+      <span className="min-w-0">
+        <span className="block truncate">{pending.filename}</span>
+        {/* The error was hover-only before — invisible on touch and easy
+            to miss on desktop. Show it in the chip, truncated. */}
+        {errored && (
+          <span className="block truncate text-[10px] opacity-80">
+            {pending.error}
+          </span>
+        )}
+      </span>
+      {errored && onRetry && (
+        <button
+          onClick={onRetry}
+          className="ml-0.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium hover:bg-[var(--hover-strong)]"
+          aria-label={`Retry uploading ${pending.filename}`}
+          title="Retry upload"
+        >
+          <RotateCw className="h-3 w-3" />
+          Retry
+        </button>
+      )}
       <button
         onClick={onRemove}
         className="ml-0.5 rounded-full p-0.5 hover:bg-[var(--hover-strong)]"

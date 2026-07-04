@@ -1305,66 +1305,26 @@ function MessageBubbleImpl({
                 {!isMobile && <span>{copyClicked ? "Copied" : "Copy"}</span>}
               </button>
             )}
-            {canRemember && (
-              <button
-                type="button"
-                onClick={() => onRemember!(isUser ? content! : stripInlineCitations(content!))}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--text-muted)] transition",
-                  "hover:bg-[var(--accent)]/[0.08] hover:text-[var(--accent)]",
-                )}
-                title="Save to memory"
-                aria-label="Remember this"
-              >
-                <Brain className="h-3 w-3" />
-                {!isMobile && <span>Remember</span>}
-              </button>
-            )}
-            {canReadAloud && (
+            {/* Remember / Read-aloud / Edit live in the ⋯ overflow (both
+                form factors) — the row was ten controls wide on desktop.
+                Exception: while audio is playing the Stop control must be
+                one click away, so it surfaces inline for the duration. */}
+            {canReadAloud && speaking && (
               <button
                 type="button"
                 onClick={handleReadAloud}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--text-muted)] transition",
-                  "hover:bg-black/[0.04] hover:text-[var(--text)]",
-                  "dark:hover:bg-white/[0.06]",
-                  speaking && "text-[var(--accent)]"
-                )}
-                title={speaking ? "Stop reading" : "Read this reply aloud"}
-                aria-label={speaking ? "Stop reading" : "Read aloud"}
-                aria-pressed={speaking}
-              >
-                {speaking ? (
-                  <Square className="h-3 w-3 fill-current" />
-                ) : (
-                  <Volume2 className="h-3 w-3" />
-                )}
-                {!isMobile && <span>{speaking ? "Stop" : "Listen"}</span>}
-              </button>
-            )}
-            {canEdit && !editing && (
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--text-muted)] transition",
-                  "hover:bg-black/[0.04] hover:text-[var(--text)]",
+                  "text-[var(--accent)] transition",
+                  "hover:bg-black/[0.04]",
                   "dark:hover:bg-white/[0.06]"
                 )}
-                title={
-                  isUser
-                    ? "Edit and resend"
-                    : "Edit this reply (no re-stream)"
-                }
-                aria-label={
-                  isUser ? "Edit and resend" : "Edit reply in place"
-                }
+                title="Stop reading"
+                aria-label="Stop reading"
+                aria-pressed
               >
-                <Pencil className="h-3 w-3" />
-                {!isMobile && <span>Edit</span>}
+                <Square className="h-3 w-3 fill-current" />
+                {!isMobile && <span>Stop</span>}
               </button>
             )}
             {onRegenerate && !streaming && (
@@ -1385,39 +1345,6 @@ function MessageBubbleImpl({
               >
                 <Microscope className="h-3 w-3" />
                 {!isMobile && <span>Dig deeper</span>}
-              </button>
-            )}
-            {!isMobile && onBranch && !streaming && (
-              <button
-                type="button"
-                onClick={() => void onBranch()}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--text-muted)] transition",
-                  "hover:bg-black/[0.04] hover:text-[var(--text)]",
-                  "dark:hover:bg-white/[0.06]"
-                )}
-                title="Branch from here — fork into a new conversation"
-                aria-label="Branch from here"
-              >
-                <GitBranch className="h-3 w-3" />
-                <span>Branch</span>
-              </button>
-            )}
-            {!isMobile && onDelete && !streaming && (
-              <button
-                type="button"
-                onClick={() => void onDelete()}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--text-muted)] transition",
-                  "hover:bg-rose-500/10 hover:text-rose-500"
-                )}
-                title="Delete this message"
-                aria-label="Delete message"
-              >
-                <Trash2 className="h-3 w-3" />
-                <span>Delete</span>
               </button>
             )}
             {canFeedback && (
@@ -1512,12 +1439,34 @@ function MessageBubbleImpl({
                 </div>
               </>
             )}
-            {isMobile && !streaming && (onBranch || onDelete) && (
-              <MessageActionOverflow
-                onBranch={onBranch}
-                onDelete={onDelete}
-              />
-            )}
+            {!streaming &&
+              (canRemember ||
+                canReadAloud ||
+                (canEdit && !editing) ||
+                onBranch ||
+                onDelete) && (
+                <MessageActionOverflow
+                  onRemember={
+                    canRemember
+                      ? () =>
+                          onRemember!(
+                            isUser
+                              ? content!
+                              : stripInlineCitations(content!)
+                          )
+                      : undefined
+                  }
+                  onReadAloud={
+                    canReadAloud && !speaking ? handleReadAloud : undefined
+                  }
+                  onEdit={
+                    canEdit && !editing ? () => setEditing(true) : undefined
+                  }
+                  editLabel={isUser ? "Edit & resend" : "Edit reply"}
+                  onBranch={onBranch}
+                  onDelete={onDelete}
+                />
+              )}
           </div>
         )}
         {hasSources && (
@@ -2151,21 +2100,29 @@ function VersionPager({
   );
 }
 
-/** Mobile-only ⋯ overflow menu for the low-frequency message actions
- *  (Branch, Delete). Keeps the icon-only mobile action row from
- *  widening with rarely-tapped controls while still exposing them one
- *  tap deeper. Desktop renders these inline instead. */
+/** ⋯ overflow menu for the low-frequency message actions (Remember,
+ *  Read aloud, Edit, Branch, Delete) on both form factors. Keeps the
+ *  action row to the daily drivers — Copy, Regenerate, feedback —
+ *  while everything else stays one tap deeper. */
 function MessageActionOverflow({
+  onRemember,
+  onReadAloud,
+  onEdit,
+  editLabel = "Edit",
   onBranch,
   onDelete,
 }: {
+  onRemember?: () => void;
+  onReadAloud?: () => void;
+  onEdit?: () => void;
+  editLabel?: string;
   onBranch?: () => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
-  const flipUp = usePopoverFlip(open, btnRef, 120);
+  const flipUp = usePopoverFlip(open, btnRef, 220);
 
   useEffect(() => {
     if (!open) return;
@@ -2215,6 +2172,57 @@ function MessageActionOverflow({
             flipUp ? "bottom-full mb-1" : "top-full mt-1"
           )}
         >
+          {onRemember && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onRemember();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                "text-[var(--text)] hover:bg-[var(--hover)]"
+              )}
+            >
+              <Brain className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              Save to memory
+            </button>
+          )}
+          {onReadAloud && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onReadAloud();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                "text-[var(--text)] hover:bg-[var(--hover)]"
+              )}
+            >
+              <Volume2 className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              Read aloud
+            </button>
+          )}
+          {onEdit && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onEdit();
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                "text-[var(--text)] hover:bg-[var(--hover)]"
+              )}
+            >
+              <Pencil className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              {editLabel}
+            </button>
+          )}
           {onBranch && (
             <button
               type="button"
