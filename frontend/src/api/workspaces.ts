@@ -143,6 +143,33 @@ export interface SpreadsheetData {
   data: unknown[] | null;
 }
 
+// ---------------------------------------------------------------------
+// Workspace Drive (Phases 6-7)
+// ---------------------------------------------------------------------
+
+export interface WorkspaceDriveFolder {
+  id: string;
+  name: string;
+  /** null = first-level (the drive root is implicit). */
+  parent_id: string | null;
+}
+
+export interface WorkspaceDriveFile extends WorkspaceFilePin {
+  /** null = drive root. */
+  folder_id: string | null;
+  /** false for legacy pins living in a member's personal Drive —
+   *  they list at root and can't be re-foldered. */
+  movable: boolean;
+}
+
+export interface WorkspaceDriveResponse {
+  root_folder_id: string;
+  folders: WorkspaceDriveFolder[];
+  files: WorkspaceDriveFile[];
+  used_bytes: number;
+  quota_bytes: number | null;
+}
+
 /** The workspace's rolling memory doc, as maintained by the librarian and
  *  optionally hand-edited. ``exists`` is false until the first auto-run or
  *  manual save creates it. */
@@ -411,6 +438,8 @@ export interface UpdateWorkspacePayload {
   memory_mode?: WorkspaceMemoryMode;
   memory_model_id?: string | null;
   memory_provider_id?: string | null;
+  /** Drive storage cap in bytes (owner-only); null clears it. */
+  storage_quota_bytes?: number | null;
 }
 
 export interface WorkspaceItemComment {
@@ -545,6 +574,72 @@ export const workspacesApi = {
   ): Promise<WorkspaceItemResponse> {
     const { data } = await apiClient.post<WorkspaceItemResponse>(
       `/workspaces/${id}/items/${itemId}/duplicate`
+    );
+    return data;
+  },
+
+  // ---- Workspace Drive (Phases 6-7) ----
+
+  async getDrive(id: string): Promise<WorkspaceDriveResponse> {
+    const { data } = await apiClient.get<WorkspaceDriveResponse>(
+      `/workspaces/${id}/drive`
+    );
+    return data;
+  },
+
+  /** Upload straight into the drive (workspace-owned + auto-pinned). */
+  async uploadDriveFile(
+    id: string,
+    file: File,
+    folderId: string | null
+  ): Promise<WorkspaceDriveFile> {
+    const form = new FormData();
+    form.append("file", file);
+    if (folderId) form.append("folder_id", folderId);
+    const { data } = await apiClient.post<WorkspaceDriveFile>(
+      `/workspaces/${id}/drive/files`,
+      form,
+      { headers: { "Content-Type": "multipart/form-data" }, timeout: 120_000 }
+    );
+    return data;
+  },
+
+  async createDriveFolder(
+    id: string,
+    name: string,
+    parentId: string | null
+  ): Promise<WorkspaceDriveFolder> {
+    const { data } = await apiClient.post<WorkspaceDriveFolder>(
+      `/workspaces/${id}/drive/folders`,
+      { name, parent_id: parentId }
+    );
+    return data;
+  },
+
+  async renameDriveFolder(
+    id: string,
+    folderId: string,
+    name: string
+  ): Promise<WorkspaceDriveFolder> {
+    const { data } = await apiClient.patch<WorkspaceDriveFolder>(
+      `/workspaces/${id}/drive/folders/${folderId}`,
+      { name }
+    );
+    return data;
+  },
+
+  async deleteDriveFolder(id: string, folderId: string): Promise<void> {
+    await apiClient.delete(`/workspaces/${id}/drive/folders/${folderId}`);
+  },
+
+  async moveDriveFile(
+    id: string,
+    fileId: string,
+    folderId: string | null
+  ): Promise<WorkspaceDriveFile> {
+    const { data } = await apiClient.post<WorkspaceDriveFile>(
+      `/workspaces/${id}/drive/files/${fileId}/move`,
+      { folder_id: folderId }
     );
     return data;
   },

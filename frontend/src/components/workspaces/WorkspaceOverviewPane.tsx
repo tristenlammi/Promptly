@@ -52,6 +52,7 @@ export function WorkspaceOverviewPane({
   onOpenItem,
   canEdit,
   onOpenSettings,
+  onOpenDrive,
 }: {
   workspaceId: string;
   title: string;
@@ -59,6 +60,8 @@ export function WorkspaceOverviewPane({
   canEdit: boolean;
   /** Opens the workspace settings pane (full memory editor lives there). */
   onOpenSettings?: () => void;
+  /** Opens the workspace drive (full file browser). */
+  onOpenDrive?: () => void;
 }) {
   const { data: overview } = useWorkspaceOverview(workspaceId);
   const { data: workspaceTasks } = useWorkspaceTasks(workspaceId);
@@ -223,9 +226,16 @@ export function WorkspaceOverviewPane({
         </div>
       )}
 
-      {/* Workspace drive — upload photos/documents, RAG-indexed on add */}
+      {/* Workspace drive — compact summary; the full browser (folders,
+          search, bulk actions) lives behind Open drive. Dropping files
+          here still works as the quick-add path. */}
       <div className="mt-8">
-        <WorkspaceFilesPanel workspaceId={workspaceId} canEdit={canEdit} />
+        <WorkspaceFilesPanel
+          workspaceId={workspaceId}
+          canEdit={canEdit}
+          compact
+          onOpenDrive={onOpenDrive}
+        />
       </div>
 
       {/* Workspace map — the catalog every chat sees, rendered as a real

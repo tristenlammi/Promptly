@@ -190,6 +190,52 @@ class WorkspaceUpdate(BaseModel):
     # NULL/cleared falls back to the workspace default chat model.
     memory_model_id: str | None = Field(default=None, max_length=255)
     memory_provider_id: uuid.UUID | None = None
+    # Drive cap (owner-only, enforced by the router). Send null to clear.
+    storage_quota_bytes: int | None = Field(default=None, ge=0)
+
+
+# ---------------------------------------------------------------------
+# Workspace Drive (Phases 6-7) — the workspace's own file browser.
+# ---------------------------------------------------------------------
+
+
+class WorkspaceDriveFolder(BaseModel):
+    """A folder inside the workspace drive. ``parent_id`` is null for
+    first-level folders (the drive root is implicit)."""
+
+    id: uuid.UUID
+    name: str
+    parent_id: uuid.UUID | None
+
+
+class WorkspaceDriveFile(WorkspaceFilePin):
+    """A drive file = a pinned file + its placement. ``folder_id`` is null
+    at the drive root; ``movable`` is false for legacy pins that live in a
+    member's personal Drive (they list at root and can't be re-foldered)."""
+
+    folder_id: uuid.UUID | None = None
+    movable: bool = True
+
+
+class WorkspaceDriveResponse(BaseModel):
+    root_folder_id: uuid.UUID
+    folders: list[WorkspaceDriveFolder]
+    files: list[WorkspaceDriveFile]
+    used_bytes: int
+    quota_bytes: int | None
+
+
+class WorkspaceDriveFolderCreate(BaseModel):
+    name: str = Field(max_length=120)
+    parent_id: uuid.UUID | None = None
+
+
+class WorkspaceDriveFolderRename(BaseModel):
+    name: str = Field(max_length=120)
+
+
+class WorkspaceDriveMove(BaseModel):
+    folder_id: uuid.UUID | None = None
 
 
 class WorkspaceFileContext(BaseModel):

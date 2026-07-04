@@ -275,6 +275,7 @@ from app.workspaces.shares import invite_router as workspace_invite_router  # no
 from app.workspaces.shares import router as workspace_shares_router  # noqa: E402
 from app.workspaces.router import router as workspaces_router  # noqa: E402
 from app.workspaces.items_router import router as workspace_items_router  # noqa: E402
+from app.workspaces.drive_router import router as workspace_drive_router  # noqa: E402
 from app.workspaces.canvas_router import router as workspace_canvas_router  # noqa: E402
 from app.workspaces.ask_router import router as workspace_ask_router  # noqa: E402
 from app.workspaces.overview_router import router as workspace_overview_router  # noqa: E402
@@ -327,6 +328,10 @@ app.include_router(
 # /tree and /items paths don't collide with the core workspaces CRUD.
 app.include_router(
     workspace_items_router, prefix="/api/workspaces", tags=["workspaces"]
+)
+# Workspace Drive (Phases 6-7) — /drive paths under the same prefix.
+app.include_router(
+    workspace_drive_router, prefix="/api/workspaces", tags=["workspaces"]
 )
 # Canvas collab tokens + text sync (creation goes through the items router).
 app.include_router(

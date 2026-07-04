@@ -32,6 +32,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  HardDrive,
   Home,
   Layers,
   Loader2,
@@ -93,6 +94,8 @@ export function WorkspaceNavigatorTree({
   atHome,
   onSettings,
   atSettings,
+  onDrive,
+  atDrive,
   onNewTask,
 }: {
   workspaceId: string;
@@ -110,6 +113,10 @@ export function WorkspaceNavigatorTree({
   onSettings?: () => void;
   /** True when the settings page is showing. */
   atSettings?: boolean;
+  /** Open the workspace drive (file browser) in the main pane. */
+  onDrive?: () => void;
+  /** True when the drive is showing. */
+  atDrive?: boolean;
   /** Open the "new automation" task form (homed in this workspace). */
   onNewTask?: () => void;
 }) {
@@ -337,6 +344,22 @@ export function WorkspaceNavigatorTree({
             >
               <Home className="h-4 w-4" />
               Home
+            </button>
+          )}
+          {onDrive && (
+            <button
+              type="button"
+              onClick={onDrive}
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-md border p-2 transition",
+                atDrive
+                  ? "border-[var(--border)] bg-[var(--hover)] text-[var(--text)]"
+                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              )}
+              title="Workspace drive — the shared files chats can draw on"
+              aria-label="Workspace drive"
+            >
+              <HardDrive className="h-4 w-4" />
             </button>
           )}
         </div>

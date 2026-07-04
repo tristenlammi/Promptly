@@ -329,6 +329,12 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
     root_folder_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("file_folders.id", ondelete="SET NULL"), nullable=True
     )
+    # Optional cap on the combined size of the workspace's pinned files
+    # (its "drive"). NULL = unlimited; the owner's personal storage quota
+    # still applies underneath either way (files live in their bucket).
+    storage_quota_bytes: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<Workspace id={self.id} title={self.title!r}>"

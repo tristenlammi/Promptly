@@ -78,6 +78,7 @@ import { useCreateTask } from "@/hooks/useTasks";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi } from "@/api/tasks";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { WorkspaceDrivePane } from "@/components/workspaces/WorkspaceDrivePane";
 import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
@@ -122,6 +123,7 @@ export function WorkspaceDetailPage() {
   const [selected, setSelected] = useState<WorkspaceItemNode | null>(null);
   const [secondary, setSecondary] = useState<WorkspaceItemNode | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [driveOpen, setDriveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -265,6 +267,7 @@ export function WorkspaceDetailPage() {
     // Avoid the same item on both sides of a split.
     if (secondary && secondary.id === node.id) setSecondary(null);
     setSettingsOpen(false);
+    setDriveOpen(false);
     setSelected(node);
   };
 
@@ -375,15 +378,24 @@ export function WorkspaceDetailPage() {
                 canEdit={canEdit && !isArchived}
                 onHome={() => {
                   setSettingsOpen(false);
+                  setDriveOpen(false);
                   setSelected(null);
                   setSecondary(null);
                 }}
-                atHome={!selected && !settingsOpen}
+                atHome={!selected && !settingsOpen && !driveOpen}
                 onSettings={() => {
                   setSecondary(null);
+                  setDriveOpen(false);
                   setSettingsOpen(true);
                 }}
                 atSettings={settingsOpen}
+                onDrive={() => {
+                  setSecondary(null);
+                  setSettingsOpen(false);
+                  setSelected(null);
+                  setDriveOpen(true);
+                }}
+                atDrive={driveOpen}
                 onNewTask={
                   canEdit && !isArchived
                     ? () => setTaskChooserOpen(true)
@@ -397,10 +409,17 @@ export function WorkspaceDetailPage() {
           <main
             className={
               "flex min-w-0 flex-1 flex-col " +
-              (secondary || settingsOpen ? "overflow-hidden" : "overflow-y-auto")
+              (secondary || settingsOpen || driveOpen
+                ? "overflow-hidden"
+                : "overflow-y-auto")
             }
           >
-            {settingsOpen ? (
+            {driveOpen ? (
+              <WorkspaceDrivePane
+                workspaceId={id}
+                canEdit={canEdit && !isArchived}
+              />
+            ) : settingsOpen ? (
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)]">
                   <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2 px-5 py-2.5">
@@ -531,6 +550,12 @@ export function WorkspaceDetailPage() {
                   setSelected(null);
                   setSettingsOpen(true);
                 }}
+                onOpenDrive={() => {
+                  setSecondary(null);
+                  setSelected(null);
+                  setSettingsOpen(false);
+                  setDriveOpen(true);
+                }}
                 />
               </>
             )}
@@ -629,6 +654,7 @@ function WorkspaceMainPane({
   sharedByName,
   canEdit,
   onOpenSettings,
+  onOpenDrive,
 }: {
   node: WorkspaceItemNode | null;
   workspaceId: string;
@@ -646,6 +672,8 @@ function WorkspaceMainPane({
   canEdit: boolean;
   /** Opens the workspace settings pane (memory editor lives there). */
   onOpenSettings?: () => void;
+  /** Opens the workspace drive (file browser). */
+  onOpenDrive?: () => void;
 }) {
   if (
     node &&
@@ -758,6 +786,7 @@ function WorkspaceMainPane({
         onOpenItem={onOpenItem}
         canEdit={canEdit && !isArchived}
         onOpenSettings={onOpenSettings}
+        onOpenDrive={onOpenDrive}
       />
     </div>
   );

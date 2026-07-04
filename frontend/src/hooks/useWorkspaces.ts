@@ -141,6 +141,87 @@ export function useUpdateWorkspaceItem(workspaceId: string) {
   });
 }
 
+// ---------------------------------------------------------------------
+// Workspace Drive (Phases 6-7)
+// ---------------------------------------------------------------------
+
+const driveKey = (id: string) => ["workspaces", "drive", id] as const;
+
+export function useWorkspaceDrive(id: string | undefined) {
+  return useQuery({
+    queryKey: id ? driveKey(id) : ["workspaces", "drive", "_"],
+    queryFn: () => workspacesApi.getDrive(id as string),
+    enabled: Boolean(id),
+  });
+}
+
+/** Every drive mutation refreshes the drive + the detail (pins list feeds
+ *  context stats) so overview summaries stay honest. */
+function useDriveInvalidate(workspaceId: string) {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: driveKey(workspaceId) });
+    void qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
+  };
+}
+
+export function useUploadDriveFile(workspaceId: string) {
+  const invalidate = useDriveInvalidate(workspaceId);
+  return useMutation({
+    mutationFn: (vars: { file: File; folderId: string | null }) =>
+      workspacesApi.uploadDriveFile(workspaceId, vars.file, vars.folderId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useCreateDriveFolder(workspaceId: string) {
+  const invalidate = useDriveInvalidate(workspaceId);
+  return useMutation({
+    mutationFn: (vars: { name: string; parentId: string | null }) =>
+      workspacesApi.createDriveFolder(workspaceId, vars.name, vars.parentId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRenameDriveFolder(workspaceId: string) {
+  const invalidate = useDriveInvalidate(workspaceId);
+  return useMutation({
+    mutationFn: (vars: { folderId: string; name: string }) =>
+      workspacesApi.renameDriveFolder(workspaceId, vars.folderId, vars.name),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteDriveFolder(workspaceId: string) {
+  const invalidate = useDriveInvalidate(workspaceId);
+  return useMutation({
+    mutationFn: (folderId: string) =>
+      workspacesApi.deleteDriveFolder(workspaceId, folderId),
+    onSuccess: invalidate,
+    onError: (err) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Couldn't delete the folder.";
+      toast.error(detail);
+    },
+  });
+}
+
+export function useMoveDriveFile(workspaceId: string) {
+  const invalidate = useDriveInvalidate(workspaceId);
+  return useMutation({
+    mutationFn: (vars: { fileId: string; folderId: string | null }) =>
+      workspacesApi.moveDriveFile(workspaceId, vars.fileId, vars.folderId),
+    onSuccess: invalidate,
+    onError: (err) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Couldn't move the file.";
+      toast.error(detail);
+    },
+  });
+}
+
 export function useDuplicateWorkspaceItem(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -465,6 +546,7 @@ export function useSetFileContext(workspaceId: string) {
       workspacesApi.setFileContext(workspaceId, vars.fileId, vars.enabled),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
+      qc.invalidateQueries({ queryKey: driveKey(workspaceId) });
     },
   });
 }
@@ -557,6 +639,7 @@ export function usePinWorkspaceFile(workspaceId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
       qc.invalidateQueries({ queryKey: KEYS.list(false) });
+      qc.invalidateQueries({ queryKey: driveKey(workspaceId) });
     },
   });
 }
@@ -569,6 +652,7 @@ export function useUnpinWorkspaceFile(workspaceId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
       qc.invalidateQueries({ queryKey: KEYS.list(false) });
+      qc.invalidateQueries({ queryKey: driveKey(workspaceId) });
     },
   });
 }

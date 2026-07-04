@@ -8,12 +8,10 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
-  FileText,
   Gauge,
   Lightbulb,
   Loader2,
   Plug,
-  Plus,
   RefreshCw,
   Save,
   Settings2,
@@ -24,19 +22,13 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
-import { AttachmentPickerModal } from "@/components/chat/AttachmentPickerModal";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { WorkspaceMembersPanel } from "@/components/workspaces/WorkspaceMembersPanel";
 import { WorkspaceConnectorsTab } from "@/components/workspaces/WorkspaceConnectorsTab";
-import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
-import { FilePreviewModal } from "@/components/files/FilePreviewModal";
-import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
 import type { WorkspaceDetail, WorkspaceMemoryMode } from "@/api/workspaces";
 import {
   useUpdateWorkspace,
-  usePinWorkspaceFile,
-  useReindexWorkspace,
-  useUnpinWorkspaceFile,
+  useWorkspaceDrive,
   useWorkspaceMemory,
   useSaveWorkspaceMemory,
   useRegenerateWorkspaceMemory,
@@ -53,7 +45,7 @@ function humanSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type Tab = "settings" | "files" | "members" | "usage" | "connectors";
+type Tab = "settings" | "members" | "usage" | "connectors";
 
 /**
  * Workspace settings drawer (Phase 1c).
@@ -167,13 +159,8 @@ export function WorkspaceSettingsContent({
             icon={<Settings2 className="h-3.5 w-3.5" />}
             label="General"
           />
-          <DrawerTab
-            active={tab === "files"}
-            onClick={() => setTab("files")}
-            icon={<FileText className="h-3.5 w-3.5" />}
-            label="Pinned files"
-            count={workspace.files.length}
-          />
+          {/* "Pinned files" tab retired — the Workspace Drive (navigator
+              rail) is the single file surface now. */}
           <DrawerTab
             active={tab === "members"}
             onClick={() => setTab("members")}
@@ -210,9 +197,6 @@ export function WorkspaceSettingsContent({
               canEdit={canEdit}
             />
           )}
-          {tab === "files" && (
-            <FilesTab workspace={workspace} canEdit={canEdit} />
-          )}
           {tab === "members" && (
             <WorkspaceMembersPanel
               workspaceId={workspace.id}
@@ -227,7 +211,9 @@ export function WorkspaceSettingsContent({
               isOwner={isOwner}
             />
           )}
-          {tab === "usage" && <UsageTab workspaceId={workspace.id} />}
+          {tab === "usage" && (
+            <UsageTab workspaceId={workspace.id} isOwner={isOwner} />
+          )}
         </div>
       </div>
     </div>
@@ -279,7 +265,13 @@ function DrawerTab({
 // Usage
 // ---------------------------------------------------------------------
 
-function UsageTab({ workspaceId }: { workspaceId: string }) {
+function UsageTab({
+  workspaceId,
+  isOwner,
+}: {
+  workspaceId: string;
+  isOwner: boolean;
+}) {
   const { data: usage, isLoading } = useWorkspaceUsage(workspaceId);
 
   if (isLoading || !usage) {
@@ -308,6 +300,8 @@ function UsageTab({ workspaceId }: { workspaceId: string }) {
         <StatCard label="Total tokens" value={formatTokens(usage.total_tokens)} />
         <StatCard label="Est. cost" value={fmtCost(usage.cost_usd)} />
       </div>
+
+      <DriveStorageSection workspaceId={workspaceId} isOwner={isOwner} />
 
       <div>
         <h3 className="mb-2 text-sm font-semibold">By model</h3>
@@ -341,6 +335,90 @@ function UsageTab({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/** Drive storage: usage bar + (owner-only) cap presets. */
+function DriveStorageSection({
+  workspaceId,
+  isOwner,
+}: {
+  workspaceId: string;
+  isOwner: boolean;
+}) {
+  const { data: drive } = useWorkspaceDrive(workspaceId);
+  const update = useUpdateWorkspace(workspaceId);
+  if (!drive) return null;
+  const used = drive.used_bytes;
+  const cap = drive.quota_bytes;
+  const pct = cap ? Math.min(100, (used / cap) * 100) : null;
+
+  const GB = 1024 * 1024 * 1024;
+  const MB = 1024 * 1024;
+  const presets: { label: string; value: number | null }[] = [
+    { label: "No cap", value: null },
+    { label: "100 MB", value: 100 * MB },
+    { label: "500 MB", value: 500 * MB },
+    { label: "1 GB", value: 1 * GB },
+    { label: "5 GB", value: 5 * GB },
+    { label: "10 GB", value: 10 * GB },
+  ];
+
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold">Drive storage</h3>
+      <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-[var(--text)]">
+            {humanSize(used)}
+            <span className="text-[var(--text-muted)]">
+              {cap != null ? ` of ${humanSize(cap)}` : " · no cap set"}
+            </span>
+          </span>
+          {isOwner && (
+            <select
+              value={cap ?? ""}
+              onChange={(e) =>
+                update.mutate({
+                  storage_quota_bytes:
+                    e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+              className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
+              aria-label="Drive storage cap"
+            >
+              {presets.map((p) => (
+                <option key={p.label} value={p.value ?? ""}>
+                  {p.label}
+                </option>
+              ))}
+              {cap != null && !presets.some((p) => p.value === cap) && (
+                <option value={cap}>{humanSize(cap)}</option>
+              )}
+            </select>
+          )}
+        </div>
+        {pct !== null && (
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--hover-strong)]">
+            <div
+              className={
+                "h-full rounded-full " +
+                (pct >= 95
+                  ? "bg-[var(--danger)]"
+                  : pct >= 80
+                    ? "bg-[var(--warning)]"
+                    : "bg-[var(--success)]")
+              }
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+          The cap bounds this workspace's drive. Files always count against
+          the owner's personal storage as well.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -352,212 +430,11 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ---------------------------------------------------------------------
-// Files
-// ---------------------------------------------------------------------
 
-function FilesTab({
-  workspace,
-  canEdit,
-}: {
-  workspace: WorkspaceDetail;
-  canEdit: boolean;
-}) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const pin = usePinWorkspaceFile(workspace.id);
-  const unpin = useUnpinWorkspaceFile(workspace.id);
-  const reindex = useReindexWorkspace(workspace.id);
-
-  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
-  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
-  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  const openPreview = async (fileId: string) => {
-    if (previewLoadingId) return;
-    setPreviewLoadingId(fileId);
-    setPreviewError(null);
-    try {
-      const file = await filesApi.getFile(fileId);
-      if (isDocumentFile(file) && !file.trashed_at) {
-        setEditingDoc(file);
-      } else {
-        setPreviewFile(file);
-      }
-    } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't load this file. It may have been removed.";
-      setPreviewError(detail);
-    } finally {
-      setPreviewLoadingId(null);
-    }
-  };
-
-  const siblings = previewFile ? [previewFile] : [];
-
-  const alreadyAttached = useMemo(
-    () =>
-      workspace.files.map((f) => ({
-        id: f.file_id,
-        filename: f.filename,
-        mime_type: f.mime_type,
-        size_bytes: f.size_bytes,
-      })),
-    [workspace.files]
-  );
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <p className="text-xs text-[var(--text-muted)]">
-          Pinned files are auto-attached to every new chat in this workspace.
-        </p>
-        {canEdit && (
-          <div className="flex shrink-0 items-center gap-2">
-            {workspace.role === "owner" &&
-              workspace.files.some(
-                (f) =>
-                  f.indexing_status === "queued" ||
-                  f.indexing_status === "failed"
-              ) && (
-                <Button
-                  variant="ghost"
-                  leftIcon={
-                    <RefreshCw
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        reindex.isPending && "animate-spin"
-                      )}
-                    />
-                  }
-                  onClick={() => reindex.mutate()}
-                  disabled={reindex.isPending || workspace.indexing_count > 0}
-                  title="Re-index all queued or failed files for semantic search"
-                >
-                  {reindex.isPending ? "Indexing…" : "Reindex"}
-                </Button>
-              )}
-            <Button
-              variant="secondary"
-              leftIcon={<Plus className="h-3.5 w-3.5" />}
-              onClick={() => setPickerOpen(true)}
-            >
-              Add file
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <ContextBudgetBar workspace={workspace} />
-
-      {previewError && (
-        <div
-          role="alert"
-          className="mb-3 rounded-card border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-sm text-[var(--danger)]"
-        >
-          {previewError}
-        </div>
-      )}
-
-      {workspace.files.length === 0 ? (
-        <div className="rounded-card border border-dashed border-[var(--border)] p-10 text-center text-sm text-[var(--text-muted)]">
-          No files pinned yet. Pin a PDF, image, or text file and every chat in
-          this workspace will have it in context.
-        </div>
-      ) : (
-        <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
-          {workspace.files.map((f) => {
-            const loading = previewLoadingId === f.file_id;
-            return (
-              <li
-                key={f.file_id}
-                className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-              >
-                <button
-                  type="button"
-                  onClick={() => openPreview(f.file_id)}
-                  disabled={loading}
-                  title={`Preview ${f.filename}`}
-                  aria-label={`Preview ${f.filename}`}
-                  className={cn(
-                    "group flex min-w-0 flex-1 items-center gap-2 rounded-md text-left",
-                    "transition hover:text-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
-                    "disabled:cursor-wait"
-                  )}
-                >
-                  {loading ? (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--text-muted)]" />
-                  ) : (
-                    <FileText className="h-4 w-4 shrink-0 text-[var(--text-muted)] transition group-hover:text-[var(--accent)]" />
-                  )}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-medium text-[var(--text)] group-hover:text-[var(--accent)]">
-                        {f.filename}
-                      </span>
-                      <IndexStatusChip
-                        status={f.indexing_status}
-                        error={f.indexing_error}
-                      />
-                    </div>
-                    <div className="text-xs text-[var(--text-muted)]">
-                      {humanSize(f.size_bytes)} · {f.mime_type}
-                    </div>
-                  </div>
-                </button>
-                {canEdit && (
-                  <button
-                    onClick={() => unpin.mutate(f.file_id)}
-                    title="Unpin"
-                    className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                    disabled={unpin.isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <AttachmentPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        alreadyAttached={alreadyAttached}
-        onAttach={async (files) => {
-          const already = new Set(alreadyAttached.map((f) => f.id));
-          for (const f of files) {
-            if (already.has(f.id)) continue;
-            try {
-              await pin.mutateAsync(f.id);
-            } catch {
-              // Ignore per-file failure; let the user retry.
-            }
-          }
-        }}
-      />
-
-      <FilePreviewModal
-        open={!!previewFile}
-        file={previewFile}
-        siblings={siblings}
-        onClose={() => setPreviewFile(null)}
-      />
-
-      {editingDoc && (
-        <DocumentEditorModal
-          file={editingDoc}
-          onClose={() => setEditingDoc(null)}
-          onFileUpdated={(f) => setEditingDoc(f)}
-        />
-      )}
-    </div>
-  );
-}
-
-function ContextBudgetBar({ workspace }: { workspace: WorkspaceDetail }) {
+/** Per-turn context cost + retrieval state + embeddings nudge. Lives at
+ *  the top of the Workspace Drive pane (exported) — it used to sit on the
+ *  retired Pinned-files tab. */
+export function ContextBudgetBar({ workspace }: { workspace: WorkspaceDetail }) {
   const {
     per_turn_tokens,
     retrieval_active,
@@ -609,41 +486,6 @@ function ContextBudgetBar({ workspace }: { workspace: WorkspaceDetail }) {
         )}
       </div>
     </div>
-  );
-}
-
-function IndexStatusChip({
-  status,
-  error,
-}: {
-  status: "queued" | "embedding" | "ready" | "failed";
-  error: string | null;
-}) {
-  if (status === "queued") return null;
-  if (status === "embedding") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--border)]/40 px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
-        <Loader2 className="h-2.5 w-2.5 animate-spin" />
-        indexing
-      </span>
-    );
-  }
-  if (status === "ready") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">
-        <Zap className="h-2.5 w-2.5" />
-        searchable
-      </span>
-    );
-  }
-  return (
-    <span
-      title={error ?? undefined}
-      className="inline-flex items-center gap-1 rounded-full bg-[var(--danger-bg)] px-1.5 py-0.5 text-[10px] text-[var(--danger)]"
-    >
-      <CircleAlert className="h-2.5 w-2.5" />
-      not indexed
-    </span>
   );
 }
 

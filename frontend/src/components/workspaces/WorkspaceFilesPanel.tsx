@@ -11,12 +11,11 @@ import {
 } from "lucide-react";
 
 import {
-  usePinWorkspaceFile,
   useSetFileContext,
   useUnpinWorkspaceFile,
+  useUploadDriveFile,
   useWorkspace,
 } from "@/hooks/useWorkspaces";
-import { filesApi } from "@/api/files";
 import type { WorkspaceFilePin } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 
@@ -39,12 +38,18 @@ const ACCEPT =
 export function WorkspaceFilesPanel({
   workspaceId,
   canEdit,
+  compact = false,
+  onOpenDrive,
 }: {
   workspaceId: string;
   canEdit: boolean;
+  /** Overview mode: dropzone + summary line only — the full listing
+   *  (folders, search, bulk) lives in the Workspace Drive pane. */
+  compact?: boolean;
+  onOpenDrive?: () => void;
 }) {
   const { data: workspace } = useWorkspace(workspaceId);
-  const pin = usePinWorkspaceFile(workspaceId);
+  const upload = useUploadDriveFile(workspaceId);
   const unpin = useUnpinWorkspaceFile(workspaceId);
   const setContext = useSetFileContext(workspaceId);
 
@@ -55,26 +60,24 @@ export function WorkspaceFilesPanel({
 
   const files = workspace?.files ?? [];
   const inContext = files.filter((f) => f.context_enabled !== false).length;
+  const totalBytes = files.reduce((sum, f) => sum + f.size_bytes, 0);
 
   const handleFiles = async (picked: FileList | File[]) => {
     const list = Array.from(picked);
     if (list.length === 0) return;
     setError(null);
     setUploading((u) => [...u, ...list.map((f) => f.name)]);
-    // Owners drop files straight into the workspace's ``Files`` Drive
-    // subfolder (tidy); collaborators can't write to the owner's folder, so
-    // they fall back to their own Drive root. Pinning is what kicks off RAG
-    // embedding with the configured provider either way.
-    const targetFolderId =
-      workspace?.role === "owner" ? (workspace?.files_folder_id ?? null) : null;
+    // Uploads land in the *workspace's* drive (owner-owned) no matter who
+    // uploads — the drive endpoint stores, pins, and indexes in one shot.
     for (const file of list) {
       try {
-        const uploaded = await filesApi.upload("mine", file, targetFolderId);
-        await pin.mutateAsync(uploaded.id);
-      } catch {
-        setError(
-          `Couldn't add "${file.name}". It may be too large or an unsupported type.`
-        );
+        await upload.mutateAsync({ file, folderId: null });
+      } catch (err) {
+        const detail =
+          (err as { response?: { data?: { detail?: string } } })?.response
+            ?.data?.detail ??
+          `Couldn't add "${file.name}". It may be too large or an unsupported type.`;
+        setError(detail);
       } finally {
         setUploading((u) => {
           const i = u.indexOf(file.name);
@@ -98,13 +101,25 @@ export function WorkspaceFilesPanel({
     <section>
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-          Files
+          Drive
         </h2>
-        {files.length > 0 && (
-          <span className="text-[11px] text-[var(--text-muted)]">
-            {inContext} of {files.length} in context
-          </span>
-        )}
+        <span className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+          {files.length > 0 && (
+            <span>
+              {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
+              {humanSize(totalBytes)} · {inContext} in context
+            </span>
+          )}
+          {onOpenDrive && (
+            <button
+              type="button"
+              onClick={onOpenDrive}
+              className="rounded-md border border-[var(--border)] px-2 py-0.5 font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+            >
+              Open drive
+            </button>
+          )}
+        </span>
       </div>
 
       {canEdit && (
@@ -151,7 +166,14 @@ export function WorkspaceFilesPanel({
         </div>
       )}
 
-      {(files.length > 0 || uploading.length > 0) && (
+      {compact && uploading.length > 0 && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Uploading {uploading.length} file{uploading.length === 1 ? "" : "s"}…
+        </div>
+      )}
+
+      {!compact && (files.length > 0 || uploading.length > 0) && (
         <ul className="mt-3 divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
           {uploading.map((name) => (
             <li

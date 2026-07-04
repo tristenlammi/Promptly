@@ -484,6 +484,15 @@ async def update_workspace(
             )
         ws.memory_model_id = new_mem_model
         ws.memory_provider_id = new_mem_provider
+    # Drive storage cap — owner-only (collaborators can edit content, but
+    # capping the drive is a lifecycle decision like delete/share).
+    if "storage_quota_bytes" in sent:
+        if ws.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the workspace owner can change the storage cap.",
+            )
+        ws.storage_quota_bytes = payload.storage_quota_bytes
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(ws)
@@ -769,6 +778,24 @@ async def pin_file(
     )
     existing = existing_q.scalar_one_or_none()
     if existing is None:
+        # Workspace drive cap applies to pins of existing files too —
+        # otherwise pinning a large personal file would bypass it.
+        if ws.storage_quota_bytes is not None:
+            used = await db.scalar(
+                select(func.coalesce(func.sum(UserFile.size_bytes), 0))
+                .select_from(WorkspaceFile)
+                .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+                .where(WorkspaceFile.workspace_id == ws.id)
+            )
+            if int(used or 0) + uf.size_bytes > ws.storage_quota_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        "Adding this file would exceed the workspace's "
+                        "storage cap. Remove some files or raise the cap "
+                        "in Settings."
+                    ),
+                )
         pin = WorkspaceFile(
             workspace_id=ws.id, file_id=uf.id, pinned_by=user.id
         )
