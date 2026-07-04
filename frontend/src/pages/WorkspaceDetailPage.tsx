@@ -945,6 +945,7 @@ function WorkspaceItemView({
         node={node}
         workspaceId={workspaceId}
         canEdit={canEdit}
+        onOpenItem={onOpenItem}
       />
     );
   }
@@ -1763,10 +1764,12 @@ function WorkspaceCanvasPaneFrame({
   node,
   workspaceId,
   canEdit,
+  onOpenItem,
 }: {
   node: WorkspaceItemNode;
   workspaceId: string;
   canEdit: boolean;
+  onOpenItem?: (node: WorkspaceItemNode) => void;
 }) {
   if (!node.ref_id) {
     return <ErrorState>This canvas has no underlying board.</ErrorState>;
@@ -1786,6 +1789,8 @@ function WorkspaceCanvasPaneFrame({
           canvasId={node.ref_id}
           readOnly={!canEdit}
           header={{ workspaceId, node }}
+          workspaceId={workspaceId}
+          onOpenItem={onOpenItem}
         />
       </Suspense>
     </div>

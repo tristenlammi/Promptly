@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Wand2 } from "lucide-react";
+import { Link2, Link2Off, Loader2, Wand2 } from "lucide-react";
 import {
   Excalidraw,
   getTextFromElements,
@@ -15,8 +15,13 @@ import { useThemeStore } from "@/store/themeStore";
 // the .promptly-canvas wrapper below).
 import "@/styles/excalidraw.css";
 import type { WorkspaceItemNode } from "@/api/workspaces";
+import {
+  buildWikiHref,
+  parseWikiHref,
+} from "@/components/files/documents/WikiLinkExtension";
 import { ErrorState } from "@/components/shared/Callout";
 import { ItemPaneHeader } from "./ItemPaneHeader";
+import { WorkspaceItemPicker } from "./WorkspaceItemPicker";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
 import { buildBundledLibraryItems } from "./canvas/libraries";
@@ -38,6 +43,15 @@ interface ImageSelection {
   top: number;
 }
 type BgState = "idle" | "working" | "error";
+
+// A single selected linkable element + where to float the "Link" button,
+// plus whether it already carries a workspace-item link.
+interface LinkSelection {
+  elementId: string;
+  left: number;
+  top: number;
+  linked: boolean;
+}
 
 /**
  * Live, multiplayer Excalidraw board for a workspace canvas item.
@@ -66,10 +80,16 @@ export function WorkspaceCanvasPane({
   canvasId,
   readOnly = false,
   header,
+  workspaceId,
+  onOpenItem,
 }: {
   canvasId: string;
   /** Viewer-role access → board opens read-only. */
   readOnly?: boolean;
+  /** Enables cross-item linking: a selected shape can be linked to a
+   *  workspace item, and clicking that link opens the item inline. */
+  workspaceId?: string;
+  onOpenItem?: (node: WorkspaceItemNode) => void;
   /** When set, renders the unified ItemPaneHeader (title / ⚡ / sync
    *  status) above the canvas — the pane had zero chrome before. */
   header?: { workspaceId: string; node: WorkspaceItemNode };
@@ -151,6 +171,11 @@ export function WorkspaceCanvasPane({
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageSel, setImageSel] = useState<ImageSelection | null>(null);
   const [bgState, setBgState] = useState<BgState>("idle");
+  // Cross-item linking (Phase 8) — a single selected shape can be linked
+  // to a workspace item. Only wired when the pane knows its workspace.
+  const linkingEnabled = !readOnly && !!workspaceId && !!onOpenItem;
+  const [linkSel, setLinkSel] = useState<LinkSelection | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const selIdRef = useRef<string | null>(null);
 
   // --- RAG text push (debounced) --------------------------------------
@@ -225,8 +250,28 @@ export function WorkspaceCanvasPane({
         setBgState("idle");
       }
       setImageSel(next);
+
+      // "Link to item" affordance for a single selected non-image shape.
+      let linkNext: LinkSelection | null = null;
+      if (linkingEnabled && picked.length === 1) {
+        const el = elements.find((e) => e.id === picked[0]);
+        if (el && el.type !== "image" && !el.isDeleted) {
+          const p = sceneCoordsToViewportCoords(
+            { sceneX: el.x + el.width, sceneY: el.y },
+            appState
+          );
+          const rect = containerRef.current?.getBoundingClientRect();
+          linkNext = {
+            elementId: el.id,
+            left: p.x - (rect?.left ?? 0),
+            top: p.y - (rect?.top ?? 0),
+            linked: !!parseWikiHref(el.link),
+          };
+        }
+      }
+      setLinkSel(linkNext);
     },
-    [binding.onChange, schedulePush, readOnly]
+    [binding.onChange, schedulePush, readOnly, linkingEnabled]
   );
 
   const handleRemoveBackground = useCallback(async () => {
@@ -243,6 +288,68 @@ export function WorkspaceCanvasPane({
       window.setTimeout(() => setBgState("idle"), 4000);
     }
   }, [excalidrawAPI, imageSel, bgState]);
+
+  // Set (or clear) an element's link to a workspace item. Stores the same
+  // relative wiki-href notes use, so Excalidraw renders its link badge and
+  // ``onLinkOpen`` below can route the click back into the app.
+  const setElementLink = useCallback(
+    (elementId: string, href: string | null) => {
+      const api = excalidrawAPI;
+      if (!api || !workspaceId) return;
+      const elements = api.getSceneElements().map((el) =>
+        el.id === elementId ? { ...el, link: href } : el
+      );
+      api.updateScene({ elements });
+      // Push the change through the collab binding so peers + persistence
+      // see it (updateScene alone doesn't fire our onChange for this path).
+      binding.onChange(
+        api.getSceneElements(),
+        api.getAppState(),
+        api.getFiles()
+      );
+    },
+    [excalidrawAPI, workspaceId, binding]
+  );
+
+  const handleLinkPicked = useCallback(
+    (node: WorkspaceItemNode) => {
+      if (!linkSel || !workspaceId) return;
+      const href = buildWikiHref({
+        id: node.id,
+        kind: node.kind,
+        refId: node.ref_id,
+        title: node.title,
+        workspaceId,
+      });
+      setElementLink(linkSel.elementId, href);
+      setPickerOpen(false);
+    },
+    [linkSel, workspaceId, setElementLink]
+  );
+
+  // Route a click on an element's link: workspace-item hrefs open inline;
+  // anything else falls through to Excalidraw's default (new tab).
+  const handleLinkOpen = useCallback(
+    (
+      element: { link?: string | null },
+      event: { preventDefault: () => void }
+    ) => {
+      const parsed = parseWikiHref(element.link);
+      if (!parsed || !onOpenItem) return;
+      event.preventDefault();
+      onOpenItem({
+        id: parsed.item,
+        kind: parsed.kind as WorkspaceItemNode["kind"],
+        ref_id: parsed.ref,
+        title: "",
+        icon: null,
+        position: 0,
+        indexing_status: null,
+        children: [],
+      });
+    },
+    [onOpenItem]
+  );
 
   // Clear any pending debounce on unmount / canvas swap.
   useEffect(() => {
@@ -313,13 +420,56 @@ export function WorkspaceCanvasPane({
           </button>
         </div>
       )}
+      {linkSel && (
+        <div
+          className="absolute z-20 flex gap-1"
+          style={{
+            left: linkSel.left,
+            top: linkSel.top,
+            transform: "translate(6px, -6px)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            title={
+              linkSel.linked
+                ? "Change the linked workspace item"
+                : "Link this shape to a workspace item"
+            }
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] shadow-md transition hover:bg-[var(--surface-hover)]"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            {linkSel.linked ? "Linked" : "Link to item"}
+          </button>
+          {linkSel.linked && (
+            <button
+              type="button"
+              onClick={() => setElementLink(linkSel.elementId, null)}
+              title="Remove the link"
+              aria-label="Remove link"
+              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-[var(--text-muted)] shadow-md transition hover:text-[var(--danger)]"
+            >
+              <Link2Off className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
       <Excalidraw
         excalidrawAPI={setExcalidrawAPI}
         onChange={handleChange}
         onPointerUpdate={binding.onPointerUpdate}
+        onLinkOpen={linkingEnabled ? handleLinkOpen : undefined}
         viewModeEnabled={readOnly}
         initialData={initialData}
       />
+      {pickerOpen && workspaceId && (
+        <WorkspaceItemPicker
+          workspaceId={workspaceId}
+          onPick={handleLinkPicked}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 

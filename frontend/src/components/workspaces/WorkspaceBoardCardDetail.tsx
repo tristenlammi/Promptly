@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Clock,
   Download,
   FileText,
   Globe,
@@ -15,6 +16,7 @@ import {
   Send,
   Square,
   Star,
+  Table2,
   Tag,
   Trash2,
   X,
@@ -737,6 +739,12 @@ function kindMeta(kind: string): { Icon: typeof FileText; label: string } {
       return { Icon: MessageSquare, label: "Chat" };
     case "board":
       return { Icon: LayoutGrid, label: "Board" };
+    case "sheet":
+      return { Icon: Table2, label: "Sheet" };
+    case "container":
+      return { Icon: Layers, label: "Notebook" };
+    case "task":
+      return { Icon: Clock, label: "Automation" };
     case "url":
       return { Icon: Globe, label: "URL" };
     default:
