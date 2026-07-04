@@ -13,6 +13,7 @@ import {
   useMyUsageSummary,
   useMyUsageTimeseries,
 } from "@/hooks/useUsage";
+import { useAvailableModels } from "@/hooks/useProviders";
 import {
   Card,
   CardHeader,
@@ -56,9 +57,17 @@ export function UsagePanel() {
     [series.data, days]
   );
 
-  const hasCap =
-    !!summary.data &&
-    (summary.data.daily_cap !== null || summary.data.monthly_cap !== null);
+  // Raw model ids ("deepseek/deepseek-v4-flash") are for machines — show
+  // the picker's display names, falling back to the id for models that
+  // are no longer offered.
+  const { data: availableModels } = useAvailableModels();
+  const modelNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of availableModels ?? []) {
+      if (!map.has(m.model_id)) map.set(m.model_id, m.display_name);
+    }
+    return map;
+  }, [availableModels]);
 
   return (
     <section className="space-y-4">
@@ -84,8 +93,10 @@ export function UsagePanel() {
 
       {summary.data && <VerdictBanner summary={summary.data} />}
 
-      {/* Quota strip — only when the user actually has a cap. */}
-      {hasCap && summary.data && (
+      {/* Quota strip — always visible so quotas exist as a concept even for
+          uncapped users ("no limit set" beats a section that appears out of
+          nowhere the day an admin adds a cap). */}
+      {summary.data && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <QuotaMeter
             label="Today"
@@ -184,7 +195,12 @@ export function UsagePanel() {
                   <th className="px-2 py-1.5 font-semibold">Model</th>
                   <th className="px-2 py-1.5 font-semibold text-right">Msgs</th>
                   <th className="px-2 py-1.5 font-semibold text-right">Tokens</th>
-                  <th className="px-2 py-1.5 font-semibold text-right">Cost</th>
+                  <th
+                    className="px-2 py-1.5 font-semibold text-right"
+                    title="Estimated from provider list pricing — rounding, discounts, and caching mean your provider's dashboard is the source of truth."
+                  >
+                    Cost*
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -194,11 +210,14 @@ export function UsagePanel() {
                     className="border-t border-[var(--border)] first:border-t-0"
                   >
                     <td
-                      className="px-2 py-1.5 font-mono text-[11px] text-[var(--text)]"
+                      className={cn(
+                        "px-2 py-1.5 text-[11px] text-[var(--text)]",
+                        !modelNames.has(row.model_id) && "font-mono"
+                      )}
                       title={row.model_id}
                     >
-                      <span className="block max-w-[20ch] truncate">
-                        {row.model_id}
+                      <span className="block max-w-[24ch] truncate">
+                        {modelNames.get(row.model_id) ?? row.model_id}
                       </span>
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]">
@@ -262,7 +281,9 @@ function QuotaMeter({
       <div className="mt-1.5 text-sm font-semibold text-[var(--text)]">
         {formatInt(used)}
         <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">
-          / {cap === null ? "unlimited" : `${formatInt(cap)} tokens`}
+          {cap === null
+            ? "tokens · no limit set"
+            : `/ ${formatInt(cap)} tokens`}
         </span>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.06]">

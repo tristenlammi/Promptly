@@ -1,9 +1,13 @@
 import { useState } from "react";
 
 import { ProviderConnections } from "@/components/models/ProviderConnections";
-import { CustomModelsPanel } from "@/components/admin/CustomModelsPanel";
+import {
+  CustomModelsPanel,
+  EmbeddingMissingBanner,
+} from "@/components/admin/CustomModelsPanel";
 import { LocalModelsPanel } from "@/components/admin/LocalModelsPanel";
 import { DefaultsTab } from "@/components/admin/DefaultsTab";
+import { useEmbeddingConfig } from "@/hooks/useCustomModels";
 
 /**
  * The Models management surface.
@@ -45,6 +49,17 @@ export function ModelsPanel() {
   // Single-tenant self-host: the admin sees every model sub-tab.
   const visibleTabs = TABS;
 
+  // Missing embedding config silently disables workspace RAG + custom-model
+  // knowledge libraries, so it warns at panel level on every tab except
+  // Defaults (where the fix lives — nagging there would just be noise).
+  const { data: embeddingConfig } = useEmbeddingConfig();
+  const embeddingMissing =
+    embeddingConfig !== undefined &&
+    !(
+      embeddingConfig?.embedding_provider_id &&
+      embeddingConfig?.embedding_model_id
+    );
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--border)]">
@@ -76,11 +91,15 @@ export function ModelsPanel() {
         </div>
       </div>
 
+      {embeddingMissing && tab !== "defaults" && (
+        <div className="mb-4">
+          <EmbeddingMissingBanner onJumpToDefaults={() => setTab("defaults")} />
+        </div>
+      )}
+
       {tab === "connections" && <ProviderConnections />}
       {tab === "defaults" && <DefaultsTab />}
-      {tab === "custom" && (
-        <CustomModelsPanel onJumpToDefaults={() => setTab("defaults")} />
-      )}
+      {tab === "custom" && <CustomModelsPanel />}
       {tab === "local" && <LocalModelsPanel />}
     </div>
   );

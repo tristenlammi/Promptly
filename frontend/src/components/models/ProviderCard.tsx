@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   Loader2,
@@ -27,6 +27,12 @@ type TestState =
   | { state: "loading" }
   | { state: "ok"; modelCount?: number | null }
   | { state: "error"; message: string };
+
+/** Providers already auto-tested this app session. Module-level so
+ *  flipping between admin tabs doesn't re-hit every provider's API on
+ *  each remount — once per provider per session is plenty for the
+ *  "is my key actually working?" signal. */
+const AUTO_TESTED_IDS = new Set<string>();
 
 export function ProviderCard({ provider }: { provider: Provider }) {
   const update = useUpdateProvider();
@@ -63,6 +69,18 @@ export function ProviderCard({ provider }: { provider: Provider }) {
       });
     }
   };
+
+  // Auto-test on first sight (covers "just added" and "first visit this
+  // session") so a bad key shows up on the card without anyone having to
+  // know the Test button exists. Disabled providers are skipped — no point
+  // pinging an API the picker won't offer.
+  useEffect(() => {
+    if (!provider.enabled) return;
+    if (AUTO_TESTED_IDS.has(provider.id)) return;
+    AUTO_TESTED_IDS.add(provider.id);
+    void onTest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider.id, provider.enabled]);
 
   const onRefreshModels = () => {
     fetchModels.mutate(provider.id);

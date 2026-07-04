@@ -55,35 +55,17 @@ function normaliseOllamaTag(name: string): string {
  *
  * Surfaces admin-curated assistants (personality + base model +
  * knowledge library). The embedding configuration — which makes
- * each assistant's knowledge library actually useful — moved out
- * of this panel into the ``Defaults`` tab, alongside the global
- * default chat model and the vision relay. A small status nudge
- * stays here so admins discover where to configure it.
+ * each assistant's knowledge library actually useful — lives on the
+ * ``Defaults`` tab; the embedding-missing nudge renders once at the
+ * ``ModelsPanel`` level (embeddings power workspace RAG too, not just
+ * custom models), so this panel no longer shows its own copy.
  */
-export function CustomModelsPanel({
-  onJumpToDefaults,
-}: {
-  /** Optional jump-to-Defaults handler. When provided, the inline
-   *  embedding banner becomes a button that switches tabs without
-   *  forcing a full page navigation; without it the banner is a
-   *  passive hint. Wired by ``ModelsPanel`` which owns the tab
-   *  state. */
-  onJumpToDefaults?: () => void;
-}) {
+export function CustomModelsPanel() {
   const { data: models, isLoading } = useCustomModels();
-  const { data: embeddingConfig } = useEmbeddingConfig();
   const [drawerId, setDrawerId] = useState<"new" | string | null>(null);
-
-  const embeddingConfigured =
-    !!embeddingConfig?.embedding_provider_id &&
-    !!embeddingConfig?.embedding_model_id;
 
   return (
     <div className="space-y-4">
-      {!embeddingConfigured && (
-        <EmbeddingMissingBanner onJumpToDefaults={onJumpToDefaults} />
-      )}
-
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold">Assistants</h2>
@@ -140,22 +122,23 @@ export function CustomModelsPanel({
 // embedded.
 // --------------------------------------------------------------------
 
-function EmbeddingMissingBanner({
+export function EmbeddingMissingBanner({
   onJumpToDefaults,
 }: {
   onJumpToDefaults?: () => void;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-amber-700 dark:text-amber-300">
+    <div className="flex items-start gap-3 rounded-card border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2.5 text-[var(--warning)]">
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">
           No embedding model configured
         </div>
         <div className="mt-0.5 text-xs">
-          Custom models can be created, but file uploads in their knowledge
-          libraries won't be embedded until an embedding model is picked
-          under <span className="font-semibold">Models → Defaults</span>.
+          Semantic search stays off until one is picked under{" "}
+          <span className="font-semibold">Models → Defaults</span> — workspace
+          files/notes won't be indexed for retrieval and custom-model knowledge
+          libraries won't embed uploads. Chat itself works fine without it.
         </div>
       </div>
       {onJumpToDefaults && (

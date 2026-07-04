@@ -20,6 +20,9 @@ export interface ProviderSpec {
   apiKeyPlaceholder: string;
   keyless?: boolean;
   hint?: string;
+  /** Official console page where the user can create/copy an API key —
+   *  rendered as a "Get your key" link under the key field. */
+  keyUrl?: string;
 }
 
 export const PROVIDER_SPECS: ProviderSpec[] = [
@@ -29,6 +32,8 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     defaultName: "OpenRouter",
     baseUrlHint: "https://openrouter.ai/api/v1",
     apiKeyPlaceholder: "sk-or-...",
+    hint: "One key, 300+ models — easiest start",
+    keyUrl: "https://openrouter.ai/keys",
   },
   {
     value: "openai",
@@ -36,6 +41,7 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     defaultName: "OpenAI",
     baseUrlHint: "https://api.openai.com/v1",
     apiKeyPlaceholder: "sk-...",
+    keyUrl: "https://platform.openai.com/api-keys",
   },
   {
     value: "anthropic",
@@ -43,6 +49,7 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     defaultName: "Anthropic",
     baseUrlHint: "https://api.anthropic.com/v1",
     apiKeyPlaceholder: "sk-ant-...",
+    keyUrl: "https://console.anthropic.com/settings/keys",
   },
   {
     value: "gemini",
@@ -50,6 +57,7 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     defaultName: "Gemini",
     baseUrlHint: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiKeyPlaceholder: "AIza...",
+    keyUrl: "https://aistudio.google.com/apikey",
   },
   {
     value: "ollama",
@@ -59,6 +67,7 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     apiKeyPlaceholder: "Not required",
     keyless: true,
     hint: "No API key required",
+    keyUrl: "https://ollama.com",
   },
   {
     value: "deepseek",
@@ -67,6 +76,7 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     baseUrlHint: "https://api.deepseek.com",
     apiKeyPlaceholder: "sk-...",
     hint: "Text + reasoning (V4)",
+    keyUrl: "https://platform.deepseek.com/api_keys",
   },
   {
     value: "openai_compatible",
@@ -74,6 +84,7 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     defaultName: "Custom",
     baseUrlHint: "https://…/v1",
     apiKeyPlaceholder: "Bearer token",
+    hint: "vLLM, LocalAI, LM Studio, …",
   },
 ];
 
@@ -210,9 +221,24 @@ export function AddProviderModal({ open, onClose }: AddProviderModalProps) {
         <Field
           label={spec.keyless ? "API key (optional)" : "API key"}
           hint={
-            spec.keyless
-              ? "Ollama doesn't require authentication. Leave this blank."
-              : undefined
+            spec.keyless ? (
+              <>
+                Ollama runs models locally on your machine — no key needed.
+                New to it?{" "}
+                <ExternalHint href={spec.keyUrl!}>
+                  Get Ollama + pull a model
+                </ExternalHint>
+                .
+              </>
+            ) : spec.keyUrl ? (
+              <>
+                Don't have a key yet?{" "}
+                <ExternalHint href={spec.keyUrl}>
+                  Create one in the {spec.label} console
+                </ExternalHint>
+                .
+              </>
+            ) : undefined
           }
         >
           <TextInput
@@ -262,7 +288,7 @@ function Field({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -273,6 +299,26 @@ function Field({
       {children}
       {hint && <div className="mt-1 text-[11px] text-[var(--text-muted)]">{hint}</div>}
     </label>
+  );
+}
+
+/** Small external link used in field hints (key-console pointers). */
+function ExternalHint({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+    >
+      {children}
+    </a>
   );
 }
 
