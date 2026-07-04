@@ -129,6 +129,7 @@ services:
       - ./data/whiteboard:/app/whiteboard
     expose:
       - "8000"
+    mem_limit: ${BACKEND_MEM_LIMIT:-4g}
     depends_on:
       postgres:
         condition: service_healthy
@@ -192,6 +193,7 @@ services:
     # racing to migrate on a fresh deploy.
     entrypoint: ["arq", "app.tasks.worker.WorkerSettings"]
     environment: *backend-env
+    mem_limit: ${ARQ_MEM_LIMIT:-2g}
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/whiteboard:/app/whiteboard
@@ -218,6 +220,7 @@ services:
       context: ./collab
       dockerfile: Dockerfile
     container_name: Promptly-Collab
+    mem_limit: ${COLLAB_MEM_LIMIT:-1g}
     environment:
       # SECRET_KEY is used for two things here:
       #   1. Verifying the short-lived collab JWT the backend hands
@@ -249,6 +252,9 @@ services:
     # Required by Custom Models' RAG knowledge base.
     image: pgvector/pgvector:pg15
     container_name: Promptly-Postgres
+    # Memory ceiling (DoS backstop) — well above steady-state so a query
+    # spike can't OOM the host, sized for a homelab. Tune via env if needed.
+    mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
     environment:
       - POSTGRES_USER=promptly
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -267,6 +273,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: Promptly-Redis
+    mem_limit: ${REDIS_MEM_LIMIT:-512m}
     volumes:
       - ./data/redis:/data
     healthcheck:
@@ -313,9 +320,15 @@ services:
       # index batch and returns immediately.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
     ports:
-      # Only this port is published; the backend reaches Ollama
-      # over the internal docker network on the unmapped 11434.
-      - "${OLLAMA_HOST_PORT:-11435}:11434"
+      # SECURITY: bind the published Ollama port to LOOPBACK only. Ollama
+      # has no authentication, so exposing it on 0.0.0.0 would hand the
+      # whole model API (pull/delete/inference) to anyone who can reach the
+      # host — a serious risk on a public domain. The backend never uses
+      # this mapping; it reaches Ollama over the internal docker network on
+      # the unmapped 11434. This mapping exists only so the *operator* can
+      # run the `ollama` CLI locally against the container. Override
+      # OLLAMA_BIND_ADDR=0.0.0.0 only on a trusted LAN behind a firewall.
+      - "${OLLAMA_BIND_ADDR:-127.0.0.1}:${OLLAMA_HOST_PORT:-11435}:11434"
     volumes:
       - ./data/ollama:/root/.ollama
       # Bootstrap script auto-pulls the embedding model on first
@@ -325,6 +338,9 @@ services:
       # Phase 2, with a real progress bar.
       - ./scripts/ollama-bootstrap.sh:/usr/local/bin/ollama-bootstrap.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/ollama-bootstrap.sh"]
+    # Generous, env-overridable memory ceiling so a large pulled model
+    # can't OOM the whole host. Bump OLLAMA_MEM_LIMIT for big (30B+) models.
+    mem_limit: ${OLLAMA_MEM_LIMIT:-16g}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
@@ -371,7 +387,8 @@ services:
       # queuing behind a bulk background re-index.
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
     ports:
-      - "${OLLAMA_HOST_PORT:-11435}:11434"
+      # SECURITY: loopback-only by default (see the CPU ollama service).
+      - "${OLLAMA_BIND_ADDR:-127.0.0.1}:${OLLAMA_HOST_PORT:-11435}:11434"
     volumes:
       - ./data/ollama:/root/.ollama
       - ./scripts/ollama-bootstrap.sh:/usr/local/bin/ollama-bootstrap.sh:ro
@@ -405,6 +422,7 @@ services:
     # Tag list: https://hub.docker.com/r/searxng/searxng/tags
     image: searxng/searxng:2026.4.17-e8299a4c3
     container_name: Promptly-SearXNG
+    mem_limit: ${SEARXNG_MEM_LIMIT:-512m}
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:
@@ -484,6 +502,7 @@ services:
       context: ./whisper
       dockerfile: Dockerfile
     container_name: Promptly-Whisper
+    mem_limit: ${WHISPER_MEM_LIMIT:-2g}
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base}
       - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
@@ -518,6 +537,7 @@ services:
       context: ./tts
       dockerfile: Dockerfile
     container_name: Promptly-TTS
+    mem_limit: ${TTS_MEM_LIMIT:-2g}
     environment:
       - TTS_VOICE=${TTS_VOICE:-af_heart}
       - TTS_LANG=${TTS_LANG:-en-us}

@@ -11,6 +11,7 @@ import {
   Volume2,
 } from "lucide-react";
 
+import { ChangePasswordPanel } from "@/components/account/ChangePasswordPanel";
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
 import { FeatureVisibilityPanel } from "@/components/account/FeatureVisibilityPanel";
 import { MemoryPanel } from "@/components/account/MemoryPanel";
@@ -61,7 +62,12 @@ export function AccountSecurityPage() {
       id: "security",
       label: "Security & MFA",
       icon: ShieldCheck,
-      node: <MfaSettingsPanel defaultEmail={user?.email} />,
+      node: (
+        <div className="space-y-6">
+          <ChangePasswordPanel />
+          <MfaSettingsPanel defaultEmail={user?.email} />
+        </div>
+      ),
     },
   ];
 

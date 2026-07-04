@@ -75,14 +75,6 @@ async def _resolve_research_model(
     return rp, fallback_model_id
 
 
-def _check_provider_access(provider: ModelProvider, user: User) -> bool:
-    """Return True if user may use this provider."""
-    if provider.user_id is None or provider.user_id == user.id:
-        return True
-    owner_role = getattr(provider, "_owner_role", None)  # not cached here; check below
-    return False
-
-
 @router.post("/conversations/{conversation_id}/research")
 async def start_research(
     conversation_id: uuid.UUID,

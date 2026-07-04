@@ -5,7 +5,13 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from app.auth.password_policy import (
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+    validate_password_strength,
+)
 
 UserRole = Literal["admin", "user"]
 
@@ -107,7 +113,15 @@ class PasswordResetRequest(BaseModel):
     ``token_version`` is bumped so any active session is killed.
     """
 
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH
+    )
+
+    @field_validator("password")
+    @classmethod
+    def _strong_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class AppSettingsResponse(BaseModel):
@@ -270,8 +284,16 @@ class AppSettingsUpdate(BaseModel):
 class AdminUserCreate(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH
+    )
     role: UserRole = "user"
+
+    @field_validator("password")
+    @classmethod
+    def _strong_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
     # None = full access (to the admin-curated pool). Provide a list to
     # restrict. Empty list = no models.
     allowed_models: list[str] | None = None
@@ -301,9 +323,18 @@ class AdminUserUpdate(BaseModel):
     username: str | None = Field(
         default=None, min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"
     )
-    # Optional password reset. Minimum 8 like register.
-    password: str | None = Field(default=None, min_length=8, max_length=128)
+    # Optional password reset. Held to the same strength policy as create.
+    password: str | None = Field(
+        default=None, min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH
+    )
     role: UserRole | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _strong_password(cls, v: str | None) -> str | None:
+        if v is not None:
+            validate_password_strength(v)
+        return v
     allowed_models: list[str] | None = None
     # Omit to leave membership unchanged; send a (possibly empty) list to
     # replace the user's group set.

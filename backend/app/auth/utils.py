@@ -60,8 +60,11 @@ def waste_a_verify() -> None:
 # JWT tokens
 # --------------------------------------------------------------------
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 15
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+# Sourced from settings so operators can tune session lifetime (and so the
+# refresh window — the stolen-token exposure — is a deliberate, documented
+# value rather than a hardcoded 7 days).
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_TTL_MINUTES
+REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_TTL_DAYS
 
 # "mfa_challenge" — issued after a successful password check when the
 # user has MFA enrolled but hasn't yet presented the second factor.

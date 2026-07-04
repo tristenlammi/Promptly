@@ -16,6 +16,7 @@ the event never happened *and* never appears in the log.
 """
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from typing import Any
 
@@ -23,6 +24,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.events import AuthEvent
+from app.config import get_settings
 
 # Re-export the canonical event-type constants so callers only need to
 # import from one place.
@@ -58,32 +60,59 @@ from app.auth.events import (  # noqa: F401
 )
 
 
+def _peer_is_trusted_proxy(peer: str) -> bool:
+    """True when the socket peer is one of the configured trusted proxies.
+
+    Forwarded client-IP headers are only honoured when the machine that
+    actually opened the TCP connection to us is a trusted reverse proxy
+    (nginx / a fronting tunnel). A client that reaches the backend directly
+    on a public IP is not trusted, so it cannot forge its source IP to
+    defeat the per-IP login/MFA rate limiters."""
+    if not peer:
+        return False
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(ip in net for net in get_settings().trusted_proxy_networks)
+
+
 def request_meta(request: Request | None) -> tuple[str, str]:
     """Extract (client_ip, user_agent) from a Starlette request.
 
-    Header preference, in order:
-      1. ``CF-Connecting-IP`` — set by Cloudflare's tunnel/proxy and
-         contains the original client IP. Trusted because traffic only
-         reaches us via the tunnel.
-      2. ``X-Forwarded-For`` — first hop. Falls back when the proxy
-         setup changes.
-      3. ``request.client.host`` — the socket peer (will be the docker
-         network bridge in our deployment, but useful in dev).
+    Client-IP resolution is **spoof-resistant**: forwarded headers are
+    trusted ONLY when ``request.client.host`` (the unspoofable socket peer)
+    is a configured trusted proxy (``TRUSTED_PROXY_IPS`` — the private
+    docker/nginx range by default). From a trusted proxy the preference is:
 
-    Returns empty strings rather than ``None`` so callers don't need
-    null guards before length-capping. Both fields are capped to fit
-    the column widths defined in 0007_security_foundation.
+      1. ``CF-Connecting-IP`` — set by Cloudflare's tunnel/proxy.
+      2. ``X-Real-IP`` — set by our nginx to the connection's ``$remote_addr``.
+      3. ``X-Forwarded-For`` (first hop) — fallback.
+
+    From an **untrusted** peer (e.g. someone hitting the backend port
+    directly) all forwarded headers are ignored and we use the raw socket
+    peer, which a client cannot forge.
+
+    Returns empty strings rather than ``None`` so callers don't need null
+    guards before length-capping. Both fields are capped to the column
+    widths defined in 0007_security_foundation.
     """
     if request is None:
         return ("", "")
 
     headers = request.headers
-    ip = (
-        headers.get("CF-Connecting-IP")
-        or headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or (request.client.host if request.client else "")
-        or ""
-    )
+    peer = (request.client.host if request.client else "") or ""
+    if _peer_is_trusted_proxy(peer):
+        ip = (
+            headers.get("CF-Connecting-IP")
+            or headers.get("X-Real-IP")
+            or headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or peer
+            or ""
+        )
+    else:
+        # Untrusted / direct peer — never trust forwarded headers.
+        ip = peer
     ua = headers.get("User-Agent", "") or ""
     return (ip[:64], ua[:512])
 

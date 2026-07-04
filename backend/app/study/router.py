@@ -1968,6 +1968,12 @@ async def _stream_generator(
 
         project = await db.get(StudyProject, session.project_id)
         if project is None or project.user_id != user.id:
+            # Cross-user access via a leaked stream_id: put the context back so
+            # the rightful owner's pending stream isn't destroyed by the
+            # (already-performed) consume. Nothing sensitive has streamed yet —
+            # ownership is verified before any model output.
+            if project is not None and project.user_id != user.id:
+                await enqueue_stream(stream_id, ctx)
             yield _sse({"error": "Study project not found"})
             yield _sse({"done": True})
             return

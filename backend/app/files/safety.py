@@ -74,15 +74,19 @@ _ALLOWED_EXTS: dict[str, tuple[str, frozenset[str]]] = {
     ".yaml": ("text/plain", frozenset({"application/x-yaml", "application/yaml"})),
     ".yml": ("text/plain", frozenset({"application/x-yaml", "application/yaml"})),
     ".xml": ("application/xml", frozenset({"text/xml"})),
-    ".html": ("text/html", frozenset({"text/plain"})),
-    ".htm": ("text/html", frozenset({"text/plain"})),
+    # NOTE: ``.html`` / ``.htm`` are intentionally NOT accepted as uploads.
+    # Even though downloads force ``Content-Disposition: attachment`` +
+    # ``nosniff`` (so a stored page can't execute same-origin), keeping
+    # active-content formats off the upload allowlist removes a whole class
+    # of stored-XSS foot-guns on a multi-user host. Notes/documents are a
+    # separate first-class feature, not uploads.
 }
 
 # MIME types that are allowed to come back from the magic-byte sniffer
 # even though we don't know the canonical extension for them. Mostly
 # covers the "plain UTF-8 text" case where ``filetype`` returns ``None``
 # and we fall back to ``text/plain``.
-_TEXT_LIKE_EXTS = frozenset({".txt", ".md", ".csv", ".log", ".json", ".yaml", ".yml", ".xml", ".html", ".htm"})
+_TEXT_LIKE_EXTS = frozenset({".txt", ".md", ".csv", ".log", ".json", ".yaml", ".yml", ".xml"})
 
 # Ceiling on the cleaned filename. Long enough for human-readable names,
 # short enough to fit comfortably in a ``Content-Disposition`` header

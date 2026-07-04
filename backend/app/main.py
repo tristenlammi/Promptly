@@ -7,7 +7,7 @@ import traceback
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -98,6 +98,8 @@ _docs_url = "/api/docs" if settings.DEBUG else None
 _redoc_url = "/api/redoc" if settings.DEBUG else None
 _openapi_url = "/api/openapi.json" if settings.DEBUG else None
 
+from app.rate_limit import blanket_rate_limit
+
 app = FastAPI(
     title="Promptly API",
     description="Backend API for the Promptly self-hosted AI chat interface.",
@@ -106,6 +108,10 @@ app = FastAPI(
     docs_url=_docs_url,
     redoc_url=_redoc_url,
     openapi_url=_openapi_url,
+    # App-wide coarse per-IP rate limit (safety net). Per-route limiters
+    # (login/refresh/MFA) still stack on top. Health + internal traffic are
+    # exempt inside the dependency.
+    dependencies=[Depends(blanket_rate_limit)],
 )
 
 
@@ -256,10 +262,16 @@ async def health() -> JSONResponse:
     )
     components = {"postgres": pg, "redis": rd, "searxng": sx}
     overall_ok = all(c["ok"] for c in components.values())
+    # This endpoint is PUBLIC (unauthenticated — docker/orchestrators probe
+    # it). Expose only the up/down boolean per component; the raw ``error``
+    # strings are withheld because they can carry internal detail (DSN
+    # fragments, hostnames). Operators get the full errors from the logs /
+    # admin observability surface, not from an anonymous probe.
+    public_components = {name: {"ok": bool(c["ok"])} for name, c in components.items()}
     body = {
         "status": "ok" if overall_ok else "degraded",
         "service": "promptly-backend",
-        "components": components,
+        "components": public_components,
     }
     return JSONResponse(body, status_code=200 if overall_ok else 503)
 

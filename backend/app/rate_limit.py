@@ -17,6 +17,7 @@ attacker's window.
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 from typing import Annotated
 
@@ -66,9 +67,55 @@ _LIMIT_USER_MESSAGES: RateLimitItem = parse(_settings.RATE_LIMIT_USER_MESSAGES)
 
 
 def _client_ip(request: Request) -> str:
-    """Cloudflare-aware client IP. Falls back to ``"unknown"``."""
+    """Spoof-resistant client IP (see ``auth.audit.request_meta``)."""
     ip, _ = _request_meta(request)
     return ip or "unknown"
+
+
+def _ip_is_internal(ip: str) -> bool:
+    """True for private/loopback/link-local IPs — i.e. internal
+    service-to-service and healthcheck traffic, which must never be
+    throttled by the blanket limiter. A real internet client resolves to a
+    public IP (via the trusted-proxy forwarded-header logic), so this can't
+    accidentally exempt an external attacker."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.is_private or addr.is_loopback or addr.is_link_local
+
+
+# ---------------------------------------------------------------------
+# Blanket per-IP limiter (app-wide safety net)
+# ---------------------------------------------------------------------
+# Installed as an app-level dependency in ``main.py`` so EVERY public route
+# inherits a coarse per-IP cap (``RATE_LIMIT_DEFAULT``), not just the auth
+# endpoints. Without this, chat/files/search/RAG/LLM routes had no per-IP
+# throttle at all — a flood or scraper against any of them was unbounded.
+# Health + internal (private-IP) traffic are exempt so orchestration and
+# service-to-service calls (collab snapshots, healthchecks) never trip it.
+async def blanket_rate_limit(request: Request) -> None:
+    if not _settings.RATE_LIMIT_ENABLED:
+        return
+    if request.url.path.startswith("/api/health"):
+        return
+    key = _client_ip(request)
+    if _ip_is_internal(key):
+        return
+    allowed = await _limiter.hit(_LIMIT_DEFAULT, "default", key)
+    if allowed:
+        return
+    await _record_rate_limit_audit(request, bucket="default")
+    logger.warning(
+        "Blanket rate limit exceeded: ip=%s path=%s",
+        key,
+        request.url.path,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many requests. Please slow down and try again.",
+        headers={"Retry-After": str(_retry_after(_LIMIT_DEFAULT))},
+    )
 
 
 # ---------------------------------------------------------------------

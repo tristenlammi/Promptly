@@ -9,13 +9,25 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from app.auth.password_policy import (
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+    validate_password_strength,
+)
+
 UserRole = Literal["admin", "user"]
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+
+    @field_validator("password")
+    @classmethod
+    def _strong_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class SetupRequest(BaseModel):
@@ -28,11 +40,37 @@ class SetupRequest(BaseModel):
 
     email: EmailStr
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+
+    @field_validator("password")
+    @classmethod
+    def _strong_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class SetupStatusResponse(BaseModel):
     requires_setup: bool
+
+
+class ChangePasswordRequest(BaseModel):
+    """Self-service password change (``POST /api/auth/me/password``).
+
+    Requires the current password (so a stolen access token alone can't
+    change it), enforces the strength policy on the new one, and bumps the
+    user's ``token_version`` so every OTHER session is logged out.
+    """
+
+    current_password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
+    new_password: str = Field(
+        min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def _strong_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -98,7 +136,11 @@ class DirectoryUser(BaseModel):
 
     user_id: uuid.UUID
     username: str
-    email: EmailStr
+    # Email is NOT returned by the directory on a public/multi-user host — it
+    # would let any authenticated user harvest every account's email for
+    # phishing + targeted lockout. The picker resolves invites by username or
+    # a free-typed email, so it never needs the directory to hand emails back.
+    email: EmailStr | None = None
 
 
 class UserPreferencesUpdate(BaseModel):

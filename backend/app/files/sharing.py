@@ -283,6 +283,63 @@ async def file_is_accessible_via_workspace(
     return False
 
 
+async def workspace_write_access_for_file(
+    db: AsyncSession, file_id: uuid.UUID, user: User
+) -> bool:
+    """Does ``user`` have *write* (owner/editor) access to ``file_id`` via a
+    workspace role?
+
+    :func:`file_is_accessible_via_workspace` answers "can they reach it",
+    which is true for a workspace **viewer** too — but a viewer must not be
+    handed a write-scoped collab token. This role-aware variant resolves the
+    caller's role on whichever workspace backs the file (note item, pinned
+    file, or canvas text) and returns True only for owner/editor. Viewers,
+    and non-members, get False.
+    """
+    from app.chat.models import (
+        WorkspaceCanvas,
+        WorkspaceFile,
+        WorkspaceItem,
+    )
+    from app.workspaces.shares import get_accessible_workspace
+
+    ws_ids: set[uuid.UUID] = set()
+    for (wid,) in (
+        await db.execute(
+            select(WorkspaceItem.workspace_id).where(
+                WorkspaceItem.ref_id == file_id,
+                WorkspaceItem.kind.in_(("note", "file")),
+            )
+        )
+    ).all():
+        ws_ids.add(wid)
+    for (wid,) in (
+        await db.execute(
+            select(WorkspaceFile.workspace_id).where(
+                WorkspaceFile.file_id == file_id
+            )
+        )
+    ).all():
+        ws_ids.add(wid)
+    for (wid,) in (
+        await db.execute(
+            select(WorkspaceCanvas.workspace_id).where(
+                WorkspaceCanvas.text_file_id == file_id
+            )
+        )
+    ).all():
+        ws_ids.add(wid)
+
+    for wid in ws_ids:
+        try:
+            _ws, role = await get_accessible_workspace(wid, user, db)
+        except Exception:  # noqa: BLE001 — no access to this workspace
+            continue
+        if role in ("owner", "editor"):
+            return True
+    return False
+
+
 # --------------------------------------------------------------------
 # Render summary
 # --------------------------------------------------------------------

@@ -28,6 +28,7 @@ from app.chat.models import Conversation, Message
 from app.chat.pdf_render import PdfRenderError, render_markdown_to_pdf
 from app.database import get_db
 from app.mcp.models import McpConnector
+from app.mcp.service import connectors_for_turn
 from app.tasks.models import Task, TaskConnector, TaskRun
 from app.tasks.flow_graph import FlowGraph
 from app.tasks.flow_service import apply_graph, load_or_derive_graph, promote_task
@@ -113,21 +114,32 @@ async def _connector_ids_for(
 
 
 async def _set_task_connectors(
-    db: AsyncSession, task_id: uuid.UUID, connector_ids: list[uuid.UUID]
+    db: AsyncSession,
+    task_id: uuid.UUID,
+    connector_ids: list[uuid.UUID],
+    *,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
 ) -> None:
-    """Replace a task's connector set with the valid ids among ``connector_ids``.
-    Connectors are global (single-tenant), so any existing connector id may be
-    attached."""
+    """Replace a task's connector set with the ids the owner can actually reach.
+
+    Only connectors resolvable for this owner (global, granted to them or a
+    group, or attached to the task's workspace) are stored — so a caller can't
+    attach a connector they were never granted (and can't use the accept/drop
+    behaviour as a connector-id existence oracle). The runners re-check grants
+    at run time too, so this is defense-in-depth + input hygiene."""
     await db.execute(
         delete(TaskConnector).where(TaskConnector.task_id == task_id)
     )
     if connector_ids:
-        stmt = select(McpConnector.id).where(
-            McpConnector.id.in_(connector_ids),
-        )
-        valid = set((await db.execute(stmt)).scalars().all())
+        reachable = {
+            c.id
+            for c in await connectors_for_turn(
+                db, user_id=user_id, workspace_id=workspace_id
+            )
+        }
         for cid in dict.fromkeys(connector_ids):
-            if cid in valid:
+            if cid in reachable:
                 db.add(TaskConnector(task_id=task_id, connector_id=cid))
 
 
@@ -316,7 +328,13 @@ async def create_task(
     task.next_run_at = _compute_next(task)
     db.add(task)
     await db.flush()
-    await _set_task_connectors(db, task.id, payload.connector_ids)
+    await _set_task_connectors(
+        db,
+        task.id,
+        payload.connector_ids,
+        user_id=user.id,
+        workspace_id=task.workspace_id,
+    )
     await db.commit()
     await db.refresh(task)
     _reindex_automations(background, task.workspace_id)
@@ -368,7 +386,13 @@ async def update_task(
     if touched_schedule:
         task.next_run_at = _compute_next(task)
     if connector_ids is not None:
-        await _set_task_connectors(db, task.id, connector_ids)
+        await _set_task_connectors(
+            db,
+            task.id,
+            connector_ids,
+            user_id=user.id,
+            workspace_id=task.workspace_id,
+        )
     await db.commit()
     await db.refresh(task)
     _reindex_automations(background, old_workspace_id, task.workspace_id)

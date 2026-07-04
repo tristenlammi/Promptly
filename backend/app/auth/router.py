@@ -31,6 +31,7 @@ from app.auth.audit import (
     EVENT_LOGIN_SUCCESS,
     EVENT_LOCKOUT,
     EVENT_LOGOUT,
+    EVENT_PASSWORD_CHANGE,
     EVENT_REFRESH_REJECTED,
     EVENT_TOKEN_REFRESH,
     EVENT_UNLOCK,
@@ -41,6 +42,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.auth.schemas import (
     AuthResponse,
+    ChangePasswordRequest,
     DirectoryUser,
     LoginRequest,
     RegisterRequest,
@@ -213,6 +215,16 @@ async def setup(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Setup is not available in single-user mode",
         )
+    # Serialise concurrent first-run setups. Without this, two requests racing
+    # during the brief pre-provisioning window can BOTH pass the
+    # "no admin yet" check before either commits and end up creating two
+    # admins. A transaction-scoped advisory lock (auto-released on
+    # commit/rollback) forces the second caller to wait, after which it sees
+    # the admin the first created and 409s. The key is an arbitrary fixed
+    # 64-bit constant shared by all setup callers.
+    from sqlalchemy import text as _sa_text
+
+    await db.execute(_sa_text("SELECT pg_advisory_xact_lock(918273645)"))
     if await _admin_exists(db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -668,6 +680,55 @@ async def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
 
 
+@router.post("/me/password", response_model=AuthResponse)
+async def change_own_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AuthResponse:
+    """Self-service password change.
+
+    Previously missing entirely: a user issued a temporary password (admin
+    create / reset / CSV import) had no way to change it, and
+    ``must_change_password`` was only an advisory UI nudge. This verifies the
+    current password, applies the strength policy to the new one, bumps
+    ``token_version`` (logging out every OTHER session), clears the
+    force-change flag, and returns fresh tokens so THIS session stays live.
+    """
+    if not verify_password(payload.current_password, current_user.password_hash):
+        # Generic 400 (no "user exists" signal needed — they're authenticated).
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+    if verify_password(payload.new_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from the current one.",
+        )
+
+    current_user.password_hash = hash_password(payload.new_password)
+    # Invalidate every outstanding session (incl. a possible attacker's) —
+    # ``_issue_tokens_for`` below re-issues this session against the new value.
+    current_user.token_version = (current_user.token_version or 0) + 1
+    if getattr(current_user, "must_change_password", False):
+        current_user.must_change_password = False
+
+    await record_event(
+        db,
+        request=request,
+        event_type=EVENT_PASSWORD_CHANGE,
+        user_id=current_user.id,
+        identifier=current_user.username,
+        detail="self-service change",
+    )
+    await db.commit()
+    await db.refresh(current_user)
+    return _issue_tokens_for(current_user, response)
+
+
 @router.get("/users/directory", response_model=list[DirectoryUser])
 async def list_directory_users(
     q: str = "",
@@ -692,25 +753,34 @@ async def list_directory_users(
     limit = max(1, min(30, limit))
     q_norm = q.strip()
 
-    stmt = select(User).where(
-        User.id != current_user.id,
-        User.disabled.is_(False),
-    )
-    # Single-tenant self-host: every user can resolve any handle for sharing.
-    if q_norm:
-        # Postgres ILIKE is case-insensitive out of the box and
-        # cheap enough on the ``users`` table (small cardinality).
-        pattern = f"%{q_norm}%"
-        stmt = stmt.where(
-            or_(User.username.ilike(pattern), User.email.ilike(pattern))
+    # Require a real search term (≥2 chars) so the directory can't be used to
+    # dump the whole roster with an empty query — a public-host privacy fix.
+    if len(q_norm) < 2:
+        return []
+
+    # Postgres ILIKE is case-insensitive; ``%``/``_`` in the term are escaped
+    # so a user can't widen the match with wildcards. Matching still spans
+    # username OR email (so you can find a colleague by their email) — but the
+    # response never returns the email itself, so emails can't be harvested.
+    escaped = q_norm.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    stmt = (
+        select(User)
+        .where(
+            User.id != current_user.id,
+            User.disabled.is_(False),
+            or_(
+                User.username.ilike(pattern, escape="\\"),
+                User.email.ilike(pattern, escape="\\"),
+            ),
         )
-    stmt = stmt.order_by(User.username.asc()).limit(limit)
+        .order_by(User.username.asc())
+        .limit(limit)
+    )
 
     rows = (await db.execute(stmt)).scalars().all()
-    return [
-        DirectoryUser(user_id=u.id, username=u.username, email=u.email)
-        for u in rows
-    ]
+    # ``email`` intentionally omitted (defaults to None) — see DirectoryUser.
+    return [DirectoryUser(user_id=u.id, username=u.username) for u in rows]
 
 
 @router.patch("/me/preferences", response_model=UserResponse)

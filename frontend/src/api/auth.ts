@@ -18,7 +18,9 @@ export interface SetupStatus {
 export interface DirectoryUser {
   user_id: string;
   username: string;
-  email: string;
+  /** Omitted by the directory endpoint on multi-user hosts (privacy) — the
+   *  picker resolves invites by username / free-typed email, not this. */
+  email?: string | null;
 }
 
 export const authApi = {
@@ -85,6 +87,19 @@ export const authApi = {
           limit: params.limit ?? 12,
         },
       }
+    );
+    return data;
+  },
+  /** Change the signed-in user's own password. Requires the current
+   *  password; the server rotates ``token_version`` (logging out other
+   *  sessions) and returns fresh tokens so THIS session stays live. */
+  async changePassword(
+    currentPassword: string,
+    newPassword: string
+  ): Promise<AuthResponseOk> {
+    const { data } = await apiClient.post<AuthResponseOk>(
+      "/auth/me/password",
+      { current_password: currentPassword, new_password: newPassword }
     );
     return data;
   },

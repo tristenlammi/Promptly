@@ -61,6 +61,39 @@ class Settings(BaseSettings):
     def trusted_hosts_list(self) -> list[str]:
         return [h.strip() for h in self.TRUSTED_HOSTS.split(",") if h.strip()]
 
+    # ---- Trusted reverse proxies (real client-IP extraction) ----
+    # The per-IP rate limiters and the audit log need the *real* client IP,
+    # which arrives in forwarded headers (CF-Connecting-IP / X-Real-IP /
+    # X-Forwarded-For). Those headers are trivially spoofable, so we ONLY
+    # honour them when the socket peer — the machine that actually opened the
+    # TCP connection to us — is one of these trusted proxy networks. A client
+    # that reaches the backend directly on a public IP is NOT trusted, so it
+    # cannot forge its source and defeat login/MFA throttling.
+    #
+    # Default: loopback + RFC1918 + ULA/link-local. In the bundled stack the
+    # peer is always the nginx container on the private docker network, so it
+    # works out of the box. On a public host, keep this to your proxy/docker
+    # ranges only and never expose the backend port directly to the internet.
+    TRUSTED_PROXY_IPS: str = (
+        "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,"
+        "fc00::/7,fe80::/10"
+    )
+
+    @property
+    def trusted_proxy_networks(self) -> list:
+        import ipaddress
+
+        nets: list = []
+        for chunk in self.TRUSTED_PROXY_IPS.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            try:
+                nets.append(ipaddress.ip_network(chunk, strict=False))
+            except ValueError:
+                continue
+        return nets
+
     # ---- MFA cookies ----
     # Cookie that carries the trusted-device token. Bound to /api so it
     # never leaks to the SPA or to third parties. The value itself is a
@@ -145,6 +178,17 @@ class Settings(BaseSettings):
     # 5 s sustained) but cuts off the runaway-script case where a
     # compromised token is being driven by a bot.
     RATE_LIMIT_USER_MESSAGES: str = "60/5 minutes"
+
+    # ---- Session tokens ----
+    # Refresh-token lifetime. The access token is short (15 min) and rotates;
+    # the refresh token is the longer-lived credential, so its TTL bounds how
+    # long a *stolen* refresh token stays usable. 3 days keeps an active user
+    # (the SPA refreshes on focus) logged in while shrinking the theft window
+    # vs. the old 7-day default. (Full rotation-reuse detection would need a
+    # server-side refresh-session table — a follow-up.) token_version still
+    # revokes everything instantly on password reset / "log out everywhere".
+    REFRESH_TOKEN_TTL_DAYS: int = 3
+    ACCESS_TOKEN_TTL_MINUTES: int = 15
 
     # ---- Database ----
     DATABASE_URL: str = (
@@ -285,6 +329,8 @@ class Settings(BaseSettings):
         """
         errors: list[str] = []
 
+        # Always fatal: the exact dev sentinel or a too-short key — these are
+        # unsafe even on a local box and signal a broken .env.
         if self.SECRET_KEY == _INSECURE_SECRET_PLACEHOLDER:
             errors.append(
                 "SECRET_KEY is still the development placeholder. "
@@ -296,6 +342,34 @@ class Settings(BaseSettings):
                 "SECRET_KEY is shorter than 32 chars — too weak for JWT signing "
                 "and at-rest encryption. Use 64+ random URL-safe chars."
             )
+        # Production-only (non-localhost DOMAIN): reject placeholder secrets +
+        # default datastore credentials. Gated on ``is_production`` so a local
+        # dev box (DOMAIN=localhost) with the bundled placeholders still boots,
+        # while a public deployment that skipped the installer is refused —
+        # a "change-me" SECRET_KEY there is a PUBLICLY-KNOWN signing/encryption
+        # key (forgeable JWTs). The .env.example placeholder is long enough to
+        # sail past the length check above, so this substring guard is what
+        # actually catches the "copied the example, skipped the installer" case.
+        if self.is_production:
+            lowered_secret = self.SECRET_KEY.lower()
+            if "change-me" in lowered_secret or "changeme" in lowered_secret:
+                errors.append(
+                    "SECRET_KEY still contains a 'change-me' placeholder on a "
+                    "public DOMAIN. Generate a real one (openssl rand -hex 32) "
+                    "— a known key lets anyone forge login tokens."
+                )
+            db_url = self.DATABASE_URL.lower()
+            if "change-me" in db_url or "promptly:promptly@" in db_url:
+                errors.append(
+                    "DATABASE_URL uses a default/placeholder password on a "
+                    "public DOMAIN. Set a strong POSTGRES_PASSWORD in .env."
+                )
+            redis_url = self.REDIS_URL.lower()
+            if "change-me" in redis_url:
+                errors.append(
+                    "REDIS_URL contains a 'change-me' placeholder password. "
+                    "Set a real REDIS_PASSWORD in .env."
+                )
         # SINGLE_USER_MODE returns the admin user with NO token check, so
         # it must never run on a network-reachable host. Allow it only for
         # localhost / private-LAN / dev. ``getattr`` keeps this resilient

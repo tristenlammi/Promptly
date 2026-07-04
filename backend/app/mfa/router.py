@@ -213,7 +213,13 @@ async def mfa_verify(
                 plaintext = decrypt_secret(secret.totp_secret_encrypted)
             except ValueError:
                 plaintext = ""
-            if plaintext and totp_service.verify_code(plaintext, payload.totp_code):
+            if (
+                plaintext
+                and totp_service.verify_code(plaintext, payload.totp_code)
+                and await totp_service.consume_totp(user.id, payload.totp_code)
+            ):
+                # verify_code passed AND the code hasn't been replayed within
+                # its validity window.
                 method_used = "totp"
 
     # ---- Email OTP ----

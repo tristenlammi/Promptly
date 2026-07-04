@@ -447,17 +447,21 @@ async def get_collab_token(
     row = await _load_document(db, document_id, user)
     from app.files.sharing import (
         caller_can_write_file,
-        file_is_accessible_via_workspace,
+        workspace_write_access_for_file,
     )
 
-    # Workspace collaborators co-edit shared notes/canvases: workspace
-    # shares are full-collaborator (no read-only tier), so reaching the
-    # doc through a workspace grants write, same as the owner.
+    # Write vs read is decided by the ``perm`` claim in the collab JWT, which
+    # the Hocuspocus server enforces (readOnly for perm=="read"). A workspace
+    # *viewer* reaches shared notes for reading, but must NOT get a write
+    # token — so we resolve the caller's actual workspace ROLE here (owner /
+    # editor → write; viewer → read) rather than granting write to any member.
+    # ``_load_document`` already gated read access, so a non-writer safely
+    # falls through to a read-only token.
     perm = (
         "write"
         if (
             await caller_can_write_file(db, row, user)
-            or await file_is_accessible_via_workspace(db, row.id, user)
+            or await workspace_write_access_for_file(db, row.id, user)
         )
         else "read"
     )
@@ -880,6 +884,15 @@ def _html_to_pdf_bytes(html_text: str, *, title: str) -> bytes:
     from io import BytesIO
 
     from xhtml2pdf import pisa  # local import: optional dep
+
+    from app.chat.pdf_render import (
+        block_external_pdf_resource,
+        strip_external_pdf_resources,
+    )
+
+    # SECURITY: neutralise any remote/file resource before it reaches
+    # xhtml2pdf (which fetches URLs / reads local files with no SSRF guard).
+    html_text = strip_external_pdf_resources(html_text)
 
     # Wrap the body in a minimal HTML shell. We deliberately don't
     # link any of the app's CSS — xhtml2pdf is a print renderer, and

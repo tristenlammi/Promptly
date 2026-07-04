@@ -18,6 +18,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 from app.mcp.models import McpConnector, WorkspaceMcpConnector
+from app.mcp.service import connectors_for_turn
 from app.workspaces.shares import (
     get_accessible_workspace,
     is_owner_of_workspace,
@@ -49,18 +50,13 @@ async def list_workspace_connectors(
 ) -> list[WorkspaceConnector]:
     await get_accessible_workspace(workspace_id, user, db)
 
-    # Single-tenant: all restricted connectors are attachable/visible.
-    connectors = (
-        (
-            await db.execute(
-                select(McpConnector).where(
-                    McpConnector.availability == "restricted",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    # Only surface restricted connectors the caller can PERSONALLY reach
+    # (granted directly or via a group). On a multi-user host, listing every
+    # restricted connector to any workspace owner — and letting them attach it
+    # — would defeat the admin's per-user/group scoping. The attach endpoint
+    # enforces the same set.
+    reachable = await connectors_for_turn(db, user_id=user.id)
+    connectors = [c for c in reachable if c.availability == "restricted"]
     attached_ids = set(
         (
             await db.execute(
@@ -95,20 +91,18 @@ async def set_workspace_connectors(
     # Only the owner reshapes which connectors a workspace uses.
     await is_owner_of_workspace(workspace_id, user, db)
 
-    # Keep only ids that exist and are restricted — silently drop anything
-    # stale/global so a bad id can't 500 the call. Single-tenant: global scope.
-    valid: set[uuid.UUID] = set(
-        (
-            await db.execute(
-                select(McpConnector.id).where(
-                    McpConnector.id.in_(payload.connector_ids or []),
-                    McpConnector.availability == "restricted",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    # Keep only restricted connectors the OWNER can personally reach (granted
+    # directly or via a group). Anything else — stale, global, or granted to
+    # someone else — is silently dropped, so attaching can't bypass the admin's
+    # per-user/group scoping on a multi-user host.
+    reachable_restricted = {
+        c.id
+        for c in await connectors_for_turn(db, user_id=user.id)
+        if c.availability == "restricted"
+    }
+    valid: set[uuid.UUID] = {
+        cid for cid in (payload.connector_ids or []) if cid in reachable_restricted
+    }
     await db.execute(
         delete(WorkspaceMcpConnector).where(
             WorkspaceMcpConnector.workspace_id == workspace_id

@@ -187,7 +187,7 @@ export function UserPicker({
             <div className="truncate text-sm font-medium">
               {value.kind === "user" ? value.user.username : value.email}
             </div>
-            {value.kind === "user" && (
+            {value.kind === "user" && value.user.email && (
               <div className="truncate text-xs text-[var(--text-muted)]">
                 {value.user.email}
               </div>
@@ -280,9 +280,11 @@ export function UserPicker({
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{u.username}</div>
-                      <div className="truncate text-xs text-[var(--text-muted)]">
-                        {u.email}
-                      </div>
+                      {u.email && (
+                        <div className="truncate text-xs text-[var(--text-muted)]">
+                          {u.email}
+                        </div>
+                      )}
                     </div>
                   </button>
                 </li>

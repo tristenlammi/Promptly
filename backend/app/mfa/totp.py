@@ -74,6 +74,31 @@ def verify_code(secret: str, code: str) -> bool:
         return False
 
 
+# A TOTP code stays valid for its ±1-step window (~90s). Without a
+# consumed-code record, the SAME code can be replayed multiple times inside
+# that window. We record accepted codes per user in Redis for the window and
+# reject reuse — the OTP analogue of what the email-OTP path already does.
+_TOTP_REUSE_TTL_SECONDS = 90
+
+
+async def consume_totp(user_id, code: str) -> bool:
+    """Mark a just-verified TOTP code as used; return False if it was already
+    used within the reuse window (a replay). Call ONLY after ``verify_code``
+    has returned True. Fail-open on a Redis error so a cache blip can't lock
+    a legitimate user out of MFA."""
+    from app.redis_client import redis
+
+    code = (code or "").strip()
+    if not code:
+        return False
+    key = f"promptly:mfa:totp-used:{user_id}:{code}"
+    try:
+        was_set = await redis.set(key, "1", ex=_TOTP_REUSE_TTL_SECONDS, nx=True)
+    except Exception:  # noqa: BLE001 — never break MFA on a cache hiccup
+        return True
+    return bool(was_set)
+
+
 def safe_account_label(*, username: str, issuer: str | None = None) -> str:
     """URL-safe label for the otpauth URI.
 
