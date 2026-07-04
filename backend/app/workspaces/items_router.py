@@ -51,10 +51,12 @@ from app.chat.models import (
     Workspace,
     WorkspaceCanvas,
     WorkspaceItem,
+    WorkspaceTask,
 )
 from app.database import get_db
 from app.files.documents_router import create_blank_document
-from app.files.models import UserFile
+from app.files.models import DocumentState, UserFile
+from app.files.storage import absolute_path
 from app.files.safety import sanitize_filename
 from app.files.system_folders import get_or_create_subfolder
 from app.workspaces.canvas_router import (
@@ -523,6 +525,190 @@ async def create_workspace_item(
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
+    return WorkspaceItemResponse.model_validate(item)
+
+
+@router.post(
+    "/{workspace_id}/items/{item_id}/duplicate",
+    response_model=WorkspaceItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_workspace_item(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemResponse:
+    """Deep-copy a note, sheet, or board as a sibling ("Research 2").
+
+    * **note** — new Drive Document; copies the HTML blob *and* the Yjs
+      state, so the copy opens with the full content (not a blank doc
+      waiting for a client seed).
+    * **sheet** — new ``Spreadsheet`` row; copies the workbook JSON, the
+      Yjs state, and the flattened text.
+    * **board** — new item with the same ``config`` (columns / labels)
+      plus a copy of every card (comments are history, not content —
+      they stay behind; attachment references are shared).
+
+    Canvases and automations aren't duplicable yet (a canvas's scene
+    lives in its collab doc with per-element image files; automations
+    have their own lifecycle) — 422 for anything unsupported.
+    """
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    src = await db.get(WorkspaceItem, item_id)
+    if src is None or src.workspace_id != ws.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
+        )
+    if src.kind not in ("note", "sheet", "board"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Duplicating a {src.kind} isn't supported yet.",
+        )
+
+    owner = user if ws.user_id == user.id else await db.get(User, ws.user_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace owner is missing",
+        )
+
+    position = await _next_position(db, ws.id, src.parent_id)
+    # The source title always collides with itself, so the dedupe helper
+    # yields "Research 2" (or " 3", …) directly.
+    title = await _dedupe_default_title(db, ws.id, src.parent_id, src.title)
+
+    if src.kind == "note":
+        src_file = await db.get(UserFile, src.ref_id) if src.ref_id else None
+        if src_file is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This note has no underlying document.",
+            )
+        doc = await create_blank_document(
+            db, owner_id=owner.id, folder_id=src_file.folder_id, name=title
+        )
+        # Copy the rendered HTML blob so preview/download match immediately.
+        try:
+            blob = absolute_path(src_file.storage_path).read_bytes()
+            absolute_path(doc.storage_path).write_bytes(blob)
+            doc.size_bytes = len(blob)
+        except OSError:
+            pass  # blob copy is best-effort; the Yjs state is the truth
+        doc.content_text = src_file.content_text
+        # Copy the merged Y.Doc so the collab server serves the full
+        # content for the copy (create_blank_document seeded an empty row).
+        src_state = await db.get(DocumentState, src.ref_id)
+        new_state = await db.get(DocumentState, doc.id)
+        if src_state is not None and new_state is not None:
+            new_state.yjs_update = src_state.yjs_update
+            new_state.version = src_state.version
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=src.parent_id,
+            kind="note",
+            ref_id=doc.id,
+            title=title,
+            position=position,
+            indexing_status="queued",
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+    elif src.kind == "sheet":
+        src_sheet = (
+            await db.get(Spreadsheet, src.ref_id) if src.ref_id else None
+        )
+        if src_sheet is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This sheet has no underlying spreadsheet.",
+            )
+        sheet = Spreadsheet(
+            workspace_id=ws.id,
+            title=title,
+            data=src_sheet.data,
+            yjs_update=src_sheet.yjs_update,
+            version=src_sheet.version,
+            content_text=src_sheet.content_text,
+        )
+        db.add(sheet)
+        await db.flush()
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=src.parent_id,
+            kind="sheet",
+            ref_id=sheet.id,
+            title=title,
+            position=position,
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+    else:  # board
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=src.parent_id,
+            kind="board",
+            ref_id=None,
+            title=title,
+            position=position,
+            config=src.config,
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+        await db.flush()
+        tasks = (
+            (
+                await db.execute(
+                    select(WorkspaceTask).where(
+                        WorkspaceTask.board_item_id == src.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for t in tasks:
+            db.add(
+                WorkspaceTask(
+                    workspace_id=ws.id,
+                    board_item_id=item.id,
+                    title=t.title,
+                    description=t.description,
+                    subtasks=t.subtasks,
+                    labels=t.labels,
+                    links=t.links,
+                    attachments=t.attachments,
+                    assignee_user_id=t.assignee_user_id,
+                    done=t.done,
+                    status=t.status,
+                    priority=t.priority,
+                    due_at=t.due_at,
+                    position=t.position,
+                    completed_at=t.completed_at,
+                    created_by=user.id,
+                )
+            )
+
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+
+    # Re-embed the copy so workspace chats can retrieve it (best-effort).
+    from app.workspaces.knowledge import (
+        index_board_for_workspace,
+        index_note_for_workspace,
+        index_sheet_for_workspace,
+    )
+
+    if src.kind == "note":
+        background.add_task(index_note_for_workspace, ws.id, item.id)
+    elif src.kind == "sheet":
+        background.add_task(index_sheet_for_workspace, ws.id, item.id)
+    else:
+        background.add_task(index_board_for_workspace, ws.id, item.id)
+
     return WorkspaceItemResponse.model_validate(item)
 
 

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useIsMutating } from "@tanstack/react-query";
 import {
   ArrowUpDown,
   CalendarDays,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 
 import {
+  boardMutationKey,
   useCreateWorkspaceTask,
   useDeleteWorkspaceTask,
   useSetBoardConfig,
@@ -28,6 +30,7 @@ import {
   useWorkspaceTasks,
   useWorkspaceTree,
 } from "@/hooks/useWorkspaces";
+import { ItemPaneHeader } from "./ItemPaneHeader";
 import { filesApi } from "@/api/files";
 import type {
   BoardColumn,
@@ -153,6 +156,43 @@ function formatDue(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/** Saving… / Saved ✓ chip driven by the shared board mutationKey — board
+ *  fields previously persisted with zero feedback. */
+function BoardSaveChip({ workspaceId }: { workspaceId: string }) {
+  const pending = useIsMutating({
+    mutationKey: boardMutationKey(workspaceId),
+  });
+  const [flash, setFlash] = useState(false);
+  const prevRef = useRef(0);
+  useEffect(() => {
+    const was = prevRef.current;
+    prevRef.current = pending;
+    if (was > 0 && pending === 0) {
+      setFlash(true);
+      const t = window.setTimeout(() => setFlash(false), 2000);
+      return () => window.clearTimeout(t);
+    }
+  }, [pending]);
+
+  if (pending > 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  if (flash) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--success)]">
+        <Check className="h-3 w-3" />
+        Saved
+      </span>
+    );
+  }
+  return null;
 }
 
 export function WorkspaceBoardPane({
@@ -389,10 +429,20 @@ export function WorkspaceBoardPane({
 
   return (
     <section>
-      {/* Header */}
+      {/* Header — unified item chrome (editable title / ⚡ / duplicate /
+          save feedback) on row one, the board's own view controls below. */}
+      <div className="mb-3 -mx-3">
+        <ItemPaneHeader
+          workspaceId={workspaceId}
+          itemId={boardItemId}
+          kind="board"
+          fallbackTitle={boardItem?.title ?? "Board"}
+          canEdit={canEdit}
+          status={<BoardSaveChip workspaceId={workspaceId} />}
+        />
+      </div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-[var(--text)]">Board</h2>
           <p className="text-[11px] text-[var(--text-muted)]">
             {list.length} {list.length === 1 ? "task" : "tasks"} ·{" "}
             {list.filter((t) => !t.done).length} open

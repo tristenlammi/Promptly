@@ -912,7 +912,11 @@ function WorkspaceItemView({
   }
   if (node.kind === "canvas") {
     return (
-      <WorkspaceCanvasPaneFrame node={node} canEdit={canEdit} />
+      <WorkspaceCanvasPaneFrame
+        node={node}
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+      />
     );
   }
   if (node.kind === "sheet" && node.ref_id) {
@@ -931,6 +935,7 @@ function WorkspaceItemView({
           workspaceId={workspaceId}
           sheetId={node.ref_id}
           canEdit={canEdit}
+          node={node}
         />
       </Suspense>
     );
@@ -972,7 +977,14 @@ function WorkspaceItemView({
     );
   }
   if (node.kind === "task" && node.ref_id) {
-    return <WorkspaceAutomationPane taskId={node.ref_id} />;
+    return (
+      <WorkspaceAutomationPane
+        taskId={node.ref_id}
+        workspaceId={workspaceId}
+        node={node}
+        canEdit={canEdit}
+      />
+    );
   }
   return null;
 }
@@ -1720,9 +1732,11 @@ function BacklinksPanel({
  */
 function WorkspaceCanvasPaneFrame({
   node,
+  workspaceId,
   canEdit,
 }: {
   node: WorkspaceItemNode;
+  workspaceId: string;
   canEdit: boolean;
 }) {
   if (!node.ref_id) {
@@ -1739,7 +1753,11 @@ function WorkspaceCanvasPaneFrame({
           </div>
         }
       >
-        <WorkspaceCanvasPane canvasId={node.ref_id} readOnly={!canEdit} />
+        <WorkspaceCanvasPane
+          canvasId={node.ref_id}
+          readOnly={!canEdit}
+          header={{ workspaceId, node }}
+        />
       </Suspense>
     </div>
   );

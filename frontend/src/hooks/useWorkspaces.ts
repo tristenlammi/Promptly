@@ -29,6 +29,7 @@ import {
   type BoardConfig,
   type WorkspaceMemory,
 } from "@/api/workspaces";
+import { toast } from "@/store/toastStore";
 
 const KEYS = {
   root: ["workspaces"] as const,
@@ -136,6 +137,25 @@ export function useUpdateWorkspaceItem(workspaceId: string) {
     }) => workspacesApi.updateItem(workspaceId, args.itemId, args.payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+    },
+  });
+}
+
+export function useDuplicateWorkspaceItem(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) =>
+      workspacesApi.duplicateItem(workspaceId, itemId),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
+      qc.invalidateQueries({ queryKey: ["workspaces", "map", workspaceId] });
+      toast.success(`Duplicated as “${created.title}”`);
+    },
+    onError: (err) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Couldn't duplicate this item.";
+      toast.error(detail);
     },
   });
 }
@@ -345,6 +365,7 @@ export function useWorkspaceItem(
 export function useSetBoardConfig(workspaceId: string, itemId: string) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: ["ws-board", workspaceId],
     mutationFn: (config: BoardConfig) =>
       workspacesApi.setItemConfig(workspaceId, itemId, config),
     onSuccess: () => {
@@ -368,9 +389,15 @@ export function useWorkspaceTasks(
   });
 }
 
+/** Shared mutationKey for everything that persists board state — the
+ *  board header's Saving…/Saved chip watches this via useIsMutating. */
+export const boardMutationKey = (workspaceId: string) =>
+  ["ws-board", workspaceId] as const;
+
 export function useCreateWorkspaceTask(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: boardMutationKey(workspaceId),
     mutationFn: (payload: WorkspaceTaskCreatePayload) =>
       workspacesApi.createTask(workspaceId, payload),
     onSuccess: () => {
@@ -383,6 +410,7 @@ export function useCreateWorkspaceTask(workspaceId: string) {
 export function useUpdateWorkspaceTask(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: boardMutationKey(workspaceId),
     mutationFn: (vars: {
       taskId: string;
       payload: WorkspaceTaskUpdatePayload;
@@ -397,6 +425,7 @@ export function useUpdateWorkspaceTask(workspaceId: string) {
 export function useDeleteWorkspaceTask(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: boardMutationKey(workspaceId),
     mutationFn: (taskId: string) =>
       workspacesApi.deleteTask(workspaceId, taskId),
     onSuccess: () => {

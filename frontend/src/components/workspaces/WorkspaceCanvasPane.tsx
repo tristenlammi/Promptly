@@ -14,7 +14,9 @@ import { useThemeStore } from "@/store/themeStore";
 // Re-points Excalidraw's indigo accent at the app's terracotta (scoped to
 // the .promptly-canvas wrapper below).
 import "@/styles/excalidraw.css";
+import type { WorkspaceItemNode } from "@/api/workspaces";
 import { ErrorState } from "@/components/shared/Callout";
+import { ItemPaneHeader } from "./ItemPaneHeader";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
 import { buildBundledLibraryItems } from "./canvas/libraries";
@@ -63,12 +65,17 @@ const CANVAS_BG = "#FAF9F7";
 export function WorkspaceCanvasPane({
   canvasId,
   readOnly = false,
+  header,
 }: {
   canvasId: string;
   /** Viewer-role access → board opens read-only. */
   readOnly?: boolean;
+  /** When set, renders the unified ItemPaneHeader (title / ⚡ / sync
+   *  status) above the canvas — the pane had zero chrome before. */
+  header?: { workspaceId: string; node: WorkspaceItemNode };
 }) {
-  const { ydoc, provider, user, error } = useCanvasCollabProvider(canvasId);
+  const { ydoc, provider, user, error, status } =
+    useCanvasCollabProvider(canvasId);
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawImperativeAPI | null>(null);
 
@@ -252,7 +259,7 @@ export function WorkspaceCanvasPane({
     return <ErrorState>{error}</ErrorState>;
   }
 
-  return (
+  const canvasSurface = (
     <div
       ref={containerRef}
       className="promptly-canvas relative h-full min-h-0 w-full flex-1"
@@ -314,5 +321,56 @@ export function WorkspaceCanvasPane({
         initialData={initialData}
       />
     </div>
+  );
+
+  if (!header) return canvasSurface;
+  return (
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+      <ItemPaneHeader
+        workspaceId={header.workspaceId}
+        itemId={header.node.id}
+        kind="canvas"
+        fallbackTitle={header.node.title}
+        canEdit={!readOnly}
+        status={<CanvasSyncChip status={status} ready={binding.ready} />}
+      />
+      {canvasSurface}
+    </div>
+  );
+}
+
+/** Connected / Syncing / Offline chip for the canvas header — the board
+ *  previously synced in total silence. */
+function CanvasSyncChip({
+  status,
+  ready,
+}: {
+  status: "connecting" | "connected" | "disconnected";
+  ready: boolean;
+}) {
+  if (status === "connected" && ready) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+        Synced live
+      </span>
+    );
+  }
+  if (status === "disconnected") {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 text-[11px] text-[var(--warning)]"
+        title="Reconnecting — edits keep applying locally and sync when the connection returns"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
+        Offline
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      Connecting…
+    </span>
   );
 }

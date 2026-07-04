@@ -538,6 +538,17 @@ export const workspacesApi = {
     return data;
   },
 
+  /** Deep-copy a note / sheet / board as a sibling ("Research 2"). */
+  async duplicateItem(
+    id: string,
+    itemId: string
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.post<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/${itemId}/duplicate`
+    );
+    return data;
+  },
+
   async moveItem(
     id: string,
     itemId: string,

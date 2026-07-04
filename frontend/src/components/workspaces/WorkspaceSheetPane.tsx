@@ -6,9 +6,10 @@ import "@fortune-sheet/react/dist/index.css";
 // Our legibility overrides — imported after the library CSS so they win.
 import "@/styles/fortune-sheet.css";
 
-import { workspacesApi } from "@/api/workspaces";
+import { workspacesApi, type WorkspaceItemNode } from "@/api/workspaces";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/Callout";
+import { ItemPaneHeader } from "./ItemPaneHeader";
 import { useSheetCollabProvider } from "./useSheetCollabProvider";
 import { useSheetCollab } from "./useSheetCollab";
 
@@ -136,10 +137,15 @@ export function WorkspaceSheetPane({
   workspaceId,
   sheetId,
   canEdit,
+  node,
 }: {
   workspaceId: string;
   sheetId: string;
   canEdit: boolean;
+  /** When set, the unified ItemPaneHeader (title / ⚡ / duplicate) replaces
+   *  the bare status strip; status + Clear fold into its slots. Absent for
+   *  contexts that bring their own chrome (notebook pages). */
+  node?: WorkspaceItemNode;
 }) {
   const [data, setData] = useState<Sheet[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -350,24 +356,43 @@ export function WorkspaceSheetPane({
   // Fortune-sheet positions its grid absolutely, so the wrapper needs a
   // concrete height — the flex column (``height: 100%``) gives the grid
   // container a real ``flex-1`` height below the thin status/actions bar.
+  const statusChips = (
+    <>
+      <CollabStatus status={collab.status} peers={peers} />
+      <span className="mx-1 h-3 w-px bg-[var(--border)]" />
+      <SaveStatus state={saveState} />
+    </>
+  );
+  const clearButton = canEdit ? (
+    <button
+      type="button"
+      onClick={() => void handleClear()}
+      title="Clear all content from this sheet"
+      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+    >
+      <Eraser className="h-3.5 w-3.5" />
+      Clear
+    </button>
+  ) : null;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={{ height: "100%" }}>
-      <div className="flex shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1">
-        <CollabStatus status={collab.status} peers={peers} />
-        <span className="mx-1 h-3 w-px bg-[var(--border)]" />
-        <SaveStatus state={saveState} />
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => void handleClear()}
-            title="Clear all content from this sheet"
-            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
-          >
-            <Eraser className="h-3.5 w-3.5" />
-            Clear
-          </button>
-        )}
-      </div>
+      {node ? (
+        <ItemPaneHeader
+          workspaceId={workspaceId}
+          itemId={node.id}
+          kind="sheet"
+          fallbackTitle={node.title}
+          canEdit={canEdit}
+          status={statusChips}
+          extra={clearButton}
+        />
+      ) : (
+        <div className="flex shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1">
+          {statusChips}
+          {clearButton}
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
         <Workbook
           key={resetKey}

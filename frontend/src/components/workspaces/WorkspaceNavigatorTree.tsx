@@ -26,6 +26,7 @@ import {
   Clock,
   Columns2,
   Columns3,
+  Copy as CopyIcon,
   FilePlus2,
   FileText,
   Folder,
@@ -57,6 +58,7 @@ import {
   useArchiveWorkspaceItem,
   useCreateWorkspaceItem,
   useDeleteWorkspaceItem,
+  useDuplicateWorkspaceItem,
   useMoveWorkspaceItem,
   useSetItemContext,
   useSetItemPinned,
@@ -807,6 +809,7 @@ function TreeRow({
   const archive = useArchiveWorkspaceItem(workspaceId);
   const setContext = useSetItemContext(workspaceId);
   const setPinned = useSetItemPinned(workspaceId);
+  const duplicateItem = useDuplicateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
   const [chatBusy, setChatBusy] = useState(false);
 
@@ -1090,6 +1093,11 @@ function TreeRow({
                 ? (kind) => onCreateInside(kind, node.id)
                 : undefined
             }
+            onDuplicate={
+              ["note", "sheet", "board"].includes(node.kind)
+                ? () => duplicateItem.mutate(node.id)
+                : undefined
+            }
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
@@ -1157,6 +1165,7 @@ function NodeActions({
   contextState,
   onToggleContext,
   onCreateInside,
+  onDuplicate,
   deleting,
 }: {
   isFolder: boolean;
@@ -1174,6 +1183,8 @@ function NodeActions({
   onToggleContext?: () => void;
   /** Folders only — create a new item inside this folder. */
   onCreateInside?: (kind: "note" | "canvas" | "board" | "sheet") => void;
+  /** Notes / sheets / boards only — deep-copy as a sibling. */
+  onDuplicate?: () => void;
   deleting: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1258,6 +1269,16 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onRename();
+                  }}
+                />
+              )}
+              {onDuplicate && (
+                <MenuItem
+                  icon={<CopyIcon className="h-3.5 w-3.5" />}
+                  label="Duplicate"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDuplicate();
                   }}
                 />
               )}

@@ -1,12 +1,21 @@
 import { Suspense, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Play } from "lucide-react";
 
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
-import { useRunTask, useTask, useTaskRun, useTaskRuns } from "@/hooks/useTasks";
+import {
+  useRunTask,
+  useTask,
+  useTaskRun,
+  useTaskRuns,
+  useUpdateTask,
+} from "@/hooks/useTasks";
+import type { WorkspaceItemNode } from "@/api/workspaces";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
 import { TaskRunDocument } from "@/components/tasks/TaskRunDocument";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
+import { ItemPaneHeader } from "./ItemPaneHeader";
 
 // React Flow is heavy — only load it when an automation is opened.
 const TaskFlowEditor = lazyWithRetry(
@@ -23,8 +32,22 @@ const TaskFlowEditor = lazyWithRetry(
  * user's personal /tasks — they're only reachable here, so there's no
  * "full page" escape hatch. A Runs⇄Flow toggle keeps the runs viewable.
  */
-export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
+export function WorkspaceAutomationPane({
+  taskId,
+  workspaceId,
+  node,
+  canEdit = true,
+}: {
+  taskId: string;
+  /** With ``node``, the unified ItemPaneHeader replaces the bespoke title
+   *  strip (adds rename-in-place). */
+  workspaceId?: string;
+  node?: WorkspaceItemNode;
+  canEdit?: boolean;
+}) {
   const { data: task } = useTask(taskId);
+  const updateTask = useUpdateTask();
+  const qc = useQueryClient();
   const runTask = useRunTask();
   const { data: runs } = useTaskRuns(taskId, true);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -51,44 +74,67 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
 
   const onRunClick = (id: string) => setSelectedRunId(id);
 
+  const controls = (
+    <div className="flex items-center gap-1.5">
+      <div className="inline-flex rounded-md border border-[var(--border)] p-0.5 text-xs">
+        {[
+          { flow: false, label: "Runs" },
+          { flow: true, label: "Flow" },
+        ].map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            onClick={() => setShowFlow(o.flow)}
+            className={cn(
+              "rounded px-2.5 py-1 transition",
+              showFlow === o.flow
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <Button
+        variant="primary"
+        size="sm"
+        leftIcon={<Play className="h-3.5 w-3.5" />}
+        onClick={() => void onRunNow()}
+        loading={runTask.isPending}
+      >
+        Run now
+      </Button>
+    </div>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
-        <span className="truncate text-xs font-medium text-[var(--text)]">
-          {task?.title ?? "Automation"}
-        </span>
-        <div className="flex items-center gap-1.5">
-          <div className="inline-flex rounded-md border border-[var(--border)] p-0.5 text-xs">
-            {[
-              { flow: false, label: "Runs" },
-              { flow: true, label: "Flow" },
-            ].map((o) => (
-              <button
-                key={o.label}
-                type="button"
-                onClick={() => setShowFlow(o.flow)}
-                className={cn(
-                  "rounded px-2.5 py-1 transition",
-                  showFlow === o.flow
-                    ? "bg-[var(--accent)] text-white"
-                    : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
-                )}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Play className="h-3.5 w-3.5" />}
-            onClick={() => void onRunNow()}
-            loading={runTask.isPending}
-          >
-            Run now
-          </Button>
+      {workspaceId && node ? (
+        <ItemPaneHeader
+          workspaceId={workspaceId}
+          itemId={node.id}
+          kind="task"
+          fallbackTitle={task?.title ?? node.title ?? "Automation"}
+          canEdit={canEdit}
+          extra={controls}
+          onRename={async (title) => {
+            await updateTask.mutateAsync({ id: taskId, input: { title } });
+            // The rail node is synthesised from the task — refresh the tree
+            // so the navigator label follows the rename.
+            void qc.invalidateQueries({
+              queryKey: ["workspaces", "tree", workspaceId],
+            });
+          }}
+        />
+      ) : (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
+          <span className="truncate text-xs font-medium text-[var(--text)]">
+            {task?.title ?? "Automation"}
+          </span>
+          {controls}
         </div>
-      </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {(runs ?? []).length > 0 && (
