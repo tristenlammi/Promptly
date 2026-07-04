@@ -52,6 +52,7 @@ from app.chat.models import (
     Message,
     Workspace,
     WorkspaceFile,
+    WorkspaceItem,
 )
 from app.workspaces.schemas import (
     WorkspaceCreate,
@@ -80,6 +81,7 @@ from app.workspaces.knowledge import (
     workspace_context_stats,
 )
 from app.chat.shares import list_accessible_workspace_ids
+from app.tasks.models import Task as AutomationTask
 from app.custom_models.resolver import is_custom_model_id
 from app.database import get_db
 from app.files.models import FileFolder, UserFile
@@ -198,9 +200,34 @@ async def _summary_with_rollups(
         .select_from(WorkspaceFile)
         .where(WorkspaceFile.workspace_id == ws.id)
     )
+    # Per-kind item counts (notes / boards / sheets / …) so the card can
+    # say what a workspace actually contains. One GROUP BY per workspace.
+    # Automations aren't item rows (they're synthesised into the tree from
+    # the tasks table, like chats from conversations) — count them directly.
+    kind_rows = await db.execute(
+        select(WorkspaceItem.kind, func.count())
+        .where(
+            WorkspaceItem.workspace_id == ws.id,
+            WorkspaceItem.archived_at.is_(None),
+        )
+        .group_by(WorkspaceItem.kind)
+    )
+    task_count = await db.scalar(
+        select(func.count())
+        .select_from(AutomationTask)
+        .where(AutomationTask.workspace_id == ws.id)
+    )
     base = WorkspaceSummary.model_validate(ws)
     base.conversation_count = int(conv_count or 0)
     base.file_count = int(file_count or 0)
+    base.item_counts = {str(k): int(c) for k, c in kind_rows}
+    if task_count:
+        base.item_counts["task"] = int(task_count)
+
+    participants = await load_workspace_participants(ws, db)
+    base.member_names = [participants.owner.username] + [
+        c.username for c in participants.collaborators
+    ]
 
     if ws.user_id == caller.id:
         base.role = "owner"

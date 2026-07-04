@@ -75,6 +75,10 @@ export const NAV_ITEMS: NavItem[] = [
     icon: FolderKanban,
     label: "Workspaces",
     section: "chat",
+    // Workspaces are a desktop surface by design (multi-pane layout,
+    // drag-first navigator) — the route itself also renders a notice on
+    // phones for direct links.
+    desktopOnly: true,
     optionalKey: "workspaces",
   },
   {

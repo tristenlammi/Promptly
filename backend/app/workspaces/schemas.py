@@ -84,6 +84,15 @@ class WorkspaceSummary(BaseModel):
     # and saves the frontend a second round-trip on every card.
     conversation_count: int = 0
     file_count: int = 0
+    # Live (non-archived) workspace items grouped by kind — "note",
+    # "canvas", "board", "sheet", "container", "task", "folder". Lets the
+    # card show what a workspace actually contains instead of just
+    # chats + files. Chats aren't items (synthesised from conversations),
+    # so ``conversation_count`` stays the chat signal.
+    item_counts: dict[str, int] = Field(default_factory=dict)
+    # Owner first, then accepted collaborators — usernames only, enough
+    # for the card's initials-avatar strip without a per-card round-trip.
+    member_names: list[str] = Field(default_factory=list)
     # ``owner`` when the caller created the workspace, ``collaborator``
     # when they have an accepted workspace share. Populated by the
     # router; the UI uses it to hide destructive actions (delete,

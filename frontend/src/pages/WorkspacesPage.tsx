@@ -4,7 +4,9 @@ import { Archive, FolderKanban, Plus, Upload } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard";
+import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { NewWorkspaceModal } from "@/components/workspaces/NewWorkspaceModal";
 import { TopNav } from "@/components/layout/TopNav";
@@ -23,6 +25,7 @@ type Tab = "active" | "archived";
  * layout so users don't need to relearn the pattern. */
 export function WorkspacesPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("active");
@@ -59,11 +62,15 @@ export function WorkspacesPage() {
     setArchiveTarget(null);
   };
 
+  // Desktop-only surface by design — direct links on a phone get a
+  // friendly explanation instead of a broken layout.
+  if (isMobile) return <WorkspaceMobileGate />;
+
   return (
     <>
       <TopNav
         title="Workspaces"
-        subtitle="Group conversations with shared instructions and files"
+        subtitle="Project spaces — notes, boards, sheets, canvases, chats, and automations, with an AI that knows all of it"
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -276,8 +283,9 @@ function EmptyState({
       </div>
       <h2 className="text-lg font-semibold">Create your first workspace</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
-        A workspace gathers related chats under one roof with a shared system
-        prompt, pinned reference files, and a default model.
+        A workspace is a project home: notes, boards, sheets, canvases, files,
+        chats, and automations in one place — and every chat inside it
+        understands the whole project.
       </p>
       <div className="mt-6">
         <Button

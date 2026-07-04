@@ -1,16 +1,25 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
+  Brain,
   CheckSquare,
   ChevronRight,
+  Clock,
+  Columns3,
   FileText,
+  Folder,
+  Layers,
+  Loader2,
   MessageSquare,
+  PenTool,
+  RefreshCw,
+  Settings2,
   Shapes,
   Sparkles,
   Square,
+  StickyNote,
+  Table2,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
 // One-time (until manually dismissed) context-banner flag, shared across
 // every workspace — once the user understands that items become context,
@@ -19,10 +28,16 @@ const CONTEXT_BANNER_KEY = "promptly.ws.contextBannerDismissed";
 
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import {
-  useWorkspaceMap,
+  useRegenerateWorkspaceMemory,
+  useWorkspace,
+  useWorkspaceMemory,
   useWorkspaceOverview,
   useWorkspaceTasks,
+  useWorkspaceTree,
 } from "@/hooks/useWorkspaces";
+import { formatRelativeTime } from "@/components/files/helpers";
+import { toast } from "@/store/toastStore";
+import { cn } from "@/utils/cn";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 /**
@@ -36,15 +51,19 @@ export function WorkspaceOverviewPane({
   title,
   onOpenItem,
   canEdit,
+  onOpenSettings,
 }: {
   workspaceId: string;
   title: string;
   onOpenItem: (node: WorkspaceItemNode) => void;
   canEdit: boolean;
+  /** Opens the workspace settings pane (full memory editor lives there). */
+  onOpenSettings?: () => void;
 }) {
   const { data: overview } = useWorkspaceOverview(workspaceId);
   const { data: workspaceTasks } = useWorkspaceTasks(workspaceId);
-  const { data: mapData } = useWorkspaceMap(workspaceId);
+  const { data: tree } = useWorkspaceTree(workspaceId);
+  const { data: workspace } = useWorkspace(workspaceId);
   const [bannerDismissed, setBannerDismissed] = useState(
     () => localStorage.getItem(CONTEXT_BANNER_KEY) === "1"
   );
@@ -52,13 +71,47 @@ export function WorkspaceOverviewPane({
     localStorage.setItem(CONTEXT_BANNER_KEY, "1");
     setBannerDismissed(true);
   };
-  // Drop the map's "## Workspace contents" header + intro (the panel below
-  // supplies its own) and show just the catalog tree.
-  const mapTree = (mapData?.markdown ?? "")
-    .split("\n\n")
-    .slice(1)
-    .join("\n\n")
-    .trim();
+
+  // Indexing-health rollup across tree items + pinned files, so "the AI
+  // hasn't caught up with X yet" stops being invisible.
+  const indexing = useMemo(() => {
+    const flat: WorkspaceItemNode[] = [];
+    const walk = (nodes: WorkspaceItemNode[]) => {
+      for (const n of nodes) {
+        if (n.kind !== "folder") flat.push(n);
+        if (n.children.length) walk(n.children);
+      }
+    };
+    walk(tree ?? []);
+    const inContext = flat.filter(
+      (n) => n.kind !== "task" && n.context_enabled !== false
+    ).length;
+    const files = workspace?.files ?? [];
+    const contextFiles = files.filter((f) => f.context_enabled).length;
+    const isPendingStatus = (s: string | null | undefined) =>
+      s === "queued" || s === "embedding";
+    const pending =
+      flat.filter(
+        (n) => n.context_enabled !== false && isPendingStatus(n.indexing_status)
+      ).length +
+      files.filter(
+        (f) =>
+          f.context_enabled &&
+          isPendingStatus(f.indexing_status) &&
+          // Images never index (they ride the vision path) and sit at
+          // "queued" forever — don't report them as stuck.
+          !f.mime_type.toLowerCase().startsWith("image/")
+      ).length;
+    const failedNames = [
+      ...flat
+        .filter((n) => n.indexing_status === "failed")
+        .map((n) => n.title || "Untitled"),
+      ...files
+        .filter((f) => f.indexing_status === "failed")
+        .map((f) => f.filename),
+    ];
+    return { inContext: inContext + contextFiles, pending, failedNames };
+  }, [tree, workspace?.files]);
 
   const open = (
     partial: Pick<WorkspaceItemNode, "id" | "kind" | "ref_id" | "title">
@@ -144,14 +197,41 @@ export function WorkspaceOverviewPane({
         />
       </div>
 
+      {/* Indexing health — what the AI can currently see. */}
+      {!isEmpty && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+            {indexing.inContext} item{indexing.inContext === 1 ? "" : "s"} in
+            context
+          </span>
+          {indexing.pending > 0 && (
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {indexing.pending} still indexing
+            </span>
+          )}
+          {indexing.failedNames.length > 0 && (
+            <span
+              className="inline-flex items-center gap-1.5 text-[var(--danger)]"
+              title={`Failed to index: ${indexing.failedNames.join(", ")}`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--danger)]" />
+              {indexing.failedNames.length} failed to index
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Workspace drive — upload photos/documents, RAG-indexed on add */}
       <div className="mt-8">
         <WorkspaceFilesPanel workspaceId={workspaceId} canEdit={canEdit} />
       </div>
 
-      {/* Workspace map — the catalog every chat sees, rendered as a clean
-          collapsible tree (open by default) rather than a raw code block. */}
-      {mapTree && (
+      {/* Workspace map — the catalog every chat sees, rendered as a real
+          clickable tree (icons per kind, click to open) instead of a raw
+          markdown dump. The model still receives the markdown version. */}
+      {(tree ?? []).length > 0 && (
         <details open className="group mt-8">
           <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]">
             <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
@@ -159,15 +239,22 @@ export function WorkspaceOverviewPane({
           </summary>
           <p className="mb-2 ml-4 mt-1 text-[11px] text-[var(--text-muted)]">
             The catalog every chat sees, so the AI knows what exists and where.
-            Updates automatically as you add, rename, or remove items.
+            Updates automatically as you add, rename, or remove items — click
+            any entry to open it.
           </p>
-          <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm leading-relaxed text-[var(--text)] [&_a]:text-[var(--accent)] [&_a:hover]:underline [&_li]:my-0.5 [&_ul]:m-0 [&_ul]:list-none [&_ul]:p-0 [&_ul_ul]:ml-4 [&_ul_ul]:border-l [&_ul_ul]:border-[var(--border)] [&_ul_ul]:pl-3">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {mapTree}
-            </ReactMarkdown>
+          <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+            <MapTree nodes={tree ?? []} onOpen={onOpenItem} />
           </div>
         </details>
       )}
+
+      {/* Workspace memory — surfaced here so freshness is never a mystery;
+          the full editor stays in Settings. */}
+      <MemoryCard
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+        onOpenSettings={onOpenSettings}
+      />
 
       {/* Secondary: checkboxes found inside notes (rollup) */}
       {tasks.length > 0 && (
@@ -331,4 +418,182 @@ function RecentIcon({ kind }: { kind: string }) {
   if (kind === "canvas") return <Shapes className={cls} />;
   if (kind === "chat") return <MessageSquare className={cls} />;
   return <FileText className={cls} />;
+}
+
+// --------------------------------------------------------------------
+// Workspace map — clickable tree
+// --------------------------------------------------------------------
+
+const KIND_ICONS: Record<string, typeof FileText> = {
+  folder: Folder,
+  note: StickyNote,
+  canvas: PenTool,
+  board: Columns3,
+  sheet: Table2,
+  chat: MessageSquare,
+  container: Layers,
+  task: Clock,
+};
+
+function MapTree({
+  nodes,
+  onOpen,
+  depth = 0,
+}: {
+  nodes: WorkspaceItemNode[];
+  onOpen: (node: WorkspaceItemNode) => void;
+  depth?: number;
+}) {
+  return (
+    <ul
+      className={cn(
+        "m-0 list-none p-0",
+        depth > 0 && "ml-3 border-l border-[var(--border)] pl-2"
+      )}
+    >
+      {nodes.map((n) => {
+        const Icon = KIND_ICONS[n.kind] ?? FileText;
+        const isFolder = n.kind === "folder";
+        return (
+          <li key={n.id} className="my-0.5">
+            {isFolder ? (
+              <span className="flex items-center gap-1.5 px-1.5 py-0.5 text-sm font-medium text-[var(--text)]">
+                <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                <span className="truncate">{n.title || "Untitled"}</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onOpen(n)}
+                className="flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                <span className="truncate">{n.title || "Untitled"}</span>
+                {n.context_enabled === false && (
+                  <span className="ml-auto shrink-0 text-[10px] text-[var(--text-muted)]">
+                    not in context
+                  </span>
+                )}
+              </button>
+            )}
+            {n.children.length > 0 && (
+              <MapTree nodes={n.children} onOpen={onOpen} depth={depth + 1} />
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// --------------------------------------------------------------------
+// Workspace memory card
+// --------------------------------------------------------------------
+
+const MEMORY_MODE_LABELS: Record<string, string> = {
+  off: "Off",
+  auto: "Auto",
+  manual: "Self-managed",
+};
+
+function MemoryCard({
+  workspaceId,
+  canEdit,
+  onOpenSettings,
+}: {
+  workspaceId: string;
+  canEdit: boolean;
+  onOpenSettings?: () => void;
+}) {
+  const { data: memory } = useWorkspaceMemory(workspaceId);
+  const regenerate = useRegenerateWorkspaceMemory(workspaceId);
+  if (!memory) return null;
+
+  const mode = memory.memory_mode;
+  const off = mode === "off";
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        <Brain className="h-3.5 w-3.5" />
+        Workspace memory
+      </h2>
+      <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 font-medium",
+              off
+                ? "bg-[var(--hover-strong)] text-[var(--text-muted)]"
+                : "bg-[var(--accent)]/10 text-[var(--accent)]"
+            )}
+          >
+            {MEMORY_MODE_LABELS[mode] ?? mode}
+          </span>
+          <span className="text-[var(--text-muted)]">
+            {off
+              ? "No memory is kept or used for this workspace."
+              : memory.exists && memory.updated_at
+                ? `Updated ${formatRelativeTime(memory.updated_at)}`
+                : "Not created yet — it builds from your chats and documents."}
+          </span>
+          <span className="ml-auto flex items-center gap-1.5">
+            {canEdit && !off && (
+              <button
+                type="button"
+                onClick={() =>
+                  regenerate.mutate(undefined, {
+                    onError: () =>
+                      toast.error(
+                        "Couldn't regenerate the memory. Check the memory model in Settings."
+                      ),
+                  })
+                }
+                disabled={regenerate.isPending}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)] disabled:opacity-50"
+              >
+                {regenerate.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
+                )}
+                {regenerate.isPending ? "Updating…" : "Update now"}
+              </button>
+            )}
+            {onOpenSettings && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+                title={
+                  off
+                    ? "Turn memory on in Settings"
+                    : "View or edit the memory in Settings"
+                }
+              >
+                <Settings2 className="h-3 w-3" />
+                {off ? "Turn on" : "View / edit"}
+              </button>
+            )}
+          </span>
+        </div>
+        {!off && memory.exists && memory.markdown.trim() && (
+          <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-[var(--text-muted)]">
+            {memoryPreview(memory.markdown)}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Strip markdown headings/fences so the 3-line preview reads as prose. */
+function memoryPreview(md: string): string {
+  return md
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .map((l) => l.replace(/^#+\s*/, "").replace(/^[-*]\s+/, "• ").trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .join("\n");
 }

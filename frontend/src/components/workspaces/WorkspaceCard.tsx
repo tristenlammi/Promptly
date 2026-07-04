@@ -1,14 +1,20 @@
 import {
   Archive,
   ArchiveRestore,
+  Clock,
+  Columns3,
   FileText,
   FolderKanban,
   MessageSquare,
+  PenTool,
+  StickyNote,
+  Table2,
   Trash2,
   Users,
 } from "lucide-react";
 
 import type { WorkspaceSummary } from "@/api/workspaces";
+import { formatRelativeTime } from "@/components/files/helpers";
 import { cn } from "@/utils/cn";
 
 interface WorkspaceCardProps {
@@ -30,18 +36,22 @@ export function WorkspaceCard({
   onArchive,
   onUnarchive,
 }: WorkspaceCardProps) {
-  const updated = new Date(workspace.updated_at);
   const isArchived = Boolean(workspace.archived_at);
   // ``role`` may be absent on older cached payloads — default to
   // owner so the card still renders while TanStack refetches the
   // enriched shape.
   const isCollaborator = workspace.role === "collaborator";
   // Deterministic per-workspace accent so cards are scannable at a
-  // glance — same workspace always gets the same hue. Purely cosmetic,
-  // derived client-side from the id (no backend field needed).
+  // glance — same workspace always gets the same hue. Constrained to the
+  // warm terracotta→amber band so identity never fights the app palette
+  // (the old full-wheel hues produced teal/blue cards that read as a
+  // different product).
   const hue = hueForId(workspace.id);
-  const accent = `hsl(${hue} 62% 52%)`;
-  const accentSoft = `hsl(${hue} 62% 52% / 0.14)`;
+  const accent = `hsl(${hue} 64% 50%)`;
+  const accentSoft = `hsl(${hue} 64% 50% / 0.14)`;
+
+  const stats = buildStats(workspace);
+  const members = workspace.member_names ?? [];
 
   return (
     <div
@@ -110,21 +120,48 @@ export function WorkspaceCard({
       {/* Stats + footer anchored to the card bottom so they line up
           across cards regardless of whether a description is present. */}
       <div className="relative mt-4 space-y-2">
-        <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
-          <span className="inline-flex items-center gap-1">
-            <MessageSquare className="h-3 w-3" />
-            {workspace.conversation_count} chat
-            {workspace.conversation_count === 1 ? "" : "s"}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <FileText className="h-3 w-3" />
-            {workspace.file_count} file
-            {workspace.file_count === 1 ? "" : "s"}
-          </span>
+        {/* What's inside — every item kind with a non-zero count, so a
+            board-and-sheets workspace stops presenting as "chats + files". */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
+          {stats.length === 0 ? (
+            <span className="italic">Empty — open to add content</span>
+          ) : (
+            stats.map((s) => (
+              <span
+                key={s.label}
+                className="inline-flex items-center gap-1"
+                title={s.label}
+              >
+                <s.icon className="h-3 w-3" />
+                {s.count} {s.label}
+              </span>
+            ))
+          )}
         </div>
 
         <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-          <span>Updated {updated.toLocaleDateString()}</span>
+          <span className="inline-flex items-center gap-2">
+            {members.length > 1 && (
+              <span className="inline-flex items-center" title={members.join(", ")}>
+                {members.slice(0, 4).map((name, i) => (
+                  <span
+                    key={name}
+                    className={cn(
+                      "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border border-[var(--surface)] text-[8px] font-semibold text-white",
+                      i > 0 && "-ml-1.5"
+                    )}
+                    style={{ backgroundColor: `hsl(${hueForId(name)} 45% 52%)` }}
+                  >
+                    {name.slice(0, 2).toUpperCase()}
+                  </span>
+                ))}
+                {members.length > 4 && (
+                  <span className="ml-1">+{members.length - 4}</span>
+                )}
+              </span>
+            )}
+            <span>Updated {formatRelativeTime(workspace.updated_at)}</span>
+          </span>
         {!isCollaborator && (
           <div className="pointer-events-auto flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
             {isArchived && onUnarchive && (
@@ -167,14 +204,48 @@ export function WorkspaceCard({
   );
 }
 
-/** Stable hue (0–359) derived from a workspace id, so each workspace
- *  gets a consistent identity colour without any backend field. */
+/** Stable hue derived from a workspace id, so each workspace gets a
+ *  consistent identity colour without any backend field. Constrained to
+ *  the warm 8°–48° band (terracotta → amber) to stay on-palette. */
 function hueForId(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) {
     h = (h * 31 + id.charCodeAt(i)) >>> 0;
   }
-  return h % 360;
+  return 8 + (h % 41);
+}
+
+/** Non-zero content stats for the card, most page-like kinds first.
+ *  Chats come from ``conversation_count`` (not tree items); files from
+ *  the pinned-file rollup. */
+function buildStats(ws: WorkspaceSummary) {
+  const counts = ws.item_counts ?? {};
+  const defs = [
+    { key: "note", one: "note", many: "notes", icon: StickyNote },
+    { key: "board", one: "board", many: "boards", icon: Columns3 },
+    { key: "sheet", one: "sheet", many: "sheets", icon: Table2 },
+    { key: "canvas", one: "canvas", many: "canvases", icon: PenTool },
+    { key: "task", one: "automation", many: "automations", icon: Clock },
+  ] as const;
+  const stats: { label: string; count: number; icon: typeof StickyNote }[] = [];
+  for (const d of defs) {
+    const n = counts[d.key] ?? 0;
+    if (n > 0)
+      stats.push({ label: n === 1 ? d.one : d.many, count: n, icon: d.icon });
+  }
+  if (ws.conversation_count > 0)
+    stats.push({
+      label: ws.conversation_count === 1 ? "chat" : "chats",
+      count: ws.conversation_count,
+      icon: MessageSquare,
+    });
+  if (ws.file_count > 0)
+    stats.push({
+      label: ws.file_count === 1 ? "file" : "files",
+      count: ws.file_count,
+      icon: FileText,
+    });
+  return stats;
 }
 
 function IconActionButton({

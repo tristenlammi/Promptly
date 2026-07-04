@@ -18,6 +18,7 @@ import {
   ArrowLeft,
   FileText,
   FolderX,
+  ChevronRight,
   Columns3,
   Layers,
   Link2,
@@ -76,6 +77,8 @@ import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
 import { useCreateTask } from "@/hooks/useTasks";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi } from "@/api/tasks";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -110,6 +113,7 @@ import {
 export function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { data: workspace, isLoading } = useWorkspace(id);
   const { data: conversations } = useWorkspaceConversations(id);
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
@@ -287,6 +291,10 @@ export function WorkspaceDetailPage() {
     }
   };
 
+  // Desktop-only surface by design — the fixed navigator + item panes
+  // don't fit a phone. Direct links get a friendly notice.
+  if (isMobile) return <WorkspaceMobileGate />;
+
   return (
     <>
       <TopNav
@@ -296,7 +304,7 @@ export function WorkspaceDetailPage() {
             ? workspace.description
             : workspace?.role === "collaborator" && workspace?.shared_by
               ? `Shared by ${workspace.shared_by.username}`
-              : "Notes, chats, and shared instructions"
+              : "Project workspace — everything here is context for its chats"
         }
         actions={
           <div className="flex items-center gap-2">
@@ -488,7 +496,17 @@ export function WorkspaceDetailPage() {
                 );
               })()
             ) : (
-              <WorkspaceMainPane
+              <>
+                <ItemBreadcrumb
+                  tree={tree ?? []}
+                  selected={selected}
+                  workspaceTitle={workspace.title}
+                  onHome={() => {
+                    setSelected(null);
+                    setSecondary(null);
+                  }}
+                />
+                <WorkspaceMainPane
                 key={selected?.id ?? "empty"}
                 node={selected}
                 workspaceId={id}
@@ -508,7 +526,13 @@ export function WorkspaceDetailPage() {
                   !isOwner ? (workspace.shared_by?.username ?? null) : null
                 }
                 canEdit={canEdit}
-              />
+                onOpenSettings={() => {
+                  setSecondary(null);
+                  setSelected(null);
+                  setSettingsOpen(true);
+                }}
+                />
+              </>
             )}
           </main>
         </div>
@@ -604,6 +628,7 @@ function WorkspaceMainPane({
   collaboratorNames,
   sharedByName,
   canEdit,
+  onOpenSettings,
 }: {
   node: WorkspaceItemNode | null;
   workspaceId: string;
@@ -619,6 +644,8 @@ function WorkspaceMainPane({
   collaboratorNames: string[];
   sharedByName: string | null;
   canEdit: boolean;
+  /** Opens the workspace settings pane (memory editor lives there). */
+  onOpenSettings?: () => void;
 }) {
   if (
     node &&
@@ -730,6 +757,7 @@ function WorkspaceMainPane({
         title={workspaceTitle}
         onOpenItem={onOpenItem}
         canEdit={canEdit && !isArchived}
+        onOpenSettings={onOpenSettings}
       />
     </div>
   );
@@ -1562,6 +1590,70 @@ function NotebookTabs({
  *  extension — matches how the backend derives the note title. */
 function stripDocExt(name: string): string {
   return name.replace(/\.(html?|md)$/i, "");
+}
+
+/** Wayfinding for nested items: "Workspace › Folder › Sub › Item".
+ *  Renders nothing for root-level items (the top nav already names the
+ *  workspace — a one-segment breadcrumb is noise). Folder segments are
+ *  static labels (folders have no pane to open); the workspace segment
+ *  jumps home. */
+function ItemBreadcrumb({
+  tree,
+  selected,
+  workspaceTitle,
+  onHome,
+}: {
+  tree: WorkspaceItemNode[];
+  selected: WorkspaceItemNode | null;
+  workspaceTitle: string;
+  onHome: () => void;
+}) {
+  if (!selected) return null;
+  const trail = findTrail(tree, selected.id);
+  // Only worth showing when the item actually sits inside a folder/notebook.
+  if (!trail || trail.length < 2) return null;
+  const ancestors = trail.slice(0, -1);
+  const leaf = trail[trail.length - 1];
+  return (
+    <nav
+      aria-label="Item location"
+      className="flex shrink-0 items-center gap-1 overflow-hidden border-b border-[var(--border)] bg-[var(--bg)] px-4 py-1.5 text-xs text-[var(--text-muted)]"
+    >
+      <button
+        type="button"
+        onClick={onHome}
+        className="shrink-0 rounded px-1 py-0.5 font-medium transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+        title="Workspace home"
+      >
+        {workspaceTitle}
+      </button>
+      {ancestors.map((n) => (
+        <span key={n.id} className="flex min-w-0 items-center gap-1">
+          <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
+          <span className="truncate">{n.title || "Untitled"}</span>
+        </span>
+      ))}
+      <span className="flex min-w-0 items-center gap-1">
+        <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
+        <span className="truncate font-medium text-[var(--text)]">
+          {leaf.title || "Untitled"}
+        </span>
+      </span>
+    </nav>
+  );
+}
+
+/** Depth-first path from the tree root to ``id`` (inclusive), or null. */
+function findTrail(
+  nodes: WorkspaceItemNode[],
+  id: string
+): WorkspaceItemNode[] | null {
+  for (const n of nodes) {
+    if (n.id === id) return [n];
+    const sub = findTrail(n.children, id);
+    if (sub) return [n, ...sub];
+  }
+  return null;
 }
 
 function collectLinkables(nodes: WorkspaceItemNode[]): WorkspaceItemNode[] {

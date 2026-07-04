@@ -43,6 +43,13 @@ export interface WorkspaceSummary {
   updated_at: string;
   conversation_count: number;
   file_count: number;
+  /** Live (non-archived) items by kind — "note" / "canvas" / "board" /
+   *  "sheet" / "container" / "task" / "folder". Chats are counted by
+   *  ``conversation_count`` (they aren't tree items). Optional so stale
+   *  cached payloads from before the rollup still render. */
+  item_counts?: Record<string, number>;
+  /** Owner first, then accepted collaborators — for the card avatars. */
+  member_names?: string[];
   /** Whether the caller owns this workspace or has an accepted share
    *  on it. Used to badge cards in the list and to hide destructive
    *  actions (delete, archive, manage shares) from collaborators. */

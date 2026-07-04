@@ -377,9 +377,10 @@ export function WorkspaceNavigatorTree({
             items={[...pinnedIds, ...mainIds]}
             strategy={verticalListSortingStrategy}
           >
-            {/* Pinned section — shown when there are pins, or as a drop target
-                while dragging so the first item can be pinned. */}
-            {(pinnedNodes.length > 0 || activeId) && (
+            {/* Pinned section — always rendered (a faint standing hint when
+                empty, so pinning is discoverable without mid-drag luck),
+                lighting up as a drop target while dragging. */}
+            {(pinnedNodes.length > 0 || activeId || tree.length > 0) && (
               <div className="mb-2 border-b border-[var(--border)] pb-2">
                 <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                   <Pin className="h-3 w-3 fill-current" />
@@ -403,6 +404,12 @@ export function WorkspaceNavigatorTree({
                           collapsed={collapsed}
                           toggleCollapse={toggleCollapse}
                           sortable={canDragKind(item.node.kind)}
+                          onCreateInside={
+                            canEdit
+                              ? (kind, parentId) =>
+                                  void handleCreate(kind, parentId)
+                              : undefined
+                          }
                         />
                       ))}
                   </ul>
@@ -436,6 +443,12 @@ export function WorkspaceNavigatorTree({
                         !dropInPinned &&
                         item.node.kind === "folder" &&
                         projected?.parentId === item.id
+                      }
+                      onCreateInside={
+                        canEdit
+                          ? (kind, parentId) =>
+                              void handleCreate(kind, parentId)
+                          : undefined
                       }
                     />
                   ))}
@@ -567,7 +580,8 @@ function PinDropZone({ active }: { active: boolean }) {
       )}
     >
       <Pin className={cn("h-3.5 w-3.5", active && "fill-current")} />
-      Drop here to pin
+      {/* Standing copy teaches the gesture; the active copy confirms it. */}
+      {active ? "Drop here to pin" : "Drag items here to pin"}
     </div>
   );
 }
@@ -761,6 +775,7 @@ function TreeRow({
   sortable,
   isDropParent,
   overlay,
+  onCreateInside,
 }: {
   workspaceId: string;
   item: FlatItem;
@@ -776,6 +791,11 @@ function TreeRow({
   isDropParent?: boolean;
   /** Rendered inside the DragOverlay (the lifted copy). */
   overlay?: boolean;
+  /** Folder rows only — create an item inside this folder (⋯ menu). */
+  onCreateInside?: (
+    kind: "note" | "canvas" | "board" | "sheet",
+    parentId: string
+  ) => void;
 }) {
   const { node, depth } = item;
   const expanded = !collapsed.has(node.id);
@@ -991,18 +1011,28 @@ function TreeRow({
             <span className="w-3.5 shrink-0" />
           )}
 
-          {/* Context is ON by default for documents, so only the *excluded*
-              state is worth a glyph — flagging the exception keeps the rail
-              quiet. The on/off toggle still lives in the ⋯ menu. */}
-          {isContextItem && !contextOn && (
-            <span
-              title="Excluded from this workspace's chat context. Toggle via the ⋯ menu."
-              aria-label="Excluded from workspace context"
-              className="inline-flex shrink-0 items-center text-[var(--text-muted)]/70"
-            >
-              <ZapOff className="h-3 w-3" />
-            </span>
-          )}
+          {/* Context state: the *excluded* glyph is permanent (it's the
+              exception worth flagging); the *included* glyph fades in on
+              row hover so the on-state is discoverable without turning the
+              rail into a wall of identical bolts. Toggle stays in ⋯. */}
+          {isContextItem &&
+            (contextOn ? (
+              <span
+                title="Included in this workspace's chat context. Toggle via the ⋯ menu."
+                aria-label="Included in workspace context"
+                className="inline-flex shrink-0 items-center text-[var(--accent)]/80 opacity-0 transition-opacity group-hover:opacity-100"
+              >
+                <Zap className="h-3 w-3 fill-current" />
+              </span>
+            ) : (
+              <span
+                title="Excluded from this workspace's chat context. Toggle via the ⋯ menu."
+                aria-label="Excluded from workspace context"
+                className="inline-flex shrink-0 items-center text-[var(--text-muted)]/70"
+              >
+                <ZapOff className="h-3 w-3" />
+              </span>
+            ))}
 
           <NodeIcon node={node} expanded={expanded} />
 
@@ -1055,6 +1085,11 @@ function TreeRow({
             }
             contextState={isContextItem ? (contextOn ? "on" : "off") : null}
             onToggleContext={isContextItem ? handleToggleContext : undefined}
+            onCreateInside={
+              isFolder && onCreateInside
+                ? (kind) => onCreateInside(kind, node.id)
+                : undefined
+            }
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
@@ -1121,6 +1156,7 @@ function NodeActions({
   onOpenToSide,
   contextState,
   onToggleContext,
+  onCreateInside,
   deleting,
 }: {
   isFolder: boolean;
@@ -1136,6 +1172,8 @@ function NodeActions({
   /** "on" / "off" for note+canvas (workspace-context toggle); null otherwise. */
   contextState?: "on" | "off" | null;
   onToggleContext?: () => void;
+  /** Folders only — create a new item inside this folder. */
+  onCreateInside?: (kind: "note" | "canvas" | "board" | "sheet") => void;
   deleting: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1187,6 +1225,32 @@ function NodeActions({
               className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-lg"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Creation-in-place for folders — drag-first stays the
+                  organising gesture, but "make a note here" shouldn't
+                  require creating at root and dragging it in. */}
+              {onCreateInside && (
+                <>
+                  {(
+                    [
+                      { kind: "note", label: "New note here", icon: FileText },
+                      { kind: "canvas", label: "New canvas here", icon: Shapes },
+                      { kind: "board", label: "New board here", icon: Columns3 },
+                      { kind: "sheet", label: "New sheet here", icon: Table2 },
+                    ] as const
+                  ).map((opt) => (
+                    <MenuItem
+                      key={opt.kind}
+                      icon={<opt.icon className="h-3.5 w-3.5" />}
+                      label={opt.label}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onCreateInside(opt.kind);
+                      }}
+                    />
+                  ))}
+                  <div className="my-1 border-t border-[var(--border)]" />
+                </>
+              )}
               {onRename && (
                 <MenuItem
                   icon={<Pencil className="h-3.5 w-3.5" />}
