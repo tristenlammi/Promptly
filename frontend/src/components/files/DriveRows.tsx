@@ -550,26 +550,6 @@ export function DriveColumnsHeader() {
   );
 }
 
-/** Small shared "Nothing here yet" card used by Drive views. */
-export function DriveEmptyState({
-  icon,
-  title,
-  description,
-  action,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-12 text-center">
-      <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--bg)] text-[var(--text-muted)]">
-        {icon}
-      </div>
-      <h2 className="text-base font-semibold">{title}</h2>
-      <p className="mt-1 text-sm text-[var(--text-muted)]">{description}</p>
-      {action && <div className="mt-4 flex justify-center">{action}</div>}
-    </div>
-  );
-}
+/** "Nothing here yet" card — promoted to the shared EmptyState primitive;
+ *  re-exported under the old name so Drive call sites don't churn. */
+export { EmptyState as DriveEmptyState } from "@/components/shared/EmptyState";

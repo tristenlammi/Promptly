@@ -5,6 +5,7 @@ import { Archive, MessageSquare, RotateCcw, Search, Trash2 } from "lucide-react"
 import type { ConversationSummary } from "@/api/types";
 import { TopNav } from "@/components/layout/TopNav";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { EmptyState } from "@/components/shared/EmptyState";
 import {
   useArchivedConversationsQuery,
   useDeleteConversation,
@@ -100,13 +101,15 @@ export function ArchivePage() {
 
           {!isLoading && archived.length === 0 && (
             <EmptyState
+              icon={<Archive className="h-5 w-5" />}
               title="No archived chats"
-              description="Archive a chat from the sidebar (the orange archive button) and it'll show up here."
+              description="Archive a chat from the sidebar and it'll show up here — you can restore it anytime."
             />
           )}
 
           {!isLoading && archived.length > 0 && filtered.length === 0 && (
             <EmptyState
+              icon={<Search className="h-5 w-5" />}
               title="No matches"
               description={`Nothing archived matches "${query.trim()}".`}
             />
@@ -195,26 +198,6 @@ function ArchiveRow({
         </button>
       </div>
     </li>
-  );
-}
-
-function EmptyState({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-card border border-dashed border-[var(--border)] px-6 py-16 text-center">
-      <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[var(--accent)]">
-        <Archive className="h-5 w-5" />
-      </span>
-      <p className="text-sm font-medium text-[var(--text)]">{title}</p>
-      <p className="mt-1 max-w-sm text-xs text-[var(--text-muted)]">
-        {description}
-      </p>
-    </div>
   );
 }
 

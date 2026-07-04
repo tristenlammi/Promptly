@@ -52,9 +52,7 @@ export function NetworkStatusToast() {
         className={cn(
           "pointer-events-auto inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-sm",
           "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-          online
-            ? "text-emerald-600 dark:text-emerald-400"
-            : "text-amber-600 dark:text-amber-400"
+          online ? "text-[var(--success)]" : "text-[var(--warning)]"
         )}
       >
         {online ? (

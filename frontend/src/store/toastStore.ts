@@ -10,6 +10,8 @@ export interface Toast {
   title?: string;
   /** ms before auto-dismiss. 0 = sticky until the user dismisses it. */
   duration: number;
+  /** Optional inline action ("Undo") — clicking runs it and dismisses. */
+  action?: { label: string; onClick: () => void };
 }
 
 interface ToastState {
@@ -57,8 +59,14 @@ export const useToastStore = create<ToastState>((set) => ({
  *   toast.success("Task deleted", { duration: 2000 });
  */
 function make(type: ToastType) {
-  return (message: string, opts?: { title?: string; duration?: number }) =>
-    useToastStore.getState().push({ type, message, ...opts });
+  return (
+    message: string,
+    opts?: {
+      title?: string;
+      duration?: number;
+      action?: Toast["action"];
+    },
+  ) => useToastStore.getState().push({ type, message, ...opts });
 }
 
 export const toast = {

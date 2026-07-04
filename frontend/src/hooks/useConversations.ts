@@ -4,6 +4,7 @@ import { authApi } from "@/api/auth";
 import { chatApi, type UpdateConversationPayload } from "@/api/chat";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
+import { toast } from "@/store/toastStore";
 
 const CONVERSATIONS_KEY = ["conversations"] as const;
 
@@ -105,12 +106,28 @@ export function useArchivedConversationsQuery() {
 export function useArchiveConversation() {
   const qc = useQueryClient();
   const remove = useChatStore((s) => s.removeConversation);
+  const upsert = useChatStore((s) => s.upsertConversation);
   return useMutation({
     mutationFn: (id: string) => chatApi.archive(id),
     onSuccess: (_data, id) => {
       remove(id);
       qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
       qc.invalidateQueries({ queryKey: ARCHIVED_KEY });
+      // The undo toast lives here, not at the call site: removing the row
+      // unmounts the sidebar component, and TanStack skips per-call mutate
+      // callbacks for unmounted components — a call-site toast never fires.
+      toast.success("Chat archived", {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            void chatApi.unarchive(id).then((updated) => {
+              upsert(updated);
+              void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+              void qc.invalidateQueries({ queryKey: ARCHIVED_KEY });
+            });
+          },
+        },
+      });
     },
   });
 }

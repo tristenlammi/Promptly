@@ -286,7 +286,7 @@ function TemporaryCountdownBadge({ expiresAt }: { expiresAt: string | null }) {
   if (!expiresAt) {
     return (
       <Clock
-        className="h-3 w-3 shrink-0 text-amber-500"
+        className="h-3 w-3 shrink-0 text-[var(--text-muted)]"
         aria-label="Temporary chat"
       />
     );
@@ -304,9 +304,11 @@ function TemporaryCountdownBadge({ expiresAt }: { expiresAt: string | null }) {
       className={cn(
         "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1 py-px",
         "text-[9px] font-semibold tabular-nums",
-        "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+        // Informational, not a warning — temporary chats are a feature the
+        // user chose, and amber read as "something's wrong".
+        "bg-[var(--hover-strong)] text-[var(--text-muted)]"
       )}
-      title={`Auto-deletes in ${label}`}
+      title={`Temporary chat — auto-deletes in ${label}`}
     >
       <Clock className="h-2.5 w-2.5" />
       {label}
@@ -423,6 +425,9 @@ function ConversationRow({
   // permanent deletion lives on the Archive page. The row clears from the
   // sidebar via the mutation's store update.
   const handleArchive = () => {
+    // The "Chat archived / Undo" toast fires from the hook's onSuccess —
+    // this row unmounts when the store drops it, and TanStack skips
+    // per-call callbacks for unmounted components.
     archive.mutate(conv.id, {
       onSuccess: () => {
         if (isActive) navigate("/chat");
@@ -533,8 +538,10 @@ function ConversationRow({
                 e.stopPropagation();
                 handleArchive();
               }}
-              className="rounded p-1 text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
-              title="Archive"
+              // Neutral, not amber: archive is a safe, reversible "put away",
+              // and warning colours made users treat it like a delete.
+              className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+              title="Archive (restore anytime from the Archive page)"
               aria-label="Archive conversation"
             >
               <Archive className="h-3 w-3" />
@@ -602,21 +609,23 @@ function UserFooter() {
         <span className="font-medium">Archive</span>
       </button>
       {/* Workspace invites — pending collaboration invites the user can
-          accept or decline. Click opens a modal listing them. */}
-      <button
-        onClick={() => setInvitesOpen(true)}
-        className="relative mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        title="Workspace invites"
-        aria-label="Open workspace invites"
-      >
-        <Inbox className="h-4 w-4" />
-        <span className="font-medium">Invites</span>
-        {inviteCount > 0 && (
+          accept or decline. Click opens a modal listing them. Rendered only
+          while something is actually pending: permanent chrome for a rare
+          event was footer noise, and the modal has nothing to say at zero. */}
+      {inviteCount > 0 && (
+        <button
+          onClick={() => setInvitesOpen(true)}
+          className="relative mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+          title="Pending workspace invites"
+          aria-label="Open workspace invites"
+        >
+          <Inbox className="h-4 w-4" />
+          <span className="font-medium">Invites</span>
           <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
             {inviteCount}
           </span>
-        )}
-      </button>
+        </button>
+      )}
       {/* Per-user account settings — every authenticated user gets one.
           Hosts chat-default preferences plus MFA / trusted devices. The
           route still ends in /security for backwards compatibility but

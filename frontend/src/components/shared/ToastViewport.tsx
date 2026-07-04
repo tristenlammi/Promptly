@@ -144,6 +144,21 @@ function ToastItem({ toast }: { toast: Toast }) {
         >
           {toast.message}
         </div>
+        {toast.action && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action!.onClick();
+              dismiss(toast.id);
+            }}
+            className={cn(
+              "mt-1.5 rounded-md px-2 py-1 text-xs font-semibold transition",
+              "bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20",
+            )}
+          >
+            {toast.action.label}
+          </button>
+        )}
       </div>
       <button
         type="button"

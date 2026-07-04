@@ -226,8 +226,10 @@ export function ConversationRowContextMenu({
                 onArchive();
               }}
               className={cn(
+                // Neutral like Pin/Move — archive is reversible; amber made
+                // it read as a destructive cousin of Delete.
                 "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
-                "text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
+                "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]"
               )}
             >
               <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">

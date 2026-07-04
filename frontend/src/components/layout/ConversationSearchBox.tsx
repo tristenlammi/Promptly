@@ -161,7 +161,7 @@ function SearchResults({
 
   if (isError) {
     return (
-      <div className="mt-2 px-2 text-xs text-red-500">
+      <div className="mt-2 px-2 text-xs text-[var(--danger)]">
         Search failed. Try again in a moment.
       </div>
     );

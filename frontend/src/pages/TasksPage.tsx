@@ -24,6 +24,7 @@ import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
@@ -124,7 +125,7 @@ export function TasksPage() {
           ))}
         </div>
       ) : !tasks || tasks.length === 0 ? (
-        <EmptyState onCreate={openNew} />
+        <TasksEmptyState onCreate={openNew} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {tasks.map((task) => (
@@ -266,22 +267,21 @@ export function TasksPage() {
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function TasksEmptyState({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center rounded-card border border-dashed border-[var(--border)] py-16 text-center">
-      <CalendarClock className="h-10 w-10 text-[var(--text-muted)]" />
-      <h2 className="mt-3 text-base font-medium">No automations yet</h2>
-      <p className="mt-1 max-w-sm text-sm text-[var(--text-muted)]">
-        Create a scheduled automation and Promptly will run it automatically — like
-        a daily news digest or a weekly summary — saving each run as its own
-        report.
-      </p>
-      <button
-        onClick={onCreate}
-        className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white"
-      >
-        <Plus className="h-4 w-4" /> New automation
-      </button>
-    </div>
+    <EmptyState
+      icon={<CalendarClock className="h-5 w-5" />}
+      title="No automations yet"
+      description="Create a scheduled automation and Promptly will run it automatically — like a daily news digest or a weekly summary — saving each run as its own report."
+      action={
+        <Button
+          variant="primary"
+          leftIcon={<Plus className="h-4 w-4" />}
+          onClick={onCreate}
+        >
+          New automation
+        </Button>
+      }
+    />
   );
 }
