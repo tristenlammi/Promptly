@@ -425,6 +425,12 @@ class WorkspaceMemoryResponse(BaseModel):
     updated_at: datetime | None = None
     auto_memory_enabled: bool
     memory_mode: str = "off"
+    # Outcome of the most recent regeneration attempt (Phase 10) so the
+    # overview card can flag a failed refresh instead of a stale timestamp.
+    # ``last_status`` ∈ {ok, failed, skipped} or None (never attempted).
+    last_status: str | None = None
+    last_error: str | None = None
+    last_attempt_at: datetime | None = None
 
 
 class WorkspaceMemorySaveRequest(BaseModel):

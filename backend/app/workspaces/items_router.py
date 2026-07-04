@@ -890,6 +890,9 @@ async def get_workspace_memory_endpoint(
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
         memory_mode=ws.memory_mode,
+        last_status=ws.memory_last_status,
+        last_error=ws.memory_last_error,
+        last_attempt_at=ws.memory_last_attempt_at,
     )
 
 
@@ -927,6 +930,9 @@ async def save_workspace_memory_endpoint(
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
         memory_mode=ws.memory_mode,
+        last_status=ws.memory_last_status,
+        last_error=ws.memory_last_error,
+        last_attempt_at=ws.memory_last_attempt_at,
     )
 
 
@@ -971,6 +977,9 @@ async def regenerate_workspace_memory_endpoint(
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
         memory_mode=ws.memory_mode,
+        last_status=ws.memory_last_status,
+        last_error=ws.memory_last_error,
+        last_attempt_at=ws.memory_last_attempt_at,
     )
 
 
@@ -1011,6 +1020,9 @@ async def append_workspace_memory_endpoint(
         updated_at=uf.updated_at if uf is not None else None,
         auto_memory_enabled=ws.auto_memory_enabled,
         memory_mode=ws.memory_mode,
+        last_status=ws.memory_last_status,
+        last_error=ws.memory_last_error,
+        last_attempt_at=ws.memory_last_attempt_at,
     )
 
 

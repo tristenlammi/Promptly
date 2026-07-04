@@ -335,6 +335,29 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
     storage_quota_bytes: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )
+    # Backing Drive file for the flattened *automations* index (Phase 10).
+    # Automations (scheduled Tasks homed here) aren't ``workspace_items`` rows,
+    # so there's no ``ref_id`` to hang their RAG backing file on — we stash it
+    # on the workspace instead. Holds a rendered summary of every automation
+    # (name, schedule, prompt, flow node summary) so a chat can answer "what
+    # runs on a schedule here?" via retrieval, not just the deterministic map.
+    # ``ON DELETE SET NULL`` so trashing the file never cascade-nukes the row.
+    automations_text_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    # Last workspace-memory regeneration outcome (Phase 10). Previously the
+    # librarian swallowed every failure silently; now we stamp the attempt so
+    # the overview Memory card can surface "last refresh failed" instead of a
+    # stale "Updated 3 days ago". ``memory_last_status`` ∈ {ok, failed,
+    # skipped}; ``skipped`` = nothing to distil / no model configured (not an
+    # error). ``memory_last_error`` is a short human-readable reason on failure.
+    memory_last_status: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )
+    memory_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memory_last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<Workspace id={self.id} title={self.title!r}>"

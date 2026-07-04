@@ -69,5 +69,12 @@ class GeneratedKind(str, Enum):
     # Keyed off ``Spreadsheet.text_file_id``.
     SHEET_TEXT = "sheet_text"
 
+    # Backing text file for a workspace's *automations* index (Phase 10).
+    # Holds a rendered summary of every scheduled Task homed in the
+    # workspace (name / schedule / prompt / flow node summary) so chats can
+    # retrieve "what runs on a schedule here?". Lives in the workspace's
+    # ``Automations/`` Drive folder; keyed off ``Workspace.automations_text_file_id``.
+    AUTOMATIONS_TEXT = "automations_text"
+
 
 __all__ = ["GeneratedKind"]

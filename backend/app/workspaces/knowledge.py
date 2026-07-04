@@ -1019,7 +1019,17 @@ def _flatten_board(
     assignee_names: dict[str, str] | None = None,
     comments_by_task: dict[str, list[str]] | None = None,
 ) -> str:
-    """Render a board's tasks as natural-language text for embedding."""
+    """Render a board's tasks as natural-language text for embedding.
+
+    Structure-aware (Phase 10): tasks are grouped under a ``## <column>``
+    heading per status rather than dumped as one flat list. This keeps the
+    column/status grouping in the indexed text, so a retrieved chunk carries
+    the header of the column it came from — a card that lands mid-chunk still
+    reads as "under Done", and a query like "what's left to do" matches the
+    To-Do section rather than a task whose per-line "status To Do" happened
+    to survive chunking. The status is no longer repeated per task line (the
+    heading owns it); every other per-card detail is preserved verbatim.
+    """
     assignee_names = assignee_names or {}
     comments_by_task = comments_by_task or {}
     rows = [t for t in tasks if (t.title or "").strip()]
@@ -1037,12 +1047,9 @@ def _flatten_board(
     for col in cfg.get("columns") or []:
         if isinstance(col, dict) and col.get("id"):
             col_names[str(col["id"])] = str(col.get("name") or col["id"])
-    lines = [f"# Board: {title}", ""]
-    for t in rows:
-        bits = [
-            f"status {col_names.get(t.status, t.status)}",
-            f"{t.priority} priority",
-        ]
+
+    def _render_task(t: WorkspaceTask) -> str:
+        bits = [f"{t.priority} priority"]
         if t.due_at is not None:
             bits.append(f"due {t.due_at.date().isoformat()}")
         names = [
@@ -1065,13 +1072,13 @@ def _flatten_board(
             line += f" Description: {desc[:1000]}"
         links = t.links or []
         if links:
-            names = [
+            link_names = [
                 str(lk.get("title")).strip()
                 for lk in links
                 if isinstance(lk, dict) and str(lk.get("title") or "").strip()
             ]
-            if names:
-                line += " Linked: " + ", ".join(names)
+            if link_names:
+                line += " Linked: " + ", ".join(link_names)
         atts = t.attachments or []
         if atts:
             fnames = [
@@ -1089,8 +1096,38 @@ def _flatten_board(
                 for s in subs
             )
             line += f" Subtasks ({done_n}/{len(subs)}): {checklist}"
-        lines.append(line)
-    return "\n".join(lines)
+        return line
+
+    # Group tasks by their status column. Order columns by the board's own
+    # column config (so custom boards read left-to-right as the user sees
+    # them), falling back to the default todo→doing→done order, then any
+    # stray statuses not in either registry. ``tasks`` arrives already
+    # ordered by (status, position) so within a column the order is stable.
+    grouped: dict[str, list[WorkspaceTask]] = {}
+    for t in rows:
+        grouped.setdefault(t.status, []).append(t)
+
+    ordered_statuses: list[str] = []
+    for col in cfg.get("columns") or []:
+        if isinstance(col, dict) and col.get("id"):
+            ordered_statuses.append(str(col["id"]))
+    for s in _BOARD_STATUS_LABEL:
+        if s not in ordered_statuses:
+            ordered_statuses.append(s)
+    for s in grouped:  # any status not covered above (defensive)
+        if s not in ordered_statuses:
+            ordered_statuses.append(s)
+
+    lines = [f"# Board: {title}", ""]
+    for status in ordered_statuses:
+        col_tasks = grouped.get(status)
+        if not col_tasks:
+            continue
+        lines.append(f"## {col_names.get(status, status)}")
+        for t in col_tasks:
+            lines.append(_render_task(t))
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 async def _ensure_board_backing_file(
@@ -1369,6 +1406,294 @@ async def index_board_for_workspace(
                 )
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ---------------------------------------------------------------------
+# Automation ingestion (scheduled Tasks feed RAG — Phase 10)
+# ---------------------------------------------------------------------
+# Automations are scheduled ``Task`` rows homed in a workspace (synthesised
+# as "task" nodes in the navigator, not ``workspace_items`` rows). We flatten
+# every automation into one backing Drive file and embed it into the shared
+# workspace pool so a chat can answer "what runs on a schedule here?" — the
+# deterministic map lists them, and retrieval can pull the detail (prompt,
+# flow node summary). The backing file id lives on
+# ``Workspace.automations_text_file_id`` (no item row to hang it on).
+
+_WEEKDAY_NAMES = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
+
+
+def _human_schedule(task) -> str:
+    """A compact, natural-language rendering of a Task's recurrence.
+
+    Mirrors the structured recurrence on :class:`app.tasks.models.Task`
+    (frequency + hour/minute/weekday/day_of_month/timezone) so the flattened
+    text reads like the schedule the user set, not a cron string."""
+    hh = task.hour if task.hour is not None else 0
+    mm = task.minute or 0
+    at = f"{hh:02d}:{mm:02d}"
+    tz = task.timezone or "Australia/Sydney"
+    freq = task.frequency
+    if freq == "hourly":
+        return f"every hour at :{mm:02d} past ({tz})"
+    if freq == "daily":
+        return f"every day at {at} ({tz})"
+    if freq == "weekly":
+        day = (
+            _WEEKDAY_NAMES[task.weekday]
+            if task.weekday is not None and 0 <= task.weekday < 7
+            else "a set day"
+        )
+        return f"every {day} at {at} ({tz})"
+    if freq == "monthly":
+        dom = task.day_of_month or 1
+        return f"monthly on day {dom} at {at} ({tz})"
+    return f"{freq} at {at} ({tz})"
+
+
+def _summarise_flow_graph(graph: dict | None) -> str | None:
+    """One-line summary of an Advanced automation's node graph.
+
+    Lists the node types in graph order (e.g. "trigger → AI step → email
+    output") so a chat knows the shape of a multi-step flow without us
+    embedding the whole JSON. ``None`` for a Simple task (no graph)."""
+    if not isinstance(graph, dict):
+        return None
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return None
+    labels: list[str] = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        data = n.get("data") if isinstance(n.get("data"), dict) else {}
+        label = n.get("label") or data.get("label") or n.get("type") or "step"
+        text = str(label).strip()
+        if text:
+            labels.append(text)
+    if not labels:
+        return None
+    return " → ".join(labels[:12])
+
+
+def _flatten_automations(ws: Workspace, tasks: list) -> str:
+    """Render a workspace's automations as natural-language text for embedding.
+
+    Deliberately captures only the *definition* (name, schedule, enabled,
+    web-search, flow shape, instruction) — not transient run outcomes
+    (``last_status`` / ``last_run_at``). That keeps the embedded text stable
+    across runs, so the doc only re-embeds when an automation's definition
+    actually changes (the create / edit / delete triggers), not on every
+    scheduled fire. Run history lives in the Tasks UI, not workspace RAG."""
+    rows = [t for t in tasks if (t.title or "").strip()]
+    if not rows:
+        return ""
+    lines = [f"# Automations in workspace: {ws.title}", ""]
+    for t in rows:
+        state = "enabled" if t.enabled else "paused"
+        lines.append(f'## Automation "{t.title.strip()}" ({state})')
+        detail = [f"Runs {_human_schedule(t)}."]
+        if not t.enabled:
+            detail.append("Currently paused (won't run until re-enabled).")
+        if t.use_web_search:
+            detail.append("Has web search enabled.")
+        flow = _summarise_flow_graph(t.flow_graph)
+        if flow:
+            detail.append(f"Advanced flow: {flow}.")
+        prompt = (t.prompt or "").strip()
+        if prompt:
+            detail.append(f"Instruction: {prompt[:1500]}")
+        lines.append(" ".join(detail))
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+async def _ensure_automations_backing_file(
+    db: AsyncSession, *, ws: Workspace, text: str
+) -> UserFile | None:
+    """Create or update the Drive file backing a workspace's automations RAG
+    text. The file id is stored on ``Workspace.automations_text_file_id`` so
+    re-indexes update it in place — the automations analogue of
+    :func:`_ensure_board_backing_file`."""
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    fname = "Automations.md"
+
+    if ws.automations_text_file_id is not None:
+        uf = await db.get(UserFile, ws.automations_text_file_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            uf.size_bytes = len(text.encode("utf-8"))
+            uf.content_text = text
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db, user_id=owner.id, parent_id=ws.root_folder_id, name="Automations"
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=fname,
+        original_filename=fname,
+        mime_type="text/markdown",
+        size_bytes=len(text.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.AUTOMATIONS_TEXT.value,
+        content_text=text,
+    )
+    db.add(uf)
+    await db.flush()
+    ws.automations_text_file_id = uf.id
+    return uf
+
+
+async def index_automations_for_workspace(
+    workspace_id: uuid.UUID, *, force: bool = False
+) -> None:
+    """Embed (or re-embed) a workspace's automations so chats can retrieve them.
+
+    Enqueued whenever an automation homed in the workspace changes
+    (create / edit / delete / run). Owns its own session
+    (``BackgroundTasks``-safe). No-ops when embeddings aren't configured; an
+    empty automation set drops its chunks and blanks the backing file so
+    full-dump injection stops inlining stale entries."""
+    from app.tasks.models import Task
+
+    async with SessionLocal() as db:
+        try:
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            tasks = list(
+                (
+                    await db.execute(
+                        select(Task)
+                        .where(Task.workspace_id == workspace_id)
+                        .order_by(Task.created_at.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            text = _flatten_automations(ws, tasks)
+            if not text.strip():
+                # No automations left → drop chunks + blank the backing file.
+                if ws.automations_text_file_id is not None:
+                    await delete_existing_chunks(
+                        db,
+                        scope_kind="workspace",
+                        scope_id=workspace_id,
+                        user_file_id=ws.automations_text_file_id,
+                    )
+                    uf = await db.get(UserFile, ws.automations_text_file_id)
+                    if uf is not None and uf.trashed_at is None:
+                        uf.content_text = None
+                        try:
+                            abs_path = absolute_path(uf.storage_path)
+                            abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            with open(abs_path, "w", encoding="utf-8") as fh:
+                                fh.write("")
+                            uf.size_bytes = 0
+                        except OSError:
+                            pass
+                    await db.commit()
+                return
+
+            # Dedup: skip the re-embed when the flattened text is unchanged
+            # AND we already have chunks for it — automations churn (a run
+            # stamps ``last_status``) shouldn't re-embed identical text.
+            prior_uf = (
+                await db.get(UserFile, ws.automations_text_file_id)
+                if ws.automations_text_file_id is not None
+                else None
+            )
+            if not force and prior_uf is not None and (
+                (prior_uf.content_text or "") == text
+            ):
+                has_chunks = await db.scalar(
+                    select(func.count())
+                    .select_from(KnowledgeChunk)
+                    .where(
+                        KnowledgeChunk.workspace_id == workspace_id,
+                        KnowledgeChunk.user_file_id == prior_uf.id,
+                    )
+                )
+                if has_chunks:
+                    return
+
+            uf = await _ensure_automations_backing_file(db, ws=ws, text=text)
+            if uf is None:
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    text,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError:
+                # Nothing embeddable (shouldn't happen for real text) — leave
+                # any prior chunks in place rather than wiping them.
+                await db.commit()
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await db.commit()
+            logger.info(
+                "indexed %d chunks for workspace=%s automations (%d rows)",
+                len(chunks),
+                workspace_id,
+                len(tasks),
+            )
+        except Exception:  # noqa: BLE001 - best-effort background indexer
+            logger.exception("index_automations_for_workspace failed")
 
 
 # ---------------------------------------------------------------------
@@ -1656,8 +1981,10 @@ async def build_workspace_map(
             )
         ).scalars()
     )
-    if not items:
-        return None
+    # Note: don't early-return on empty ``items`` — a workspace with *only*
+    # automations (no notes/boards/files) still deserves a map. The
+    # combined-empty check below (no lines and no automations) handles the
+    # truly-empty case.
 
     by_parent: dict[uuid.UUID | None, list[WorkspaceItem]] = {}
     for it in items:
@@ -1679,17 +2006,46 @@ async def build_workspace_map(
                 render(it.id, depth + 1)
 
     render(None, 0)
-    if not lines:
+
+    # Automations (scheduled Tasks homed here) aren't ``workspace_items`` rows,
+    # so append them as their own map section with the schedule inline — this
+    # is what lets a chat answer "what runs on a schedule here?" deterministically
+    # every turn, before retrieval even comes into play.
+    from app.tasks.models import Task
+
+    autos = list(
+        (
+            await db.execute(
+                select(Task)
+                .where(Task.workspace_id == workspace_id)
+                .order_by(Task.created_at.asc())
+            )
+        ).scalars()
+    )
+    auto_lines: list[str] = []
+    for t in autos:
+        if not (t.title or "").strip():
+            continue
+        state = "" if t.enabled else " (paused)"
+        auto_lines.append(
+            f'- Automation: "{t.title.strip()}" — {_human_schedule(t)}{state}'
+        )
+
+    if not lines and not auto_lines:
         return None
     if truncated:
         lines.append(f"  - …and more (showing first {_MAP_MAX_LINES})")
+
+    body = "\n".join(lines) if lines else "(no notes, boards, or files yet)"
+    if auto_lines:
+        body += "\n\n### Automations (scheduled tasks)\n" + "\n".join(auto_lines)
 
     return (
         "## Workspace contents\n"
         "A map of everything in this workspace. Use it to decide what to look "
         "up — the user can @-mention an item or ask you to use one. This is a "
         "catalog of what exists and where, not the content itself.\n\n"
-        + "\n".join(lines)
+        + body
     )
 
 
@@ -2224,6 +2580,30 @@ def mark_memory_refreshed(workspace_id: uuid.UUID) -> None:
     _last_memory_run[str(workspace_id)] = time.monotonic()
 
 
+async def _record_memory_attempt(
+    db: AsyncSession,
+    ws: Workspace,
+    *,
+    status: str,
+    error: str | None = None,
+) -> None:
+    """Stamp the outcome of a memory-regeneration attempt on the workspace row.
+
+    ``status`` ∈ {"ok", "failed", "skipped"}. Previously every soft-fail was a
+    silent ``return None`` — the overview Memory card then showed a stale
+    "Updated 3 days ago" with no hint the last refresh actually broke. Now the
+    card can render "last refresh failed" from these fields. Best-effort: a
+    commit failure here must never mask the real (in-progress) work, so it's
+    swallowed."""
+    ws.memory_last_status = status
+    ws.memory_last_error = (error or None) if status == "failed" else None
+    ws.memory_last_attempt_at = datetime.now(timezone.utc)
+    try:
+        await db.commit()
+    except Exception:  # noqa: BLE001 - status bookkeeping is best-effort
+        await db.rollback()
+
+
 async def regenerate_workspace_memory(
     db: AsyncSession,
     *,
@@ -2258,9 +2638,21 @@ async def regenerate_workspace_memory(
         or (fallback_conv.model_id if fallback_conv else None)
     )
     if not mem_provider_id or not mem_model_id:
+        await _record_memory_attempt(
+            db,
+            ws,
+            status="skipped",
+            error="No memory or default model is configured.",
+        )
         return None, 0
     provider = await db.get(ModelProvider, mem_provider_id)
     if provider is None or not provider.enabled:
+        await _record_memory_attempt(
+            db,
+            ws,
+            status="failed",
+            error="The workspace's memory model provider is unavailable.",
+        )
         return None, 0
 
     recent_convs = list(
@@ -2335,8 +2727,10 @@ async def regenerate_workspace_memory(
                 break
         docs_text = "".join(buf).strip()
 
-    # Nothing to distil from — no usable chats and no documents.
+    # Nothing to distil from — no usable chats and no documents. Not a
+    # failure: an empty/quiet workspace simply has nothing to summarise yet.
     if not excerpts and not docs_text:
+        await _record_memory_attempt(db, ws, status="skipped")
         return None, 0
 
     # Load the current memory doc (if any) so the librarian *updates* it —
@@ -2388,13 +2782,28 @@ async def regenerate_workspace_memory(
         memo = "".join(chunks).strip()
     except Exception:  # noqa: BLE001 - ProviderError or any other failure
         logger.debug("workspace-memory: merge call failed for workspace %s", ws.id)
+        await _record_memory_attempt(
+            db,
+            ws,
+            status="failed",
+            error="The memory model failed to respond.",
+        )
         return None, 0
 
     if not memo:
+        await _record_memory_attempt(
+            db,
+            ws,
+            status="failed",
+            error="The memory model returned an empty result.",
+        )
         return None, 0
 
     owner = await db.get(User, ws.user_id)
     if owner is None:
+        await _record_memory_attempt(
+            db, ws, status="failed", error="Workspace owner not found."
+        )
         return None, 0
 
     conv_count = len(recent_convs)
@@ -2425,6 +2834,9 @@ async def regenerate_workspace_memory(
             source_kind=WORKSPACE_MEMORY_SOURCE_KIND,
         )
     except GeneratedFileError:
+        await _record_memory_attempt(
+            db, ws, status="failed", error="Couldn't save the memory file."
+        )
         return None, 0
 
     # Set ``content_text`` directly so the doc reads back correctly even when
@@ -2441,6 +2853,10 @@ async def regenerate_workspace_memory(
         )
         await db.delete(existing)
     ws.updated_at = datetime.now(timezone.utc)
+    # Success — clear any prior failure marker and stamp the attempt.
+    ws.memory_last_status = "ok"
+    ws.memory_last_error = None
+    ws.memory_last_attempt_at = datetime.now(timezone.utc)
     await db.commit()
     return new_uf.id, conv_count
 

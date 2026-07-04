@@ -181,6 +181,12 @@ export interface WorkspaceMemory {
   updated_at: string | null;
   auto_memory_enabled: boolean;
   memory_mode: WorkspaceMemoryMode;
+  /** Outcome of the last regeneration attempt (Phase 10): "ok" | "failed" |
+   *  "skipped" | null (never attempted). Lets the overview card flag a broken
+   *  auto-refresh instead of silently showing a stale timestamp. */
+  last_status: "ok" | "failed" | "skipped" | null;
+  last_error: string | null;
+  last_attempt_at: string | null;
 }
 
 /** A board's coloured label, defined once per board and referenced by id

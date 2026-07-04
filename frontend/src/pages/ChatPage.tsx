@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Ghost,
   GitBranch,
+  Loader2,
   Zap,
 } from "lucide-react";
 
@@ -1408,11 +1409,13 @@ function WorkspaceBreadcrumb({
 }) {
   const navigate = useNavigate();
   const { data: workspace } = useWorkspace(workspaceId);
+  const indexing = workspace?.indexing_count ?? 0;
   if (embedded) {
-    if (!workspace?.retrieval_active) return null;
+    if (!workspace?.retrieval_active && indexing === 0) return null;
     return (
       <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-1.5 text-xs">
-        <RetrievalBadge />
+        {workspace?.retrieval_active && <RetrievalBadge />}
+        {indexing > 0 && <IndexingBadge count={indexing} />}
       </div>
     );
   }
@@ -1447,7 +1450,23 @@ function WorkspaceBreadcrumb({
         </span>
       </span>
       {workspace?.retrieval_active && <RetrievalBadge />}
+      {indexing > 0 && <IndexingBadge count={indexing} />}
     </div>
+  );
+}
+
+/** Subtle "still indexing" chip so a workspace chat that returns a thin,
+ *  no-context answer isn't a mystery — the pinned file just hasn't finished
+ *  embedding yet. Driven by ``indexing_count`` (queued/embedding files). */
+function IndexingBadge({ count }: { count: number }) {
+  return (
+    <span
+      title={`${count} workspace file${count === 1 ? "" : "s"} still indexing — they'll join this chat's context once ready`}
+      className="inline-flex items-center gap-1 rounded-full bg-[var(--hover-strong)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]"
+    >
+      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+      {count} indexing
+    </span>
   );
 }
 

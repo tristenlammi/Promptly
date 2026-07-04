@@ -9,7 +9,15 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +47,22 @@ router = APIRouter()
 # T.4 will promote this to an admin-tunable cap; a constant keeps a
 # single user from spawning unbounded background spend in the meantime.
 MAX_TASKS_PER_USER = 25
+
+
+def _reindex_automations(
+    background: BackgroundTasks, *workspace_ids: uuid.UUID | None
+) -> None:
+    """Re-embed a workspace's automations index after a task definition
+    changes (Phase 10). No-op for top-level tasks (no workspace). De-dupes
+    ids so a move between workspaces reindexes each side once."""
+    from app.workspaces.knowledge import index_automations_for_workspace
+
+    seen: set[uuid.UUID] = set()
+    for wid in workspace_ids:
+        if wid is None or wid in seen:
+            continue
+        seen.add(wid)
+        background.add_task(index_automations_for_workspace, wid)
 
 
 async def _get_owned_task(task_id: uuid.UUID, user: User, db: AsyncSession) -> Task:
@@ -241,6 +265,7 @@ async def available_connectors(
 @router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(
     payload: TaskCreate,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TaskResponse:
@@ -294,6 +319,7 @@ async def create_task(
     await _set_task_connectors(db, task.id, payload.connector_ids)
     await db.commit()
     await db.refresh(task)
+    _reindex_automations(background, task.workspace_id)
     conns = await _connector_ids_for(db, [task.id])
     return _serialize(task, None, conns.get(task.id, []))
 
@@ -314,10 +340,12 @@ async def get_task(
 async def update_task(
     task_id: uuid.UUID,
     payload: TaskUpdate,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TaskResponse:
     task = await _get_owned_task(task_id, user, db)
+    old_workspace_id = task.workspace_id
     data = payload.model_dump(exclude_unset=True)
     # ``connector_ids`` is a join, not a column — handle separately.
     connector_ids = data.pop("connector_ids", None)
@@ -343,6 +371,7 @@ async def update_task(
         await _set_task_connectors(db, task.id, connector_ids)
     await db.commit()
     await db.refresh(task)
+    _reindex_automations(background, old_workspace_id, task.workspace_id)
     latest = await _latest_runs(db, [task.id])
     conns = await _connector_ids_for(db, [task.id])
     return _serialize(task, latest.get(task.id), conns.get(task.id, []))
@@ -355,12 +384,15 @@ async def update_task(
 )
 async def delete_task(
     task_id: uuid.UUID,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
     task = await _get_owned_task(task_id, user, db)
+    workspace_id = task.workspace_id
     await db.delete(task)
     await db.commit()
+    _reindex_automations(background, workspace_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -405,6 +437,7 @@ async def get_task_graph(
 async def put_task_graph(
     task_id: uuid.UUID,
     graph: FlowGraph,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FlowGraph:
@@ -420,12 +453,14 @@ async def put_task_graph(
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(task)
+    _reindex_automations(background, task.workspace_id)
     return await load_or_derive_graph(db, task)
 
 
 @router.post("/{task_id}/promote", response_model=FlowGraph)
 async def promote_task_to_advanced(
     task_id: uuid.UUID,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FlowGraph:
@@ -433,6 +468,7 @@ async def promote_task_to_advanced(
     graph = await promote_task(db, task)
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
+    _reindex_automations(background, task.workspace_id)
     return graph
 
 

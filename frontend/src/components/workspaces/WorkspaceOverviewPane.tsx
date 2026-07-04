@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Brain,
   CheckSquare,
   ChevronRight,
@@ -587,6 +588,19 @@ function MemoryCard({
             )}
           </span>
         </div>
+        {!off && memory.last_status === "failed" && (
+          <div className="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-xs text-[var(--danger)]">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Last refresh failed
+              {memory.last_attempt_at
+                ? ` ${formatRelativeTime(memory.last_attempt_at)}`
+                : ""}
+              {memory.last_error ? ` — ${memory.last_error}` : "."}
+              {canEdit ? " Check the memory model in Settings, then try again." : ""}
+            </span>
+          </div>
+        )}
         {!off && memory.exists && memory.markdown.trim() && (
           <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-[var(--text-muted)]">
             {memoryPreview(memory.markdown)}
