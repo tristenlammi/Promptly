@@ -347,6 +347,8 @@ async def update_task(
     old_due = task.due_at
     old_assignee = task.assignee_user_id
     old_priority = task.priority
+    old_title = task.title
+    old_description = task.description
 
     if payload.title is not None:
         task.title = payload.title.strip()
@@ -418,6 +420,17 @@ async def update_task(
     if payload.priority is not None and task.priority != old_priority:
         _log_activity(
             db, task.id, user.id, f"set priority to {task.priority}"
+        )
+    if payload.title is not None and task.title != old_title:
+        _log_activity(db, task.id, user.id, f"renamed the card to “{task.title}”")
+    if "description" in sent and task.description != old_description:
+        _log_activity(
+            db,
+            task.id,
+            user.id,
+            "cleared the description"
+            if not task.description
+            else "updated the description",
         )
 
     await db.commit()

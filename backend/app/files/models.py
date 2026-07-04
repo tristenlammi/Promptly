@@ -278,6 +278,60 @@ class DocumentState(Base):
         return f"<DocumentState file={self.file_id} v={self.version}>"
 
 
+class DocumentVersion(UUIDPKMixin, Base):
+    """A point-in-time HTML snapshot of a Drive Document (Phase 9).
+
+    Captured on the collab snapshot path (throttled + content-hash
+    deduped so a burst of idle-flushes doesn't store dozens of near-
+    identical rows) and on every explicit manual save. Restore is a
+    client-side operation (``editor.setContent`` of a version's HTML,
+    which flows back through Yjs) so the backend only stores + serves
+    these — no CRDT surgery.
+
+    ``content_hash`` lets capture skip an unchanged snapshot; the row
+    count per document is capped (oldest auto-versions pruned) so a
+    long-lived doc can't grow versions unbounded.
+
+    Added in migration ``0130_document_versions``.
+    """
+
+    __tablename__ = "document_versions"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Full sanitised HTML at capture time.
+    html: Mapped[str] = mapped_column(Text, nullable=False)
+    # Plain text preview (first-N chars rendered client-side).
+    plain_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Who triggered this version. NULL for collab-path auto-captures
+    # (the snapshot POST is authenticated by the internal bearer, not a
+    # user) and when the author account is later deleted.
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # ``auto`` (collab snapshot), ``manual`` (explicit save), or
+    # ``restore`` (a restore's resulting save).
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'auto'")
+    )
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentVersion file={self.file_id} at={self.created_at}>"
+
+
 class ResourceGrant(UUIDPKMixin, CreatedAtMixin, Base):
     """Per-user access grant on a Drive file or folder.
 

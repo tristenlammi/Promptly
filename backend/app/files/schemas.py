@@ -454,6 +454,34 @@ class ManualDocumentSaveRequest(BaseModel):
     # comfortably more than the editor will ever produce in a
     # legitimate session.
     html: str = Field(default="", max_length=4 * 1024 * 1024)
+    # ``"restore"`` when this save is the result of restoring a version,
+    # so the captured version is tagged distinctly. Defaults to a normal
+    # manual save.
+    source: str | None = Field(default=None, max_length=16)
+
+
+# --------------------------------------------------------------------
+# Document version history (Phase 9)
+# --------------------------------------------------------------------
+class DocumentVersionMeta(BaseModel):
+    """List-row metadata for a document version (no HTML body)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    size_bytes: int
+    source: str
+    author_username: str | None = None
+    preview: str = ""
+
+
+class DocumentVersionContent(BaseModel):
+    """Full HTML of one version — for preview + client-side restore."""
+
+    id: uuid.UUID
+    created_at: datetime
+    html: str
 
 
 # --------------------------------------------------------------------

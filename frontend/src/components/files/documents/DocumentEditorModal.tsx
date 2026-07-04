@@ -9,6 +9,7 @@ import {
   FileCode,
   FileDown,
   FileText,
+  History,
   Loader2,
   MoveHorizontal,
   Save,
@@ -18,6 +19,7 @@ import {
 import { filesApi, type FileItem } from "@/api/files";
 import { documentsApi, type DocumentDownloadFormat } from "@/api/documents";
 import { useQueryClient } from "@tanstack/react-query";
+import { DocumentHistoryPanel } from "./DocumentHistoryPanel";
 import { cn } from "@/utils/cn";
 import {
   NOTE_WIDTH_CLASS,
@@ -93,6 +95,7 @@ export function DocumentEditorModal({
   const cycleNoteWidth = useNoteWidthStore((s) => s.cycle);
 
   const [filename, setFilename] = useState(() => splitDocExt(file.filename).base);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [renameError, setRenameError] = useState<string | null>(null);
   // Wall-clock timestamp of the last successful manual save. Drives
@@ -632,9 +635,9 @@ export function DocumentEditorModal({
   // Inline mode fills its parent (no modal inset / rounding / shadow);
   // modal mode keeps the centred, rounded, shadowed card on a backdrop.
   const cardClass = inline
-    ? "flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg)]"
+    ? "relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg)]"
     : cn(
-        "flex flex-1 flex-col overflow-hidden bg-[var(--bg)]",
+        "relative flex flex-1 flex-col overflow-hidden bg-[var(--bg)]",
         "md:mx-auto md:w-full md:max-w-6xl md:rounded-2xl md:border md:border-[var(--border)] md:shadow-2xl"
       );
 
@@ -718,6 +721,22 @@ export function DocumentEditorModal({
             <span className="hidden sm:inline">Save</span>
           </button>
         )}
+
+        {/* Version history (Phase 9). Available to anyone who can read the
+            doc; restore is gated to editors inside the panel. */}
+        <button
+          type="button"
+          onClick={() => setHistoryOpen(true)}
+          aria-label="Version history"
+          title="Version history"
+          className={cn(
+            "inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm transition",
+            "text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
+          )}
+        >
+          <History className="h-4 w-4" />
+          <span className="hidden lg:inline">History</span>
+        </button>
 
         {/* Format-aware download menu. Three options (HTML / MD /
             PDF) all hit ``GET /api/documents/:id/download`` which
@@ -897,6 +916,29 @@ export function DocumentEditorModal({
           </div>
         )}
       </div>
+
+      {historyOpen && (
+        <DocumentHistoryPanel
+          documentId={file.id}
+          canEdit={canEdit}
+          onClose={() => setHistoryOpen(false)}
+          onRestore={async (html) => {
+            // Set the live editor content — this emits an update that
+            // flows through the Collaboration extension → Yjs → peers +
+            // the snapshot path, so the restore persists everywhere. A
+            // manual save (tagged "restore") captures it as a version.
+            // TipTap v2 signature: setContent(content, emitUpdate).
+            editor?.commands.setContent(html, true);
+            try {
+              await documentsApi.manualSave(file.id, html, "restore");
+            } catch {
+              // The Yjs sync already persisted the content; a failed
+              // explicit save just means no distinct "restore" version
+              // marker. Non-fatal.
+            }
+          }}
+        />
+      )}
       </div>
   );
 

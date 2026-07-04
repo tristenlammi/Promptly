@@ -53,7 +53,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from jose import JWTError, jwt
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -67,7 +67,12 @@ from app.files.document_render import (
     sanitize_document_html,
 )
 from app.files.generated_kinds import GeneratedKind
-from app.files.models import DocumentState, FileFolder, UserFile
+from app.files.models import (
+    DocumentState,
+    DocumentVersion,
+    FileFolder,
+    UserFile,
+)
 from app.files.quota import get_quota
 from app.files.safety import (
     UnsafeUploadError,
@@ -81,6 +86,8 @@ from app.files.schemas import (
     CollabTokenUser,
     DocumentAssetResponse,
     DocumentCreateRequest,
+    DocumentVersionContent,
+    DocumentVersionMeta,
     FileResponse as FileResponseSchema,
     ManualDocumentSaveRequest,
     Scope,
@@ -467,6 +474,88 @@ async def get_collab_token(
 
 
 # --------------------------------------------------------------------
+# Version history capture (Phase 9)
+# --------------------------------------------------------------------
+# At most one *auto* (collab-path) version per document in this window —
+# the collab server flushes every few idle seconds, so without a throttle
+# an active editing session would spawn dozens of near-identical rows.
+_AUTO_VERSION_MIN_INTERVAL_S = 180.0
+# Keep at most this many versions per document; oldest auto rows pruned.
+_MAX_VERSIONS_PER_DOC = 50
+
+
+async def _capture_document_version(
+    db: AsyncSession,
+    *,
+    file_id: uuid.UUID,
+    html: str,
+    plain_text: str | None,
+    author_user_id: uuid.UUID | None,
+    source: str,
+) -> None:
+    """Append a version row for ``file_id`` (best-effort; never raises).
+
+    ``manual`` / ``restore`` sources always capture. ``auto`` (collab)
+    captures only when the content changed AND the newest version is
+    older than the throttle window. Prunes to ``_MAX_VERSIONS_PER_DOC``.
+    """
+    try:
+        content_hash = hashlib.sha256(html.encode("utf-8")).hexdigest()
+        latest = (
+            await db.execute(
+                select(DocumentVersion)
+                .where(DocumentVersion.file_id == file_id)
+                .order_by(DocumentVersion.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if latest is not None and latest.content_hash == content_hash:
+            return  # unchanged — nothing to record
+        if source == "auto" and latest is not None:
+            age = (
+                datetime.now(timezone.utc) - latest.created_at
+            ).total_seconds()
+            if age < _AUTO_VERSION_MIN_INTERVAL_S:
+                return  # too soon for another auto-snapshot
+
+        db.add(
+            DocumentVersion(
+                file_id=file_id,
+                html=html,
+                plain_text=(plain_text or None),
+                size_bytes=len(html.encode("utf-8")),
+                content_hash=content_hash,
+                author_user_id=author_user_id,
+                source=source,
+            )
+        )
+        await db.flush()
+
+        # Prune oldest beyond the cap so history stays bounded.
+        ids = (
+            (
+                await db.execute(
+                    select(DocumentVersion.id)
+                    .where(DocumentVersion.file_id == file_id)
+                    .order_by(DocumentVersion.created_at.desc())
+                    .offset(_MAX_VERSIONS_PER_DOC)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for old_id in ids:
+            await db.execute(
+                sa_delete(DocumentVersion).where(DocumentVersion.id == old_id)
+            )
+        await db.commit()
+    except Exception:  # noqa: BLE001 — versioning must never break a save
+        logger.exception("Failed to capture document version for %s", file_id)
+        await db.rollback()
+
+
+# --------------------------------------------------------------------
 # POST /api/documents/{id}/snapshot — internal snapshot writer
 # --------------------------------------------------------------------
 def _verify_collab_internal_caller(authorization: str | None) -> None:
@@ -553,6 +642,18 @@ async def write_snapshot(
 
     await db.commit()
 
+    # Capture a version (throttled + deduped inside). The collab POST is
+    # authenticated by the internal bearer, not a user, so authorship is
+    # unknown here → NULL author.
+    await _capture_document_version(
+        db,
+        file_id=document_id,
+        html=html_text,
+        plain_text=plain_text,
+        author_user_id=None,
+        source="auto",
+    )
+
     # If this document backs a workspace note, (re)index it so workspace
     # chats stay grounded in the note's latest content. Local imports keep
     # the workspace layer out of the generic documents import graph.
@@ -634,7 +735,96 @@ async def manual_save_document(
 
     await db.commit()
     await db.refresh(row)
+
+    # Explicit saves always version (dedup still skips a no-op re-save).
+    # ``source`` lets a client-side restore tag its resulting save.
+    await _capture_document_version(
+        db,
+        file_id=document_id,
+        html=html_text,
+        plain_text=plain_text,
+        author_user_id=user.id,
+        source="restore" if body.source == "restore" else "manual",
+    )
     return _file_to_response(row, caller=user)
+
+
+# --------------------------------------------------------------------
+# GET /api/documents/{id}/versions — list version history
+# --------------------------------------------------------------------
+@router.get(
+    "/{document_id}/versions",
+    response_model=list[DocumentVersionMeta],
+)
+async def list_document_versions(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[DocumentVersionMeta]:
+    """Version metadata (no HTML), newest first. Readable by anyone who
+    can read the document."""
+    row = await _load_document(db, document_id, user)
+    versions = (
+        (
+            await db.execute(
+                select(DocumentVersion)
+                .where(DocumentVersion.file_id == row.id)
+                .order_by(DocumentVersion.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Resolve author usernames in one pass.
+    author_ids = {v.author_user_id for v in versions if v.author_user_id}
+    names: dict[uuid.UUID, str] = {}
+    if author_ids:
+        rows = (
+            await db.execute(
+                select(User.id, User.username).where(User.id.in_(author_ids))
+            )
+        ).all()
+        names = {uid: uname for uid, uname in rows}
+    return [
+        DocumentVersionMeta(
+            id=v.id,
+            created_at=v.created_at,
+            size_bytes=v.size_bytes,
+            source=v.source,
+            author_username=(
+                names.get(v.author_user_id) if v.author_user_id else None
+            ),
+            preview=(v.plain_text or "")[:160],
+        )
+        for v in versions
+    ]
+
+
+# --------------------------------------------------------------------
+# GET /api/documents/{id}/versions/{version_id} — full version HTML
+# --------------------------------------------------------------------
+@router.get(
+    "/{document_id}/versions/{version_id}",
+    response_model=DocumentVersionContent,
+)
+async def get_document_version(
+    document_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DocumentVersionContent:
+    """Full sanitised HTML of one version (for preview + restore)."""
+    row = await _load_document(db, document_id, user)
+    version = await db.get(DocumentVersion, version_id)
+    if version is None or version.file_id != row.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Version not found"
+        )
+    return DocumentVersionContent(
+        id=version.id,
+        created_at=version.created_at,
+        html=version.html,
+    )
 
 
 # --------------------------------------------------------------------

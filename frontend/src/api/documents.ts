@@ -40,6 +40,23 @@ export interface DocumentAsset {
   url: string;
 }
 
+/** One row in the version-history list (metadata only, no HTML). */
+export interface DocumentVersionMeta {
+  id: string;
+  created_at: string;
+  size_bytes: number;
+  /** "auto" (collab snapshot), "manual" (explicit save), "restore". */
+  source: string;
+  author_username: string | null;
+  preview: string;
+}
+
+export interface DocumentVersionContent {
+  id: string;
+  created_at: string;
+  html: string;
+}
+
 export const documentsApi = {
   async create(payload: DocumentCreatePayload = {}): Promise<FileItem> {
     const { data } = await apiClient.post<FileItem>("/documents", payload);
@@ -64,10 +81,33 @@ export const documentsApi = {
    *  HTML through this side door. Returns the freshly-saved
    *  ``FileItem`` so the caller can refresh its size + updated_at.
    */
-  async manualSave(documentId: string, html: string): Promise<FileItem> {
+  async manualSave(
+    documentId: string,
+    html: string,
+    source?: "restore"
+  ): Promise<FileItem> {
     const { data } = await apiClient.post<FileItem>(
       `/documents/${documentId}/save`,
-      { html }
+      { html, source }
+    );
+    return data;
+  },
+
+  /** Version history (Phase 9) — metadata list, newest first. */
+  async listVersions(documentId: string): Promise<DocumentVersionMeta[]> {
+    const { data } = await apiClient.get<DocumentVersionMeta[]>(
+      `/documents/${documentId}/versions`
+    );
+    return data;
+  },
+
+  /** Full HTML of one version, for preview + restore. */
+  async getVersion(
+    documentId: string,
+    versionId: string
+  ): Promise<DocumentVersionContent> {
+    const { data } = await apiClient.get<DocumentVersionContent>(
+      `/documents/${documentId}/versions/${versionId}`
     );
     return data;
   },
