@@ -3700,6 +3700,18 @@ async def _stream_generator(
             # doesn't reach the triggering message: use the flat scan.
             history_rows = list(all_rows)
 
+        # The triggering user turn's text — the retrieval query for BOTH the
+        # workspace-injection path and the conversation attachment-RAG path.
+        # Defined unconditionally here: the workspace block below only runs for
+        # workspace chats, but attachment-RAG runs for every chat, so leaving
+        # this scoped inside the workspace branch left it unbound in a plain
+        # chat (UnboundLocalError → attachment retrieval silently skipped, so
+        # an indexed attachment's content never reached the model).
+        triggering_text = next(
+            (m.content for m in history_rows if m.id == triggering_user_msg_id),
+            "",
+        )
+
         # Look up vision support for the currently selected model so we
         # know whether to actually feed image bytes or fall back to a
         # textual marker + warning. Falls open (False) if the catalog row
@@ -3762,14 +3774,8 @@ async def _stream_generator(
                     build_workspace_injection,
                 )
 
-                triggering_text = next(
-                    (
-                        m.content
-                        for m in history_rows
-                        if m.id == triggering_user_msg_id
-                    ),
-                    "",
-                )
+                # ``triggering_text`` is computed once above (used by both the
+                # workspace-injection and attachment-RAG retrieval queries).
                 # Per-chat opt-outs: files this conversation has excluded
                 # from the workspace's shared set.
                 excluded_ids = set(
