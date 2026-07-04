@@ -1034,9 +1034,11 @@ export function ChatPage({
 
   // Raw (possibly null) title — EditableTitle handles the placeholder.
   const rawTitle = conversation?.title ?? null;
-  const subtitle = selectedModel
-    ? `${selectedModel.display_name} · ${selectedModel.provider_name}`
-    : "No model selected";
+  // The model selector pill in the header actions is the single source of
+  // model identity — repeating it as a subtitle (and again in the empty
+  // state) had the name on screen three times. Subtitle only carries the
+  // attention-worthy "nothing configured" case.
+  const subtitle = selectedModel ? undefined : "No model selected";
 
   // Show the live chat pane whenever the store has any messages (including
   // optimistic ones) or we're mid-stream. Falling back to the server-side
@@ -1174,6 +1176,7 @@ export function ChatPage({
             <WorkspaceBreadcrumb
               workspaceId={conversation.workspace_id}
               onBack={onExitToWorkspace}
+              embedded={embedded}
             />
           )}
           {/* Context-window UI (pill + warning banner) is desktop-only
@@ -1222,7 +1225,6 @@ export function ChatPage({
             <div className="flex flex-1 items-center justify-center">
               <EmptyState
                 hasModel={Boolean(selectedModel)}
-                modelName={selectedModel?.display_name ?? null}
                 workspaceId={conversation?.workspace_id ?? null}
                 onSuggestion={(s) => handleSend(s)}
               />
@@ -1392,20 +1394,34 @@ interface BranchBannerProps {
 function WorkspaceBreadcrumb({
   workspaceId,
   onBack,
+  embedded = false,
 }: {
   workspaceId: string;
   /** When embedded in the workspace shell, return to the workspace home
    *  in-place instead of navigating to the (already-current) route. */
   onBack?: () => void;
+  /** True when the chat renders inside the workspace shell, where the
+   *  navigator's Home button and the TopNav already provide the "back"
+   *  path and the workspace name — repeating them here read as a bug.
+   *  Embedded mode keeps only the retrieval badge (or nothing). */
+  embedded?: boolean;
 }) {
   const navigate = useNavigate();
   const { data: workspace } = useWorkspace(workspaceId);
-  // Explicit "back to workspace" affordance rather than a subtle
-  // breadcrumb link. Chats inside a workspace now carry the workspace's
-  // shared context (system prompt, files, references, collaborators),
-  // so the round-trip back to the workspace detail page — where all
-  // sibling chats live — is a core navigation step users expect to
-  // find with no hunting.
+  if (embedded) {
+    if (!workspace?.retrieval_active) return null;
+    return (
+      <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-1.5 text-xs">
+        <RetrievalBadge />
+      </div>
+    );
+  }
+  // Standalone chat route: an explicit "back to workspace" affordance
+  // rather than a subtle breadcrumb link. Chats inside a workspace carry
+  // the workspace's shared context (system prompt, files, references,
+  // collaborators), so the round-trip back to the workspace detail page —
+  // where all sibling chats live — is a core navigation step users expect
+  // to find with no hunting.
   return (
     <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs">
       <button
@@ -1430,16 +1446,20 @@ function WorkspaceBreadcrumb({
           {workspace?.title ?? "Workspace"}
         </span>
       </span>
-      {workspace?.retrieval_active && (
-        <span
-          title="This workspace uses semantic retrieval — only the most relevant chunks are included in context each turn"
-          className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
-        >
-          <Zap className="h-2.5 w-2.5" />
-          Retrieval on
-        </span>
-      )}
+      {workspace?.retrieval_active && <RetrievalBadge />}
     </div>
+  );
+}
+
+function RetrievalBadge() {
+  return (
+    <span
+      title="This workspace uses semantic retrieval — only the most relevant chunks are included in context each turn"
+      className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+    >
+      <Zap className="h-2.5 w-2.5" />
+      Retrieval on
+    </span>
   );
 }
 

@@ -93,13 +93,15 @@ export function WorkspaceOverviewPane({
   // and nothing silently omitted on one that does. Open tasks is always
   // shown as the headline action metric.
   const contentStats = [
-    { label: "Notes", value: counts?.notes ?? 0 },
-    { label: "Canvases", value: counts?.canvases ?? 0 },
-    { label: "Boards", value: counts?.boards ?? 0 },
-    { label: "Sheets", value: counts?.sheets ?? 0 },
-    { label: "Files", value: counts?.files ?? 0 },
-    { label: "Chats", value: counts?.chats ?? 0 },
-  ].filter((s) => s.value > 0);
+    { one: "Note", many: "Notes", value: counts?.notes ?? 0 },
+    { one: "Canvas", many: "Canvases", value: counts?.canvases ?? 0 },
+    { one: "Board", many: "Boards", value: counts?.boards ?? 0 },
+    { one: "Sheet", many: "Sheets", value: counts?.sheets ?? 0 },
+    { one: "File", many: "Files", value: counts?.files ?? 0 },
+    { one: "Chat", many: "Chats", value: counts?.chats ?? 0 },
+  ]
+    .filter((s) => s.value > 0)
+    .map((s) => ({ label: s.value === 1 ? s.one : s.many, value: s.value }));
 
   return (
     <div className="mx-auto w-full max-w-4xl px-6 py-8">
@@ -135,7 +137,11 @@ export function WorkspaceOverviewPane({
         {contentStats.map((s) => (
           <StatCard key={s.label} label={s.label} value={s.value} />
         ))}
-        <StatCard label="Open tasks" value={openTaskCount} accent />
+        <StatCard
+          label={openTaskCount === 1 ? "Open task" : "Open tasks"}
+          value={openTaskCount}
+          accent
+        />
       </div>
 
       {/* Workspace drive — upload photos/documents, RAG-indexed on add */}

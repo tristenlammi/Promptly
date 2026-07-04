@@ -20,16 +20,25 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import Workspace, WorkspaceShare
+from app.chat.models import Workspace, WorkspaceFile, WorkspaceShare
 from app.chat.shares import ShareUserBrief, _brief, _resolve_invitee
 from app.database import get_db
+from app.files.models import UserFile
+from app.workspaces.knowledge import delete_workspace_file_chunks
 
 logger = logging.getLogger("promptly.workspaces.shares")
 router = APIRouter()
@@ -321,6 +330,7 @@ async def create_workspace_share(
 async def revoke_workspace_share(
     workspace_id: uuid.UUID,
     share_id: uuid.UUID,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -329,6 +339,10 @@ async def revoke_workspace_share(
     Hard-deletes the row. The unique ``(workspace_id, invitee_user_id)``
     constraint means a follow-up invite starts cleanly as
     ``pending`` rather than surfacing a stale ``accepted`` row.
+
+    Files the departing member owns are unpinned and their workspace
+    chunks purged — otherwise their content would stay retrievable (and
+    visible in the pinned list) for the remaining members after they left.
     """
     share = await db.get(WorkspaceShare, share_id)
     if share is None or share.workspace_id != workspace_id:
@@ -346,8 +360,41 @@ async def revoke_workspace_share(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Share not found"
         )
+
+    # Unpin every workspace file whose backing Drive file belongs to the
+    # departing member (covers their uploads and their auto-managed
+    # chat-context files). Chunk deletion runs post-commit — it owns its
+    # own session.
+    member_pins = (
+        (
+            await db.execute(
+                select(WorkspaceFile)
+                .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+                .where(
+                    WorkspaceFile.workspace_id == workspace_id,
+                    UserFile.user_id == share.invitee_user_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    purged_file_ids = [p.file_id for p in member_pins]
+    for pin in member_pins:
+        await db.delete(pin)
+
     await db.delete(share)
     await db.commit()
+
+    if purged_file_ids:
+        logger.info(
+            "workspace %s: purging %d pinned file(s) owned by departing member %s",
+            workspace_id,
+            len(purged_file_ids),
+            share.invitee_user_id,
+        )
+    for fid in purged_file_ids:
+        background.add_task(delete_workspace_file_chunks, workspace_id, fid)
 
 
 # ====================================================================

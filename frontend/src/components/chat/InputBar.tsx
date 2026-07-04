@@ -1064,7 +1064,11 @@ export function InputBar({
                   value.trim().length === 0 ||
                   enhanceStatus === "loading"
                 }
-                title="Enhance prompt — rewrite for a sharper answer"
+                title={
+                  value.trim().length === 0
+                    ? "Enhance prompt — type a message first"
+                    : "Enhance prompt — rewrite for a sharper answer"
+                }
                 className={cn(
                   "inline-flex items-center rounded-full border transition",
                   "disabled:cursor-not-allowed disabled:opacity-50",
@@ -1130,11 +1134,14 @@ export function InputBar({
                   )}
                   {!isMobile && (
                     <span className="font-medium">
+                      {/* "Dictate", not "Voice" — sitting next to the
+                          voice-mode "Talk" button, two voice-ish labels
+                          were a coin flip for new users. */}
                       {dictation.isRecording
                         ? "Stop"
                         : dictation.status === "transcribing"
                           ? "Transcribing…"
-                          : "Voice"}
+                          : "Dictate"}
                     </span>
                   )}
                 </button>
@@ -1494,6 +1501,11 @@ function ComposerMoreMenu({
                   onResearch!();
                 }}
                 disabled={researchDisabled}
+                title={
+                  researchDisabled
+                    ? "Type your research question in the message box first"
+                    : undefined
+                }
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition",
                   "hover:bg-[var(--accent)]/[0.08]",
@@ -1506,7 +1518,9 @@ function ComposerMoreMenu({
                     Deep Research
                   </span>
                   <span className="block text-xs leading-snug text-[var(--text-muted)]">
-                    Multi-source investigation with cited report.
+                    {researchDisabled
+                      ? "Type your question below, then start a research run."
+                      : "Multi-source investigation with cited report."}
                   </span>
                 </span>
               </button>

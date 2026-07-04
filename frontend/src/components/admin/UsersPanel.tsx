@@ -195,6 +195,12 @@ export function UsersPanel() {
   const noMfaCount = (users ?? []).filter(
     (u) => !u.mfa_enrolled_method
   ).length;
+  // The "N without MFA" pill doubles as a filter toggle so an admin can act
+  // on the list it summarises instead of scanning the table for the chips.
+  const [showNoMfaOnly, setShowNoMfaOnly] = useState(false);
+  const visibleUsers = showNoMfaOnly
+    ? (users ?? []).filter((u) => !u.mfa_enrolled_method)
+    : users;
 
   return (
     <>
@@ -211,9 +217,24 @@ export function UsersPanel() {
             </Pill>
           )}
           {noMfaCount > 0 && (
-            <Pill tone="warn" icon={<ShieldAlert className="h-3 w-3" />}>
-              {noMfaCount} without MFA
-            </Pill>
+            <button
+              type="button"
+              onClick={() => setShowNoMfaOnly((v) => !v)}
+              aria-pressed={showNoMfaOnly}
+              title={
+                showNoMfaOnly
+                  ? "Showing only users without multi-factor authentication — click to show everyone"
+                  : "These users haven't enrolled in multi-factor authentication — click to filter the list to them"
+              }
+              className={cn(
+                "rounded-full transition",
+                showNoMfaOnly && "ring-2 ring-amber-500/60"
+              )}
+            >
+              <Pill tone="warn" icon={<ShieldAlert className="h-3 w-3" />}>
+                {noMfaCount} without MFA
+              </Pill>
+            </button>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -297,7 +318,7 @@ export function UsersPanel() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {(visibleUsers ?? []).map((u) => (
                 <UserRow
                   key={u.id}
                   user={u}

@@ -7,6 +7,13 @@
       "runtimeArgs": ["compose", "up", "-d"],
       "port": 8091,
       "autoPort": false
+    },
+    {
+      "name": "promptly-vite",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--config", "vite.preview-claude.config.ts"],
+      "port": 5199,
+      "autoPort": false
     }
   ]
 }

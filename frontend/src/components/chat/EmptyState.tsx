@@ -19,9 +19,6 @@ const WORKSPACE_SUGGESTIONS = [
 interface EmptyStateProps {
   onSuggestion?: (text: string) => void;
   hasModel: boolean;
-  /** Active model's display name — surfaced so the user knows who
-   *  they're about to talk to. */
-  modelName?: string | null;
   /** When this chat belongs to a workspace, the empty state greets with
    *  the workspace name and offers workspace-flavoured starters. */
   workspaceId?: string | null;
@@ -30,7 +27,6 @@ interface EmptyStateProps {
 export function EmptyState({
   onSuggestion,
   hasModel,
-  modelName,
   workspaceId,
 }: EmptyStateProps) {
   const { data: workspace } = useWorkspace(workspaceId ?? undefined);
@@ -59,27 +55,17 @@ export function EmptyState({
       </p>
 
       {hasModel && (
-        <>
-          <div className="mt-6 grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
-            {suggestions.map((s) => (
-              <button
-                key={s}
-                onClick={() => onSuggestion?.(s)}
-                className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left text-sm text-[var(--text)] transition hover:border-[var(--accent)]/50 hover:bg-[var(--hover)]"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-          {modelName && (
-            <p className="mt-5 text-xs text-[var(--text-muted)]">
-              Talking to{" "}
-              <span className="font-medium text-[var(--text)]">
-                {modelName}
-              </span>
-            </p>
-          )}
-        </>
+        <div className="mt-6 grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
+          {suggestions.map((s) => (
+            <button
+              key={s}
+              onClick={() => onSuggestion?.(s)}
+              className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left text-sm text-[var(--text)] transition hover:border-[var(--accent)]/50 hover:bg-[var(--hover)]"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

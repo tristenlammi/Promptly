@@ -129,6 +129,36 @@ async def _next_position(
     return float(current_min or 0.0) - 1.0
 
 
+async def _dedupe_default_title(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    base: str,
+) -> str:
+    """"New folder" → "New folder 2" when a live sibling already holds the
+    name. Only applied to *default* titles — an explicit user-chosen title is
+    respected verbatim (duplicates there are the user's call)."""
+    taken = set(
+        (
+            await db.execute(
+                select(WorkspaceItem.title).where(
+                    WorkspaceItem.workspace_id == workspace_id,
+                    WorkspaceItem.parent_id == parent_id,
+                    WorkspaceItem.archived_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base} {n}" in taken:
+        n += 1
+    return f"{base} {n}"
+
+
 async def _validate_parent(
     db: AsyncSession,
     workspace_id: uuid.UUID,
@@ -386,7 +416,10 @@ async def create_workspace_item(
             parent_id=payload.parent_id,
             kind=payload.kind,
             ref_id=None,
-            title=title or default_title,
+            title=title
+            or await _dedupe_default_title(
+                db, ws.id, payload.parent_id, default_title
+            ),
             position=position,
         )
         db.add(item)
@@ -405,7 +438,9 @@ async def create_workspace_item(
         )
 
     if payload.kind == "note":
-        note_title = title or _DEFAULT_NOTE_TITLE
+        note_title = title or await _dedupe_default_title(
+            db, ws.id, payload.parent_id, _DEFAULT_NOTE_TITLE
+        )
         notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
         doc = await create_blank_document(
             db, owner_id=owner.id, folder_id=notes_folder_id, name=note_title
@@ -424,7 +459,9 @@ async def create_workspace_item(
         # A standalone spreadsheet — its backing entity is a ``Spreadsheet``
         # row (no Drive folder needed). RAG indexing of sheet content is a
         # later phase, so ``indexing_status`` stays NULL for now.
-        sheet_title = title or _DEFAULT_SHEET_TITLE
+        sheet_title = title or await _dedupe_default_title(
+            db, ws.id, payload.parent_id, _DEFAULT_SHEET_TITLE
+        )
         sheet = Spreadsheet(workspace_id=ws.id, title=sheet_title)
         db.add(sheet)
         await db.flush()  # assign sheet.id before the item links to it
@@ -467,7 +504,9 @@ async def create_workspace_item(
         )
         db.add(item)
     else:  # kind == "canvas"
-        canvas_title = title or _DEFAULT_CANVAS_TITLE
+        canvas_title = title or await _dedupe_default_title(
+            db, ws.id, payload.parent_id, _DEFAULT_CANVAS_TITLE
+        )
         canvases_folder_id = await _resolve_subfolder_id(
             db, ws, owner, "Canvases"
         )

@@ -67,6 +67,16 @@ interface DocumentEditorModalProps {
 
 type SaveStatus = "idle" | "dirty" | "syncing" | "saved" | "offline";
 
+/** Documents are stored as ``<name>.html`` / ``.md`` Drive files, but the
+ *  editor title should read like a document name, not a filename — split so
+ *  the extension survives a rename without ever being shown or typed. */
+function splitDocExt(filename: string): { base: string; ext: string } {
+  const m = filename.match(/\.(html?|md)$/i);
+  return m
+    ? { base: filename.slice(0, -m[0].length), ext: m[0] }
+    : { base: filename, ext: "" };
+}
+
 export function DocumentEditorModal({
   file,
   onClose,
@@ -82,7 +92,7 @@ export function DocumentEditorModal({
   const noteWidth = useNoteWidthStore((s) => s.width);
   const cycleNoteWidth = useNoteWidthStore((s) => s.cycle);
 
-  const [filename, setFilename] = useState(file.filename);
+  const [filename, setFilename] = useState(() => splitDocExt(file.filename).base);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [renameError, setRenameError] = useState<string | null>(null);
   // Wall-clock timestamp of the last successful manual save. Drives
@@ -458,21 +468,27 @@ export function DocumentEditorModal({
   }, [provider]);
 
   const handleFilenameBlur = useCallback(async () => {
-    const next = filename.trim();
-    if (!next || next === file.filename) {
-      setFilename(file.filename);
+    const { base, ext } = splitDocExt(file.filename);
+    // Re-attach the hidden storage extension; tolerate a user typing it.
+    const typed = filename.trim();
+    const next = typed && ext && typed.toLowerCase().endsWith(ext.toLowerCase())
+      ? typed
+      : typed + ext;
+    if (!typed || next === file.filename) {
+      setFilename(base);
       return;
     }
     setRenameError(null);
     try {
       const updated = await filesApi.renameFile(file.id, next);
+      setFilename(splitDocExt(updated.filename).base);
       onFileUpdated?.(updated);
       // Keep Drive listings in sync.
       await queryClient.invalidateQueries({ queryKey: ["drive"] });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Rename failed";
       setRenameError(msg);
-      setFilename(file.filename);
+      setFilename(base);
     }
   }, [filename, file.filename, file.id, onFileUpdated, queryClient]);
 

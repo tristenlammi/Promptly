@@ -11,7 +11,15 @@ export function humanSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  const gb = n / (1024 * 1024 * 1024);
+  // Big storage caps ("10000 GB") read better in TB. Trim trailing zeros
+  // so round caps show as "2 TB", not "2.00 TB".
+  if (gb >= 1024) return `${trimZeros((gb / 1024).toFixed(2))} TB`;
+  return `${trimZeros(gb.toFixed(2))} GB`;
+}
+
+function trimZeros(s: string): string {
+  return s.replace(/\.?0+$/, "");
 }
 
 /** Short, human-readable file-kind label for the Drive list's "Kind"

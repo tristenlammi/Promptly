@@ -108,8 +108,20 @@ export function WorkspaceAutomationPane({ taskId }: { taskId: string }) {
                 title="View this run"
               >
                 <RunStatusChip status={r.status} />
-                <span className="truncate text-[var(--text-muted)]">
-                  {r.title || new Date(r.created_at).toLocaleDateString()}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[var(--text-muted)]">
+                    {r.title || "Run"}
+                  </span>
+                  {/* Runs often share a title — the timestamp is what tells
+                      them apart in the rail. */}
+                  <span className="block truncate text-[10px] text-[var(--text-muted)]/70">
+                    {new Date(r.created_at).toLocaleString([], {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
                 </span>
               </button>
             ))}

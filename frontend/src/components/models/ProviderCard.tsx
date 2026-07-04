@@ -169,6 +169,11 @@ export function ProviderCard({ provider }: { provider: Provider }) {
           leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}
           onClick={() => setSelectOpen(true)}
           disabled={totalModels === 0}
+          title={
+            totalModels === 0
+              ? "No models in the catalog yet — run “Refresh models” (if it stays empty, check the API key with “Test connection”)"
+              : undefined
+          }
         >
           Select models
         </Button>

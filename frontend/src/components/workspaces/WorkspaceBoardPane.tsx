@@ -950,7 +950,10 @@ function BoardCard({
   const urgency = task.due_at ? dueUrgency(task.due_at, task.done) : null;
   const subs = task.subtasks ?? [];
   const subDone = subs.filter((s) => s.done).length;
-  const hasDesc = Boolean((task.description ?? "").trim());
+  // Skip descriptions that just repeat the title (AI-created tasks often
+  // arrive that way) — rendering "Task 1 / Task 1" reads as a glitch.
+  const descText = (task.description ?? "").trim();
+  const hasDesc = Boolean(descText) && descText !== task.title.trim();
   const links = task.links ?? [];
   const attachments = task.attachments ?? [];
   const cover = attachments.find((a) => a.is_cover);
