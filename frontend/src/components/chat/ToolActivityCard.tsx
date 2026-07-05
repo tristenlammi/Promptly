@@ -117,7 +117,11 @@ function stepArg(step: ActivityStep): string | null {
 /** Compact per-step trailing detail: hit count, files, or "timed out". */
 function stepDetail(step: ActivityStep): string | null {
   if (step.status === "error") {
-    return step.errorKind === "timeout" ? "timed out" : "failed";
+    if (step.errorKind === "timeout") return "timed out";
+    // A blocked page isn't a system failure — the site refused a
+    // crawler. "unreachable" reads as the benign, expected thing it is.
+    if (step.name === "fetch_url") return "unreachable";
+    return "failed";
   }
   const meta = step.meta;
   const bits: string[] = [];
@@ -162,18 +166,18 @@ function formatElapsed(ms?: number | null): string | null {
 }
 
 /** "Searched the web and read 2 pages" — a sentence built by grouping
- *  finished steps per tool. Only successful steps count toward the noun
- *  phrase; failures are folded into a trailing "· 1 failed". */
+ *  the SUCCESSFUL steps per tool. Failures are deliberately NOT folded
+ *  into the headline: one blocked page (those sites 403 every crawler)
+ *  shouldn't make a turn that produced results read as a failure. The
+ *  failed steps still show, honestly, on the expanded per-step rows.
+ *  Returns "" when nothing succeeded — the caller renders a failure
+ *  line in that case. */
 function summarise(steps: ActivityStep[]): string {
   const okByTool = new Map<string, number>();
   // Sum of agents fanned out across any run_agents calls, from meta.
   let agentTotal = 0;
-  let failed = 0;
   for (const s of steps) {
-    if (s.status === "error") {
-      failed += 1;
-      continue;
-    }
+    if (s.status === "error") continue;
     okByTool.set(s.name, (okByTool.get(s.name) ?? 0) + 1);
     if (s.name === "run_agents" && typeof s.meta?.agent_count === "number") {
       agentTotal += s.meta.agent_count;
@@ -194,9 +198,20 @@ function summarise(steps: ActivityStep[]): string {
       clauses.push(`${past} ${count} ${info.noun(count)}`);
     }
   }
-  let text = clauses.length ? joinClauses(clauses) : "Ran tools";
-  if (failed > 0) text += ` · ${failed} failed`;
-  return text;
+  return clauses.length ? joinClauses(clauses) : "";
+}
+
+/** Headline for the rare case where EVERY step errored — the only
+ *  time the card should read as a genuine failure. */
+function failureSummary(steps: ActivityStep[]): string {
+  const names = new Set(steps.map((s) => s.name));
+  if (names.size === 1) {
+    const only = [...names][0];
+    if (only === "web_search") return "Web search failed";
+    if (only === "fetch_url") return "Couldn't read the page";
+    if (only === "run_agents") return "Agents couldn't complete";
+  }
+  return "Tool calls didn't complete";
 }
 
 /** Map the present-participle verb to a past-tense summary verb. */
@@ -295,8 +310,12 @@ export function ToolActivityCard({
   }
 
   // ---- Finished: collapsed one-line summary, expandable ----
-  const summary = summarise(steps);
-  const anyError = steps.some((s) => s.status === "error");
+  // The card reads as a failure ONLY when nothing succeeded. A turn
+  // with any successful work is a success, even if a blocked page or
+  // two failed along the way (those failures stay visible on expand).
+  const okCount = steps.filter((s) => s.status === "ok").length;
+  const allFailed = okCount === 0;
+  const summary = allFailed ? failureSummary(steps) : summarise(steps);
   const metaBits: string[] = [];
   if (sourceCount > 0)
     metaBits.push(`${sourceCount} source${sourceCount === 1 ? "" : "s"}`);
@@ -317,7 +336,7 @@ export function ToolActivityCard({
             open && "rotate-90",
           )}
         />
-        {anyError ? (
+        {allFailed ? (
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
         ) : (
           <Check className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
