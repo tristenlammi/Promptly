@@ -4,7 +4,10 @@ import { ArrowLeft } from "lucide-react";
 
 import { InputBar } from "@/components/chat/InputBar";
 import { TopNav } from "@/components/layout/TopNav";
-import { ExamContextPanel } from "@/components/study/ExamContextPanel";
+import {
+  ExamContextPanel,
+  ExamTimerStrip,
+} from "@/components/study/ExamContextPanel";
 import { ExamResultsModal } from "@/components/study/ExamResultsModal";
 import { SplitPane } from "@/components/study/SplitPane";
 import { StudyChat } from "@/components/study/StudyChat";
@@ -528,6 +531,12 @@ export function StudySessionPage() {
           }
           right={
             <div className="flex h-full min-h-0 flex-col">
+              {/* One pane per session kind (L0.4): units always get the
+                  LessonBoard (its Board tab hosts exercises and auto-flips
+                  when one arrives); exams keep their context panel, and when
+                  an exam exercise takes the pane the countdown stays pinned
+                  above it — the student never loses the clock; legacy
+                  sessions keep the classic whiteboard. */}
               {kind === "unit" && session ? (
                 <>
                   <LessonArcRail sessionId={session.id} />
@@ -540,20 +549,37 @@ export function StudySessionPage() {
                     />
                   </div>
                 </>
+              ) : kind === "exam" && exam && project ? (
+                showWhiteboard && session ? (
+                  <>
+                    <ExamTimerStrip
+                      exam={exam}
+                      onTimeout={handleTimeout}
+                      timeoutPending={timeoutPending}
+                    />
+                    <div className="min-h-0 flex-1">
+                      <WhiteboardPanel
+                        sessionId={session.id}
+                        initialNotes={session.notes_md}
+                        onSubmit={handleExerciseSubmit}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <ExamContextPanel
+                    exam={exam}
+                    projectTitle={project.title}
+                    totalUnits={project.total_units}
+                    completedUnits={completedUnits}
+                    onTimeout={handleTimeout}
+                    timeoutPending={timeoutPending}
+                  />
+                )
               ) : showWhiteboard && session ? (
                 <WhiteboardPanel
                   sessionId={session.id}
                   initialNotes={session.notes_md}
                   onSubmit={handleExerciseSubmit}
-                />
-              ) : kind === "exam" && exam && project ? (
-                <ExamContextPanel
-                  exam={exam}
-                  projectTitle={project.title}
-                  totalUnits={project.total_units}
-                  completedUnits={completedUnits}
-                  onTimeout={handleTimeout}
-                  timeoutPending={timeoutPending}
                 />
               ) : null}
             </div>

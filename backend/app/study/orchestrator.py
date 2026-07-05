@@ -132,9 +132,14 @@ def _next_phase(
 
     # ---- present (explain one objective) -----------------------------
     if current_phase == "present":
-        # Advance when the tutor confirms comprehension OR after the
-        # turn-count ceiling (prevents getting stuck in present forever).
-        if comprehension_confirmed or turns_in_phase >= 4:
+        # The tutor's ``comprehension_confirmed`` signal is the driver
+        # (L0.2): a student advances when they demonstrate understanding,
+        # not on a schedule. The turn ceiling is only a slow escape valve
+        # for a model that forgets to emit the signal — set high enough
+        # that a genuinely struggling student gets re-explanations (the
+        # phase prompt switches to simplify-and-recheck after 3 turns)
+        # instead of being shoved into guided practice.
+        if comprehension_confirmed or turns_in_phase >= 6:
             return "guided"
         return "present"
 

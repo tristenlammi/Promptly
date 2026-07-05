@@ -18,6 +18,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -149,6 +150,16 @@ class PlanGenerationError(Exception):
     """Raised when the LLM output can't be turned into a usable plan."""
 
 
+# In-memory planning progress (L0.3) — keyed by project id, read by
+# ``GET /projects/{id}/planning-progress`` so the create wizard can show
+# *real* stages instead of a canned animation. Entries are written by
+# :func:`generate_and_apply_plan` while it streams and removed when the
+# run ends (the project row's ``status`` / ``planning_error`` carry the
+# terminal state). Single-process registry — fine for the single-uvicorn
+# deployment; a restart mid-plan just degrades the poll to "starting".
+PLANNING_PROGRESS: dict[uuid.UUID, dict[str, Any]] = {}
+
+
 async def generate_plan(
     *,
     provider: ModelProvider,
@@ -159,8 +170,14 @@ async def generate_plan(
     topics: list[str],
     current_level: str | None = None,
     material_context: str | None = None,
+    progress: dict[str, Any] | None = None,
 ) -> GeneratedPlan:
     """Ask the model for a unit plan and parse the JSON response.
+
+    ``progress`` (L0.3) is an optional live-updated dict (a
+    ``PLANNING_PROGRESS`` entry): as the plan streams, ``units_drafted``
+    counts the unit titles seen so far so the wizard can show real
+    progress ("drafting unit 4…") instead of a canned animation.
 
     Raises :class:`PlanGenerationError` on malformed output or if the
     model flagged the brief as impossible.
@@ -175,6 +192,9 @@ async def generate_plan(
     )
 
     buf: list[str] = []
+    # Rolling tail catches a ``"title"`` key split across two tokens.
+    tail = ""
+    units_seen = 0
     try:
         async for token in model_router.stream_chat(
             provider=provider,
@@ -185,6 +205,17 @@ async def generate_plan(
             max_tokens=DEFAULT_MAX_TOKENS,
         ):
             buf.append(token)
+            if progress is not None:
+                window = tail + token
+                # Count only occurrences extending into the NEW token — ones
+                # fully inside the tail were counted on the previous step.
+                idx = window.find('"title"')
+                while idx != -1:
+                    if idx + len('"title"') > len(tail):
+                        units_seen += 1
+                    idx = window.find('"title"', idx + 1)
+                tail = window[-8:]
+                progress["units_drafted"] = units_seen
     except ProviderError as exc:
         raise PlanGenerationError(f"Provider error: {exc}") from exc
 
@@ -399,9 +430,13 @@ async def generate_and_apply_plan(
 ) -> list[StudyUnit]:
     """Convenience wrapper — generate + persist in one step.
 
-    Records any :class:`PlanGenerationError` on the project row so the
-    UI can surface a retry affordance without losing the original brief.
+    Maintains the project's ``PLANNING_PROGRESS`` entry (L0.3) so the
+    wizard's poll sees real stages while the plan streams. Records any
+    :class:`PlanGenerationError` on the project row so the UI can surface
+    a retry affordance without losing the original brief.
     """
+    prog = PLANNING_PROGRESS.setdefault(project.id, {})
+    prog.update({"stage": "drafting", "units_drafted": 0})
     try:
         plan = await generate_plan(
             provider=provider,
@@ -412,7 +447,9 @@ async def generate_and_apply_plan(
             topics=list(project.topics or []),
             current_level=project.current_level,
             material_context=material_context,
+            progress=prog,
         )
+        prog["stage"] = "building"
     except PlanGenerationError as exc:
         project.status = "planning"
         project.planning_error = str(exc)[:500]
@@ -422,5 +459,14 @@ async def generate_and_apply_plan(
             "Plan generation failed for project %s: %s", project.id, exc
         )
         raise
+    finally:
+        # Terminal state lives on the project row; drop the live entry once
+        # the run ends (kept through "building" so the poll sees that stage
+        # until the caller's commit makes status=active visible).
+        if project.planning_error:
+            PLANNING_PROGRESS.pop(project.id, None)
 
-    return await apply_plan(db=db, project=project, plan=plan)
+    try:
+        return await apply_plan(db=db, project=project, plan=plan)
+    finally:
+        PLANNING_PROGRESS.pop(project.id, None)

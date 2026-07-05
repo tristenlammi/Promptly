@@ -4,6 +4,7 @@ import { FileText, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 import type { StudyCurrentLevel } from "@/api/types";
 import { apiClient } from "@/api/client";
+import { studyApi, type PlanningProgress } from "@/api/study";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useCreateStudyProject } from "@/hooks/useStudy";
@@ -66,6 +67,12 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
   const [error, setError] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
+  // Real planning progress (L0.3): create returns fast with the project in
+  // "planning" status; we poll its progress and navigate on completion.
+  const [planningProjectId, setPlanningProjectId] = useState<string | null>(
+    null
+  );
+  const [progress, setProgress] = useState<PlanningProgress | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -86,7 +93,46 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
     setStep("form");
     setPendingFiles([]);
     setUploadingFile(false);
+    setPlanningProjectId(null);
+    setProgress(null);
   };
+
+  // Poll the plan-generation progress while the planning screen is up.
+  useEffect(() => {
+    if (!planningProjectId) return;
+    let alive = true;
+    let timer = 0;
+    const tick = async () => {
+      try {
+        const p = await studyApi.planningProgress(planningProjectId);
+        if (!alive) return;
+        setProgress(p);
+        if (p.status !== "planning") {
+          // Plan landed — straight into the topic.
+          const id = planningProjectId;
+          reset();
+          onClose();
+          navigate(`/study/topics/${id}`);
+          return;
+        }
+        if (p.error) {
+          setError(p.error);
+          setStep("form");
+          setPlanningProjectId(null);
+          return;
+        }
+      } catch {
+        // Transient poll failure — keep trying; the run continues server-side.
+      }
+      if (alive) timer = window.setTimeout(tick, 1200);
+    };
+    timer = window.setTimeout(tick, 700);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planningProjectId]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -159,9 +205,10 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
         current_level: currentLevel,
         material_file_ids: pendingFiles.map((f) => f.fileId),
       });
-      reset();
-      onClose();
-      navigate(`/study/topics/${detail.id}`);
+      // Plan generation continues server-side; the poll (above) drives the
+      // progress screen and navigates when the plan lands.
+      setProgress(null);
+      setPlanningProjectId(detail.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
@@ -389,33 +436,47 @@ export function NewStudyWizard({ open, onClose }: NewStudyWizardProps) {
           )}
         </div>
       ) : (
-        <PlanningScreen hasMaterials={pendingFiles.length > 0} />
+        <PlanningScreen
+          hasMaterials={pendingFiles.length > 0}
+          progress={progress}
+        />
       )}
     </Modal>
   );
 }
 
-function PlanningScreen({ hasMaterials }: { hasMaterials: boolean }) {
-  const [stage, setStage] = useState(0);
-  const stages = hasMaterials
-    ? [
-        "Reading your uploaded material...",
-        "Mapping prerequisites and skill order...",
-        "Grounding units in your course content...",
-        "Finalising your study plan...",
-      ]
-    : [
-        "Parsing your learning goals...",
-        "Mapping prerequisites and skill order...",
-        "Drafting focused units with clear objectives...",
-        "Finalising your study plan...",
-      ];
-  useEffect(() => {
-    const t = setInterval(() => {
-      setStage((s) => Math.min(s + 1, stages.length - 1));
-    }, 4500);
-    return () => clearInterval(t);
-  }, [stages.length]);
+/** Live planning progress (L0.3): stages come from the backend's actual run
+ *  — reading materials → drafting (with a real unit count as the plan
+ *  streams) → building — not a canned animation. */
+function PlanningScreen({
+  hasMaterials,
+  progress,
+}: {
+  hasMaterials: boolean;
+  progress: PlanningProgress | null;
+}) {
+  const stage = progress?.stage ?? "reading";
+  const units = progress?.units_drafted ?? 0;
+  const stages: { key: string; label: string }[] = [
+    {
+      key: "reading",
+      label: hasMaterials
+        ? "Reading your uploaded material…"
+        : "Reading your learning goals…",
+    },
+    {
+      key: "drafting",
+      label:
+        stage === "drafting" && units > 0
+          ? `Drafting unit ${units}…`
+          : "Drafting focused units with clear objectives…",
+    },
+    { key: "building", label: "Building your topic — seeding objectives…" },
+  ];
+  const stageIdx = Math.max(
+    0,
+    stages.findIndex((s) => s.key === stage)
+  );
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
@@ -435,26 +496,30 @@ function PlanningScreen({ hasMaterials }: { hasMaterials: boolean }) {
       <div className="mt-4 w-full max-w-sm space-y-1 text-left text-xs text-[var(--text-muted)]">
         {stages.map((s, idx) => (
           <div
-            key={s}
+            key={s.key}
             className={cn(
               "flex items-center gap-2 transition",
-              idx <= stage ? "text-[var(--text)]" : "opacity-40"
+              idx <= stageIdx ? "text-[var(--text)]" : "opacity-40"
             )}
           >
             <span
               className={cn(
                 "inline-block h-1.5 w-1.5 rounded-full",
-                idx < stage
+                idx < stageIdx
                   ? "bg-[var(--accent)]"
-                  : idx === stage
+                  : idx === stageIdx
                   ? "animate-pulse bg-[var(--accent)]"
                   : "bg-[var(--border)]"
               )}
             />
-            {s}
+            {s.label}
           </div>
         ))}
       </div>
+      <p className="text-[11px] text-[var(--text-muted)]">
+        You can close this — the plan keeps building and the topic will appear
+        in your list when it's ready.
+      </p>
     </div>
   );
 }

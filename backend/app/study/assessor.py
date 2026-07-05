@@ -65,6 +65,37 @@ Do NOT add explanation outside the JSON."""
 _JSON_RE = re.compile(r'\{[^{}]*"correct"\s*:\s*(true|false)[^{}]*\}', re.DOTALL)
 
 
+async def resolve_assessor_model(
+    db: AsyncSession, org_id: uuid.UUID | None = None
+) -> tuple[ModelProvider, str] | None:
+    """The model that independently grades student answers (L0.1).
+
+    Measurement is mandatory: mastery numbers other people may rely on
+    (leads reviewing an assignee's progress) must never silently degrade to
+    the tutor's self-grading. Resolution order:
+
+    1. The dedicated assessor model (admin-configured — ideally a cheap one).
+    2. The Study teaching model (honest, just costs a few more tokens).
+    3. The default chat model.
+
+    Returns ``None`` only when nothing at all is configured (a fresh install
+    with no providers) — in which case there is no model to call anyway.
+    """
+    settings = await load_effective_defaults(db, org_id)
+    candidates = [
+        (settings.study_assessor_provider_id, settings.study_assessor_model_id),
+        (settings.study_provider_id, settings.study_model_id),
+        (settings.default_chat_provider_id, settings.default_chat_model_id),
+    ]
+    for provider_id, model_id in candidates:
+        if not provider_id or not model_id:
+            continue
+        provider = await db.get(ModelProvider, provider_id)
+        if provider is not None and provider.enabled:
+            return provider, model_id
+    return None
+
+
 async def _call_assessor(
     provider: ModelProvider,
     model_id: str,
@@ -88,8 +119,7 @@ async def _call_assessor(
             messages=[ChatMessage(role="user", content=user_content)],
             system=_ASSESSOR_SYSTEM,
             temperature=0.0,
-            max_tokens=64,
-            reasoning_effort="off",
+            max_tokens=64,
         ):
             full_response.append(token)
     except ProviderError as exc:
@@ -126,15 +156,18 @@ async def _run_assessor_task(
     """Background task body — owns its own DB session."""
     try:
         async with SessionLocal() as db:
-            # --- Load assessor model config (per-org default) ---
-            settings = await load_effective_defaults(db, org_id)
-            if not settings.study_assessor_configured:
+            # --- Resolve the grading model (dedicated → teaching → default;
+            # L0.1: measurement is mandatory, never silently skipped) ---
+            resolved = await resolve_assessor_model(db, org_id)
+            if resolved is None:
+                logger.warning(
+                    "assessor skipped: no model configured at all "
+                    "(session=%s obj=%d)",
+                    session_id,
+                    objective_index,
+                )
                 return
-
-            provider = await db.get(ModelProvider, settings.study_assessor_provider_id)
-            if provider is None or not provider.enabled:
-                return
-            model_id = settings.study_assessor_model_id
+            provider, model_id = resolved
 
             # --- Get last student answer (up to 3 turns for context) ---
             msgs_stmt = (
@@ -285,19 +318,16 @@ async def grade_teachback(
 ) -> bool | None:
     """Grade a student's teach-back explanation against the unit's objectives.
 
-    Returns ``True`` (passed), ``False`` (rejected), or ``None`` when the
-    assessor is not configured or a call error occurs — callers should treat
+    Returns ``True`` (passed), ``False`` (rejected), or ``None`` when no model
+    is configured at all or a call error occurs — callers should treat
     ``None`` as "pass-through" and not gate on it. ``org_id`` selects the
-    acting tenant's assessor-model default.
+    acting tenant's assessor-model default. Falls back to the teaching /
+    default chat model when no dedicated assessor is set (L0.1).
     """
-    settings = await load_effective_defaults(db, org_id)
-    if not settings.study_assessor_configured:
+    resolved = await resolve_assessor_model(db, org_id)
+    if resolved is None:
         return None
-
-    provider = await db.get(ModelProvider, settings.study_assessor_provider_id)
-    if provider is None or not provider.enabled:
-        return None
-    model_id: str = settings.study_assessor_model_id
+    provider, model_id = resolved
 
     objectives_text = "\n".join(
         f"- {obj}" for obj in (unit.learning_objectives or [])
@@ -317,8 +347,7 @@ async def grade_teachback(
             messages=[ChatMessage(role="user", content=user_content)],
             system=_TEACHBACK_SYSTEM,
             temperature=0.0,
-            max_tokens=64,
-            reasoning_effort="off",
+            max_tokens=64,
         ):
             full_response.append(token)
     except ProviderError as exc:
@@ -370,18 +399,15 @@ async def grade_for_review(
 ) -> tuple[bool, str] | None:
     """Grade a free-recall answer for the standalone daily review loop.
 
-    Returns ``(correct, feedback_sentence)`` or ``None`` if the assessor
-    model is not configured — callers should fall back to self-grading.
-    ``org_id`` selects the acting tenant's assessor-model default.
+    Returns ``(correct, feedback_sentence)`` or ``None`` when no model is
+    configured at all — callers should fall back to self-grading. Falls back
+    to the teaching / default chat model when no dedicated assessor is set
+    (L0.1). ``org_id`` selects the acting tenant's assessor-model default.
     """
-    settings = await load_effective_defaults(db, org_id)
-    if not settings.study_assessor_configured:
+    resolved = await resolve_assessor_model(db, org_id)
+    if resolved is None:
         return None
-
-    provider = await db.get(ModelProvider, settings.study_assessor_provider_id)
-    if provider is None or not provider.enabled:
-        return None
-    model_id: str = settings.study_assessor_model_id
+    provider, model_id = resolved
 
     user_content = (
         f"Learning objective: {objective_text}\n\n"
@@ -395,8 +421,7 @@ async def grade_for_review(
             messages=[ChatMessage(role="user", content=user_content)],
             system=_REVIEW_GRADE_SYSTEM,
             temperature=0.0,
-            max_tokens=128,
-            reasoning_effort="off",
+            max_tokens=128,
         ):
             full_response.append(token)
     except ProviderError as exc:

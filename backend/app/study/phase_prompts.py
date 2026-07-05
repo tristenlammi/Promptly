@@ -228,14 +228,45 @@ then close cleanly with summarise_unit + mark_complete.\
 """
 
 
+# Appended to PRESENT when the student has been in it for several turns
+# without a confirmed comprehension check (L0.2). The orchestrator holds
+# them here on purpose — this block makes the tutor change tactics rather
+# than repeat the same explanation louder.
+_PRESENT_STUCK_ADDENDUM = """
+
+**You've spent {turns} turns in PRESENT without confirmed comprehension.**
+The current explanation isn't landing. Change tactics this turn:
+- Re-explain with a SIMPLER, smaller example — concrete numbers or a
+  familiar analogy, not more abstraction.
+- Break the concept into a smaller piece and check just that piece.
+- Ask what specifically feels unclear, and answer THAT.
+Then run the comprehension check again. Emit
+``<unit_action>{{"type": "comprehension_confirmed"}}</unit_action>`` only
+when their answer genuinely shows understanding.\
+"""
+
+
 # ---- Formatter -------------------------------------------------------
 
-def format_phase_block(phase: str | None) -> str:
+def format_phase_block(phase: str | None, turns_in_phase: int = 0) -> str:
     """Return the phase instruction block to prepend to the system prompt.
 
     Always returns a non-empty string so the template substitution is
     safe regardless of whether the orchestrator has run.
+
+    ``turns_in_phase`` (L0.2) lets the block adapt to a stuck lesson:
+    after 3+ turns in PRESENT without a confirmed comprehension check,
+    the tutor is told to simplify and re-check rather than push on.
     """
     if not phase:
         return _FALLBACK_INTENT
-    return PHASE_INTENT.get(phase, _FALLBACK_INTENT)
+    # The blocks are written with ``{{``-escaped braces, but they're inserted
+    # into the system prompt as a .format() *value* (never re-processed) — so
+    # without this de-escape the model literally saw ``{{"type": …}}`` and
+    # learned to emit unparseable doubled-brace actions (L0.2 bug fix).
+    block = PHASE_INTENT.get(phase, _FALLBACK_INTENT).replace("{{", "{").replace(
+        "}}", "}"
+    )
+    if phase == "present" and turns_in_phase >= 3:
+        block += _PRESENT_STUCK_ADDENDUM.format(turns=turns_in_phase)
+    return block

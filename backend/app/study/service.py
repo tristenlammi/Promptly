@@ -1523,6 +1523,7 @@ def build_unit_system_prompt(
     review_queue: list[StudyObjectiveMastery] | None = None,
     review_focus: StudyObjectiveMastery | None = None,
     current_phase: str | None = None,
+    turns_in_phase: int = 0,
     session_goal: str | None = None,
     material_context: str | None = None,
 ) -> str:
@@ -1601,16 +1602,26 @@ def build_unit_system_prompt(
     if material_context and material_context.strip():
         material_context_block = (
             "## Course material (retrieved passages most relevant to this turn)\n"
-            "These passages come from the student's uploaded learning material. "
-            "Use them to ground your teaching in the actual content they are studying — "
-            "reference specific terms, examples, or definitions from the material where relevant.\n\n"
+            "These passages come from the uploaded learning material — the\n"
+            "authoritative source for this course. Ground your teaching in them\n"
+            "(L0.5 rules):\n"
+            "- When you teach from a passage, NAME the source document naturally\n"
+            "  in your reply (e.g. \"per auth-service.md, …\" or \"the runbook\n"
+            "  says…\") so the student knows where it lives and can go deeper.\n"
+            "- Where the material and your general knowledge disagree, the\n"
+            "  material wins — it describes THEIR system, not the textbook one.\n"
+            "- If the student asks something these materials don't cover, SAY SO\n"
+            "  plainly (\"that's not covered in the course material — here's the\n"
+            "  general answer, but verify it against your team's setup\") instead\n"
+            "  of presenting guesses as if they came from the material. Never\n"
+            "  invent file names, config values, commands, or policies.\n\n"
             + material_context.strip()
         )
     else:
         material_context_block = ""
 
     return _UNIT_SYSTEM_PROMPT_TEMPLATE.format(
-        phase_block=format_phase_block(current_phase),
+        phase_block=format_phase_block(current_phase, turns_in_phase),
         project_title=project.title,
         learning_request=learning_request,
         goal=goal_str,

@@ -36,6 +36,8 @@ from app.app_settings.models import AppSettings, SINGLETON_APP_SETTINGS_ID
 from app.app_settings.defaults import load_effective_defaults
 from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
+from pydantic import BaseModel
+
 from app.database import SessionLocal, get_db
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, ProviderError, model_router
@@ -63,6 +65,7 @@ from app.study.frame_auth import (
 )
 from app.study.parser import TaggedActionParser
 from app.study.planner import (
+    PLANNING_PROGRESS,
     PlanGenerationError,
     generate_and_apply_plan,
 )
@@ -120,7 +123,7 @@ from app.study.schemas import (
     StudyMaterialResponse,
 )
 from app.study.assessor import dispatch_assessor_if_configured, grade_for_review
-from app.study.orchestrator import advance_phase
+from app.study.orchestrator import advance_phase, turns_in_current_phase
 from app.study.service import (
     StudyStreamContext,
     apply_captures,
@@ -637,19 +640,16 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StudyProjectDetail:
-    """Create a study topic and generate its unit plan inline.
+    """Create a study topic and generate its unit plan in the background.
 
-    We generate the plan synchronously because doing it on a background
-    task means the frontend has to poll, which adds a sharp edge to
-    what should be a single "create → show units" gesture. The planner
-    takes anywhere from 5–25 seconds on a typical model; the client
-    renders a dedicated "Designing your study plan..." screen for the
-    duration.
+    Returns immediately with the project in ``planning`` status (L0.3);
+    the wizard polls ``GET /projects/{id}/planning-progress`` and shows
+    the *real* stages of the run (reading material → drafting unit N →
+    building) instead of a canned animation.
 
-    If plan generation fails we still persist the project in
-    ``planning`` status with the error text so the user can retry
-    via ``POST /projects/{id}/regenerate-plan`` instead of losing
-    their brief.
+    If plan generation fails, the background task records the error on
+    the project so the poll surfaces it and the user can retry via
+    ``POST /projects/{id}/regenerate-plan`` without losing their brief.
     """
     provider, teaching_model_id = await _load_study_provider(db, user)
 
@@ -679,56 +679,17 @@ async def create_project(
             indexing_status="pending",
         )
         db.add(mat)
-    if payload.material_file_ids:
-        await db.flush()
-
-    # Extract text from materials to ground the plan (synchronous —
-    # full indexing for session retrieval happens async after commit).
-    material_context = await extract_material_text_for_planning(db, project.id)
-
-    try:
-        await generate_and_apply_plan(
-            db=db,
-            project=project,
-            provider=provider,
-            model_id=teaching_model_id,
-            material_context=material_context or None,
-        )
-    except PlanGenerationError as exc:
-        # The planner already recorded the error on the project and
-        # flushed. Commit so the student has something to retry against.
-        await db.commit()
-        await db.refresh(project)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Plan generation failed: {exc}",
-        )
-    except ProviderError as exc:
-        await db.rollback()
-        # Persist a minimal error-ed project so the user doesn't lose
-        # their brief on network blips.
-        project = StudyProject(
-            user_id=user.id,
-            title=payload.title.strip(),
-            topics=[t.strip() for t in payload.topics if t.strip()],
-            goal=(payload.goal or "").strip() or None,
-            learning_request=payload.learning_request.strip(),
-            current_level=payload.current_level,
-            model_id=payload.model_id,
-            planning_provider_id=provider.id,
-            status="planning",
-            planning_error=str(exc)[:500],
-        )
-        db.add(project)
-        await db.commit()
-        await db.refresh(project)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Provider error while generating plan: {exc}",
-        )
 
     await db.commit()
     await db.refresh(project)
+
+    # Mark the entry before returning so the first poll never sees a gap
+    # between "created" and "task started".
+    PLANNING_PROGRESS.setdefault(project.id, {"stage": "reading", "units_drafted": 0})
+    asyncio.create_task(
+        _plan_project_task(project.id, provider.id, teaching_model_id),
+        name=f"study-plan-{project.id}",
+    )
 
     # Kick off async indexing for each attached material now that the
     # project is committed and the file rows are durable.
@@ -736,6 +697,92 @@ async def create_project(
         background.add_task(index_material_for_study_project, project.id, file_id)
 
     return await _project_detail(project, db)
+
+
+async def _plan_project_task(
+    project_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    model_id: str,
+) -> None:
+    """Background body for create-time plan generation (L0.3).
+
+    Owns its own DB session (the request's session is gone by the time
+    this runs). Every failure is recorded on the project row —
+    ``planning_error`` is what the wizard's poll surfaces.
+    """
+    try:
+        async with SessionLocal() as task_db:
+            project = await task_db.get(StudyProject, project_id)
+            provider = await task_db.get(ModelProvider, provider_id)
+            if project is None or provider is None:
+                return
+            prog = PLANNING_PROGRESS.setdefault(project_id, {})
+            prog["stage"] = "reading"
+            material_context = await extract_material_text_for_planning(
+                task_db, project_id
+            )
+            try:
+                await generate_and_apply_plan(
+                    db=task_db,
+                    project=project,
+                    provider=provider,
+                    model_id=model_id,
+                    material_context=material_context or None,
+                )
+            except PlanGenerationError:
+                # Error already recorded on the row by the planner.
+                await task_db.commit()
+                return
+            await task_db.commit()
+    except Exception:  # noqa: BLE001 — never let a crash lose the brief
+        logger.exception("plan generation task crashed project=%s", project_id)
+        try:
+            async with SessionLocal() as err_db:
+                project = await err_db.get(StudyProject, project_id)
+                if project is not None and project.status == "planning":
+                    project.planning_error = (
+                        "Unexpected error while generating the plan — retry "
+                        "from the topic page."
+                    )
+                    await err_db.commit()
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        PLANNING_PROGRESS.pop(project_id, None)
+
+
+class PlanningProgressResponse(BaseModel):
+    """Live planning state for the create wizard's poll (L0.3)."""
+
+    status: str  # planning | active | completed | archived
+    stage: str | None  # reading | drafting | building | None once terminal
+    units_drafted: int
+    error: str | None
+
+
+@router.get(
+    "/projects/{project_id}/planning-progress",
+    response_model=PlanningProgressResponse,
+)
+async def get_planning_progress(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PlanningProgressResponse:
+    """Real progress of the initial plan generation — polled by the wizard."""
+    project = await _get_owned_project(project_id, user, db)
+    entry = PLANNING_PROGRESS.get(project.id) or {}
+    stage = entry.get("stage")
+    if stage is None and project.status == "planning" and not project.planning_error:
+        # Task not registered (yet, or process restarted) — report the
+        # earliest stage rather than nothing.
+        stage = "reading"
+    return PlanningProgressResponse(
+        status=project.status,
+        stage=stage,
+        units_drafted=int(entry.get("units_drafted") or 0),
+        error=project.planning_error,
+    )
 
 
 @router.get("/projects/{project_id}", response_model=StudyProjectDetail)
@@ -2092,6 +2139,10 @@ async def _stream_generator(
                 mastery_rows=mastery_rows,
                 has_due_reviews=bool(review_queue),
             )
+            # Turns spent in the (possibly just-entered) phase — lets the
+            # PRESENT prompt switch to simplify-and-recheck when the student
+            # is stuck rather than repeating the same explanation (L0.2).
+            phase_turns = turns_in_current_phase(session)
 
             # Commit the seeding changes so the transaction stays
             # tidy even if the LLM call downstream fails.
@@ -2122,6 +2173,7 @@ async def _stream_generator(
                 review_queue=review_queue,
                 review_focus=review_focus,
                 current_phase=current_phase,
+                turns_in_phase=phase_turns,
                 session_goal=getattr(session, "session_goal", None),
                 material_context=retrieved_material or None,
             )
@@ -2824,8 +2876,12 @@ async def get_assessor_status(
     user: User = Depends(require_admin),
 ) -> AssessorStatusResponse:
     """Coverage stats for the independent assessor model (admin only)."""
-    settings = await load_effective_defaults(db)
-    configured = settings.study_assessor_configured
+    # "Configured" now means "a grading model resolves" — the assessor falls
+    # back to the teaching / default chat model when no dedicated one is set
+    # (L0.1: measurement is mandatory), so only a model-less install is off.
+    from app.study.assessor import resolve_assessor_model
+
+    configured = (await resolve_assessor_model(db)) is not None
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     total_result = await db.execute(

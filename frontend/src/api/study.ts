@@ -87,6 +87,16 @@ export interface ListProjectsParams {
   include_archived?: boolean;
 }
 
+/** Live plan-generation state (L0.3) — the wizard's progress poll. */
+export interface PlanningProgress {
+  status: "planning" | "active" | "completed" | "archived";
+  /** reading | drafting | building — null once the run is terminal. */
+  stage: string | null;
+  /** Unit titles seen so far while the plan streams. */
+  units_drafted: number;
+  error: string | null;
+}
+
 export const studyApi = {
   async listProjects(
     params: ListProjectsParams = {}
@@ -106,12 +116,19 @@ export const studyApi = {
   async createProject(
     payload: CreateStudyProjectPayload
   ): Promise<StudyProjectDetail> {
+    // Returns fast with status="planning" (L0.3); plan generation runs in
+    // the background — poll planningProgress() for the real stages.
     const { data } = await apiClient.post<StudyProjectDetail>(
       "/study/projects",
-      payload,
-      // Plan generation runs inline with the create — allow plenty of
-      // time for longer models to settle before the client bails.
-      { timeout: 120_000 }
+      payload
+    );
+    return data;
+  },
+  /** Live state of the initial plan generation (L0.3) — polled by the
+   *  create wizard so its progress screen shows real stages. */
+  async planningProgress(id: string): Promise<PlanningProgress> {
+    const { data } = await apiClient.get<PlanningProgress>(
+      `/study/projects/${id}/planning-progress`
     );
     return data;
   },

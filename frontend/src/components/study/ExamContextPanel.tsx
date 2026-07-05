@@ -110,6 +110,64 @@ export function ExamContextPanel({
   );
 }
 
+/** Slim countdown bar kept visible when an exam exercise takes over the
+ *  right pane (L0.4) — the student must never lose sight of the clock
+ *  mid-question. Same local countdown as the full panel. */
+export function ExamTimerStrip({
+  exam,
+  onTimeout,
+  timeoutPending,
+}: {
+  exam: StudyExamSummary;
+  onTimeout: () => void;
+  timeoutPending?: boolean;
+}) {
+  const secondsRemaining = useCountdown(exam);
+  const expired = secondsRemaining <= 0;
+  const critical = secondsRemaining <= 60 && secondsRemaining > 0;
+
+  return (
+    <div
+      className={cn(
+        "flex shrink-0 items-center justify-between gap-3 border-b px-3 py-1.5",
+        expired
+          ? "border-red-500/50 bg-red-500/10"
+          : critical
+          ? "border-amber-500/50 bg-amber-500/10"
+          : "border-[var(--border)] bg-[var(--surface)]"
+      )}
+    >
+      <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+        <Clock className="h-3.5 w-3.5" />
+        {expired ? "Time's up" : "Exam time"}
+      </span>
+      <span
+        className={cn(
+          "font-mono text-sm font-semibold tabular-nums",
+          expired
+            ? "text-red-600 dark:text-red-400"
+            : critical
+            ? "text-amber-700 dark:text-amber-300"
+            : "text-[var(--text)]"
+        )}
+      >
+        {formatRemaining(secondsRemaining)}
+      </span>
+      {expired && (
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={onTimeout}
+          loading={timeoutPending}
+        >
+          End exam
+        </Button>
+      )}
+    </div>
+  );
+}
+
+
 function useCountdown(exam: StudyExamSummary): number {
   const deadline = exam.started_at
     ? new Date(exam.started_at).getTime() + exam.time_limit_seconds * 1000
