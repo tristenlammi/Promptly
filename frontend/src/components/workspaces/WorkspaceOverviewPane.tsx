@@ -354,6 +354,81 @@ export function WorkspaceOverviewPane({
         </section>
       )}
 
+      {/* Knowledge health (4.8) — stale + oversized context items. */}
+      {overview?.health &&
+        (overview.health.stale.length > 0 ||
+          overview.health.heavy.length > 0) && (
+          <section className="mt-8 rounded-card border border-[var(--border)] bg-[var(--surface)] p-4">
+            <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              <AlertTriangle className="h-3.5 w-3.5 text-[var(--warning)]" />
+              Knowledge health
+            </h2>
+            <p className="mb-3 text-xs text-[var(--text-muted)]">
+              The AI treats everything in context as current — these items
+              may be quietly skewing its answers.
+            </p>
+            {overview.health.stale.length > 0 && (
+              <div className="mb-3">
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Untouched for 60+ days
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {overview.health.stale.map((s) => (
+                    <button
+                      key={s.item_id}
+                      type="button"
+                      onClick={() =>
+                        open({
+                          id: s.item_id,
+                          kind: s.kind as WorkspaceItemNode["kind"],
+                          ref_id: null,
+                          title: s.title,
+                        })
+                      }
+                      className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                      title={`Last touched ${s.updated_at ? formatRelativeTime(s.updated_at) : "long ago"} — refresh it or flip its ⚡ off`}
+                    >
+                      <Clock className="h-3 w-3 shrink-0 text-[var(--warning)]" />
+                      <span className="truncate">{s.title}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {overview.health.heavy.length > 0 && (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Biggest context consumers
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {overview.health.heavy.map((h) => (
+                    <button
+                      key={h.item_id}
+                      type="button"
+                      onClick={() =>
+                        open({
+                          id: h.item_id,
+                          kind: h.kind as WorkspaceItemNode["kind"],
+                          ref_id: null,
+                          title: h.title,
+                        })
+                      }
+                      className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                      title="Large items crowd out retrieval budget — consider splitting or flipping ⚡ off"
+                    >
+                      <Layers className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+                      <span className="truncate">{h.title}</span>
+                      <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
+                        ~{Math.round((h.chars ?? 0) / 4 / 1000)}k tok
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
       {/* Activity — what changed since you were last here (Batch 3). */}
       <ActivitySection workspaceId={workspaceId} onOpen={open} />
     </div>

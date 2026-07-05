@@ -792,3 +792,13 @@ html.dark .promptly-doc mark {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* Deep citations (4.2): flash the block a citation scrolled to. */
+@keyframes citation-flash-kf {
+  0% { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  100% { background: transparent; }
+}
+.citation-flash {
+  animation: citation-flash-kf 2.4s ease-out;
+  border-radius: 4px;
+}

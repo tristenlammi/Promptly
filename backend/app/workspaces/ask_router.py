@@ -58,6 +58,9 @@ class AskCitation(BaseModel):
     ref_id: uuid.UUID | None
     kind: str  # 'note' | 'canvas' | 'file'
     title: str
+    # Deep-citation anchor (4.2): opening text of the best-matching chunk
+    # so the client can scroll-to-highlight the cited passage.
+    snippet: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -211,10 +214,13 @@ async def ask_workspace(
             detail="The model couldn't be reached to answer.",
         ) from exc
 
-    citations = [
-        await _resolve_citation(db, ws.id, idx, fid)
-        for idx, fid in enumerate(order, start=1)
-    ]
+    citations = []
+    for idx, fid in enumerate(order, start=1):
+        citation = await _resolve_citation(db, ws.id, idx, fid)
+        # Deep-citation anchor (4.2): the best chunk's opening text lets
+        # the note pane scroll straight to the cited passage.
+        citation.snippet = (by_file[fid][0] or "")[:240] or None
+        citations.append(citation)
     return AskResponse(
         answer=answer or "(no answer)", citations=citations
     )
@@ -468,6 +474,93 @@ async def search_workspace(
     return SearchResponse(
         hits=hits[:limit], semantic_available=semantic_available
     )
+
+
+# ---------------------------------------------------------------------
+# Related items (Batch 4.5) — embedding-nearest neighbours of an item,
+# for the "Related" strip under notes. Turns the workspace into a
+# knowledge graph without requiring wiki-link discipline.
+# ---------------------------------------------------------------------
+class RelatedItem(BaseModel):
+    item_id: uuid.UUID
+    ref_id: uuid.UUID | None
+    kind: str
+    title: str
+    score: float
+
+
+class RelatedResponse(BaseModel):
+    items: list[RelatedItem] = Field(default_factory=list)
+
+
+@router.get(
+    "/{workspace_id}/items/{item_id}/related", response_model=RelatedResponse
+)
+async def related_items(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RelatedResponse:
+    """Semantic neighbours of ``item_id`` among the caller-visible pool.
+
+    The query is the item's title + the head of its own indexed text —
+    cheap, no new embeddings stored, and empty (never an error) when
+    embeddings aren't configured."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    item = await db.get(WorkspaceItem, item_id)
+    if item is None or item.workspace_id != ws.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
+        )
+    from app.workspaces.items_router import require_item_visible
+
+    require_item_visible(item, user)
+
+    file_map = await _visible_item_file_map(db, ws.id, user)
+    own_file_id = next(
+        (fid for fid, (iid, _r, _k, _t) in file_map.items() if iid == item.id),
+        None,
+    )
+    query = item.title or ""
+    if own_file_id is not None:
+        uf = await db.get(UserFile, own_file_id)
+        if uf is not None and uf.content_text:
+            query = f"{query}\n{uf.content_text[:1200]}"
+    if len(query.strip()) < 3:
+        return RelatedResponse(items=[])
+
+    try:
+        chunks = await retrieve_workspace_context(
+            db, workspace_id=ws.id, query=query, top_k=10
+        )
+    except Exception:  # pragma: no cover — best-effort
+        return RelatedResponse(items=[])
+
+    out: list[RelatedItem] = []
+    seen: set[uuid.UUID] = {item.id}
+    for chunk in chunks:
+        if chunk.score < 0.35:
+            continue
+        mapped = file_map.get(chunk.user_file_id)
+        if mapped is None:
+            continue
+        rel_item_id, ref_id, kind, title = mapped
+        if rel_item_id is None or rel_item_id in seen:
+            continue
+        seen.add(rel_item_id)
+        out.append(
+            RelatedItem(
+                item_id=rel_item_id,
+                ref_id=ref_id,
+                kind=kind,
+                title=title,
+                score=chunk.score,
+            )
+        )
+        if len(out) >= 4:
+            break
+    return RelatedResponse(items=out)
 
 
 __all__ = ["router"]

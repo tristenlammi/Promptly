@@ -19,6 +19,7 @@ import {
   type WorkspaceItemNode,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { setPendingHighlight } from "./deepCitation";
 
 /** Rewrite bare ``[n]`` citation markers into markdown links on a
  *  ``#ws-cite-n`` anchor so the renderer below can turn them into
@@ -52,7 +53,7 @@ function AskAnswer({
   onJump,
 }: {
   answer: WorkspaceAskResponse;
-  onJump: (itemId: string | null) => void;
+  onJump: (itemId: string | null, snippet?: string | null) => void;
 }) {
   const byIndex = useMemo(
     () => new Map(answer.citations.map((c) => [c.index, c])),
@@ -75,7 +76,7 @@ function AskAnswer({
                 <button
                   type="button"
                   disabled={!c?.item_id}
-                  onClick={() => onJump(c?.item_id ?? null)}
+                  onClick={() => onJump(c?.item_id ?? null, c?.snippet)}
                   title={c ? (c.item_id ? `Open ${c.title}` : c.title) : undefined}
                   className={cn(
                     "mx-0.5 inline-flex -translate-y-[1px] items-center rounded-full border border-[var(--border)] px-1.5 text-[11px] font-medium no-underline",
@@ -272,10 +273,15 @@ export function WorkspaceCommandPalette({
     }
   };
 
-  const jumpToCitation = (itemId: string | null) => {
+  const jumpToCitation = (itemId: string | null, snippet?: string | null) => {
     if (!itemId) return;
     const match = flat.find((f) => f.node.id === itemId);
     if (match) {
+      // Deep citation (4.2): hand the cited passage to the note pane so
+      // it scrolls straight to it after opening.
+      if (snippet && match.node.ref_id) {
+        setPendingHighlight(match.node.ref_id, snippet);
+      }
       onSelectNode(match.node);
       onClose();
     }
@@ -347,7 +353,7 @@ export function WorkspaceCommandPalette({
                           key={c.index}
                           type="button"
                           disabled={!c.item_id}
-                          onClick={() => jumpToCitation(c.item_id)}
+                          onClick={() => jumpToCitation(c.item_id, c.snippet)}
                           className={cn(
                             "inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5 text-xs",
                             c.item_id

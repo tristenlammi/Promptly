@@ -168,6 +168,9 @@ class WorkspaceCreate(BaseModel):
     system_prompt: str | None = Field(default=None, max_length=20_000)
     default_model_id: str | None = Field(default=None, max_length=255)
     default_provider_id: uuid.UUID | None = None
+    # Optional starter template key (4.6): seeds notes / a labelled board /
+    # a tuned system prompt. Unknown keys are ignored (blank workspace).
+    template: str | None = Field(default=None, max_length=40)
 
 
 class WorkspaceUpdate(BaseModel):

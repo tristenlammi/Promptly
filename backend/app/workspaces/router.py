@@ -31,6 +31,7 @@ today — if/when we add it, the check becomes a helper mirroring
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -90,6 +91,8 @@ from app.database import get_db
 from app.files.models import FileFolder, UserFile
 from app.files.system_folders import create_workspace_folder_tree
 from app.models_config.models import ModelProvider
+
+logger = logging.getLogger("promptly.workspaces")
 
 router = APIRouter()
 
@@ -413,6 +416,22 @@ async def create_workspace(
     # inherit Drive's preview / search / trash / quota plumbing.
     ws_folder = await create_workspace_folder_tree(db, user, ws.title)
     ws.root_folder_id = ws_folder.id
+    # Starter template (4.6): seed notes / board / system prompt inside the
+    # same transaction. A template bug must never lose the workspace, so
+    # failures degrade to a blank workspace with a logged warning.
+    if payload.template:
+        try:
+            from app.workspaces.templates import apply_template
+
+            await apply_template(
+                db, ws=ws, user=user, template_key=payload.template
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "template %r failed; created blank workspace",
+                payload.template,
+                exc_info=True,
+            )
     await db.commit()
     await db.refresh(ws)
     return await _summary_with_rollups(ws, db, user)

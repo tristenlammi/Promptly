@@ -239,6 +239,8 @@ export interface WorkspaceAskCitation {
   ref_id: string | null;
   kind: string;
   title: string;
+  /** Opening text of the best-matching chunk — the deep-citation anchor. */
+  snippet?: string | null;
 }
 
 export interface WorkspaceAskResponse {
@@ -290,6 +292,21 @@ export interface WorkspaceOverview {
     ref_id: string | null;
     title: string;
   }[];
+  /** Knowledge health (4.8): what's quietly degrading the AI's answers. */
+  health?: {
+    stale: Array<{
+      item_id: string;
+      kind: string;
+      title: string;
+      updated_at: string | null;
+    }>;
+    heavy: Array<{
+      item_id: string;
+      kind: string;
+      title: string;
+      chars: number | null;
+    }>;
+  };
 }
 
 /** A task's ``status`` is a board *column id* — the defaults (todo / doing
@@ -463,6 +480,8 @@ export interface CreateWorkspacePayload {
   system_prompt?: string | null;
   default_model_id?: string | null;
   default_provider_id?: string | null;
+  /** Starter template key (4.6) — null/omitted = blank workspace. */
+  template?: string | null;
 }
 
 export interface UpdateWorkspacePayload {
@@ -854,6 +873,25 @@ export const workspacesApi = {
     const { data } = await apiClient.post<WorkspaceItemComment>(
       `/workspaces/${id}/items/${itemId}/comments/${commentId}/resolve`,
       { resolved }
+    );
+    return data;
+  },
+
+  /** Embedding-nearest neighbours of an item ("Related" strip). */
+  async related(
+    id: string,
+    itemId: string
+  ): Promise<{
+    items: Array<{
+      item_id: string;
+      ref_id: string | null;
+      kind: string;
+      title: string;
+      score: number;
+    }>;
+  }> {
+    const { data } = await apiClient.get(
+      `/workspaces/${id}/items/${itemId}/related`
     );
     return data;
   },

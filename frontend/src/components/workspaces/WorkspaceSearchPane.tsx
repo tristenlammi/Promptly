@@ -18,6 +18,7 @@ import {
   type WorkspaceSearchHit,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { setPendingHighlight } from "./deepCitation";
 
 /**
  * The workspace search pane (Batch 4.3) — one box over three passes:
@@ -87,6 +88,10 @@ export function WorkspaceSearchPane({
 
   const openHit = (h: WorkspaceSearchHit) => {
     if (!h.item_id) return; // pinned file without a tree item — v1 no-op
+    // Deep citation (4.2): notes scroll straight to the matched passage.
+    if (h.snippet && h.ref_id && h.kind === "note") {
+      setPendingHighlight(h.ref_id, h.snippet);
+    }
     onSelectNode({
       id: h.item_id,
       kind: h.kind as WorkspaceItemNode["kind"],

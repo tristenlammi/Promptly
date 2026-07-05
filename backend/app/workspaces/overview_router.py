@@ -67,11 +67,34 @@ class RecentItem(BaseModel):
     title: str
 
 
+class HealthItem(BaseModel):
+    item_id: uuid.UUID
+    kind: str
+    title: str
+    # Stale: last touched. Heavy: indexed characters.
+    updated_at: datetime | None = None
+    chars: int | None = None
+
+
+class KnowledgeHealth(BaseModel):
+    """The trust card (4.8): what's quietly degrading the AI's answers.
+
+    * ``stale`` — context-enabled items untouched for 60+ days (the AI
+      still cites them as if current).
+    * ``heavy`` — the biggest text contributors (crowd out retrieval
+      budget; candidates for the ⚡ toggle or splitting).
+    """
+
+    stale: list[HealthItem] = Field(default_factory=list)
+    heavy: list[HealthItem] = Field(default_factory=list)
+
+
 class WorkspaceOverview(BaseModel):
     counts: OverviewCounts
     tasks: list[TaskRollupItem] = Field(default_factory=list)
     open_task_count: int = 0
     recent: list[RecentItem] = Field(default_factory=list)
+    health: KnowledgeHealth = Field(default_factory=KnowledgeHealth)
 
 
 def _extract_tasks(rendered_html: str) -> list[tuple[bool, str]]:
@@ -207,8 +230,112 @@ async def workspace_overview(
             )
         )
 
+    # --- Knowledge health (4.8) ------------------------------------------
+    # NOTE: no local ``UserFile`` import here — it's module-level, and a
+    # function-local import would shadow it for the *entire* function
+    # (UnboundLocalError at the earlier tasks-rollup use).
+    from datetime import timedelta, timezone as tz
+
+    from sqlalchemy import or_ as sa_or
+
+    from app.chat.models import Spreadsheet, WorkspaceCanvas
+
+    visible = sa_or(
+        WorkspaceItem.visibility != "private",
+        WorkspaceItem.created_by == user.id,
+    )
+    stale_cutoff = datetime.now(tz.utc) - timedelta(days=60)
+    stale_rows = (
+        (
+            await db.execute(
+                select(WorkspaceItem)
+                .where(
+                    WorkspaceItem.workspace_id == ws.id,
+                    WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.kind.in_(("note", "canvas", "sheet", "board")),
+                    WorkspaceItem.context_enabled.is_(True),
+                    WorkspaceItem.updated_at < stale_cutoff,
+                    visible,
+                )
+                .order_by(WorkspaceItem.updated_at.asc())
+                .limit(5)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    health = KnowledgeHealth(
+        stale=[
+            HealthItem(
+                item_id=it.id,
+                kind=it.kind,
+                title=it.title,
+                updated_at=it.updated_at,
+            )
+            for it in stale_rows
+        ]
+    )
+    # Heaviest text contributors: join each context item to its backing
+    # file's content length. One query per backing shape, merged in Python.
+    heavy: list[HealthItem] = []
+    note_sizes = (
+        await db.execute(
+            select(WorkspaceItem, func.length(UserFile.content_text))
+            .join(UserFile, UserFile.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == ws.id,
+                WorkspaceItem.archived_at.is_(None),
+                WorkspaceItem.kind.in_(("note", "board")),
+                WorkspaceItem.context_enabled.is_(True),
+                UserFile.content_text.is_not(None),
+                visible,
+            )
+        )
+    ).all()
+    canvas_sizes = (
+        await db.execute(
+            select(WorkspaceItem, func.length(WorkspaceCanvas.content_text))
+            .join(WorkspaceCanvas, WorkspaceCanvas.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == ws.id,
+                WorkspaceItem.archived_at.is_(None),
+                WorkspaceItem.kind == "canvas",
+                WorkspaceItem.context_enabled.is_(True),
+                WorkspaceCanvas.content_text.is_not(None),
+                visible,
+            )
+        )
+    ).all()
+    sheet_sizes = (
+        await db.execute(
+            select(WorkspaceItem, func.length(Spreadsheet.content_text))
+            .join(Spreadsheet, Spreadsheet.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == ws.id,
+                WorkspaceItem.archived_at.is_(None),
+                WorkspaceItem.kind == "sheet",
+                WorkspaceItem.context_enabled.is_(True),
+                Spreadsheet.content_text.is_not(None),
+                visible,
+            )
+        )
+    ).all()
+    for it, chars in [*note_sizes, *canvas_sizes, *sheet_sizes]:
+        if chars and chars > 10_000:  # under ~2.5k tokens nobody cares
+            heavy.append(
+                HealthItem(
+                    item_id=it.id, kind=it.kind, title=it.title, chars=chars
+                )
+            )
+    heavy.sort(key=lambda h: h.chars or 0, reverse=True)
+    health.heavy = heavy[:3]
+
     return WorkspaceOverview(
-        counts=counts, tasks=tasks, open_task_count=open_count, recent=recent
+        counts=counts,
+        tasks=tasks,
+        open_task_count=open_count,
+        recent=recent,
+        health=health,
     )
 
 

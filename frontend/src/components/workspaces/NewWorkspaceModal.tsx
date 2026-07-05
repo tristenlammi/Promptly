@@ -1,9 +1,41 @@
 import { useState } from "react";
+import { Briefcase, FileText, Handshake, Rocket } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { useCreateWorkspace } from "@/hooks/useWorkspaces";
+import { cn } from "@/utils/cn";
+
+/** Starter templates (4.6) — mirrors backend/app/workspaces/templates.py.
+ *  Kept as a static list client-side: templates are content, and the
+ *  backend silently ignores unknown keys, so drift degrades to Blank. */
+const TEMPLATES = [
+  {
+    key: null,
+    name: "Blank",
+    description: "Start from scratch.",
+    icon: FileText,
+  },
+  {
+    key: "legal_matter",
+    name: "Legal matter",
+    description: "Matter overview, client intake, deadlines board.",
+    icon: Briefcase,
+  },
+  {
+    key: "engineering_sprint",
+    name: "Engineering sprint",
+    description: "Sprint goals, runbook, labelled sprint board.",
+    icon: Rocket,
+  },
+  {
+    key: "client_onboarding",
+    name: "Client onboarding",
+    description: "Checklist, welcome pack, pipeline board.",
+    icon: Handshake,
+  },
+] as const;
 
 interface NewWorkspaceModalProps {
   open: boolean;
@@ -26,6 +58,7 @@ export function NewWorkspaceModal({
   const [systemPrompt, setSystemPrompt] = useState("");
   const [modelId, setModelId] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
+  const [template, setTemplate] = useState<string | null>(null);
   const create = useCreateWorkspace();
 
   const reset = () => {
@@ -34,6 +67,7 @@ export function NewWorkspaceModal({
     setSystemPrompt("");
     setModelId(null);
     setProviderId(null);
+    setTemplate(null);
   };
 
   const handleClose = () => {
@@ -52,6 +86,7 @@ export function NewWorkspaceModal({
       system_prompt: systemPrompt.trim() || null,
       default_model_id: modelId,
       default_provider_id: providerId,
+      template,
     });
     reset();
     onCreated?.(ws.id);
@@ -81,6 +116,48 @@ export function NewWorkspaceModal({
       }
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
+            Start from
+          </label>
+          <div className="grid grid-cols-2 gap-1.5">
+            {TEMPLATES.map((t) => {
+              const Icon = t.icon;
+              const selected = template === t.key;
+              return (
+                <button
+                  key={t.name}
+                  type="button"
+                  onClick={() => setTemplate(t.key)}
+                  className={cn(
+                    "flex items-start gap-2 rounded-md border px-2.5 py-2 text-left transition",
+                    selected
+                      ? "border-[var(--accent)] bg-[var(--accent)]/5"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--hover)]"
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      selected
+                        ? "text-[var(--accent)]"
+                        : "text-[var(--text-muted)]"
+                    )}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium text-[var(--text)]">
+                      {t.name}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-[var(--text-muted)]">
+                      {t.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div>
           <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
             Title

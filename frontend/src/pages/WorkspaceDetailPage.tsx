@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { cn } from "@/utils/cn";
 import {
@@ -27,6 +27,7 @@ import {
   Plus,
   Search,
   Shapes,
+  Sparkles,
   Table2,
   Share2,
   Upload,
@@ -89,7 +90,13 @@ import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutoma
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
-import type { WorkspaceItemNode } from "@/api/workspaces";
+import { workspacesApi, type WorkspaceItemNode } from "@/api/workspaces";
+import {
+  clearPendingHighlight,
+  onPendingHighlight,
+  peekPendingHighlight,
+  scrollToQuote,
+} from "@/components/workspaces/deepCitation";
 import {
   useArchiveWorkspace,
   useBulkRemoveConversationsFromWorkspace,
@@ -1137,6 +1144,52 @@ function WorkspaceNotePane({
     [linkables, onOpenItem]
   );
 
+  // Deep citation (4.2): a citation/search hit that opened this note may
+  // have left a pending text anchor. Content arrives async over collab,
+  // so retry briefly until the passage exists in the DOM, then scroll +
+  // flash it.
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!node.ref_id) return;
+    const refId = node.ref_id;
+    let timer: number | null = null;
+
+    const attempt = () => {
+      // Peek (not consume): StrictMode double-mounts effects in dev, and
+      // a destructive read on the first mount leaves the remount with
+      // nothing. The anchor clears only on success or timeout.
+      const quote = peekPendingHighlight(refId);
+      if (!quote) return;
+      let attempts = 0;
+      if (timer !== null) window.clearInterval(timer);
+      timer = window.setInterval(() => {
+        attempts += 1;
+        const container = paneRef.current?.querySelector<HTMLElement>(
+          ".ProseMirror"
+        );
+        if (container && scrollToQuote(container, quote)) {
+          clearPendingHighlight(refId);
+          if (timer !== null) window.clearInterval(timer);
+          timer = null;
+        } else if (attempts > 15) {
+          clearPendingHighlight(refId); // never matched — give up quietly
+          if (timer !== null) window.clearInterval(timer);
+          timer = null;
+        }
+      }, 400);
+    };
+
+    attempt(); // freshly-opened note: anchor was set before mount
+    // Already-open note: a citation for it fires the push channel.
+    const unsubscribe = onPendingHighlight((forRef) => {
+      if (forRef === refId) attempt();
+    });
+    return () => {
+      unsubscribe();
+      if (timer !== null) window.clearInterval(timer);
+    };
+  }, [node.id, node.ref_id]);
+
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -1181,7 +1234,7 @@ function WorkspaceNotePane({
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div ref={paneRef} className="relative flex min-h-0 flex-1 flex-col">
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
       <div
         className="flex min-h-0 flex-1 flex-col"
@@ -1198,6 +1251,11 @@ function WorkspaceNotePane({
           wikiLink={wikiLink}
         />
       </div>
+      <RelatedItemsStrip
+        workspaceId={workspaceId}
+        itemId={node.id}
+        onOpenItem={onOpenItem}
+      />
       <BacklinksPanel
         workspaceId={workspaceId}
         itemId={node.id}
@@ -1770,6 +1828,60 @@ function BacklinksPanel({
           >
             <FileText className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
             <span className="truncate">{b.title || "Untitled"}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Embedding-nearest neighbours of the open note (Batch 4.5) — the
+ *  knowledge-graph-without-discipline strip. Hidden when embeddings are
+ *  off or nothing clears the relevance floor. */
+function RelatedItemsStrip({
+  workspaceId,
+  itemId,
+  onOpenItem,
+}: {
+  workspaceId: string;
+  itemId: string;
+  onOpenItem: (node: WorkspaceItemNode) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["workspaces", "related", workspaceId, itemId],
+    queryFn: () => workspacesApi.related(workspaceId, itemId),
+    staleTime: 5 * 60_000,
+  });
+  const items = data?.items ?? [];
+  if (items.length === 0) return null;
+  return (
+    <div className="border-t border-[var(--border)] px-4 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        <Sparkles className="h-3 w-3" />
+        Related
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((r) => (
+          <button
+            key={r.item_id}
+            type="button"
+            onClick={() =>
+              onOpenItem({
+                id: r.item_id,
+                kind: r.kind as WorkspaceItemNode["kind"],
+                ref_id: r.ref_id,
+                title: r.title,
+                icon: null,
+                position: 0,
+                indexing_status: null,
+                children: [],
+              })
+            }
+            className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--accent)]/10"
+            title={`${r.title} — related by meaning`}
+          >
+            <Sparkles className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+            <span className="truncate">{r.title || "Untitled"}</span>
           </button>
         ))}
       </div>

@@ -165,18 +165,7 @@ async def apply_proposal(
 async def _apply_create_note(
     db: AsyncSession, *, ws: Workspace, user: User, payload: dict[str, Any]
 ) -> uuid.UUID:
-    from app.files.document_build import markdown_to_doc_update
-    from app.files.document_render import (
-        extract_text_from_html,
-        render_html_from_update,
-    )
-    from app.files.documents_router import create_blank_document
-    from app.files.models import DocumentState
-    from app.files.storage import absolute_path
-    from app.workspaces.items_router import (
-        _next_position,
-        _resolve_subfolder_id,
-    )
+    from app.workspaces.content_seed import create_note_with_item
 
     title = str(payload.get("title") or "Untitled note").strip()[:200]
     markdown = str(payload.get("markdown") or "")
@@ -186,38 +175,14 @@ async def _apply_create_note(
             status_code=status.HTTP_410_GONE, detail="Workspace owner missing."
         )
 
-    notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
-    doc = await create_blank_document(
-        db, owner_id=owner.id, folder_id=notes_folder_id, name=title
-    )
-    update = markdown_to_doc_update(markdown)
-    ds = await db.get(DocumentState, doc.id)
-    if ds is not None:
-        ds.yjs_update = update
-        ds.version = (ds.version or 0) + 1
-    html = render_html_from_update(update)
-    doc.content_text = extract_text_from_html(html) or None
-    try:
-        with open(absolute_path(doc.storage_path), "w", encoding="utf-8") as f:
-            f.write(html)
-        doc.size_bytes = len(html.encode("utf-8"))
-    except OSError:
-        logger.warning("proposal note blob write failed", exc_info=True)
-
-    pos = await _next_position(db, ws.id, None)
-    item = WorkspaceItem(
-        workspace_id=ws.id,
-        parent_id=None,
-        kind="note",
-        ref_id=doc.id,
+    item = await create_note_with_item(
+        db,
+        ws=ws,
+        owner=owner,
+        creator_id=user.id,
         title=title,
-        position=pos,
-        indexing_status="queued",
-        created_by=user.id,
+        markdown=markdown,
     )
-    db.add(item)
-    await db.flush()
-
     try:
         from app.workspaces.knowledge import index_note_for_workspace
 
