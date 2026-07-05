@@ -48,6 +48,20 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Workspace-tree placement (0140) — mirrors the columns on
+    # ``Conversation``. An automation is synthesised into its workspace's
+    # navigator with no backing ``workspace_items`` row; these let the
+    # user drag it to reorder or drop it into a folder. Both NULL =
+    # "unplaced": the tree falls back to recency order at root.
+    #   * ``ws_parent_id`` — the folder it lives under, NULL for root.
+    #     ``ON DELETE SET NULL`` lifts it back to root if the folder goes.
+    #   * ``ws_position`` — float sort key among siblings, NULL until placed.
+    ws_parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    ws_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     # The instruction the model runs each period.
     prompt: Mapped[str] = mapped_column(Text, nullable=False)

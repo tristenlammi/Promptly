@@ -235,7 +235,10 @@ export function WorkspaceNavigatorTree({
     document.body.style.removeProperty("cursor");
   };
 
-  const canDragKind = (k: string) => k !== "chat" && k !== "task";
+  // Chats + automations (0140) are draggable now: they carry their own
+  // parent/position columns, so reordering/filing routes to the placement
+  // endpoints instead of the items-move one.
+  const canDragKind = (_k: string) => true;
 
   // ↑↓ walk the visible rows, Enter opens (or toggles a folder), ←/→
   // collapse/expand, F2 renames. The handler lives on the scroll
@@ -303,11 +306,29 @@ export function WorkspaceNavigatorTree({
     if (!over || !canEdit || !activeFlat || !canDragKind(activeFlat.node.kind))
       return;
 
-    // Crossing the Pinned ↔ tree boundary toggles the pin.
+    const kind = activeFlat.node.kind;
+    const isChat = kind === "chat";
+    const isTask = kind === "task";
+    const refId = activeFlat.node.ref_id;
+
+    // Crossing the Pinned ↔ tree boundary toggles the pin. Tasks have no
+    // pin concept, so pinning is a no-op for them.
     const wasPinned = activeFlat.node.pinned === true;
-    if (toPinned !== wasPinned) {
-      setPinned.mutate({ itemId: String(active.id), pinned: toPinned });
+    if (toPinned !== wasPinned && !isTask) {
+      if (isChat) {
+        if (refId) {
+          void chatApi.update(refId, { pinned: toPinned }).then(() =>
+            qc.invalidateQueries({
+              queryKey: ["workspaces", "tree", workspaceId],
+            })
+          );
+        }
+      } else {
+        setPinned.mutate({ itemId: String(active.id), pinned: toPinned });
+      }
     }
+    // Tasks can't live in the pinned section — snap them back if dropped there.
+    if (toPinned && isTask) return;
     // Reparent + reorder only when the item lands in the tree region.
     if (toPinned || over.id === PIN_ZONE_ID || !projected) return;
     const { parentId, depth } = projected;
@@ -339,10 +360,24 @@ export function WorkspaceNavigatorTree({
       (old) =>
         old ? moveNodeInTree(old, String(active.id), parentId, position) : old
     );
-    move.mutate({
-      itemId: String(active.id),
-      payload: { parent_id: parentId, position },
-    });
+    // Chats + automations (0140) persist their placement to their own
+    // columns; stored items go through the items-move endpoint.
+    if (isChat) {
+      void workspacesApi.placeChat(workspaceId, String(active.id), {
+        parent_id: parentId,
+        position,
+      });
+    } else if (isTask) {
+      void workspacesApi.placeTask(workspaceId, String(active.id), {
+        parent_id: parentId,
+        position,
+      });
+    } else {
+      move.mutate({
+        itemId: String(active.id),
+        payload: { parent_id: parentId, position },
+      });
+    }
   };
 
   const handleCreate = async (
@@ -1518,9 +1553,11 @@ function TreeRow({
           {/* Context state: the *excluded* glyph is permanent (it's the
               exception worth flagging); the *included* glyph fades in on
               row hover so the on-state is discoverable without turning the
-              rail into a wall of identical bolts. Toggle stays in ⋯. */}
-          {isContextItem &&
-            (contextOn ? (
+              rail into a wall of identical bolts. Toggle stays in ⋯.
+              Non-context rows (folders, automations) reserve the same column
+              with an empty spacer so every row's icon + title stay aligned. */}
+          {isContextItem ? (
+            contextOn ? (
               <span
                 title="Included in this workspace's chat context. Toggle via the ⋯ menu."
                 aria-label="Included in workspace context"
@@ -1536,7 +1573,10 @@ function TreeRow({
               >
                 <ZapOff className="h-3 w-3" />
               </span>
-            ))}
+            )
+          ) : (
+            <span className="w-3 shrink-0" aria-hidden />
+          )}
 
           <NodeIcon node={node} expanded={expanded} />
 

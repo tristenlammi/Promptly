@@ -805,6 +805,27 @@ export const workspacesApi = {
     await apiClient.delete(`/workspaces/${id}/items/${itemId}`);
   },
 
+  /** Reorder / file a synthesised chat node in the navigator (0140). */
+  async placeChat(
+    id: string,
+    conversationId: string,
+    payload: MoveWorkspaceItemPayload
+  ): Promise<void> {
+    await apiClient.post(
+      `/workspaces/${id}/chats/${conversationId}/place`,
+      payload
+    );
+  },
+
+  /** Reorder / file a synthesised automation node in the navigator (0140). */
+  async placeTask(
+    id: string,
+    taskId: string,
+    payload: MoveWorkspaceItemPayload
+  ): Promise<void> {
+    await apiClient.post(`/workspaces/${id}/tasks/${taskId}/place`, payload);
+  },
+
   /** The workspace's structural map (Markdown) — the same catalog injected
    *  into chat context. */
   async map(id: string): Promise<{ markdown: string }> {

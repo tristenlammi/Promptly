@@ -154,6 +154,23 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Workspace-tree placement (0140). A chat is synthesised into its
+    # workspace's navigator tree with no backing ``workspace_items`` row.
+    # These two columns let the user drag a chat to reorder it or drop it
+    # into a folder, mirroring how ``WorkspaceItem`` stores position +
+    # parent. Both NULL = "unplaced": the tree falls back to recency order
+    # at root (the historical default), so existing chats need no backfill.
+    #   * ``ws_parent_id`` — the folder (a ``workspace_items`` row) the chat
+    #     lives under, or NULL for root. ``ON DELETE SET NULL`` so deleting
+    #     the folder lifts the chat back to root rather than orphaning it.
+    #   * ``ws_position`` — float sort key among its siblings (same midpoint
+    #     scheme the items tree uses), NULL until first placed.
+    ws_parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    ws_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # Compare mode (0029). Non-NULL for every column of a side-by-
     # side comparison; each column is a real conversation driven by
     # the normal send/stream pipeline, just linked together into a

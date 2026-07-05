@@ -331,6 +331,26 @@ async def get_workspace_tree(
     )
     tree = _serialize_tree(items)
 
+    # Placement (0140): chats + automations are synthesised into the tree
+    # with no backing item row, but they carry ``ws_parent_id`` /
+    # ``ws_position`` so the user can drag them into folders and reorder
+    # them. Build an id → node index over the serialised item tree so a
+    # placed node can be inserted under its parent folder; ``None`` parent
+    # (or a parent that no longer exists) lands at root.
+    node_index: dict[uuid.UUID, WorkspaceItemNode] = {}
+
+    def _index(nodes: list[WorkspaceItemNode]) -> None:
+        for n in nodes:
+            node_index[n.id] = n
+            if n.children:
+                _index(n.children)
+
+    _index(tree)
+
+    def _place(node: WorkspaceItemNode, parent_id: uuid.UUID | None) -> None:
+        parent = node_index.get(parent_id) if parent_id else None
+        (parent.children if parent is not None else tree).append(node)
+
     # Synthesise chat nodes from the workspace's conversations. Top-level
     # chats carry no item row — the frontend opens them by ref_id. Chats that
     # are *notebook pages* DO have a backing ``kind='chat'`` item (rendered as
@@ -362,22 +382,28 @@ async def get_workspace_tree(
         if c.id not in page_chat_ids
     ]
     for idx, c in enumerate(convs):
-        tree.append(
+        _place(
             WorkspaceItemNode(
                 id=c.id,
                 kind="chat",
                 ref_id=c.id,
                 title=c.title or "New chat",
                 icon=None,
-                # Sort chats after stored items; recency order within.
-                position=1_000_000.0 + idx,
+                # Placed chats sort by their ws_position; unplaced ones sit
+                # after stored items in recency order (the historical default).
+                position=(
+                    c.ws_position
+                    if c.ws_position is not None
+                    else 1_000_000.0 + idx
+                ),
                 # Chats are out of context by default; surface the toggle
                 # state + index chip so the rail can show both.
                 context_enabled=c.context_enabled,
                 indexing_status=c.context_index_status,
                 pinned=bool(c.pinned),
                 children=[],
-            )
+            ),
+            c.ws_parent_id,
         )
 
     # Synthesise automation (scheduled task) nodes the same way — the
@@ -392,17 +418,33 @@ async def get_workspace_tree(
         )
     ).scalars()
     for idx, t in enumerate(tasks):
-        tree.append(
+        _place(
             WorkspaceItemNode(
                 id=t.id,
                 kind="task",
                 ref_id=t.id,
                 title=t.title,
                 icon=None,
-                position=2_000_000.0 + idx,
+                position=(
+                    t.ws_position
+                    if t.ws_position is not None
+                    else 2_000_000.0 + idx
+                ),
                 children=[],
-            )
+            ),
+            t.ws_parent_id,
         )
+
+    # A placed chat/task can now be interleaved with stored items under a
+    # folder, so re-sort every level by position (items came pre-sorted;
+    # inserting a synthesised node may have broken that order).
+    def _sort(nodes: list[WorkspaceItemNode]) -> None:
+        nodes.sort(key=lambda n: n.position)
+        for n in nodes:
+            if n.children:
+                _sort(n.children)
+
+    _sort(tree)
     return tree
 
 
@@ -1339,6 +1381,82 @@ async def move_workspace_item(
     await db.commit()
     await db.refresh(item)
     return WorkspaceItemResponse.model_validate(item)
+
+
+# ---------------------------------------------------------------------
+# Placement of synthesised nodes (0140) — chats + automations have no
+# workspace_items row, so they carry their own parent/position columns.
+# These endpoints let the navigator drag them like any tree item.
+# ---------------------------------------------------------------------
+async def _validate_placement_parent(
+    db: AsyncSession, workspace_id: uuid.UUID, parent_id: uuid.UUID | None
+) -> None:
+    """A synthesised node may sit at root or inside a *folder* — not
+    inside a notebook (those hold backing item pages) or another leaf."""
+    if parent_id is None:
+        return
+    parent = await db.get(WorkspaceItem, parent_id)
+    if (
+        parent is None
+        or parent.workspace_id != workspace_id
+        or parent.kind != "folder"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A chat or automation can only be filed into a folder.",
+        )
+
+
+@router.post(
+    "/{workspace_id}/chats/{conversation_id}/place",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def place_workspace_chat(
+    workspace_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    payload: WorkspaceItemMove,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Reorder / file a workspace chat in the navigator (0140)."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None or conv.workspace_id != ws.id or conv.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await _validate_placement_parent(db, ws.id, payload.parent_id)
+    conv.ws_parent_id = payload.parent_id
+    conv.ws_position = payload.position
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{workspace_id}/tasks/{task_id}/place",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def place_workspace_task(
+    workspace_id: uuid.UUID,
+    task_id: uuid.UUID,
+    payload: WorkspaceItemMove,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Reorder / file a workspace automation in the navigator (0140)."""
+    from app.tasks.models import Task
+
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    task = await db.get(Task, task_id)
+    if task is None or task.workspace_id != ws.id or task.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await _validate_placement_parent(db, ws.id, payload.parent_id)
+    task.ws_parent_id = payload.parent_id
+    task.ws_position = payload.position
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------
