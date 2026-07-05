@@ -1,4 +1,10 @@
-import { useCallback, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   closestCenter,
@@ -47,6 +53,8 @@ import {
   Plus,
   Settings,
   Shapes,
+  Smile,
+  SmilePlus,
   Table2,
   Trash2,
   Unlock,
@@ -55,6 +63,7 @@ import {
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
+import { EmojiPicker } from "@/components/files/documents/EmojiPicker";
 import { tasksApi } from "@/api/tasks";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { workspacesApi } from "@/api/workspaces";
@@ -162,6 +171,11 @@ export function WorkspaceNavigatorTree({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [offsetLeft, setOffsetLeft] = useState(0);
+  // Keyboard navigation (7.1): a roving focus separate from the *open*
+  // item, so ↑↓ can walk the rail without loading every pane it passes.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  // F2 → the focused row flips into its inline rename input.
+  const [renameRequestId, setRenameRequestId] = useState<string | null>(null);
 
   // One flat list across both sections so pinned items are draggable too, and
   // dragging between the Pinned area and the tree pins / unpins the item.
@@ -211,6 +225,64 @@ export function WorkspaceNavigatorTree({
   };
 
   const canDragKind = (k: string) => k !== "chat" && k !== "task";
+
+  // ↑↓ walk the visible rows, Enter opens (or toggles a folder), ←/→
+  // collapse/expand, F2 renames. The handler lives on the scroll
+  // container so it only fires when the rail itself has focus — typing
+  // in a rename input or the search box is untouched.
+  const handleTreeKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    const order = visibleItems;
+    if (order.length === 0) return;
+    const idx = order.findIndex((i) => i.id === (focusId ?? selectedId));
+    const focusRow = (item: FlatItem | undefined) => {
+      if (!item) return;
+      setFocusId(item.id);
+      document
+        .getElementById(`ws-tree-row-${item.id}`)
+        ?.scrollIntoView({ block: "nearest" });
+    };
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      const next =
+        idx === -1
+          ? step === 1
+            ? 0
+            : order.length - 1
+          : Math.max(0, Math.min(order.length - 1, idx + step));
+      focusRow(order[next]);
+      return;
+    }
+    const cur = idx >= 0 ? order[idx] : undefined;
+    if (!cur) return;
+    const isFolderish = cur.node.kind === "folder" || cur.node.kind === "container";
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (isFolderish) toggleCollapse(cur.id);
+      else onSelect(cur.node);
+    } else if (e.key === "ArrowRight") {
+      if (isFolderish && collapsed.has(cur.id)) {
+        e.preventDefault();
+        toggleCollapse(cur.id);
+      }
+    } else if (e.key === "ArrowLeft") {
+      if (isFolderish && !collapsed.has(cur.id)) {
+        e.preventDefault();
+        toggleCollapse(cur.id);
+      } else if (cur.parentId) {
+        // On a leaf (or an already-collapsed folder): jump to the parent.
+        e.preventDefault();
+        focusRow(order.find((i) => i.id === cur.parentId));
+      }
+    } else if (e.key === "F2") {
+      if (canEdit) {
+        e.preventDefault();
+        setRenameRequestId(cur.id);
+      }
+    }
+  };
 
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     const activeFlat = flatItems.find((i) => i.id === active.id);
@@ -429,7 +501,13 @@ export function WorkspaceNavigatorTree({
         onDragEnd={handleDragEnd}
         onDragCancel={resetDrag}
       >
-        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+        <div
+          tabIndex={0}
+          onKeyDown={handleTreeKeyDown}
+          role="tree"
+          aria-label="Workspace content"
+          className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]/40"
+        >
           <SortableContext
             items={[...pinnedIds, ...mainIds]}
             strategy={verticalListSortingStrategy}
@@ -455,12 +533,18 @@ export function WorkspaceNavigatorTree({
                           workspaceId={workspaceId}
                           item={item}
                           selectedId={selectedId}
-                          onSelect={onSelect}
+                          onSelect={(n) => {
+                            setFocusId(n.id);
+                            onSelect(n);
+                          }}
                           onOpenToSide={onOpenToSide}
                           canEdit={canEdit}
                           collapsed={collapsed}
                           toggleCollapse={toggleCollapse}
                           sortable={canDragKind(item.node.kind)}
+                          focused={focusId === item.id}
+                          renameRequest={renameRequestId === item.id}
+                          onRenameHandled={() => setRenameRequestId(null)}
                           onCreateInside={
                             canEdit
                               ? (kind, parentId) =>
@@ -489,12 +573,18 @@ export function WorkspaceNavigatorTree({
                       workspaceId={workspaceId}
                       item={item}
                       selectedId={selectedId}
-                      onSelect={onSelect}
+                      onSelect={(n) => {
+                        setFocusId(n.id);
+                        onSelect(n);
+                      }}
                       onOpenToSide={onOpenToSide}
                       canEdit={canEdit}
                       collapsed={collapsed}
                       toggleCollapse={toggleCollapse}
                       sortable={canDragKind(item.node.kind)}
+                      focused={focusId === item.id}
+                      renameRequest={renameRequestId === item.id}
+                      onRenameHandled={() => setRenameRequestId(null)}
                       isDropParent={
                         !!activeId &&
                         !dropInPinned &&
@@ -833,6 +923,9 @@ function TreeRow({
   isDropParent,
   overlay,
   onCreateInside,
+  focused,
+  renameRequest,
+  onRenameHandled,
 }: {
   workspaceId: string;
   item: FlatItem;
@@ -853,11 +946,26 @@ function TreeRow({
     kind: "note" | "canvas" | "board" | "sheet",
     parentId: string
   ) => void;
+  /** Keyboard roving focus (visual ring; the open item stays separate). */
+  focused?: boolean;
+  /** F2 on the focused row — flip into the inline rename input. */
+  renameRequest?: boolean;
+  onRenameHandled?: () => void;
 }) {
   const { node, depth } = item;
   const expanded = !collapsed.has(node.id);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(node.title);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (renameRequest && canEdit && !overlay) {
+      setDraftTitle(node.title);
+      setRenaming(true);
+      onRenameHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRequest]);
 
   const update = useUpdateWorkspaceItem(workspaceId);
   const remove = useDeleteWorkspaceItem(workspaceId);
@@ -1028,6 +1136,7 @@ function TreeRow({
 
   return (
     <li
+      id={overlay ? undefined : `ws-tree-row-${node.id}`}
       ref={overlay ? undefined : setNodeRef}
       style={
         overlay
@@ -1042,6 +1151,9 @@ function TreeRow({
           isSelected
             ? "bg-[var(--accent)]/10 text-[var(--text)]"
             : "text-[var(--text)] hover:bg-[var(--hover)]",
+          focused &&
+            !overlay &&
+            "ring-1 ring-inset ring-[var(--accent)]/60",
           isDropParent &&
             "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/50",
           isDragging && !overlay && "opacity-40",
@@ -1186,10 +1298,31 @@ function TreeRow({
                 },
               })
             }
+            onChangeIcon={
+              !isChat && !isTask ? () => setIconPickerOpen(true) : undefined
+            }
+            hasIcon={Boolean(node.icon)}
+            onClearIcon={() =>
+              update.mutate({ itemId: node.id, payload: { icon: null } })
+            }
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
         )}
       </div>
+      {iconPickerOpen && (
+        <EmojiPicker
+          anchor={
+            document
+              .getElementById(`ws-tree-row-${node.id}`)
+              ?.getBoundingClientRect() ?? null
+          }
+          onSelect={(emoji) => {
+            update.mutate({ itemId: node.id, payload: { icon: emoji } });
+            setIconPickerOpen(false);
+          }}
+          onClose={() => setIconPickerOpen(false)}
+        />
+      )}
     </li>
   );
 }
@@ -1256,6 +1389,9 @@ function NodeActions({
   onDuplicate,
   visibility,
   onToggleVisibility,
+  onChangeIcon,
+  hasIcon,
+  onClearIcon,
   deleting,
 }: {
   isFolder: boolean;
@@ -1280,6 +1416,10 @@ function NodeActions({
    *  0134); null hides the menu entry. */
   visibility?: "workspace" | "private" | null;
   onToggleVisibility?: () => void;
+  /** Open the emoji picker for this item's tree icon. */
+  onChangeIcon?: () => void;
+  hasIcon?: boolean;
+  onClearIcon?: () => void;
   deleting: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1364,6 +1504,26 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onRename();
+                  }}
+                />
+              )}
+              {onChangeIcon && (
+                <MenuItem
+                  icon={<Smile className="h-3.5 w-3.5" />}
+                  label="Change icon"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onChangeIcon();
+                  }}
+                />
+              )}
+              {hasIcon && onClearIcon && (
+                <MenuItem
+                  icon={<SmilePlus className="h-3.5 w-3.5" />}
+                  label="Remove icon"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onClearIcon();
                   }}
                 />
               )}

@@ -259,6 +259,7 @@ async def _summary_with_rollups(
     base.member_names = [participants.owner.username] + [
         c.username for c in participants.collaborators
     ]
+    base.members = [participants.owner, *participants.collaborators]
 
     if ws.user_id == caller.id:
         base.role = "owner"

@@ -31,6 +31,7 @@ import {
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
+import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
 
 /**
@@ -890,35 +891,40 @@ export function DocumentEditorModal({
         />
       </div>
 
-      {/* Editor area */}
-      <div
-        className={cn(
-          "flex-1 overflow-y-auto",
-          // Horizontal + bottom safe-areas so content doesn't hide
-          // behind the iOS home indicator / rounded corners.
-          "pl-[env(safe-area-inset-left,0)]",
-          "pr-[env(safe-area-inset-right,0)]",
-          "pb-[max(env(safe-area-inset-bottom,0),1.5rem)]"
-        )}
-      >
-        {error ? (
-          <div className="mx-auto mt-12 flex max-w-md flex-col items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center text-sm text-red-600 dark:text-red-300">
-            <AlertTriangle className="h-6 w-6" />
-            <div>
-              <div className="font-semibold">Collaboration unavailable</div>
-              <div className="mt-1 text-xs opacity-80">{error}</div>
+      {/* Editor area — relative wrapper so the outline rail + word-count
+          pill float over the scroll region instead of scrolling with it. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          className={cn(
+            "flex-1 overflow-y-auto",
+            // Horizontal + bottom safe-areas so content doesn't hide
+            // behind the iOS home indicator / rounded corners.
+            "pl-[env(safe-area-inset-left,0)]",
+            "pr-[env(safe-area-inset-right,0)]",
+            "pb-[max(env(safe-area-inset-bottom,0),1.5rem)]"
+          )}
+        >
+          {error ? (
+            <div className="mx-auto mt-12 flex max-w-md flex-col items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center text-sm text-red-600 dark:text-red-300">
+              <AlertTriangle className="h-6 w-6" />
+              <div>
+                <div className="font-semibold">Collaboration unavailable</div>
+                <div className="mt-1 text-xs opacity-80">{error}</div>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div
-            className={cn(
-              "mx-auto px-0 md:px-4",
-              NOTE_WIDTH_CLASS[noteWidth]
-            )}
-          >
-            <EditorContent editor={editor} />
-          </div>
-        )}
+          ) : (
+            <div
+              className={cn(
+                "document-print-root mx-auto px-0 md:px-4",
+                NOTE_WIDTH_CLASS[noteWidth]
+              )}
+            >
+              <EditorContent editor={editor} />
+            </div>
+          )}
+        </div>
+        <DocumentOutline editor={editor} />
+        <WordCountPill editor={editor} />
       </div>
 
       {historyOpen && (

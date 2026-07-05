@@ -15,6 +15,7 @@ import {
 
 import type { WorkspaceSummary } from "@/api/workspaces";
 import { formatRelativeTime } from "@/components/files/helpers";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { cn } from "@/utils/cn";
 
 interface WorkspaceCardProps {
@@ -51,7 +52,10 @@ export function WorkspaceCard({
   const accentSoft = `hsl(${hue} 64% 50% / 0.14)`;
 
   const stats = buildStats(workspace);
+  // Prefer the enriched member payload (real avatars, 7.5); fall back to
+  // the usernames-only strip for stale cached summaries.
   const members = workspace.member_names ?? [];
+  const richMembers = workspace.members ?? [];
 
   return (
     <div
@@ -141,8 +145,34 @@ export function WorkspaceCard({
 
         <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-2">
-            {members.length > 1 && (
-              <span className="inline-flex items-center" title={members.join(", ")}>
+            {richMembers.length > 1 ? (
+              <span
+                className="inline-flex items-center"
+                title={members.join(", ")}
+              >
+                {richMembers.slice(0, 4).map((m, i) => (
+                  <UserAvatar
+                    key={m.user_id}
+                    name={m.username}
+                    userId={m.user_id}
+                    avatarUrl={m.avatar_url}
+                    color={m.avatar_color}
+                    size={18}
+                    className={cn(
+                      "border border-[var(--surface)]",
+                      i > 0 && "-ml-1.5"
+                    )}
+                  />
+                ))}
+                {richMembers.length > 4 && (
+                  <span className="ml-1">+{richMembers.length - 4}</span>
+                )}
+              </span>
+            ) : members.length > 1 ? (
+              <span
+                className="inline-flex items-center"
+                title={members.join(", ")}
+              >
                 {members.slice(0, 4).map((name, i) => (
                   <span
                     key={name}
@@ -159,7 +189,7 @@ export function WorkspaceCard({
                   <span className="ml-1">+{members.length - 4}</span>
                 )}
               </span>
-            )}
+            ) : null}
             <span>Updated {formatRelativeTime(workspace.updated_at)}</span>
           </span>
         {!isCollaborator && (

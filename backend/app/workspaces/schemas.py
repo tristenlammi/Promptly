@@ -96,6 +96,10 @@ class WorkspaceSummary(BaseModel):
     # Owner first, then accepted collaborators — usernames only, enough
     # for the card's initials-avatar strip without a per-card round-trip.
     member_names: list[str] = Field(default_factory=list)
+    # The same people with avatar url/colour (7.5) so hub cards render
+    # real profile pictures. Kept alongside ``member_names`` (not in
+    # place of it) so stale cached payloads still render.
+    members: list[WorkspaceParticipant] = Field(default_factory=list)
     # ``owner`` when the caller created the workspace, ``collaborator``
     # when they have an accepted workspace share. Populated by the
     # router; the UI uses it to hide destructive actions (delete,

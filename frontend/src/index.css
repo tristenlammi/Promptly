@@ -802,3 +802,41 @@ html.dark .promptly-doc mark {
   animation: citation-flash-kf 2.4s ease-out;
   border-radius: 4px;
 }
+
+/* Print styling (7.4): when a document/note is open, print ONLY its
+   content — no toolbar, rail, sidebar, or app chrome. The classic
+   visibility trick keeps layout intact without a separate print route.
+   With no editor open the app prints as-is (rarely useful, never wrong). */
+@media print {
+  body:has(.document-print-root) * {
+    visibility: hidden;
+  }
+  body:has(.document-print-root) .document-print-root,
+  body:has(.document-print-root) .document-print-root * {
+    visibility: visible;
+  }
+  body:has(.document-print-root) .document-print-root {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    overflow: visible;
+    padding: 0;
+  }
+  /* Ink-friendly regardless of app theme. */
+  .document-print-root,
+  .document-print-root * {
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+  .document-print-root a {
+    color: #000 !important;
+    text-decoration: underline;
+  }
+  /* Collaboration cursors/selections are screen furniture. */
+  .document-print-root .collaboration-cursor__caret,
+  .document-print-root .collaboration-cursor__label {
+    display: none !important;
+  }
+}

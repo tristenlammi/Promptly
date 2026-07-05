@@ -1,6 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, FolderKanban, Plus, Upload } from "lucide-react";
+import {
+  Archive,
+  ArrowUpDown,
+  FolderKanban,
+  Plus,
+  Search,
+  Upload,
+} from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
@@ -20,6 +27,14 @@ import type { WorkspaceSummary } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 
 type Tab = "active" | "archived";
+type SortKey = "updated" | "created" | "title" | "content";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  updated: "Recently updated",
+  created: "Recently created",
+  title: "Title A–Z",
+  content: "Most content",
+};
 
 /** Workspaces home — tabbed (Active / Archive), mirrors the Study page
  * layout so users don't need to relearn the pattern. */
@@ -49,6 +64,38 @@ export function WorkspacesPage() {
   const workspaces =
     tab === "active" ? activeWorkspaces ?? [] : archivedWorkspaces ?? [];
   const isLoading = tab === "active" ? activeLoading : archivedLoading;
+
+  // Hub sort + filter (7.5). Client-side: the payload is already the
+  // full list, so there's nothing to gain from a round-trip.
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortKey>("updated");
+  const shown = useMemo(() => {
+    let list = workspaces;
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (w) =>
+          w.title.toLowerCase().includes(q) ||
+          (w.description ?? "").toLowerCase().includes(q) ||
+          (w.member_names ?? []).some((n) => n.toLowerCase().includes(q))
+      );
+    }
+    const contentOf = (w: WorkspaceSummary) =>
+      Object.values(w.item_counts ?? {}).reduce((a, b) => a + b, 0) +
+      w.conversation_count;
+    return [...list].sort((a, b) => {
+      switch (sort) {
+        case "title":
+          return a.title.localeCompare(b.title);
+        case "created":
+          return +new Date(b.created_at) - +new Date(a.created_at);
+        case "content":
+          return contentOf(b) - contentOf(a);
+        default:
+          return +new Date(b.updated_at) - +new Date(a.updated_at);
+      }
+    });
+  }, [workspaces, query, sort]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -92,12 +139,41 @@ export function WorkspacesPage() {
       />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl px-6 py-6">
-          <Tabs
-            tab={tab}
-            onChange={setTab}
-            activeCount={activeWorkspaces?.length ?? 0}
-            archivedCount={archivedWorkspaces?.length ?? 0}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)]">
+            <Tabs
+              tab={tab}
+              onChange={setTab}
+              activeCount={activeWorkspaces?.length ?? 0}
+              archivedCount={archivedWorkspaces?.length ?? 0}
+            />
+            <div className="flex items-center gap-2 pb-1.5">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter workspaces…"
+                  className="w-44 rounded-md border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-7 pr-2 text-xs text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
+                />
+              </div>
+              <div className="relative">
+                <ArrowUpDown className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortKey)}
+                  title="Sort workspaces"
+                  className="appearance-none rounded-md border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-7 pr-6 text-xs text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
+                >
+                  {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                    <option key={k} value={k}>
+                      {SORT_LABELS[k]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
 
           {isLoading ? (
             <div className="mt-10 text-sm text-[var(--text-muted)]">
@@ -105,9 +181,13 @@ export function WorkspacesPage() {
             </div>
           ) : workspaces.length === 0 ? (
             <EmptyState tab={tab} onNewWorkspace={() => setWizardOpen(true)} />
+          ) : shown.length === 0 ? (
+            <div className="mt-10 text-center text-sm text-[var(--text-muted)]">
+              No workspace matches “{query}”.
+            </div>
           ) : (
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {workspaces.map((p) => (
+              {shown.map((p) => (
                 <WorkspaceCard
                   key={p.id}
                   workspace={p}
@@ -196,7 +276,7 @@ function Tabs({
   archivedCount: number;
 }) {
   return (
-    <div className="flex items-center gap-1 border-b border-[var(--border)]">
+    <div className="flex items-center gap-1">
       <TabButton
         active={tab === "active"}
         onClick={() => onChange("active")}

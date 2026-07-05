@@ -54,6 +54,8 @@ export interface WorkspaceSummary {
   item_counts?: Record<string, number>;
   /** Owner first, then accepted collaborators — for the card avatars. */
   member_names?: string[];
+  /** Same people with avatar url/colour (7.5) — real pictures on cards. */
+  members?: WorkspaceParticipant[];
   /** Whether the caller owns this workspace or has an accepted share
    *  on it. Used to badge cards in the list and to hide destructive
    *  actions (delete, archive, manage shares) from collaborators. */
@@ -424,7 +426,8 @@ export interface CreateWorkspaceItemPayload {
 
 export interface UpdateWorkspaceItemPayload {
   title?: string;
-  icon?: string;
+  /** Emoji glyph shown in place of the kind icon; null clears it. */
+  icon?: string | null;
   /** "workspace" | "private" — creator-only drafts (0134). */
   visibility?: "workspace" | "private";
 }
