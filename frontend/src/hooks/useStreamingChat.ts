@@ -13,6 +13,7 @@ import type {
   ChatMessage,
   ConversationSummary,
   MessageAttachmentSnapshot,
+  PersistedToolCall,
   Source,
 } from "@/api/types";
 
@@ -99,6 +100,12 @@ interface SSEPayload {
   ok?: boolean;
   attachments?: MessageAttachmentSnapshot[] | null;
   meta?: Record<string, unknown> | null;
+  // tool_finished extras (Tool Activity Card): wall-clock duration,
+  // benign-failure class ("per_turn_cap" / "timeout"), and — on the
+  // final ``done`` payload — the persisted per-turn tool log.
+  elapsed_ms?: number | null;
+  error_kind?: string | null;
+  tool_calls?: PersistedToolCall[] | null;
   // vision_relay_started / vision_relay_finished events. Driven by the
   // chat router when a non-vision chat model receives an image
   // attachment and the admin has configured a vision-capable relay
@@ -341,6 +348,8 @@ export function useStreamingChat(): UseStreamingChatResult {
           store.finishToolInvocation(data.id, {
             ok: !!data.ok,
             error: data.error ?? null,
+            errorKind: data.error_kind ?? null,
+            elapsedMs: data.elapsed_ms ?? null,
             attachments: data.attachments ?? null,
             meta: data.meta ?? null,
           });
@@ -407,6 +416,7 @@ export function useStreamingChat(): UseStreamingChatResult {
               role: "assistant",
               content: currentContent,
               sources: finalSources,
+              tool_calls: data.tool_calls ?? null,
               attachments: finalAttachments,
               created_at: data.created_at,
               prompt_tokens: data.prompt_tokens ?? null,

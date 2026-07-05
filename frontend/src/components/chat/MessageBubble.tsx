@@ -53,6 +53,7 @@ import { MermaidDiagram } from "./MermaidDiagram";
 import type {
   ChatMessage,
   MessageAttachmentSnapshot,
+  PersistedToolCall,
   Source,
   ToolInvocation,
   VisionRelayInvocation,
@@ -79,7 +80,11 @@ export interface RegenerateOverride {
 }
 
 import { MessageStats } from "./MessageStats";
-import { ToolStatusBlock } from "./ToolStatusBlock";
+import {
+  ToolActivityCard,
+  stepsFromInvocations,
+  stepsFromPersisted,
+} from "./ToolActivityCard";
 import { VisionRelayChip } from "./VisionRelayChip";
 
 interface MessageBubbleProps {
@@ -111,10 +116,13 @@ interface MessageBubbleProps {
    *  bubble doesn't update its own state. */
   onBranch?: () => Promise<void> | void;
   /** Tool calls fired during *this* turn. Only meaningful on assistant
-   *  rows — the streaming bubble passes the live in-flight list, the
-   *  persisted bubble passes nothing (the chips and reply text are the
-   *  permanent record once the turn lands). */
+   *  rows — the streaming bubble passes the live in-flight list; the
+   *  committed bubble passes ``toolCalls`` (the persisted log) instead
+   *  so the activity card survives in scrollback. */
   toolInvocations?: ToolInvocation[] | null;
+  /** Persisted per-turn tool log (``messages.tool_calls``) on committed
+   *  assistant rows. Drives the same activity card as the live list. */
+  toolCalls?: PersistedToolCall[] | null;
   /** Vision-relay captioning calls fired *before* this turn's reply
    *  began (each image attached to a non-vision chat model gets one).
    *  Only meaningful on the streaming bubble — once the assistant
@@ -737,53 +745,6 @@ function computeAuthorLabel(
   return authorLookup[authorUserId] ?? "Friend";
 }
 
-/** Apply the "show failures only when nothing else worked" rule to
- *  the live list of tool invocations before rendering.
- *
- *  Per tool name:
- *    - Pending invocations always render (in-flight UX).
- *    - If at least one ``ok`` invocation exists, every ``error`` entry
- *      for that tool is dropped. Most failed chips in practice come
- *      from the per-turn cap kicking in after several successful
- *      searches — the user has already got useful results, so the red
- *      X-chips are pure noise and look like a duplicate bug.
- *    - If *every* invocation of that tool errored, keep exactly one
- *      chip (the most recent failure) so the user still sees that the
- *      tool couldn't do its job. That preserves the "complete failure
- *      surfaces clearly" guarantee.
- *
- *  Order is preserved within each retained group; the final array is
- *  rebuilt in the same order tools were started so the chip strip
- *  matches the model's actual call sequence.
- */
-export function consolidateToolInvocations(
-  invocations: ToolInvocation[] | null | undefined,
-): ToolInvocation[] {
-  if (!invocations || invocations.length === 0) return [];
-  const byName = new Map<string, ToolInvocation[]>();
-  for (const inv of invocations) {
-    const bucket = byName.get(inv.name);
-    if (bucket) bucket.push(inv);
-    else byName.set(inv.name, [inv]);
-  }
-  const keep = new Set<string>();
-  for (const group of byName.values()) {
-    const hasSuccess = group.some((t) => t.status === "ok");
-    let lastErrorId: string | null = null;
-    for (const t of group) {
-      if (t.status === "pending" || t.status === "ok") {
-        keep.add(t.id);
-      } else if (t.status === "error") {
-        lastErrorId = t.id;
-      }
-    }
-    if (!hasSuccess && lastErrorId !== null) {
-      keep.add(lastErrorId);
-    }
-  }
-  return invocations.filter((t) => keep.has(t.id));
-}
-
 // Some reasoning models (e.g. DeepSeek-R1 / QwQ via Ollama) emit their
 // chain-of-thought inline as a leading <think>…</think> block in the
 // content stream. Peel it off so the answer renders clean and the reasoning
@@ -819,6 +780,7 @@ function MessageBubbleImpl({
   sources,
   attachments,
   toolInvocations,
+  toolCalls,
   visionRelayInvocations,
   promptTokens,
   completionTokens,
@@ -860,11 +822,16 @@ function MessageBubbleImpl({
   // Phase A1: assistant rows can carry attachments too (artefacts
   // produced by tool calls). The chip UI is identical across roles.
   const hasAttachments = !!attachments && attachments.length > 0;
-  const displayedToolInvocations = useMemo(
-    () => consolidateToolInvocations(toolInvocations),
-    [toolInvocations],
-  );
-  const hasToolInvocations = displayedToolInvocations.length > 0;
+  // Tool Activity Card — one quiet card summarising every tool this
+  // turn ran. Live invocations drive it while streaming; the persisted
+  // log drives it in scrollback. Live takes precedence so a just-
+  // finished turn doesn't momentarily flip between the two sources.
+  const activitySteps = useMemo(() => {
+    const live = stepsFromInvocations(toolInvocations);
+    if (live.length > 0) return live;
+    return stepsFromPersisted(toolCalls);
+  }, [toolInvocations, toolCalls]);
+  const hasToolInvocations = activitySteps.length > 0;
   // Preprocess the markdown once per content change rather than on
   // every render. During streaming ``content`` changes ~60×/sec (post
   // batching), so keeping these string passes out of the hot render
@@ -1213,11 +1180,7 @@ function MessageBubbleImpl({
           </div>
         )}
         {hasToolInvocations && (
-          <div className="mt-2 flex flex-col gap-1.5">
-            {displayedToolInvocations.map((t) => (
-              <ToolStatusBlock key={t.id} invocation={t} />
-            ))}
-          </div>
+          <ToolActivityCard steps={activitySteps} streaming={!!streaming} />
         )}
         {hasAttachments && !editing && (
           <AttachmentChips

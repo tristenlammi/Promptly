@@ -3256,16 +3256,20 @@ async def _run_native_tool(
     conversation_id: uuid.UUID,
     user_message_id: uuid.UUID,
     sem: asyncio.Semaphore,
-) -> tuple[str, Any]:
+) -> tuple[str, Any, int]:
     """Run one native tool on its own DB session, bounded by ``sem``.
 
-    Never raises (except cancellation): returns ``(kind, payload)``:
+    Never raises (except cancellation): returns
+    ``(kind, payload, elapsed_ms)``:
 
-    * ``("ok", ToolResult)`` — success
-    * ``("tool_error", message)`` — controlled :class:`ToolError`
-    * ``("timeout", message)`` — ``tool.timeout_seconds`` expired
-    * ``("unexpected", exception_class_name)`` — tool bug; message is
-      never surfaced, mirroring the sequential dispatcher's contract
+    * ``("ok", ToolResult, ms)`` — success
+    * ``("tool_error", message, ms)`` — controlled :class:`ToolError`
+    * ``("timeout", message, ms)`` — ``tool.timeout_seconds`` expired
+    * ``("unexpected", exception_class_name, ms)`` — tool bug; message
+      is never surfaced, mirroring the sequential dispatcher's contract
+
+    ``elapsed_ms`` measures the wait-for-slot + run wall clock — what
+    the user experienced, which is what the UI badge should show.
 
     The fresh session is the whole point: no two concurrent tasks ever
     touch the same ``AsyncSession``, and a timeout-cancelled task can
@@ -3274,12 +3278,21 @@ async def _run_native_tool(
     ``expire_on_commit`` refresh can't ping-pong across sessions.
     """
     timeout_s = getattr(tool, "timeout_seconds", None)
+    t0 = time.monotonic()
+
+    def _ms() -> int:
+        return int((time.monotonic() - t0) * 1000)
+
     try:
         async with sem:
             async with SessionLocal() as tool_db:
                 tool_user = await tool_db.get(User, user_id)
                 if tool_user is None:
-                    return ("tool_error", "Your account is no longer available.")
+                    return (
+                        "tool_error",
+                        "Your account is no longer available.",
+                        _ms(),
+                    )
                 tool_ctx = ToolContext(
                     db=tool_db,
                     user=tool_user,
@@ -3297,7 +3310,7 @@ async def _run_native_tool(
                 # dispatcher's main session can see the rows during
                 # attachment resolution.
                 await tool_db.commit()
-                return ("ok", result)
+                return ("ok", result, _ms())
     except asyncio.CancelledError:
         raise
     except TimeoutError:
@@ -3306,14 +3319,15 @@ async def _run_native_tool(
             f"Tool call timed out after {int(timeout_s or 0)}s and was "
             "aborted. Try a simpler request, or tell the user the "
             "operation is too slow right now.",
+            _ms(),
         )
     except ToolError as e:
-        return ("tool_error", str(e))
+        return ("tool_error", str(e), _ms())
     except Exception as e:  # noqa: BLE001 — uncaught tool bug
         logger.exception(
             "Tool %s raised unexpectedly", getattr(tool, "name", "?")
         )
-        return ("unexpected", type(e).__name__)
+        return ("unexpected", type(e).__name__, _ms())
 
 
 async def _dispatch_tools(
@@ -3327,6 +3341,7 @@ async def _dispatch_tools(
     on_attachment,  # noqa: ANN001 — callable: snapshot dict -> None
     on_sources=None,  # noqa: ANN001 — callable: list[dict] -> None | None
     on_cost=None,  # noqa: ANN001 — callable: float -> None | None
+    on_tool_event=None,  # noqa: ANN001 — callable: dict -> None | None
     invocation_counts: dict[str, int] | None = None,
     per_tool_caps: dict[str, int] | None = None,
     mcp_dispatch: dict[str, tuple[uuid.UUID, str]] | None = None,
@@ -3334,6 +3349,13 @@ async def _dispatch_tools(
     tuple[str, dict[str, Any] | None], None
 ]:
     """Execute every pending tool call for this hop.
+
+    ``on_tool_event`` (Tool Activity Card) receives one compact record
+    per finished call — ``{id, name, ok, error?, error_kind?,
+    elapsed_ms?, meta?}`` — which the stream generator accumulates and
+    persists onto ``messages.tool_calls`` so scrollback keeps the
+    activity trail. Attachments/sources are deliberately omitted from
+    these records (they live on their own message columns).
 
     Yields ``(sse_event_string, history_message_or_None)`` tuples. The
     caller forwards the SSE string to the client; if ``history_message``
@@ -3488,6 +3510,30 @@ async def _dispatch_tools(
         plan.append((call_id, name, "task", (tool, task)))
 
     # ---- Phase 2: drain results in call order -------------------------
+    def _record_tool_event(
+        event: dict[str, Any],
+        *,
+        elapsed_ms: int | None = None,
+        meta: Any = None,
+    ) -> None:
+        """Feed one compact per-call record to ``on_tool_event``."""
+        if on_tool_event is None:
+            return
+        rec: dict[str, Any] = {
+            "id": event["id"],
+            "name": event["name"],
+            "ok": event["ok"],
+        }
+        if event.get("error"):
+            rec["error"] = event["error"]
+        if event.get("error_kind"):
+            rec["error_kind"] = event["error_kind"]
+        if elapsed_ms is not None:
+            rec["elapsed_ms"] = elapsed_ms
+        if isinstance(meta, dict) and meta:
+            rec["meta"] = meta
+        on_tool_event(rec)
+
     try:
         for call_id, name, kind, payload in plan:
             if kind == "fail":
@@ -3510,6 +3556,7 @@ async def _dispatch_tools(
                 }
                 if extra_sse:
                     event.update(extra_sse)
+                _record_tool_event(event)
                 yield (
                     sse_yield(event),
                     {
@@ -3522,6 +3569,7 @@ async def _dispatch_tools(
 
             if kind == "mcp":
                 (connector_id, real_tool), args = payload
+                mcp_t0 = time.monotonic()
                 try:
                     from app.mcp.service import call_connector_tool
 
@@ -3540,15 +3588,18 @@ async def _dispatch_tools(
                         tool_name=name,
                         detail={"mcp": True},
                     )
+                    event = {
+                        "event": "tool_finished",
+                        "id": call_id,
+                        "name": name,
+                        "ok": True,
+                        "elapsed_ms": int((time.monotonic() - mcp_t0) * 1000),
+                    }
+                    _record_tool_event(
+                        event, elapsed_ms=event["elapsed_ms"]
+                    )
                     yield (
-                        sse_yield(
-                            {
-                                "event": "tool_finished",
-                                "id": call_id,
-                                "name": name,
-                                "ok": True,
-                            }
-                        ),
+                        sse_yield(event),
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
@@ -3566,16 +3617,19 @@ async def _dispatch_tools(
                         tool_name=name,
                         detail={"mcp": True, "error": type(e).__name__},
                     )
+                    event = {
+                        "event": "tool_finished",
+                        "id": call_id,
+                        "name": name,
+                        "ok": False,
+                        "error": err_msg,
+                        "elapsed_ms": int((time.monotonic() - mcp_t0) * 1000),
+                    }
+                    _record_tool_event(
+                        event, elapsed_ms=event["elapsed_ms"]
+                    )
                     yield (
-                        sse_yield(
-                            {
-                                "event": "tool_finished",
-                                "id": call_id,
-                                "name": name,
-                                "ok": False,
-                                "error": err_msg,
-                            }
-                        ),
+                        sse_yield(event),
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
@@ -3586,7 +3640,7 @@ async def _dispatch_tools(
 
             # kind == "task" — a native tool running concurrently.
             tool, task = payload
-            outcome, out = await task
+            outcome, out, elapsed_ms = await task
 
             if outcome in ("tool_error", "timeout"):
                 err_msg = str(out)
@@ -3604,9 +3658,11 @@ async def _dispatch_tools(
                     "name": name,
                     "ok": False,
                     "error": err_msg,
+                    "elapsed_ms": elapsed_ms,
                 }
                 if outcome == "timeout":
                     event["error_kind"] = "timeout"
+                _record_tool_event(event, elapsed_ms=elapsed_ms)
                 yield (
                     sse_yield(event),
                     {
@@ -3630,16 +3686,17 @@ async def _dispatch_tools(
                     detail={"error": str(out)},
                 )
                 err_msg = "The tool failed unexpectedly."
+                event = {
+                    "event": "tool_finished",
+                    "id": call_id,
+                    "name": name,
+                    "ok": False,
+                    "error": err_msg,
+                    "elapsed_ms": elapsed_ms,
+                }
+                _record_tool_event(event, elapsed_ms=elapsed_ms)
                 yield (
-                    sse_yield(
-                        {
-                            "event": "tool_finished",
-                            "id": call_id,
-                            "name": name,
-                            "ok": False,
-                            "error": err_msg,
-                        }
-                    ),
+                    sse_yield(event),
                     {
                         "role": "tool",
                         "tool_call_id": call_id,
@@ -3709,18 +3766,21 @@ async def _dispatch_tools(
                 getattr(tool, "max_content_chars", None), result.content
             )
 
+            event = {
+                "event": "tool_finished",
+                "id": call_id,
+                "name": name,
+                "ok": True,
+                "attachments": attachment_snaps or None,
+                "sources": result.sources or None,
+                "meta": result.meta or None,
+                "elapsed_ms": elapsed_ms,
+            }
+            _record_tool_event(
+                event, elapsed_ms=elapsed_ms, meta=result.meta
+            )
             yield (
-                sse_yield(
-                    {
-                        "event": "tool_finished",
-                        "id": call_id,
-                        "name": name,
-                        "ok": True,
-                        "attachments": attachment_snaps or None,
-                        "sources": result.sources or None,
-                        "meta": result.meta or None,
-                    }
-                ),
+                sse_yield(event),
                 {
                     "role": "tool",
                     "tool_call_id": call_id,
@@ -4443,6 +4503,11 @@ async def _stream_generator(
         # ends up NULL.
         collected_reasoning: list[str] = []
         assistant_attachment_snaps: list[dict[str, Any]] = []
+        # Tool Activity Card — compact per-call records ({id, name, ok,
+        # error?, elapsed_ms?, meta?}) accumulated across every hop and
+        # persisted onto ``messages.tool_calls`` so scrollback keeps
+        # the activity trail after the reply commits.
+        tool_call_log: list[dict[str, Any]] = []
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
         # Sum of provider-reported USD cost across hops + tool
@@ -4543,6 +4608,7 @@ async def _stream_generator(
                     on_attachment=assistant_attachment_snaps.append,
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
+                    on_tool_event=tool_call_log.append,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                 ):
@@ -5046,6 +5112,7 @@ async def _stream_generator(
                     on_attachment=assistant_attachment_snaps.append,
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
+                    on_tool_event=tool_call_log.append,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     mcp_dispatch=mcp_dispatch,
@@ -5342,6 +5409,10 @@ async def _stream_generator(
                 assistant.attachments = (
                     list(assistant.attachments or []) + assistant_attachment_snaps
                 )
+            if tool_call_log:
+                assistant.tool_calls = (
+                    list(assistant.tool_calls or []) + tool_call_log
+                )
             assistant.prompt_tokens = (
                 (assistant.prompt_tokens or 0) + (prompt_tokens or 0)
             ) or None
@@ -5374,6 +5445,7 @@ async def _stream_generator(
                 # the API throws on multi-turn tool-call conversations.
                 reasoning_content=reasoning_full,
                 sources=sources_payload,
+                tool_calls=tool_call_log or None,
                 attachments=assistant_attachment_snaps or None,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -5555,6 +5627,7 @@ async def _stream_generator(
                 "message_id": str(assistant.id),
                 "created_at": assistant.created_at.isoformat(),
                 "sources": sources_payload,
+                "tool_calls": tool_call_log or None,
                 "attachments": assistant_attachment_snaps or None,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,

@@ -604,6 +604,11 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   sources?: Source[] | null;
+  /** Tool Activity Card — the persisted per-turn tool log on assistant
+   *  rows ({id, name, ok, error?, error_kind?, elapsed_ms?, meta?}).
+   *  Lets scrollback render the same collapsed activity summary the
+   *  live stream showed. ``null``/absent when no tools ran. */
+  tool_calls?: PersistedToolCall[] | null;
   /** Files attached to the message:
    *  - on ``user`` rows: files the user picked via the paperclip modal.
    *  - on ``assistant`` rows: artefacts produced by tool calls during
@@ -769,12 +774,32 @@ export interface ToolInvocation {
   status: ToolInvocationStatus;
   /** Populated for ``error`` status; null while pending or on success. */
   error?: string | null;
+  /** Distinguishes benign failure classes ("per_turn_cap", "timeout")
+   *  from real tool errors so the activity card can tone them down. */
+  errorKind?: string | null;
+  /** Wall-clock duration of the call, reported on ``tool_finished``. */
+  elapsedMs?: number | null;
   /** Files the tool produced. Only present on the ``finished`` event,
    *  but kept on the invocation so the UI can render a per-tool chip
    *  group inline before the assistant message is finalised. */
   attachments?: MessageAttachmentSnapshot[] | null;
   /** Tool-specific structured data (e.g. an image-gen prompt + model)
    *  surfaced for richer UI affordances. Opaque to the chat layer. */
+  meta?: Record<string, unknown> | null;
+}
+
+/** One entry of ``messages.tool_calls`` — the persisted per-turn tool
+ *  log stamped onto assistant rows at finalize (Tool Activity Card).
+ *  Compact by design: attachments and sources live on their own
+ *  message columns, so scrollback re-derives the card from this plus
+ *  those. Field names mirror the wire/JSONB shape (snake_case). */
+export interface PersistedToolCall {
+  id: string;
+  name: string;
+  ok: boolean;
+  error?: string | null;
+  error_kind?: string | null;
+  elapsed_ms?: number | null;
   meta?: Record<string, unknown> | null;
 }
 

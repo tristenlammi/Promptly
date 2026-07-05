@@ -39,6 +39,9 @@ class MessageResponse(BaseModel):
     role: MessageRole
     content: str
     sources: list[dict[str, Any]] | None = None
+    # Tool Activity Card — the per-turn tool-call log ({id, name, ok,
+    # error?, error_kind?, elapsed_ms?, meta?}), assistant rows only.
+    tool_calls: list[dict[str, Any]] | None = None
     # Files the user attached via the paperclip modal (user messages only).
     # Snapshot of id / filename / mime_type / size_bytes captured at send
     # time; these chips survive even if the underlying file is later
@@ -114,6 +117,7 @@ class MessageResponse(BaseModel):
                         "role",
                         "content",
                         "sources",
+                        "tool_calls",
                         "attachments",
                         "created_at",
                         "prompt_tokens",

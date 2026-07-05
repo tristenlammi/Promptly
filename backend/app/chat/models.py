@@ -952,6 +952,16 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     # {title, url, snippet} dicts rendered as inline citations.
     sources: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
+    # Tool Activity Card (0145): the per-turn tool-call log — list of
+    # {id, name, ok, error?, error_kind?, elapsed_ms?, meta?} dicts in
+    # dispatch order, so scrollback can render the same collapsed
+    # activity summary the live stream showed instead of the tool
+    # trail vanishing when the reply commits. Attachments and sources
+    # live on their own columns; entries here deliberately omit them.
+    tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+
     # Reserved for study-style messages that embed whiteboard actions; in
     # regular chats this stays null.
     whiteboard_actions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)

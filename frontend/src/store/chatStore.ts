@@ -109,6 +109,8 @@ interface ChatState {
     update: {
       ok: boolean;
       error?: string | null;
+      errorKind?: string | null;
+      elapsedMs?: number | null;
       attachments?: MessageAttachmentSnapshot[] | null;
       meta?: Record<string, unknown> | null;
     }
@@ -260,6 +262,8 @@ export const useChatStore = create<ChatState>((set) => ({
               ...t,
               status: update.ok ? "ok" : "error",
               error: update.error ?? null,
+              errorKind: update.errorKind ?? null,
+              elapsedMs: update.elapsedMs ?? null,
               attachments: update.attachments ?? null,
               meta: update.meta ?? null,
             }

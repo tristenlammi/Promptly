@@ -327,6 +327,7 @@ export function ChatWindow({
               role={m.role}
               content={m.content}
               sources={m.sources}
+              toolCalls={m.tool_calls}
               attachments={m.attachments}
               promptTokens={m.prompt_tokens}
               completionTokens={m.completion_tokens}
