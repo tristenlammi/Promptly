@@ -335,6 +335,10 @@ class WorkspaceItemNode(BaseModel):
     context_enabled: bool = True
     # Surfaced in the rail's "Pinned" quick-access section when True.
     pinned: bool = False
+    # "workspace" | "private" (0134). Other members never receive private
+    # nodes at all — this field lets the *creator's* UI badge their drafts.
+    visibility: str = "workspace"
+    created_by: uuid.UUID | None = None
     children: list["WorkspaceItemNode"] = Field(default_factory=list)
 
 
@@ -366,6 +370,8 @@ class WorkspaceItemUpdate(BaseModel):
     pinned: bool | None = None
     # Kind-specific JSON config (boards: the label registry / columns).
     config: dict[str, Any] | None = None
+    # "workspace" | "private" — creator-only (0134).
+    visibility: str | None = None
 
 
 class WorkspaceItemMove(BaseModel):
@@ -396,6 +402,8 @@ class WorkspaceItemResponse(BaseModel):
     context_enabled: bool = True
     pinned: bool = False
     config: dict[str, Any] | None = None
+    visibility: str = "workspace"
+    created_by: uuid.UUID | None = None
 
 
 class SpreadsheetResponse(BaseModel):

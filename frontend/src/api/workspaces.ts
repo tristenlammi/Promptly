@@ -135,6 +135,11 @@ export interface WorkspaceItemNode {
   context_enabled?: boolean;
   /** Surfaced in the rail's Pinned quick-access section when true. */
   pinned?: boolean;
+  /** "workspace" (everyone) | "private" (creator-only draft, 0134).
+   *  Other members never receive private nodes — this lets the creator's
+   *  own UI badge them. */
+  visibility?: "workspace" | "private";
+  created_by?: string | null;
   children: WorkspaceItemNode[];
 }
 
@@ -403,6 +408,8 @@ export interface CreateWorkspaceItemPayload {
 export interface UpdateWorkspaceItemPayload {
   title?: string;
   icon?: string;
+  /** "workspace" | "private" — creator-only drafts (0134). */
+  visibility?: "workspace" | "private";
 }
 
 export interface MoveWorkspaceItemPayload {
@@ -476,8 +483,27 @@ export interface WorkspaceItemComment {
   id: string;
   item_id: string;
   body: string;
+  /** The selected note text this comment anchors to (text-quote anchor). */
+  quote?: string | null;
   author_user_id: string | null;
   author_name: string;
+  /** Non-null = resolved; resolved comments collapse in the panel. */
+  resolved_at?: string | null;
+  created_at: string;
+}
+
+/** One workspace activity-feed row ("what changed since I was here"). */
+export interface WorkspaceActivityEvent {
+  kind: "item_created" | "item_comment" | "card_activity" | "card_comment";
+  actor: {
+    username: string;
+    avatar_url?: string | null;
+    avatar_color?: string | null;
+  } | null;
+  item_id: string | null;
+  item_kind: string | null;
+  item_title: string;
+  text: string;
   created_at: string;
 }
 
@@ -786,16 +812,40 @@ export const workspacesApi = {
     return data;
   },
 
-  /** Post a comment on a workspace item. */
+  /** Post a comment on a workspace item, optionally anchored to a
+   *  selected-text quote. */
   async createComment(
     id: string,
     itemId: string,
-    body: string
+    body: string,
+    quote?: string | null
   ): Promise<WorkspaceItemComment> {
     const { data } = await apiClient.post<WorkspaceItemComment>(
       `/workspaces/${id}/items/${itemId}/comments`,
-      { body }
+      { body, quote: quote || undefined }
     );
+    return data;
+  },
+
+  /** Resolve / unresolve a comment thread entry. */
+  async setCommentResolved(
+    id: string,
+    itemId: string,
+    commentId: string,
+    resolved: boolean
+  ): Promise<WorkspaceItemComment> {
+    const { data } = await apiClient.post<WorkspaceItemComment>(
+      `/workspaces/${id}/items/${itemId}/comments/${commentId}/resolve`,
+      { resolved }
+    );
+    return data;
+  },
+
+  /** Merged newest-first activity feed for the overview pane. */
+  async activity(id: string): Promise<{ events: WorkspaceActivityEvent[] }> {
+    const { data } = await apiClient.get<{
+      events: WorkspaceActivityEvent[];
+    }>(`/workspaces/${id}/activity`);
     return data;
   },
 

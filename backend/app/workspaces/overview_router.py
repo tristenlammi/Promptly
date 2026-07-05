@@ -11,6 +11,7 @@ from __future__ import annotations
 import html as html_module
 import re
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -209,6 +210,174 @@ async def workspace_overview(
     return WorkspaceOverview(
         counts=counts, tasks=tasks, open_task_count=open_count, recent=recent
     )
+
+
+# ---------------------------------------------------------------------
+# Activity feed (Batch 3 finale) — "what changed since I was last here"
+# ---------------------------------------------------------------------
+class ActivityActor(BaseModel):
+    username: str
+    avatar_url: str | None = None
+    avatar_color: str | None = None
+
+
+class ActivityEvent(BaseModel):
+    """One feed row. ``kind`` picks the verb phrasing client-side:
+
+    * ``item_created``  — actor created <item kind> "<title>"
+    * ``item_comment``  — actor commented on "<title>" (+snippet)
+    * ``card_activity`` — actor <text> on card "<title>" (system log rows)
+    * ``card_comment``  — actor commented on card "<title>" (+snippet)
+    """
+
+    kind: str
+    actor: ActivityActor | None = None
+    # The item/board the event belongs to, for click-through.
+    item_id: uuid.UUID | None = None
+    item_kind: str | None = None
+    item_title: str
+    # Comment snippet / activity text; empty for creations.
+    text: str = ""
+    created_at: datetime
+
+
+class ActivityResponse(BaseModel):
+    events: list[ActivityEvent]
+
+
+@router.get("/{workspace_id}/activity", response_model=ActivityResponse)
+async def workspace_activity(
+    workspace_id: uuid.UUID,
+    limit: int = 40,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ActivityResponse:
+    """Merged, newest-first feed of what happened in the workspace:
+    item creations, item comments, and board-card comments/activity.
+
+    Private drafts (0134) are filtered to their creator; each source is
+    capped at ``limit`` before the merge so one chatty board can't
+    starve the others, then the merged list is trimmed again.
+    """
+    from app.chat.models import (
+        WorkspaceItemComment,
+        WorkspaceTask,
+        WorkspaceTaskComment,
+    )
+    from sqlalchemy import or_
+
+    limit = max(1, min(100, limit))
+    events: list[tuple] = []  # (created_at, ActivityEvent)
+
+    def actor_of(u: User | None) -> ActivityActor | None:
+        if u is None:
+            return None
+        return ActivityActor(
+            username=u.username,
+            avatar_url=u.avatar_url,
+            avatar_color=u.avatar_color,
+        )
+
+    visible = or_(
+        WorkspaceItem.visibility != "private",
+        WorkspaceItem.created_by == user.id,
+    )
+
+    # 1) Item creations (notes / canvases / boards / sheets / folders).
+    created_rows = (
+        await db.execute(
+            select(WorkspaceItem, User)
+            .outerjoin(User, User.id == WorkspaceItem.created_by)
+            .where(WorkspaceItem.workspace_id == workspace_id, visible)
+            .order_by(WorkspaceItem.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    for item, creator in created_rows:
+        events.append(
+            (
+                item.created_at,
+                ActivityEvent(
+                    kind="item_created",
+                    actor=actor_of(creator),
+                    item_id=item.id,
+                    item_kind=item.kind,
+                    item_title=item.title,
+                    created_at=item.created_at,
+                ),
+            )
+        )
+
+    # 2) Item comments.
+    comment_rows = (
+        await db.execute(
+            select(WorkspaceItemComment, WorkspaceItem, User)
+            .join(
+                WorkspaceItem,
+                WorkspaceItem.id == WorkspaceItemComment.item_id,
+            )
+            .outerjoin(User, User.id == WorkspaceItemComment.author_user_id)
+            .where(
+                WorkspaceItemComment.workspace_id == workspace_id, visible
+            )
+            .order_by(WorkspaceItemComment.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    for c, item, author in comment_rows:
+        events.append(
+            (
+                c.created_at,
+                ActivityEvent(
+                    kind="item_comment",
+                    actor=actor_of(author),
+                    item_id=item.id,
+                    item_kind=item.kind,
+                    item_title=item.title,
+                    text=c.body[:140],
+                    created_at=c.created_at,
+                ),
+            )
+        )
+
+    # 3) Card comments + system activity ("moved to Done", "assigned to…").
+    card_rows = (
+        await db.execute(
+            select(WorkspaceTaskComment, WorkspaceTask, User)
+            .join(
+                WorkspaceTask,
+                WorkspaceTask.id == WorkspaceTaskComment.task_id,
+            )
+            .outerjoin(
+                User, User.id == WorkspaceTaskComment.author_user_id
+            )
+            .where(WorkspaceTask.workspace_id == workspace_id)
+            .order_by(WorkspaceTaskComment.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    for c, task, author in card_rows:
+        events.append(
+            (
+                c.created_at,
+                ActivityEvent(
+                    kind=(
+                        "card_activity"
+                        if c.kind == "activity"
+                        else "card_comment"
+                    ),
+                    actor=actor_of(author),
+                    item_id=task.board_item_id,
+                    item_kind="board",
+                    item_title=task.title,
+                    text=c.text[:140],
+                    created_at=c.created_at,
+                ),
+            )
+        )
+
+    events.sort(key=lambda pair: pair[0], reverse=True)
+    return ActivityResponse(events=[e for _, e in events[:limit]])
 
 
 __all__ = ["router"]

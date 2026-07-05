@@ -185,6 +185,19 @@ async def _load_canvas_with_access(
             status_code=status.HTTP_404_NOT_FOUND, detail="Canvas not found"
         )
     _ws, role = await get_accessible_workspace(canvas.workspace_id, user, db)
+    # Private drafts (0134): the flag lives on the backing navigator item.
+    item = (
+        await db.execute(
+            select(WorkspaceItem).where(
+                WorkspaceItem.ref_id == canvas.id,
+                WorkspaceItem.kind == "canvas",
+            )
+        )
+    ).scalars().first()
+    if item is not None:
+        from app.workspaces.items_router import require_item_visible
+
+        require_item_visible(item, user)
     return canvas, role
 
 

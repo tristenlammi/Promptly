@@ -467,6 +467,22 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
     # for kinds that don't need it.
     config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
+    # --- Visibility (0134) ------------------------------------------------
+    # "workspace" (default) = every member sees it. "private" = a
+    # creator-only draft: hidden from other members' trees and item
+    # fetches, and excluded from the shared RAG pool entirely (the pool
+    # is workspace-wide, so a private item can't feed anyone's chats —
+    # including the creator's — without leaking through shared surfaces
+    # like the map).
+    visibility: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="workspace", server_default="workspace"
+    )
+    # Who created the item (0134). Drives private visibility + activity
+    # attribution. SET NULL keeps items when an account is deleted.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     def __repr__(self) -> str:
         return (
             f"<WorkspaceItem id={self.id} kind={self.kind} "
@@ -502,6 +518,14 @@ class WorkspaceItemComment(UUIDPKMixin, TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    # The selected note text this comment anchors to (0134). Text-quote
+    # anchoring on purpose: editor marks would be stripped by the
+    # bleach/CRDT snapshot pipeline, a quoted string survives anything.
+    quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Non-null = thread resolved; resolved comments collapse in the UI.
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<WorkspaceItemComment id={self.id} item={self.item_id}>"

@@ -1771,12 +1771,16 @@ async def context_disabled_file_ids(
 
     # An item is excluded when its own context toggle is OFF, or when it's a
     # page inside a Notebook (container) whose context toggle is OFF — the
-    # container acts as a master switch over its pages.
+    # container acts as a master switch over its pages. Private drafts
+    # (0134) are excluded outright: the RAG pool is workspace-wide, so a
+    # private item can't feed *anyone's* chats (including the creator's)
+    # without leaking through shared surfaces.
     Parent = aliased(WorkspaceItem)
 
     def _disabled(item):
         return or_(
             item.context_enabled.is_(False),
+            item.visibility == "private",
             and_(
                 Parent.kind == "container",
                 Parent.context_enabled.is_(False),
@@ -1997,6 +2001,9 @@ async def build_workspace_map(
                 .where(
                     WorkspaceItem.workspace_id == workspace_id,
                     WorkspaceItem.archived_at.is_(None),
+                    # The map is injected into every member's chats —
+                    # private drafts (0134) stay off it entirely.
+                    WorkspaceItem.visibility != "private",
                 )
                 .order_by(WorkspaceItem.position.asc())
             )

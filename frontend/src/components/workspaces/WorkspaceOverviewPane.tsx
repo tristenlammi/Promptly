@@ -27,7 +27,13 @@ import {
 // they don't need reminding on each one.
 const CONTEXT_BANNER_KEY = "promptly.ws.contextBannerDismissed";
 
-import type { WorkspaceItemNode } from "@/api/workspaces";
+import { useQuery } from "@tanstack/react-query";
+
+import {
+  workspacesApi,
+  type WorkspaceActivityEvent,
+  type WorkspaceItemNode,
+} from "@/api/workspaces";
 import {
   useRegenerateWorkspaceMemory,
   useWorkspace,
@@ -37,6 +43,8 @@ import {
   useWorkspaceTree,
 } from "@/hooks/useWorkspaces";
 import { formatRelativeTime } from "@/components/files/helpers";
+import { relativeTime } from "@/components/tasks/RunStatusChip";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
@@ -345,7 +353,96 @@ export function WorkspaceOverviewPane({
           </div>
         </section>
       )}
+
+      {/* Activity — what changed since you were last here (Batch 3). */}
+      <ActivitySection workspaceId={workspaceId} onOpen={open} />
     </div>
+  );
+}
+
+/** Merged newest-first feed: item creations, comments, card activity. */
+function ActivitySection({
+  workspaceId,
+  onOpen,
+}: {
+  workspaceId: string;
+  onOpen: (node: Pick<WorkspaceItemNode, "id" | "kind" | "ref_id" | "title">) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["workspaces", "activity", workspaceId],
+    queryFn: () => workspacesApi.activity(workspaceId),
+    refetchInterval: 60_000,
+  });
+  const events = data?.events ?? [];
+  if (events.length === 0) return null;
+
+  const verb = (e: WorkspaceActivityEvent) => {
+    switch (e.kind) {
+      case "item_created":
+        return `created ${e.item_kind === "folder" ? "folder" : e.item_kind} “${e.item_title}”`;
+      case "item_comment":
+        return `commented on “${e.item_title}”`;
+      case "card_comment":
+        return `commented on card “${e.item_title}”`;
+      default:
+        return `${e.text} — “${e.item_title}”`;
+    }
+  };
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        Activity
+      </h2>
+      <div className="space-y-0.5">
+        {events.slice(0, 15).map((e, i) => (
+          <button
+            key={`${e.kind}-${e.created_at}-${i}`}
+            type="button"
+            disabled={!e.item_id}
+            onClick={() =>
+              e.item_id &&
+              onOpen({
+                id: e.item_id,
+                kind: (e.item_kind ?? "note") as WorkspaceItemNode["kind"],
+                ref_id: null,
+                title: e.item_title,
+              })
+            }
+            className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--hover)] disabled:cursor-default disabled:hover:bg-transparent"
+          >
+            {e.actor ? (
+              <UserAvatar
+                name={e.actor.username}
+                avatarUrl={e.actor.avatar_url}
+                color={e.actor.avatar_color}
+                size={20}
+                className="mt-0.5"
+              />
+            ) : (
+              <span className="mt-0.5 inline-block h-5 w-5 shrink-0 rounded-full bg-[var(--surface-2)]" />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="text-[var(--text)]">
+                <span className="font-medium">
+                  {e.actor?.username ?? "Someone"}
+                </span>{" "}
+                <span className="text-[var(--text-muted)]">{verb(e)}</span>
+              </span>
+              {(e.kind === "item_comment" || e.kind === "card_comment") &&
+                e.text && (
+                  <span className="mt-0.5 line-clamp-1 block text-xs text-[var(--text-muted)]">
+                    {e.text}
+                  </span>
+                )}
+            </span>
+            <span className="shrink-0 text-[11px] text-[var(--text-muted)]/70">
+              {relativeTime(e.created_at)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -36,6 +36,7 @@ import {
   Home,
   Layers,
   Loader2,
+  Lock,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -46,6 +47,7 @@ import {
   Shapes,
   Table2,
   Trash2,
+  Unlock,
   Zap,
   ZapOff,
 } from "lucide-react";
@@ -68,6 +70,7 @@ import {
   useWorkspace,
   useWorkspaceArchive,
 } from "@/hooks/useWorkspaces";
+import { useAuthStore } from "@/store/authStore";
 import { useModelStore } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
@@ -836,6 +839,7 @@ function TreeRow({
   const duplicateItem = useDuplicateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
   const [chatBusy, setChatBusy] = useState(false);
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const isFolder = node.kind === "folder";
   const isChat = node.kind === "chat";
@@ -1084,6 +1088,13 @@ function TreeRow({
             <span className="truncate">{node.title || "Untitled"}</span>
           )}
 
+          {node.visibility === "private" && !renaming && (
+            <Lock
+              className="h-3 w-3 shrink-0 text-[var(--text-muted)]"
+              aria-label="Private — only you can see this"
+            />
+          )}
+
           {indexing && !renaming && (
             <span
               title="Indexing for semantic search…"
@@ -1129,6 +1140,23 @@ function TreeRow({
                         .then(invalidateTreeAndArchive);
                     }
                   : undefined
+            }
+            visibility={
+              // Only the creator may flip a draft (0134); others never even
+              // receive private nodes, so this is about *my* items only.
+              ["note", "sheet", "board", "canvas"].includes(node.kind) &&
+              node.created_by === currentUserId
+                ? node.visibility ?? "workspace"
+                : null
+            }
+            onToggleVisibility={() =>
+              update.mutate({
+                itemId: node.id,
+                payload: {
+                  visibility:
+                    node.visibility === "private" ? "workspace" : "private",
+                },
+              })
             }
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
@@ -1198,6 +1226,8 @@ function NodeActions({
   onToggleContext,
   onCreateInside,
   onDuplicate,
+  visibility,
+  onToggleVisibility,
   deleting,
 }: {
   isFolder: boolean;
@@ -1218,6 +1248,10 @@ function NodeActions({
   /** Notes / sheets / boards / canvases — deep-copy as a sibling;
    *  automations — copy the task (arrives paused). */
   onDuplicate?: () => void;
+  /** Current visibility when the caller may flip it (creator only,
+   *  0134); null hides the menu entry. */
+  visibility?: "workspace" | "private" | null;
+  onToggleVisibility?: () => void;
   deleting: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1342,6 +1376,26 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onToggleContext();
+                  }}
+                />
+              )}
+              {visibility && onToggleVisibility && (
+                <MenuItem
+                  icon={
+                    visibility === "private" ? (
+                      <Unlock className="h-3.5 w-3.5" />
+                    ) : (
+                      <Lock className="h-3.5 w-3.5" />
+                    )
+                  }
+                  label={
+                    visibility === "private"
+                      ? "Share with workspace"
+                      : "Make private"
+                  }
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onToggleVisibility();
                   }}
                 />
               )}

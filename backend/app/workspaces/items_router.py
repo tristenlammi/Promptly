@@ -37,7 +37,7 @@ from fastapi import (
     status,
 )
 from jose import jwt
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -104,14 +104,32 @@ def _strip_doc_ext(name: str) -> str:
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+def require_item_visible(item: WorkspaceItem, user: User) -> None:
+    """404 when ``item`` is someone else's private draft.
+
+    404 (not 403) on purpose — a private item's existence shouldn't be
+    probeable by other members. Shared with the sheet/canvas/comment
+    routers so every fetch path enforces the same rule the tree does.
+    """
+    if item.visibility == "private" and item.created_by != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
+        )
+
+
 async def _load_item(
-    db: AsyncSession, workspace_id: uuid.UUID, item_id: uuid.UUID
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    user: User | None = None,
 ) -> WorkspaceItem:
     item = await db.get(WorkspaceItem, item_id)
     if item is None or item.workspace_id != workspace_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
         )
+    if user is not None:
+        require_item_visible(item, user)
     return item
 
 
@@ -262,6 +280,8 @@ def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
                     indexing_status=it.indexing_status,
                     context_enabled=it.context_enabled,
                     pinned=it.pinned,
+                    visibility=it.visibility,
+                    created_by=it.created_by,
                     children=build(it.id),
                 )
             )
@@ -294,6 +314,11 @@ async def get_workspace_tree(
                 .where(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.archived_at.is_(None),
+                    # Private drafts only show for their creator (0134).
+                    or_(
+                        WorkspaceItem.visibility != "private",
+                        WorkspaceItem.created_by == user.id,
+                    ),
                 )
                 .order_by(WorkspaceItem.position.asc())
             )
@@ -522,6 +547,7 @@ async def create_workspace_item(
             canvases_folder_id=canvases_folder_id,
         )
 
+    item.created_by = user.id  # attribution + private-visibility (0134)
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
@@ -565,6 +591,7 @@ async def duplicate_workspace_item(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
         )
+    require_item_visible(src, user)
     if src.kind not in ("note", "sheet", "board", "canvas"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -736,6 +763,7 @@ async def duplicate_workspace_item(
                 )
             )
 
+    item.created_by = user.id  # the duplicator owns the copy (0134)
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
@@ -767,7 +795,10 @@ _DEFAULT_SHEET_TITLE = "Untitled sheet"
 # Spreadsheet pages — single-user persistence
 # ---------------------------------------------------------------------
 async def _load_workspace_spreadsheet(
-    db: AsyncSession, workspace_id: uuid.UUID, sheet_id: uuid.UUID
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    user: User | None = None,
 ) -> Spreadsheet:
     sheet = await db.get(Spreadsheet, sheet_id)
     if sheet is None or sheet.workspace_id != workspace_id:
@@ -775,6 +806,20 @@ async def _load_workspace_spreadsheet(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Spreadsheet not found",
         )
+    if user is not None:
+        # Private drafts (0134): the visibility flag lives on the backing
+        # navigator item — enforce it on direct fetches too, not just the
+        # tree (the tree hiding a row is worthless if the API serves it).
+        item = (
+            await db.execute(
+                select(WorkspaceItem).where(
+                    WorkspaceItem.ref_id == sheet.id,
+                    WorkspaceItem.kind == "sheet",
+                )
+            )
+        ).scalars().first()
+        if item is not None:
+            require_item_visible(item, user)
     return sheet
 
 
@@ -790,7 +835,7 @@ async def get_spreadsheet(
 ) -> SpreadsheetResponse:
     """Load a spreadsheet page's workbook. Read access (any member)."""
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
     return SpreadsheetResponse.model_validate(sheet)
 
 
@@ -811,7 +856,7 @@ async def save_spreadsheet(
     Re-indexes the sheet so its cell text feeds workspace RAG + memory."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
     sheet.data = payload.data
     text_changed = (
         payload.content_text is not None
@@ -891,7 +936,7 @@ async def get_sheet_collab_token(
     """Mint the collab JWT for a sheet's ``sheet:<id>`` Yjs room. Viewers get
     a read-only token; editors get write."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
     perm = "read" if access_role == "viewer" else "write"
     token, exp = _mint_sheet_token(sheet_id=sheet.id, user=user, perm=perm)
     return CollabTokenResponse(
@@ -1095,7 +1140,7 @@ async def get_workspace_item(
     user: User = Depends(get_current_user),
 ) -> WorkspaceItemResponse:
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    item = await _load_item(db, ws.id, item_id)
+    item = await _load_item(db, ws.id, item_id, user)
     return WorkspaceItemResponse.model_validate(item)
 
 
@@ -1116,7 +1161,7 @@ async def update_workspace_item(
 ) -> WorkspaceItemResponse:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    item = await _load_item(db, ws.id, item_id)
+    item = await _load_item(db, ws.id, item_id, user)
 
     sent = payload.model_fields_set
     if "title" in sent:
@@ -1149,6 +1194,27 @@ async def update_workspace_item(
     if "config" in sent:
         # Kind-specific config (boards: label registry / columns).
         item.config = payload.config
+    if "visibility" in sent and payload.visibility is not None:
+        if payload.visibility not in ("workspace", "private"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="visibility must be 'workspace' or 'private'.",
+            )
+        # Only the creator can flip a draft's visibility — anyone else
+        # can't even see a private item (0134). Folders/notebooks stay
+        # workspace-visible in v1: hiding a subtree container while its
+        # children remain addressable would be a lie.
+        if item.kind in ("folder", "container"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Folders and notebooks can't be private.",
+            )
+        if item.created_by != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the item's creator can change its visibility.",
+            )
+        item.visibility = payload.visibility
 
     item.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -1253,7 +1319,7 @@ async def move_workspace_item(
     own subtree as a drop target."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    item = await _load_item(db, ws.id, item_id)
+    item = await _load_item(db, ws.id, item_id, user)
 
     if payload.parent_id == item.id:
         raise HTTPException(
@@ -1287,7 +1353,7 @@ async def archive_workspace_item(
     drops out of the tree into the workspace's Archive section."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    item = await _load_item(db, ws.id, item_id)
+    item = await _load_item(db, ws.id, item_id, user)
     now = datetime.now(timezone.utc)
     for it in await _collect_subtree(db, ws.id, item):
         it.archived_at = now
@@ -1310,7 +1376,7 @@ async def unarchive_workspace_item(
     """Restore an archived item (+ its subtree) back into the tree."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    item = await _load_item(db, ws.id, item_id)
+    item = await _load_item(db, ws.id, item_id, user)
     now = datetime.now(timezone.utc)
     for it in await _collect_subtree(db, ws.id, item):
         it.archived_at = None
@@ -1476,7 +1542,7 @@ async def delete_workspace_item(
     isn't orphaned but is still recoverable from the Files page."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    item = await _load_item(db, ws.id, item_id)
+    item = await _load_item(db, ws.id, item_id, user)
 
     # Collect the item + every descendant so we can trash their note
     # blobs before the cascade drops the rows.
