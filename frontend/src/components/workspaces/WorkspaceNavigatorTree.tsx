@@ -37,7 +37,6 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  GraduationCap,
   HardDrive,
   Search as SearchIcon,
   Home,
@@ -117,8 +116,6 @@ export function WorkspaceNavigatorTree({
   atDrive,
   onSearch,
   atSearch,
-  onLearning,
-  atLearning,
   onNewTask,
   onNewMeeting,
   isOwner,
@@ -146,10 +143,6 @@ export function WorkspaceNavigatorTree({
   onSearch?: () => void;
   /** True when the search pane is showing. */
   atSearch?: boolean;
-  /** Open the Learning pane (Team Learning courses, Study L1). */
-  onLearning?: () => void;
-  /** True when the Learning pane is showing. */
-  atLearning?: boolean;
   /** Open the "new automation" task form (homed in this workspace). */
   onNewTask?: () => void;
   /** Open the meeting-notes upload (recording → transcribed note). */
@@ -593,22 +586,6 @@ export function WorkspaceNavigatorTree({
               aria-label="Search workspace"
             >
               <SearchIcon className="h-4 w-4" />
-            </button>
-          )}
-          {onLearning && (
-            <button
-              type="button"
-              onClick={onLearning}
-              className={cn(
-                "flex shrink-0 items-center justify-center rounded-md border p-2 transition",
-                atLearning
-                  ? "border-[var(--border)] bg-[var(--hover)] text-[var(--text)]"
-                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
-              )}
-              title="Learning — courses this team authors and assigns"
-              aria-label="Workspace learning"
-            >
-              <GraduationCap className="h-4 w-4" />
             </button>
           )}
         </div>
