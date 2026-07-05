@@ -94,6 +94,9 @@ def _trigger_matches(
     if str(node_data.get("event") or "").strip() != event:
         return False
     if event == EVENT_CARD_MOVED:
+        want_board = str(node_data.get("board_item_id") or "").strip()
+        if want_board and want_board != str(payload.get("board_item_id") or ""):
+            return False
         want = str(node_data.get("column") or "").strip().lower()
         if want:
             got = str(payload.get("column") or "").strip().lower()

@@ -2678,6 +2678,7 @@ export function TaskFlowEditor({
               data: {
                 event: "file_added",
                 column: null,
+                board_item_id: null,
                 item_kind: null,
                 folder_id: null,
               },
@@ -4742,6 +4743,7 @@ function NodeInspector({
                       onPatch({
                         event: e.target.value,
                         column: null,
+                        board_item_id: null,
                         item_kind: null,
                         folder_id: null,
                       })
@@ -4784,6 +4786,25 @@ function NodeInspector({
                       Subfolders count — a filter on a folder also catches
                       files dropped anywhere beneath it.
                     </span>
+                  </label>
+                )}
+                {ev.event === "card_moved" && (
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Board
+                    <select
+                      value={ev.board_item_id ?? ""}
+                      className={selCls}
+                      onChange={(e) =>
+                        onPatch({ board_item_id: e.target.value || null })
+                      }
+                    >
+                      <option value="">Any board</option>
+                      {boards.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.title}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 )}
                 {ev.event === "card_moved" && (

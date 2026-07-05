@@ -208,7 +208,8 @@ class EventTriggerData(BaseModel):
     * ``file_added``   — a file was uploaded/pinned to the workspace drive.
     * ``card_moved``   — a board card changed column. ``column`` (optional)
       fires only when the card lands in that column (matched
-      case-insensitively against the column key/name).
+      case-insensitively against the column key/name); ``board_item_id``
+      (optional) narrows to one board.
     * ``item_created`` — a workspace item was created. ``item_kind``
       (optional) narrows to one kind (note / canvas / board / sheet …).
 
@@ -220,6 +221,7 @@ class EventTriggerData(BaseModel):
 
     event: str = "file_added"
     column: str | None = None
+    board_item_id: str | None = None
     item_kind: str | None = None
     folder_id: str | None = None
 

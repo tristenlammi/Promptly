@@ -346,6 +346,8 @@ export interface EventTriggerData {
   event: string;
   /** card_moved filter: only fire when the card lands in this column. */
   column?: string | null;
+  /** card_moved filter: only fire for cards on this board (workspace item id). */
+  board_item_id?: string | null;
   /** item_created filter: only fire for this item kind. */
   item_kind?: string | null;
   /** file_added filter: only fire for files landing in this folder (or any
