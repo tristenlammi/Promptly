@@ -439,6 +439,7 @@ export function WorkspaceDetailPage() {
                     ? () => setMeetingOpen(true)
                     : undefined
                 }
+                isOwner={isOwner && !isArchived}
               />
             )}
           </aside>

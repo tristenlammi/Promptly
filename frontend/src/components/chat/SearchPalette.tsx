@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  FolderKanban,
   Search,
   Sparkles,
   Users,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
+import { workspacesApi } from "@/api/workspaces";
 import type { ConversationSearchHit } from "@/api/types";
 import { cn } from "@/utils/cn";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
@@ -50,6 +52,12 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   const [query, setQuery] = useState("");
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [hits, setHits] = useState<ConversationSearchHit[]>([]);
+  // Cross-workspace content hits (9.2) — grouped per workspace,
+  // rendered under the chat sections. Mouse-driven (not in the ↑↓ flat
+  // list) so the chat cursor maths stays simple.
+  const [wsGroups, setWsGroups] = useState<
+    Awaited<ReturnType<typeof workspacesApi.searchAll>>["groups"]
+  >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -71,6 +79,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       setQuery("");
       setDateRange(null);
       setHits([]);
+      setWsGroups([]);
       setError(null);
       setCursor(0);
       setLoading(false);
@@ -89,6 +98,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     const trimmed = query.trim();
     if (!trimmed && !dateRange) {
       setHits([]);
+      setWsGroups([]);
       setError(null);
       setLoading(false);
       return;
@@ -96,6 +106,21 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     const seq = ++fetchSeq.current;
     setLoading(true);
     const t = window.setTimeout(async () => {
+      // Workspace content search rides alongside the chat search (its
+      // own request so a slow pass can't delay chat results). Dates
+      // don't apply to it — a date-only browse clears the section.
+      if (trimmed.length >= 2) {
+        void workspacesApi
+          .searchAll(trimmed)
+          .then((res) => {
+            if (seq === fetchSeq.current) setWsGroups(res.groups);
+          })
+          .catch(() => {
+            if (seq === fetchSeq.current) setWsGroups([]);
+          });
+      } else {
+        setWsGroups([]);
+      }
       try {
         const results = await chatApi.search(trimmed, 30, {
           start: dateRange?.start ?? undefined,
@@ -238,6 +263,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           {!error &&
             !loading &&
             flat.length === 0 &&
+            wsGroups.length === 0 &&
             (query.trim() || dateRange) && (
               <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
                 {query.trim() ? (
@@ -287,6 +313,55 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               onSelect={openHit}
               onHover={setCursor}
             />
+          )}
+
+          {/* Cross-workspace content (9.2) — notes / boards / sheets /
+              files across every workspace, grouped per workspace. */}
+          {!dateRange && wsGroups.length > 0 && (
+            <div className="border-t border-[var(--border)]">
+              <div className="flex items-center gap-1.5 px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+                <FolderKanban className="h-3 w-3" />
+                In your workspaces
+              </div>
+              {wsGroups.map((g) => (
+                <div key={g.workspace_id} className="pb-1">
+                  <div className="px-3 pt-1 text-[10px] font-semibold text-[var(--text-muted)]">
+                    {g.workspace_title}
+                  </div>
+                  {g.hits.slice(0, 4).map((h, i) => (
+                    <button
+                      key={`${g.workspace_id}-${h.item_id ?? h.ref_id ?? i}`}
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        navigate(
+                          h.item_id
+                            ? `/workspaces/${g.workspace_id}?item=${h.item_id}`
+                            : `/workspaces/${g.workspace_id}`
+                        );
+                      }}
+                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition hover:bg-[var(--surface-2)]"
+                    >
+                      <span className="mt-0.5 shrink-0 rounded bg-[var(--surface-2)] px-1 py-0.5 text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
+                        {h.kind}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-[var(--text)]">
+                          {h.title || "Untitled"}
+                        </span>
+                        {h.snippet && (
+                          <span
+                            className="search-snippet mt-0.5 line-clamp-1 block text-xs text-[var(--text-muted)]"
+                            // ts_headline output: text + <mark> only.
+                            dangerouslySetInnerHTML={{ __html: h.snippet }}
+                          />
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
           )}
         </div>
 

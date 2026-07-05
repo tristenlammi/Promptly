@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import DOMPurify from "dompurify";
 import {
   useNavigate,
   useParams,
@@ -458,14 +459,21 @@ function PublicBlobPreview({
 
   const isImage = mime.startsWith("image/");
   const isPdf = mime === "application/pdf" || filename.toLowerCase().endsWith(".pdf");
-  const isText = !isImage && !isPdf && (
+  // Promptly documents (shared notes) are HTML blobs — render them as the
+  // rich page a guest expects, not as markup source. Server-side bleach
+  // already sanitised the blob; DOMPurify here is belt-and-braces.
+  const isHtmlDoc =
+    !isImage &&
+    !isPdf &&
+    (mime.startsWith("text/html") || /\.html?$/i.test(filename));
+  const isText = !isImage && !isPdf && !isHtmlDoc && (
     mime.startsWith("text/") ||
     mime === "application/json" ||
     /\.(txt|md|json|xml|csv|log|yaml|yml|toml|ini)$/i.test(filename)
   );
 
   useEffect(() => {
-    if (!isText) return;
+    if (!isText && !isHtmlDoc) return;
     let cancelled = false;
     fetch(blobUrl)
       .then((r) => r.text())
@@ -476,7 +484,7 @@ function PublicBlobPreview({
     return () => {
       cancelled = true;
     };
-  }, [blobUrl, isText]);
+  }, [blobUrl, isText, isHtmlDoc]);
 
   return (
     <div
@@ -519,6 +527,26 @@ function PublicBlobPreview({
             className="h-full w-full rounded-md border-0 bg-white shadow-2xl"
           />
         )}
+        {isHtmlDoc && (
+          <div className="h-full w-full max-w-4xl overflow-y-auto rounded-md bg-[var(--bg)] px-6 py-6 text-[var(--text)] shadow-2xl">
+            {text === null ? (
+              <p className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </p>
+            ) : (
+              <div
+                className="promptly-prose text-sm leading-relaxed"
+                // Sanitised twice: bleach server-side at snapshot time,
+                // DOMPurify here. Guests get the rendered note, not markup.
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(text, {
+                    FORBID_TAGS: ["script", "style", "iframe"],
+                  }),
+                }}
+              />
+            )}
+          </div>
+        )}
         {isText && (
           <div className="h-full w-full max-w-4xl overflow-y-auto rounded-md bg-[var(--bg)] px-5 py-4 text-[var(--text)] shadow-2xl">
             <pre className="whitespace-pre-wrap break-words text-sm">
@@ -526,7 +554,7 @@ function PublicBlobPreview({
             </pre>
           </div>
         )}
-        {!isImage && !isPdf && !isText && (
+        {!isImage && !isPdf && !isText && !isHtmlDoc && (
           <div className="rounded-md border border-white/20 bg-white/10 p-6 text-center text-white">
             <p className="text-sm">
               No inline preview available for this file type.

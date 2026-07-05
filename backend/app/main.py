@@ -290,6 +290,7 @@ from app.workspaces.items_router import router as workspace_items_router  # noqa
 from app.workspaces.drive_router import router as workspace_drive_router  # noqa: E402
 from app.workspaces.canvas_router import router as workspace_canvas_router  # noqa: E402
 from app.workspaces.ask_router import router as workspace_ask_router  # noqa: E402
+from app.workspaces.ask_router import global_search_router as workspace_global_search_router  # noqa: E402
 from app.workspaces.overview_router import router as workspace_overview_router  # noqa: E402
 from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa: E402
 from app.workspaces.comments_router import router as workspace_comments_router  # noqa: E402
@@ -384,6 +385,13 @@ app.include_router(
 # Workspace export bundle (zip) + Markdown-zip import.
 app.include_router(
     workspace_export_router, prefix="/api/workspaces", tags=["workspaces"]
+)
+# Cross-workspace search (9.2) — own prefix so it can't be captured by
+# the /{workspace_id} routes.
+app.include_router(
+    workspace_global_search_router,
+    prefix="/api/workspace-search",
+    tags=["workspaces"],
 )
 # MCP connectors (admin-managed external tool servers — Phase 10).
 app.include_router(

@@ -333,25 +333,16 @@ async def _visible_item_file_map(
     return out
 
 
-@router.get("/{workspace_id}/search", response_model=SearchResponse)
-async def search_workspace(
-    workspace_id: uuid.UUID,
+async def _search_one_workspace(
+    db: AsyncSession,
+    ws,
+    user: User,
     q: str,
-    limit: int = 30,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> SearchResponse:
-    """Three passes, merged: item-title matches, Postgres FTS over the
-    workspace's backing/pinned files (with ``<mark>`` headlines), and
-    embedding similarity (when configured). Deduped per item, titles
-    first, then FTS by rank, then any semantic-only stragglers."""
+    limit: int,
+) -> tuple[list[SearchHit], bool]:
+    """The three search passes for one workspace — shared by the
+    per-workspace endpoint and the cross-workspace search (9.2)."""
     from sqlalchemy import desc, func as sa_func, literal_column, or_ as sa_or
-
-    ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    q = (q or "").strip()
-    if len(q) < 2:
-        return SearchResponse(hits=[], semantic_available=False)
-    limit = max(1, min(60, limit))
 
     hits: list[SearchHit] = []
     seen_items: set[uuid.UUID] = set()
@@ -473,9 +464,107 @@ async def search_workspace(
     except Exception:  # pragma: no cover — semantic is best-effort
         pass
 
-    return SearchResponse(
-        hits=hits[:limit], semantic_available=semantic_available
+    return hits[:limit], semantic_available
+
+
+@router.get("/{workspace_id}/search", response_model=SearchResponse)
+async def search_workspace(
+    workspace_id: uuid.UUID,
+    q: str,
+    limit: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SearchResponse:
+    """Three passes, merged: item-title matches, Postgres FTS over the
+    workspace's backing/pinned files (with ``<mark>`` headlines), and
+    embedding similarity (when configured). Deduped per item, titles
+    first, then FTS by rank, then any semantic-only stragglers."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    q = (q or "").strip()
+    if len(q) < 2:
+        return SearchResponse(hits=[], semantic_available=False)
+    limit = max(1, min(60, limit))
+    hits, semantic_available = await _search_one_workspace(
+        db, ws, user, q, limit
     )
+    return SearchResponse(hits=hits, semantic_available=semantic_available)
+
+
+# ---------------------------------------------------------------------
+# Cross-workspace search (9.2) — one query over every workspace the
+# caller can see. Mounted on its own prefix (``/api/workspace-search``)
+# because ``/api/workspaces/<anything>`` would be captured by the
+# ``/{workspace_id}`` routes and 422 on the non-UUID segment.
+# ---------------------------------------------------------------------
+global_search_router = APIRouter()
+
+_GLOBAL_SEARCH_MAX_WORKSPACES = 20
+_GLOBAL_SEARCH_PER_WS = 6
+
+
+class GlobalSearchGroup(BaseModel):
+    workspace_id: uuid.UUID
+    workspace_title: str
+    hits: list[SearchHit] = Field(default_factory=list)
+
+
+class GlobalSearchResponse(BaseModel):
+    groups: list[GlobalSearchGroup] = Field(default_factory=list)
+
+
+@global_search_router.get("", response_model=GlobalSearchResponse)
+async def search_all_workspaces(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GlobalSearchResponse:
+    """Run the workspace search across everything the caller owns or has
+    an accepted share on, grouped per workspace, best group first."""
+    from app.chat.models import Workspace, WorkspaceShare
+
+    q = (q or "").strip()
+    if len(q) < 2:
+        return GlobalSearchResponse()
+
+    shared_ids = select(WorkspaceShare.workspace_id).where(
+        WorkspaceShare.invitee_user_id == user.id,
+        WorkspaceShare.status == "accepted",
+    )
+    from sqlalchemy import or_ as sa_or
+
+    workspaces = list(
+        (
+            await db.execute(
+                select(Workspace)
+                .where(
+                    Workspace.archived_at.is_(None),
+                    sa_or(
+                        Workspace.user_id == user.id,
+                        Workspace.id.in_(shared_ids),
+                    ),
+                )
+                .order_by(Workspace.updated_at.desc())
+                .limit(_GLOBAL_SEARCH_MAX_WORKSPACES)
+            )
+        ).scalars()
+    )
+
+    groups: list[GlobalSearchGroup] = []
+    for ws in workspaces:
+        hits, _sem = await _search_one_workspace(
+            db, ws, user, q, _GLOBAL_SEARCH_PER_WS
+        )
+        if hits:
+            groups.append(
+                GlobalSearchGroup(
+                    workspace_id=ws.id,
+                    workspace_title=ws.title,
+                    hits=hits,
+                )
+            )
+    # Best group first: the strongest single hit wins the ordering.
+    groups.sort(key=lambda g: max(h.score for h in g.hits), reverse=True)
+    return GlobalSearchResponse(groups=groups)
 
 
 # ---------------------------------------------------------------------

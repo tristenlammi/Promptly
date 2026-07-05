@@ -43,6 +43,8 @@ import {
   Search as SearchIcon,
   Home,
   Layers,
+  LayoutTemplate,
+  Link2,
   Loader2,
   Lock,
   MessageSquare,
@@ -64,6 +66,8 @@ import {
 
 import { chatApi } from "@/api/chat";
 import { EmojiPicker } from "@/components/files/documents/EmojiPicker";
+import { ShareLinkDialog } from "@/components/files/ShareLinkDialog";
+import { Modal } from "@/components/shared/Modal";
 import { tasksApi } from "@/api/tasks";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { workspacesApi } from "@/api/workspaces";
@@ -116,6 +120,7 @@ export function WorkspaceNavigatorTree({
   atSearch,
   onNewTask,
   onNewMeeting,
+  isOwner,
 }: {
   workspaceId: string;
   tree: WorkspaceItemNode[];
@@ -144,6 +149,9 @@ export function WorkspaceNavigatorTree({
   onNewTask?: () => void;
   /** Open the meeting-notes upload (recording → transcribed note). */
   onNewMeeting?: () => void;
+  /** Caller owns the workspace — gates public share links (9.1); the
+   *  backing documents belong to the owner, so only they can mint links. */
+  isOwner?: boolean;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
@@ -177,6 +185,8 @@ export function WorkspaceNavigatorTree({
   const [focusId, setFocusId] = useState<string | null>(null);
   // F2 → the focused row flips into its inline rename input.
   const [renameRequestId, setRenameRequestId] = useState<string | null>(null);
+  // "New from template" picker (9.3).
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 
   // One flat list across both sections so pinned items are draggable too, and
   // dragging between the Pinned area and the tree pins / unpins the item.
@@ -484,6 +494,7 @@ export function WorkspaceNavigatorTree({
             onNewFolder={() => handleCreate("folder", null)}
             onNewTask={onNewTask}
             onNewMeeting={onNewMeeting}
+            onNewFromTemplate={() => setTemplatePickerOpen(true)}
           />
         )}
       </div>
@@ -546,6 +557,7 @@ export function WorkspaceNavigatorTree({
                           focused={focusId === item.id}
                           renameRequest={renameRequestId === item.id}
                           onRenameHandled={() => setRenameRequestId(null)}
+                          isOwner={isOwner}
                           onCreateInside={
                             canEdit
                               ? (kind, parentId) =>
@@ -586,6 +598,7 @@ export function WorkspaceNavigatorTree({
                       focused={focusId === item.id}
                       renameRequest={renameRequestId === item.id}
                       onRenameHandled={() => setRenameRequestId(null)}
+                      isOwner={isOwner}
                       isDropParent={
                         !!activeId &&
                         !dropInPinned &&
@@ -624,6 +637,26 @@ export function WorkspaceNavigatorTree({
       {/* Per-workspace Archive + Trash — pinned to the bottom of the rail. */}
       <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
       <WorkspaceTrashSection workspaceId={workspaceId} canEdit={canEdit} />
+
+      {templatePickerOpen && (
+        <NoteTemplatePicker
+          workspaceId={workspaceId}
+          tree={tree}
+          onClose={() => setTemplatePickerOpen(false)}
+          onCreated={(item) =>
+            onSelect({
+              id: item.id,
+              kind: "note",
+              ref_id: item.ref_id,
+              title: item.title,
+              icon: null,
+              position: 0,
+              indexing_status: null,
+              children: [],
+            })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -921,6 +954,139 @@ function WorkspaceArchiveSection({
   );
 }
 
+/** Builtin note templates — mirrors backend NOTE_TEMPLATES (9.3). The
+ *  backend ignores unknown keys, so drift degrades to a 404 toast. */
+const BUILTIN_NOTE_TEMPLATES: { key: string; name: string; hint: string }[] = [
+  { key: "meeting_agenda", name: "Meeting agenda", hint: "Attendees, agenda, decisions, action items" },
+  { key: "decision_record", name: "Decision record", hint: "Context, options, decision, consequences" },
+  { key: "weekly_report", name: "Weekly report", hint: "Done, in progress, blocked, next week" },
+  { key: "project_brief", name: "Project brief", hint: "Problem, goals, approach, risks" },
+];
+
+/** "New from template" picker (9.3): builtin skeletons + any workspace
+ *  note flagged as a template via its ⋯ menu. */
+function NoteTemplatePicker({
+  workspaceId,
+  tree,
+  onClose,
+  onCreated,
+}: {
+  workspaceId: string;
+  tree: WorkspaceItemNode[];
+  onClose: () => void;
+  onCreated: (item: { id: string; ref_id: string | null; title: string }) => void;
+}) {
+  const qc = useQueryClient();
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const templateNotes = useMemo(() => {
+    const out: WorkspaceItemNode[] = [];
+    const walk = (nodes: WorkspaceItemNode[]) => {
+      for (const n of nodes) {
+        if (n.kind === "note" && n.is_template) out.push(n);
+        if (n.children.length) walk(n.children);
+      }
+    };
+    walk(tree);
+    return out;
+  }, [tree]);
+
+  const create = async (
+    payload: { template_key?: string; from_item_id?: string },
+    busy: string
+  ) => {
+    if (busyKey) return;
+    setBusyKey(busy);
+    try {
+      const item = await workspacesApi.createNoteFromTemplate(
+        workspaceId,
+        payload
+      );
+      qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
+      onCreated({ id: item.id, ref_id: item.ref_id, title: item.title });
+      onClose();
+    } catch {
+      toast.error("Couldn't create the note — try again.");
+      setBusyKey(null);
+    }
+  };
+
+  const Row = ({
+    name,
+    hint,
+    busy,
+    onClick,
+  }: {
+    name: string;
+    hint: string;
+    busy: boolean;
+    onClick: () => void;
+  }) => (
+    <button
+      type="button"
+      disabled={Boolean(busyKey)}
+      onClick={onClick}
+      className="flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition hover:bg-[var(--hover)] disabled:opacity-60"
+    >
+      {busy ? (
+        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
+      ) : (
+        <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+      )}
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-[var(--text)]">
+          {name}
+        </span>
+        <span className="block truncate text-xs text-[var(--text-muted)]">
+          {hint}
+        </span>
+      </span>
+    </button>
+  );
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="New note from template"
+      description="Start from a skeleton instead of a blank page."
+      widthClass="max-w-sm"
+    >
+      <div className="space-y-0.5">
+        {BUILTIN_NOTE_TEMPLATES.map((t) => (
+          <Row
+            key={t.key}
+            name={t.name}
+            hint={t.hint}
+            busy={busyKey === t.key}
+            onClick={() => void create({ template_key: t.key }, t.key)}
+          />
+        ))}
+        {templateNotes.length > 0 && (
+          <>
+            <div className="px-2.5 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Your templates
+            </div>
+            {templateNotes.map((n) => (
+              <Row
+                key={n.id}
+                name={n.title || "Untitled"}
+                hint="Copy of your template note"
+                busy={busyKey === n.id}
+                onClick={() => void create({ from_item_id: n.id }, n.id)}
+              />
+            ))}
+          </>
+        )}
+        <p className="px-2.5 pt-2 text-[10px] leading-snug text-[var(--text-muted)]">
+          Tip: flag any note as a template from its ⋯ menu and it appears
+          here for the whole workspace.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
 /**
  * Collapsible Trash below the Archive (0138). Deleted items stage here
  * for 30 days; each entry restores in one click or purges for real.
@@ -1065,6 +1231,7 @@ function TreeRow({
   focused,
   renameRequest,
   onRenameHandled,
+  isOwner,
 }: {
   workspaceId: string;
   item: FlatItem;
@@ -1090,12 +1257,15 @@ function TreeRow({
   /** F2 on the focused row — flip into the inline rename input. */
   renameRequest?: boolean;
   onRenameHandled?: () => void;
+  /** Workspace owner — may mint public share links for notes (9.1). */
+  isOwner?: boolean;
 }) {
   const { node, depth } = item;
   const expanded = !collapsed.has(node.id);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(node.title);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [shareLinkOpen, setShareLinkOpen] = useState(false);
 
   useEffect(() => {
     if (renameRequest && canEdit && !overlay) {
@@ -1463,6 +1633,23 @@ function TreeRow({
             onChangeIcon={
               !isChat && !isTask ? () => setIconPickerOpen(true) : undefined
             }
+            onShareLink={
+              isOwner && node.kind === "note" && node.ref_id
+                ? () => setShareLinkOpen(true)
+                : undefined
+            }
+            isTemplate={node.is_template === true}
+            onToggleTemplate={
+              node.kind === "note"
+                ? () =>
+                    update.mutate({
+                      itemId: node.id,
+                      payload: {
+                        config: node.is_template ? null : { template: true },
+                      },
+                    })
+                : undefined
+            }
             hasIcon={Boolean(node.icon)}
             onClearIcon={() =>
               update.mutate({ itemId: node.id, payload: { icon: null } })
@@ -1471,6 +1658,13 @@ function TreeRow({
           />
         )}
       </div>
+      {shareLinkOpen && node.ref_id && (
+        <ShareLinkDialog
+          open={shareLinkOpen}
+          resource={{ kind: "file", id: node.ref_id, name: node.title }}
+          onClose={() => setShareLinkOpen(false)}
+        />
+      )}
       {iconPickerOpen && (
         <EmojiPicker
           anchor={
@@ -1553,6 +1747,9 @@ function NodeActions({
   onChangeIcon,
   hasIcon,
   onClearIcon,
+  onShareLink,
+  isTemplate,
+  onToggleTemplate,
   deleting,
 }: {
   isChat: boolean;
@@ -1580,6 +1777,11 @@ function NodeActions({
   onChangeIcon?: () => void;
   hasIcon?: boolean;
   onClearIcon?: () => void;
+  /** Manage public (guest) share links for this note (9.1; owner only). */
+  onShareLink?: () => void;
+  /** Note templates (9.3): current flag + toggle. */
+  isTemplate?: boolean;
+  onToggleTemplate?: () => void;
   deleting: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1704,6 +1906,28 @@ function NodeActions({
                   onClick={() => {
                     setMenuOpen(false);
                     onOpenToSide();
+                  }}
+                />
+              )}
+              {onShareLink && (
+                <MenuItem
+                  icon={<Link2 className="h-3.5 w-3.5" />}
+                  label="Public link…"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onShareLink();
+                  }}
+                />
+              )}
+              {onToggleTemplate && (
+                <MenuItem
+                  icon={<LayoutTemplate className="h-3.5 w-3.5" />}
+                  label={
+                    isTemplate ? "Remove from templates" : "Save as template"
+                  }
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onToggleTemplate();
                   }}
                 />
               )}
@@ -1843,6 +2067,7 @@ function NewMenu({
   onNewFolder,
   onNewTask,
   onNewMeeting,
+  onNewFromTemplate,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
@@ -1856,6 +2081,8 @@ function NewMenu({
   onNewTask?: () => void;
   /** Upload a meeting recording → transcribed + summarised note. */
   onNewMeeting?: () => void;
+  /** Open the note-template picker (9.3). */
+  onNewFromTemplate?: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1911,6 +2138,16 @@ function NewMenu({
                 onNewNote();
               }}
             />
+            {onNewFromTemplate && (
+              <MenuItem
+                icon={<LayoutTemplate className="h-3.5 w-3.5" />}
+                label="New from template"
+                onClick={() => {
+                  setOpen(false);
+                  onNewFromTemplate();
+                }}
+              />
+            )}
             <MenuItem
               icon={<PenTool className="h-3.5 w-3.5" />}
               label="New canvas"

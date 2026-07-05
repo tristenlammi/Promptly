@@ -197,4 +197,104 @@ async def apply_template(
         )
 
 
-__all__ = ["TEMPLATES", "apply_template", "template_catalog"]
+# ---------------------------------------------------------------------
+# Note templates (9.3) — single-note skeletons for the "New from
+# template" picker. Same philosophy as workspace templates: plain
+# content, adding one is an edit. The date placeholder is filled at
+# creation time.
+# ---------------------------------------------------------------------
+NOTE_TEMPLATES: dict[str, tuple[str, str]] = {
+    "meeting_agenda": (
+        "Meeting agenda",
+        """# Meeting agenda — {date}
+
+**Attendees:**
+**Goal:**
+
+## Agenda
+
+1.
+2.
+3.
+
+## Notes
+
+## Decisions
+
+## Action items
+
+- [ ]
+""",
+    ),
+    "decision_record": (
+        "Decision record",
+        """# Decision — {date}
+
+**Status:** Proposed
+**Deciders:**
+
+## Context
+
+What situation forces this decision?
+
+## Options considered
+
+1. **Option A** —
+2. **Option B** —
+
+## Decision
+
+## Consequences
+""",
+    ),
+    "weekly_report": (
+        "Weekly report",
+        """# Week of {date}
+
+## Done
+
+-
+
+## In progress
+
+-
+
+## Blocked
+
+-
+
+## Next week
+
+-
+""",
+    ),
+    "project_brief": (
+        "Project brief",
+        """# Project brief
+
+**Owner:**
+**Target date:**
+
+## Problem
+
+## Goals
+
+-
+
+## Non-goals
+
+-
+
+## Approach
+
+## Risks
+
+## Open questions
+
+-
+""",
+    ),
+}
+
+
+__all__ = ["TEMPLATES", "NOTE_TEMPLATES", "apply_template", "template_catalog"]

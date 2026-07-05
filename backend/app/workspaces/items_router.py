@@ -285,6 +285,7 @@ def _serialize_tree(items: list[WorkspaceItem]) -> list[WorkspaceItemNode]:
                     pinned=it.pinned,
                     visibility=it.visibility,
                     created_by=it.created_by,
+                    is_template=bool((it.config or {}).get("template")),
                     children=build(it.id),
                 )
             )
@@ -1561,6 +1562,103 @@ async def delete_workspace_item(
     ws.updated_at = now
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# Note from template (9.3) — builtin skeletons + notes flagged as
+# templates (``config.template``). Both land as a fresh collaborative
+# note; content fidelity for user templates goes HTML → Markdown → Y.Doc
+# (structural docs survive that round-trip fine).
+# ---------------------------------------------------------------------
+class NoteFromTemplateRequest(BaseModel):
+    # Exactly one of these picks the source.
+    template_key: str | None = None
+    from_item_id: uuid.UUID | None = None
+    title: str | None = None
+    parent_id: uuid.UUID | None = None
+
+
+@router.post(
+    "/{workspace_id}/items/note-from-template",
+    response_model=WorkspaceItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_note_from_template(
+    workspace_id: uuid.UUID,
+    payload: NoteFromTemplateRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemResponse:
+    from datetime import date as date_cls
+
+    from app.files.documents_router import _html_to_markdown
+    from app.files.storage import absolute_path
+    from app.workspaces.content_seed import create_note_with_item
+    from app.workspaces.knowledge import index_note_for_workspace
+    from app.workspaces.templates import NOTE_TEMPLATES
+
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    await _validate_parent(db, ws.id, payload.parent_id, "note")
+
+    if payload.template_key is not None:
+        entry = NOTE_TEMPLATES.get(payload.template_key)
+        if entry is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Unknown template.",
+            )
+        default_title, markdown = entry
+        markdown = markdown.replace(
+            "{date}", date_cls.today().strftime("%d %b %Y")
+        )
+        title = (payload.title or "").strip() or default_title
+    elif payload.from_item_id is not None:
+        src = await _load_item(db, ws.id, payload.from_item_id, user)
+        if src.kind != "note" or src.ref_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Only notes can be used as templates.",
+            )
+        uf = await db.get(UserFile, src.ref_id)
+        html = ""
+        if uf is not None:
+            try:
+                html = absolute_path(uf.storage_path).read_text(
+                    encoding="utf-8"
+                )
+            except (OSError, ValueError):
+                html = ""
+        markdown = _html_to_markdown(html) or (
+            uf.content_text if uf else ""
+        ) or ""
+        title = (payload.title or "").strip() or src.title
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Pick a builtin template or a template note.",
+        )
+
+    owner = user if ws.user_id == user.id else await db.get(User, ws.user_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Workspace owner missing."
+        )
+    item = await create_note_with_item(
+        db,
+        ws=ws,
+        owner=owner,
+        creator_id=user.id,
+        title=title[:200],
+        markdown=markdown,
+        parent_id=payload.parent_id,
+    )
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+    background.add_task(index_note_for_workspace, ws.id, item.id)
+    return WorkspaceItemResponse.model_validate(item)
 
 
 # ---------------------------------------------------------------------

@@ -346,6 +346,9 @@ class WorkspaceItemNode(BaseModel):
     # nodes at all — this field lets the *creator's* UI badge their drafts.
     visibility: str = "workspace"
     created_by: uuid.UUID | None = None
+    # Flagged as a note template (9.3; stored as ``config.template``) —
+    # surfaces in the "New from template" picker.
+    is_template: bool = False
     children: list["WorkspaceItemNode"] = Field(default_factory=list)
 
 

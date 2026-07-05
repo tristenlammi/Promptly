@@ -142,6 +142,8 @@ export interface WorkspaceItemNode {
    *  own UI badge them. */
   visibility?: "workspace" | "private";
   created_by?: string | null;
+  /** Flagged as a note template (9.3) — shows in "New from template". */
+  is_template?: boolean;
   children: WorkspaceItemNode[];
 }
 
@@ -460,6 +462,8 @@ export interface UpdateWorkspaceItemPayload {
   icon?: string | null;
   /** "workspace" | "private" — creator-only drafts (0134). */
   visibility?: "workspace" | "private";
+  /** Kind-specific config. Notes use ``{template: true}`` (9.3). */
+  config?: Record<string, unknown> | null;
 }
 
 export interface MoveWorkspaceItemPayload {
@@ -954,11 +958,43 @@ export const workspacesApi = {
     return data;
   },
 
+  /** Cross-workspace search (9.2): one query over every workspace the
+   *  caller can see, grouped per workspace, best group first. */
+  async searchAll(q: string): Promise<{
+    groups: {
+      workspace_id: string;
+      workspace_title: string;
+      hits: WorkspaceSearchHit[];
+    }[];
+  }> {
+    const { data } = await apiClient.get("/workspace-search", {
+      params: { q },
+    });
+    return data;
+  },
+
   /** Merged newest-first activity feed for the overview pane. */
   async activity(id: string): Promise<{ events: WorkspaceActivityEvent[] }> {
     const { data } = await apiClient.get<{
       events: WorkspaceActivityEvent[];
     }>(`/workspaces/${id}/activity`);
+    return data;
+  },
+
+  /** Create a note from a builtin skeleton or a template-flagged note. */
+  async createNoteFromTemplate(
+    id: string,
+    payload: {
+      template_key?: string;
+      from_item_id?: string;
+      title?: string;
+      parent_id?: string | null;
+    }
+  ): Promise<WorkspaceItemResponse> {
+    const { data } = await apiClient.post<WorkspaceItemResponse>(
+      `/workspaces/${id}/items/note-from-template`,
+      payload
+    );
     return data;
   },
 
