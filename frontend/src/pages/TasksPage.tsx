@@ -5,6 +5,7 @@ import {
   Copy,
   FolderKanban,
   Globe,
+  KeyRound,
   MoreVertical,
   Pencil,
   Play,
@@ -24,6 +25,7 @@ import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi, type Task } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
+import { CredentialsModal } from "@/components/tasks/CredentialsModal";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
@@ -46,6 +48,7 @@ export function TasksPage() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [credsOpen, setCredsOpen] = useState(false);
   const create = useCreateTask();
   const { data: models } = useAvailableModels();
 
@@ -124,13 +127,23 @@ export function TasksPage() {
         title="Automations"
         subtitle="Scheduled prompts that produce a fresh report on their own"
         actions={
-          <Button
-            variant="primary"
-            leftIcon={<Plus className="h-4 w-4" />}
-            onClick={openNew}
-          >
-            New automation
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              leftIcon={<KeyRound className="h-4 w-4" />}
+              onClick={() => setCredsOpen(true)}
+              title="Manage API keys and tokens your automations use"
+            >
+              Credentials
+            </Button>
+            <Button
+              variant="primary"
+              leftIcon={<Plus className="h-4 w-4" />}
+              onClick={openNew}
+            >
+              New automation
+            </Button>
+          </div>
         }
       />
       <div className="flex-1 overflow-y-auto">
@@ -317,6 +330,11 @@ export function TasksPage() {
             open={chooserOpen}
             onClose={() => setChooserOpen(false)}
             onChoose={handleChoose}
+          />
+
+          <CredentialsModal
+            open={credsOpen}
+            onClose={() => setCredsOpen(false)}
           />
 
           <TaskFormModal

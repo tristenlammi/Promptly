@@ -44,6 +44,7 @@ from app.tasks.flow_graph import (
     FetchPageData,
     FlowGraph,
     FlowNode,
+    HttpRequestData,
     LoopData,
     MemoryData,
     MergeData,
@@ -291,6 +292,188 @@ async def _run_fetch_node(
     }
     structured = {"url": url, "text": extracted}
     return text, [{"title": url, "url": url, "snippet": ""}], structured, record
+
+
+# ---------------------------------------------------------------------
+# Credentials vault (A1) — {{secret.NAME}} resolution + redaction.
+# Secrets resolve ONLY inside the HTTP-request node (never in AI
+# prompts — a key must never reach a model provider), and every value
+# is swapped back to its token before anything is recorded.
+# ---------------------------------------------------------------------
+_SECRET_TOKEN_RE = re.compile(r"\{\{\s*secret\.([A-Za-z][A-Za-z0-9_]*)\s*\}\}")
+
+
+async def _load_secrets(db, user_id: uuid.UUID) -> dict[str, str]:
+    """The owner's decrypted vault, name → value. Rows that fail to
+    decrypt (rotated SECRET_KEY) are skipped rather than killing the run."""
+    from app.auth.utils import decrypt_secret
+    from app.secrets.models import UserSecret
+
+    rows = (
+        (
+            await db.execute(
+                select(UserSecret).where(UserSecret.user_id == user_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out: dict[str, str] = {}
+    for r in rows:
+        try:
+            out[r.name] = decrypt_secret(r.value_encrypted)
+        except Exception:  # noqa: BLE001 — undecryptable → treat as absent
+            logger.warning("secret %s failed to decrypt; skipping", r.name)
+    return out
+
+
+def _resolve_secret_tokens(text: str, secrets: dict[str, str]) -> str:
+    """Replace ``{{secret.NAME}}`` with the vault value; unknown names fail
+    loudly (a silently-empty Authorization header is a debugging tarpit)."""
+
+    def _rep(m: re.Match) -> str:
+        name = m.group(1).upper()
+        if name not in secrets:
+            raise TaskRunError(
+                f"Unknown credential {{{{secret.{name}}}}} — add it under "
+                "Automations ▸ Credentials."
+            )
+        return secrets[name]
+
+    return _SECRET_TOKEN_RE.sub(_rep, text)
+
+
+def _redact_secrets(text: str, secrets: dict[str, str]) -> str:
+    """Swap any vault *value* appearing in ``text`` back to its token, so
+    node runs / reports / logs never persist a plaintext credential."""
+    for name, value in secrets.items():
+        if value and value in text:
+            text = text.replace(value, f"{{{{secret.{name}}}}}")
+    return text
+
+
+_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+_HTTP_MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # cap the wire read
+_HTTP_MAX_TEXT = 60_000  # cap what flows downstream / into records
+
+
+async def _run_http_node(
+    node: FlowNode,
+    ctx: dict[str, str],
+    *,
+    secrets: dict[str, str],
+) -> tuple[str, object, dict]:
+    """Execute an ``http.request`` node → (text, structured, record).
+
+    The universal API adapter: templated method/URL/headers/body with
+    ``{{secret.NAME}}`` credentials, SSRF-guarded (private targets are an
+    explicit per-node opt-in; the cloud metadata range never is). A JSON
+    response body becomes the structured output so ``{{json.*}}`` works
+    downstream; non-2xx raises by default so the per-node error policy
+    ("if this step errors") drives the failure path.
+    """
+    import json as _json
+
+    import httpx
+
+    from app.net.safe_fetch import (
+        ResponseTooLargeError,
+        UnsafeURLError,
+        safe_fetch,
+    )
+
+    data = HttpRequestData.model_validate(node.data)
+    method = (data.method or "GET").upper()
+    if method not in _HTTP_METHODS:
+        raise TaskRunError(f"Unsupported HTTP method {method!r}.")
+
+    url = _resolve_secret_tokens(_interpolate(data.url, ctx).strip(), secrets)
+    if not url:
+        raise TaskRunError("The HTTP step has no URL.")
+
+    headers: dict[str, str] = {}
+    for h in data.headers:
+        name = (h.name or "").strip()
+        if not name:
+            continue
+        headers[name] = _resolve_secret_tokens(
+            _interpolate(h.value or "", ctx), secrets
+        )
+
+    json_body = None
+    content_body: str | None = None
+    if method != "GET" and (data.body or "").strip():
+        raw_body = _resolve_secret_tokens(_interpolate(data.body, ctx), secrets)
+        try:
+            json_body = _json.loads(raw_body)
+        except (ValueError, TypeError):
+            content_body = raw_body
+            headers.setdefault("Content-Type", "text/plain; charset=utf-8")
+
+    timeout = max(1, min(120, data.timeout_s or 30))
+    label = f"HTTP {method}"
+    try:
+        resp = await safe_fetch(
+            method,
+            url,
+            headers=headers or None,
+            json=json_body,
+            content=content_body,
+            timeout_seconds=float(timeout),
+            max_bytes=_HTTP_MAX_RESPONSE_BYTES,
+            allow_private=data.allow_private_network,
+        )
+    except UnsafeURLError as e:
+        hint = (
+            " Enable “allow private network” on this step if you meant to "
+            "reach something on your own network."
+            if not data.allow_private_network
+            else ""
+        )
+        raise TaskRunError(
+            f"Refused unsafe URL for {label}: {e}.{hint}"
+        ) from e
+    except ResponseTooLargeError as e:
+        raise TaskRunError(f"{label} response exceeded the size cap.") from e
+    except httpx.HTTPError as e:
+        raise TaskRunError(
+            f"{label} to {_redact_secrets(url, secrets)} failed: "
+            f"{type(e).__name__}."
+        ) from e
+
+    body_text = _redact_secrets(resp.text[:_HTTP_MAX_TEXT], secrets)
+    if data.fail_on_error_status and resp.status_code >= 400:
+        raise TaskRunError(
+            f"{label} to {_redact_secrets(url, secrets)} returned "
+            f"{resp.status_code}: {body_text[:300]}"
+        )
+
+    structured = _try_json(body_text)
+    # Redacted request summary for the inspector — never the raw values.
+    req_lines = [f"{method} {_redact_secrets(url, secrets)}"]
+    for name, value in headers.items():
+        req_lines.append(f"{name}: {_redact_secrets(value, secrets)}")
+    if json_body is not None or content_body is not None:
+        shown = (
+            _json.dumps(json_body, ensure_ascii=False)
+            if json_body is not None
+            else (content_body or "")
+        )
+        req_lines.append("")
+        req_lines.append(_redact_secrets(shown[:2000], secrets))
+
+    record = {
+        "node_id": node.id,
+        "type": NodeType.HTTP_REQUEST,
+        # Status + size ride on the label so the raw output stays clean —
+        # the inspector's JSON data pane only kicks in when the output
+        # parses as JSON, and a "200 · N bytes" prefix would defeat it.
+        "label": f"{label} · {resp.status_code} · {len(resp.content)}B",
+        "status": "success",
+        "input": "\n".join(req_lines),
+        "output": body_text,
+    }
+    return body_text, structured, record
 
 
 def _first_line_title(text: str) -> str:
@@ -1384,6 +1567,9 @@ async def run_graph_flow(
     node_runs: list[dict] = []
     ai_count = sum(1 for n in graph.nodes if n.type == NodeType.AI_PROMPT)
     ai_seen = 0
+    # Credentials vault (A1) — loaded lazily on the first HTTP node so
+    # flows without one never touch the table.
+    secrets_cache: dict[str, str] | None = None
     last_processing_output = ""  # fallback run report when there's no report node
     report_from_output: str | None = None  # an output.report node's input, if any
     action_notes: list[str] = []
@@ -1584,6 +1770,17 @@ async def run_graph_flow(
                 node_runs.append(record)
                 outputs[nid] = text
                 structured[nid] = fetch_struct  # {url, text}
+                last_processing_output = text
+
+            elif node.type == NodeType.HTTP_REQUEST:
+                if secrets_cache is None:
+                    secrets_cache = await _load_secrets(db, task.user_id)
+                text, http_struct, record = await _run_http_node(
+                    node, ctx, secrets=secrets_cache
+                )
+                node_runs.append(record)
+                outputs[nid] = text
+                structured[nid] = http_struct  # parsed JSON body (or None)
                 last_processing_output = text
 
             elif node.type == NodeType.SUMMARISE:

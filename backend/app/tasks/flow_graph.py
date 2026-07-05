@@ -56,6 +56,9 @@ class NodeType:
     # emits text for the next node. The first steps toward an n8n-style catalog.
     SEARCH_WEB = "search.web"
     FETCH_PAGE = "fetch.page"
+    # The universal API adapter (A1): any method, templated URL / headers /
+    # body, ``{{secret.NAME}}`` credentials, JSON response → ``{{json.*}}``.
+    HTTP_REQUEST = "http.request"
     # Compound node: search → fetch top-N pages → synthesise a cited report.
     DEEP_RESEARCH = "research.deep"
     # Map node: split the upstream into items, run an AI body per item, aggregate.
@@ -107,6 +110,7 @@ PROCESSING_TYPES = frozenset(
         NodeType.EXTRACT,
         NodeType.SEARCH_WEB,
         NodeType.FETCH_PAGE,
+        NodeType.HTTP_REQUEST,
         NodeType.DEEP_RESEARCH,
         NodeType.LOOP,
         NodeType.MEMORY,
@@ -241,6 +245,42 @@ class FetchPageData(BaseModel):
 
     url: str = ""
     max_chars: int = 8000  # cap the extracted text handed downstream
+
+
+class HttpHeader(BaseModel):
+    """One request header. ``value`` is a template and may reference
+    ``{{secret.NAME}}`` — the canonical ``Authorization: Bearer …`` shape."""
+
+    name: str = ""
+    value: str = ""
+
+
+class HttpRequestData(BaseModel):
+    """The universal API adapter (A1).
+
+    ``url`` / header values / ``body`` are templates; ``{{secret.NAME}}``
+    tokens resolve from the owner's credentials vault at execution time
+    (and are redacted from the recorded node run). A JSON response body
+    lands in the structured channel, so downstream steps read
+    ``{{json.field}}`` naturally. Non-2xx fails the step by default —
+    pair with the node's "if this step errors" policy to branch on
+    failure.
+
+    ``allow_private_network`` opts this one node out of the private-IP
+    SSRF block (self-hosters automating their own LAN); the cloud
+    metadata range stays blocked unconditionally.
+    """
+
+    method: str = "GET"  # GET | POST | PUT | PATCH | DELETE
+    url: str = ""
+    headers: list[HttpHeader] = Field(default_factory=list)
+    # Sent for non-GET methods. If it parses as JSON it's sent as
+    # ``application/json``, otherwise ``text/plain`` — an explicit
+    # Content-Type header overrides either.
+    body: str = ""
+    timeout_s: int = 30  # 1..120
+    fail_on_error_status: bool = True
+    allow_private_network: bool = False
 
 
 class LoopData(BaseModel):

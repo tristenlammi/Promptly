@@ -296,6 +296,7 @@ from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa
 from app.workspaces.comments_router import router as workspace_comments_router  # noqa: E402
 from app.workspaces.meetings_router import router as workspace_meetings_router  # noqa: E402
 from app.workspaces.export_router import router as workspace_export_router  # noqa: E402
+from app.secrets.router import router as secrets_router  # noqa: E402
 from app.mcp.router import router as mcp_admin_router  # noqa: E402
 from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E402
 from app.groups.router import router as groups_admin_router  # noqa: E402
@@ -393,6 +394,8 @@ app.include_router(
     prefix="/api/workspace-search",
     tags=["workspaces"],
 )
+# Credentials vault (A1) — named encrypted values for automations.
+app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
 # MCP connectors (admin-managed external tool servers — Phase 10).
 app.include_router(
     mcp_admin_router, prefix="/api/admin/mcp", tags=["mcp"]

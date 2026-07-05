@@ -31,6 +31,7 @@ import {
   Braces,
   Brain,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Clock,
   Columns3,
@@ -59,6 +60,7 @@ import {
   Trash2,
   TextQuote,
   Webhook,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -73,6 +75,8 @@ import {
   type DelayData,
   type ExtractData,
   type FetchPageData,
+  type HttpHeader,
+  type HttpRequestData,
   type LoopData,
   type MemoryData,
   type MergeData,
@@ -96,6 +100,7 @@ import {
 } from "@/hooks/useTasks";
 import { useWorkspaceTree } from "@/hooks/useWorkspaces";
 import { useAvailableModels } from "@/hooks/useProviders";
+import { secretsApi } from "@/api/secrets";
 import { useThemeStore } from "@/store/themeStore";
 import { Modal } from "@/components/shared/Modal";
 import type { WorkspaceItemNode } from "@/api/workspaces";
@@ -714,6 +719,41 @@ function FetchNode({ id, type, data, selected }: NodeProps) {
   );
 }
 
+function HttpNode({ id, type, data, selected }: NodeProps) {
+  const d = data as unknown as HttpRequestData;
+  const detail = useDetailed(id, type ?? "http.request", data);
+  return (
+    <NodeShell
+      icon={<Globe className="h-3.5 w-3.5" />}
+      label="HTTP request"
+      accent="#3b82f6"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      {detail ?? (
+        <>
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold">
+              {d.method || "GET"}
+            </span>
+            <span className="truncate text-[var(--text)]">
+              {d.url || (
+                <span className="italic text-[var(--text-muted)]">No URL yet</span>
+              )}
+            </span>
+          </div>
+          <div className="mt-1 truncate text-[10px] text-[var(--text-muted)]">
+            {(d.headers?.length ?? 0) > 0
+              ? `${d.headers.length} header${d.headers.length === 1 ? "" : "s"}`
+              : "JSON response → {{json.*}}"}
+          </div>
+        </>
+      )}
+    </NodeShell>
+  );
+}
+
 function DeepResearchNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as DeepResearchData;
   const detail = useDetailed(id, type ?? "research.deep", data);
@@ -1110,6 +1150,393 @@ function SheetOutNode({ id, type, data, selected }: NodeProps) {
   );
 }
 
+// ---------------------------------------------------------------------
+// Output view (A1 data pane): when a node's output parses as JSON, render
+// a collapsible tree where clicking a leaf copies its {{node_<id>.json.path}}
+// token — turning the engine's existing field-access power into something
+// users can see and grab. Plain text falls back to the <pre>.
+// ---------------------------------------------------------------------
+function OutputView({ text, nodeId }: { text: string; nodeId: string }) {
+  const [tab, setTab] = useState<"tree" | "raw">("tree");
+  const [copied, setCopied] = useState<string | null>(null);
+  const parsed = useMemo(() => {
+    const t = text.trim();
+    if (!(t.startsWith("{") || t.startsWith("["))) return undefined;
+    try {
+      return JSON.parse(t) as unknown;
+    } catch {
+      return undefined;
+    }
+  }, [text]);
+
+  if (parsed === undefined) {
+    return (
+      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--text)]">
+        {text || "(empty)"}
+      </pre>
+    );
+  }
+
+  const copyToken = (path: string) => {
+    const token = `{{node_${nodeId}.json${path}}}`;
+    void navigator.clipboard?.writeText(token);
+    setCopied(path);
+    window.setTimeout(() => setCopied((c) => (c === path ? null : c)), 1200);
+  };
+
+  return (
+    <div className="mt-1">
+      <div className="mb-1 flex items-center gap-2">
+        <div className="inline-flex overflow-hidden rounded border border-[var(--border)]">
+          {(["tree", "raw"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setTab(k)}
+              className={cn(
+                "px-1.5 py-0.5 text-[10px] capitalize transition",
+                tab === k
+                  ? "bg-[var(--accent)] text-white"
+                  : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
+              )}
+            >
+              {k === "tree" ? "JSON" : "Raw"}
+            </button>
+          ))}
+        </div>
+        <span className="text-[10px] text-[var(--text-muted)]">
+          click a field to copy its variable
+        </span>
+      </div>
+      {tab === "raw" ? (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--text)]">
+          {text}
+        </pre>
+      ) : (
+        <div className="max-h-48 overflow-auto rounded bg-[var(--bg)] p-1.5 font-mono text-[11px]">
+          <JsonTree value={parsed} path="" onCopy={copyToken} copied={copied} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JsonTree({
+  value,
+  path,
+  onCopy,
+  copied,
+  keyName,
+  depth = 0,
+}: {
+  value: unknown;
+  path: string;
+  onCopy: (path: string) => void;
+  copied: string | null;
+  keyName?: string;
+  depth?: number;
+}) {
+  const [open, setOpen] = useState(depth < 2);
+  const isObj = value !== null && typeof value === "object";
+  const label = keyName !== undefined && (
+    <span className="text-[var(--accent)]">{keyName}: </span>
+  );
+
+  if (!isObj) {
+    // Leaf — the clickable, copyable node.
+    const display =
+      typeof value === "string"
+        ? `"${value.length > 60 ? value.slice(0, 60) + "…" : value}"`
+        : String(value);
+    return (
+      <button
+        type="button"
+        onClick={() => onCopy(path)}
+        title={`Copy {{node.json${path}}}`}
+        className="group flex w-full items-baseline gap-1 rounded px-1 text-left hover:bg-[var(--hover)]"
+      >
+        {label}
+        <span className="truncate text-[var(--text)]">{display}</span>
+        {copied === path && (
+          <span className="ml-auto shrink-0 text-[9px] text-[var(--success)]">
+            copied
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  const entries: [string, unknown][] = Array.isArray(value)
+    ? value.map((v, i) => [String(i), v])
+    : Object.entries(value as Record<string, unknown>);
+  const bracket = Array.isArray(value)
+    ? `[${entries.length}]`
+    : `{${entries.length}}`;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 rounded px-1 hover:bg-[var(--hover)]"
+      >
+        <ChevronRight
+          className={cn(
+            "h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform",
+            open && "rotate-90"
+          )}
+        />
+        {label}
+        <span className="text-[var(--text-muted)]">{bracket}</span>
+      </button>
+      {open && (
+        <div className="ml-3 border-l border-[var(--border)] pl-1.5">
+          {entries.map(([k, v]) => {
+            const childPath = Array.isArray(value)
+              ? `${path}.${k}`
+              : `${path}.${k}`;
+            return (
+              <JsonTree
+                key={k}
+                value={v}
+                path={childPath}
+                keyName={k}
+                onCopy={onCopy}
+                copied={copied}
+                depth={depth + 1}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+/** HTTP-request node config (A1) — method, templated URL, headers with a
+ *  ⊕/× editor, JSON/text body, and the safety knobs. The credentials vault
+ *  is surfaced inline so `{{secret.NAME}}` is discoverable at the point of
+ *  use. */
+function HttpRequestConfig({
+  node,
+  onPatch,
+}: {
+  node: { data: unknown };
+  onPatch: (patch: Record<string, unknown>) => void;
+}) {
+  const d = node.data as unknown as HttpRequestData;
+  const headers = d.headers ?? [];
+  const { data: secrets } = useQuery({
+    queryKey: ["secrets"],
+    queryFn: () => secretsApi.list(),
+    staleTime: 30_000,
+  });
+  const inputCls =
+    "mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]";
+
+  const patchHeader = (i: number, patch: Partial<HttpHeader>) => {
+    const next = headers.map((h, idx) => (idx === i ? { ...h, ...patch } : h));
+    onPatch({ headers: next });
+  };
+
+  return (
+    <>
+      <div className="flex gap-2">
+        <label className="text-xs font-medium text-[var(--text-muted)]">
+          Method
+          <select
+            value={d.method || "GET"}
+            onChange={(e) => onPatch({ method: e.target.value })}
+            className={inputCls}
+          >
+            {HTTP_METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex-1 text-xs font-medium text-[var(--text-muted)]">
+          URL
+          <div className="mt-1">
+            <VariableField
+              value={d.url}
+              onChange={(v) => onPatch({ url: v })}
+              variables={DEFAULT_VARS}
+              placeholder="https://api.example.com/v1/…"
+            />
+          </div>
+        </label>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-[var(--text-muted)]">
+            Headers
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              onPatch({ headers: [...headers, { name: "", value: "" }] })
+            }
+            className="inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline"
+          >
+            <Plus className="h-3 w-3" /> Add
+          </button>
+        </div>
+        {headers.length === 0 ? (
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+            e.g. <code className="rounded bg-[var(--surface-2)] px-1">
+              Authorization
+            </code>{" "}
+            ={" "}
+            <code className="rounded bg-[var(--surface-2)] px-1">
+              {"Bearer {{secret.NAME}}"}
+            </code>
+          </p>
+        ) : (
+          <div className="mt-1.5 space-y-1.5">
+            {headers.map((h, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  value={h.name}
+                  onChange={(e) => patchHeader(i, { name: e.target.value })}
+                  placeholder="Header"
+                  className="w-1/3 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                />
+                <input
+                  value={h.value}
+                  onChange={(e) => patchHeader(i, { value: e.target.value })}
+                  placeholder="Value ({{secret.NAME}})"
+                  className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    onPatch({ headers: headers.filter((_, idx) => idx !== i) })
+                  }
+                  aria-label="Remove header"
+                  className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:text-[var(--danger)]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {d.method !== "GET" && (
+        <label className="text-xs font-medium text-[var(--text-muted)]">
+          Body
+          <div className="mt-1">
+            <VariableField
+              value={d.body}
+              onChange={(v) => onPatch({ body: v })}
+              variables={DEFAULT_VARS}
+              multiline
+              rows={4}
+              placeholder={'{"key": "{{upstream_output}}"}'}
+            />
+          </div>
+          <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+            Valid JSON is sent as <code>application/json</code>; anything else
+            as plain text.
+          </span>
+        </label>
+      )}
+
+      <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2">
+        <div className="text-[11px] font-medium text-[var(--text-muted)]">
+          Credentials
+        </div>
+        {secrets && secrets.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {secrets.map((s) => (
+              <code
+                key={s.id}
+                title="Reference this in the URL, a header, or the body"
+                className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--text)]"
+              >
+                {`{{secret.${s.name}}}`}
+              </code>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+            Add API keys under{" "}
+            <span className="font-medium text-[var(--text)]">
+              Automations ▸ Credentials
+            </span>
+            , then reference them as {"{{secret.NAME}}"} — the value is
+            resolved at run time and never shown in logs.
+          </p>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <label className="text-xs font-medium text-[var(--text-muted)]">
+          Timeout (s)
+          <input
+            type="number"
+            min={1}
+            max={120}
+            value={d.timeout_s ?? 30}
+            onChange={(e) =>
+              onPatch({
+                timeout_s: Math.max(
+                  1,
+                  Math.min(120, Number(e.target.value) || 30)
+                ),
+              })
+            }
+            className={inputCls}
+          />
+        </label>
+      </div>
+
+      <label className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+        <input
+          type="checkbox"
+          checked={d.fail_on_error_status !== false}
+          onChange={(e) => onPatch({ fail_on_error_status: e.target.checked })}
+          className="mt-0.5 accent-[var(--accent)]"
+        />
+        <span>
+          <span className="font-medium text-[var(--text)]">
+            Fail on error status
+          </span>
+          <span className="mt-0.5 block text-[10px] leading-snug">
+            Treat a 4xx/5xx response as a step failure (pairs with “If this step
+            errors” to branch on it). Off = the flow continues with the error
+            body as output.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+        <input
+          type="checkbox"
+          checked={d.allow_private_network === true}
+          onChange={(e) => onPatch({ allow_private_network: e.target.checked })}
+          className="mt-0.5 accent-[var(--accent)]"
+        />
+        <span>
+          <span className="font-medium text-[var(--text)]">
+            Allow private network
+          </span>
+          <span className="mt-0.5 block text-[10px] leading-snug">
+            Permit reaching a LAN / localhost address (self-hosted services on
+            your own network). Cloud metadata endpoints stay blocked either way.
+          </span>
+        </span>
+      </label>
+    </>
+  );
+}
+
 const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
@@ -1119,6 +1546,7 @@ const nodeTypes = {
   "ai.extract": ExtractNode,
   "search.web": SearchNode,
   "fetch.page": FetchNode,
+  "http.request": HttpNode,
   "research.deep": DeepResearchNode,
   "loop.foreach": LoopNode,
   "memory.store": MemoryNode,
@@ -1578,6 +2006,7 @@ export function TaskFlowEditor({
         | "ai.extract"
         | "search.web"
         | "fetch.page"
+        | "http.request"
         | "research.deep"
         | "loop.foreach"
         | "memory.store"
@@ -1606,6 +2035,16 @@ export function TaskFlowEditor({
       else if (type === "ai.extract") data = { spec: "", ...modelBits };
       else if (type === "search.web") data = { query: "", count: 5 };
       else if (type === "fetch.page") data = { url: "", max_chars: 8000 };
+      else if (type === "http.request")
+        data = {
+          method: "GET",
+          url: "",
+          headers: [],
+          body: "",
+          timeout_s: 30,
+          fail_on_error_status: true,
+          allow_private_network: false,
+        };
       else if (type === "research.deep")
         data = {
           query: "",
@@ -1669,6 +2108,7 @@ export function TaskFlowEditor({
         | "ai.extract"
         | "search.web"
         | "fetch.page"
+        | "http.request"
         | "research.deep"
         | "loop.foreach"
         | "memory.store"
@@ -1944,6 +2384,13 @@ export function TaskFlowEditor({
               </button>
               <button
                 type="button"
+                onClick={() => addNodeAtMenu("http.request")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Globe className="h-3.5 w-3.5 text-[#3b82f6]" /> Add HTTP request
+              </button>
+              <button
+                type="button"
                 onClick={() => addNodeAtMenu("research.deep")}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
@@ -2193,9 +2640,10 @@ function NodeInspector({
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                   Output {pinned && "(pinned)"}
                 </div>
-                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--text)]">
-                  {nodeData.output || "(empty)"}
-                </pre>
+                <OutputView
+                  text={nodeData.output || ""}
+                  nodeId={node.id}
+                />
               </div>
             </div>
           )}
@@ -2448,6 +2896,10 @@ function NodeInspector({
             />
           </label>
         </>
+      )}
+
+      {node.type === "http.request" && (
+        <HttpRequestConfig node={node} onPatch={onPatch} />
       )}
 
       {node.type === "research.deep" && (

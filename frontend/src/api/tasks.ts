@@ -224,6 +224,7 @@ export type FlowNodeType =
   | "ai.extract"
   | "search.web"
   | "fetch.page"
+  | "http.request"
   | "research.deep"
   | "loop.foreach"
   | "memory.store"
@@ -389,6 +390,25 @@ export interface RouterData {
 export interface FetchPageData {
   url: string;
   max_chars: number;
+}
+
+/** One header on an HTTP-request node. ``value`` is a template and may
+ *  reference ``{{secret.NAME}}`` from the credentials vault. */
+export interface HttpHeader {
+  name: string;
+  value: string;
+}
+
+/** The universal API adapter (A1). URL / header values / body are
+ *  templates; ``{{secret.NAME}}`` resolves from the vault at run time. */
+export interface HttpRequestData {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers: HttpHeader[];
+  body: string;
+  timeout_s: number;
+  fail_on_error_status: boolean;
+  allow_private_network: boolean;
 }
 
 export interface ReportOutputData {

@@ -52,6 +52,10 @@ const EVENT_LABELS: Record<string, string> = {
   workspace_share_created: "Workspace shared",
   workspace_share_revoked: "Workspace share revoked",
   workspace_item_deleted: "Workspace item deleted",
+  // A1 — automation credentials vault.
+  secret_created: "Credential created",
+  secret_updated: "Credential updated",
+  secret_deleted: "Credential deleted",
 };
 
 /** Filter dropdown options. Order matters — top items are most-used. */

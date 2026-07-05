@@ -178,7 +178,7 @@ def _resolve_all(hostname: str) -> list[ipaddress._BaseAddress]:
     return out
 
 
-def assert_url_is_safe(url: str) -> str:
+def assert_url_is_safe(url: str, *, allow_private: bool = False) -> str:
     """Return the validated URL, raise ``UnsafeURLError`` if not safe.
 
     Public API for callers that want to do the validation up front
@@ -188,6 +188,12 @@ def assert_url_is_safe(url: str) -> str:
     private-IP check — the docker-compose ``searxng`` service is the
     canonical example, since it has to resolve to an internal IP for
     the OOB experience to work.
+
+    ``allow_private=True`` (the automation HTTP node's explicit opt-in
+    for self-hosters automating their own LAN) relaxes the private /
+    loopback block, but the cloud instance-metadata range (169.254/16,
+    fe80::/10, known IMDS hostnames) stays refused unconditionally —
+    it's never a legitimate automation target, only credential theft.
     """
     parsed = urlparse(url)
     if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
@@ -200,15 +206,36 @@ def assert_url_is_safe(url: str) -> str:
     if not hostname:
         raise UnsafeURLError("bad_url", "URL has no hostname")
 
-    if hostname in _NEVER_HOSTNAMES:
+    if hostname in _METADATA_HOSTNAMES:
+        raise UnsafeURLError(
+            "blocked_metadata",
+            f"Refusing to fetch the metadata service ({hostname!r})",
+        )
+    if not allow_private and hostname in _NEVER_HOSTNAMES:
         # ``_NEVER_HOSTNAMES`` wins even if the operator allowlists
-        # the same name — refusing ``localhost`` is non-negotiable.
+        # the same name — refusing ``localhost`` is non-negotiable
+        # (unless the caller explicitly opted into private targets).
         raise UnsafeURLError(
             "blocked_hostname",
             f"Refusing to fetch {hostname!r}",
         )
 
     explicit_allow = hostname in get_settings().ssrf_allowed_hosts_set
+
+    def _check_ip(ip: ipaddress._BaseAddress) -> None:
+        if _ip_is_metadata(ip):
+            raise UnsafeURLError(
+                "blocked_metadata",
+                f"Refusing to fetch {hostname!r} — metadata-service address",
+            )
+        if allow_private:
+            return
+        blocked, reason = _ip_is_blocked(ip)
+        if blocked:
+            raise UnsafeURLError(
+                f"blocked_ip:{reason}",
+                f"Refusing to fetch {hostname!r} — resolves to a {reason} address",
+            )
 
     # If the hostname is itself an IP literal, validate directly —
     # don't round-trip through DNS, that's pointless and slow.
@@ -218,14 +245,9 @@ def assert_url_is_safe(url: str) -> str:
         literal = None
 
     if literal is not None:
-        if explicit_allow:
+        if explicit_allow and not _ip_is_metadata(literal):
             return url
-        blocked, reason = _ip_is_blocked(literal)
-        if blocked:
-            raise UnsafeURLError(
-                f"blocked_ip:{reason}",
-                f"Refusing to fetch {hostname!r} ({reason})",
-            )
+        _check_ip(literal)
         return url
 
     addresses = _resolve_all(hostname)
@@ -238,16 +260,17 @@ def assert_url_is_safe(url: str) -> str:
     if explicit_allow:
         # Allowlisted name — we still ran DNS so that a typo or
         # broken resolver fails loudly, but we skip the private-IP
-        # check on purpose.
+        # check on purpose (metadata is still refused).
+        for ip in addresses:
+            if _ip_is_metadata(ip):
+                raise UnsafeURLError(
+                    "blocked_metadata",
+                    f"Refusing to fetch {hostname!r} — metadata-service address",
+                )
         return url
 
     for ip in addresses:
-        blocked, reason = _ip_is_blocked(ip)
-        if blocked:
-            raise UnsafeURLError(
-                f"blocked_ip:{reason}",
-                f"Refusing to fetch {hostname!r} — resolves to a {reason} address",
-            )
+        _check_ip(ip)
     return url
 
 
@@ -378,8 +401,10 @@ async def safe_fetch(
     headers: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any = None,
+    content: str | bytes | None = None,
     client: httpx.AsyncClient | None = None,
     follow_redirects: bool = True,
+    allow_private: bool = False,
 ) -> httpx.Response:
     """Issue an SSRF-safe HTTP request.
 
@@ -397,7 +422,7 @@ async def safe_fetch(
     """
     method = method.upper()
     current_url = url
-    assert_url_is_safe(current_url)
+    assert_url_is_safe(current_url, allow_private=allow_private)
 
     own_client = client is None
     if own_client:
@@ -414,6 +439,8 @@ async def safe_fetch(
         body_kwargs: dict[str, Any] = {}
         if json is not None:
             body_kwargs["json"] = json
+        elif content is not None:
+            body_kwargs["content"] = content
 
         # Manual redirect loop. Bound at 5 hops to match httpx's
         # default and stop a redirect chain from amplifying a
@@ -441,7 +468,7 @@ async def safe_fetch(
             next_url = str(httpx.URL(current_url).join(location))
             await response.aclose()
             response = None
-            assert_url_is_safe(next_url)
+            assert_url_is_safe(next_url, allow_private=allow_private)
             current_url = next_url
             # On a redirect the body is not re-sent — drop ``json``.
             body_kwargs.clear()
