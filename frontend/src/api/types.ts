@@ -777,6 +777,10 @@ export interface ToolInvocation {
   /** Distinguishes benign failure classes ("per_turn_cap", "timeout")
    *  from real tool errors so the activity card can tone them down. */
   errorKind?: string | null;
+  /** Latest ``tool_progress`` note from a long-running tool (e.g.
+   *  run_agents "2/4 agents done"). Shown under the running header;
+   *  cleared irrelevant once the call finishes. */
+  progressMessage?: string | null;
   /** Wall-clock duration of the call, reported on ``tool_finished``. */
   elapsedMs?: number | null;
   /** Files the tool produced. Only present on the ``finished`` event,

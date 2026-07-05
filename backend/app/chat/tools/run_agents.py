@@ -159,8 +159,16 @@ class RunAgentsTool(Tool):
             len(tasks),
         )
 
-        results: list[AgentResult] = await asyncio.gather(
-            *(
+        total = len(tasks)
+        ctx.report_progress(f"0/{total} agents done")
+
+        # Launch all agents, then report as each finishes so the UI can
+        # count down instead of staring at a frozen spinner for up to a
+        # few minutes. Results are re-ordered back to the task order
+        # afterwards so the merged brief reads in the order the model
+        # asked for.
+        launched = [
+            asyncio.ensure_future(
                 run_agent(
                     user_id=ctx.user.id,
                     conversation_id=ctx.conversation_id,
@@ -170,9 +178,21 @@ class RunAgentsTool(Tool):
                     model_id=conv.model_id,
                     tools_payload=agent_tools,
                 )
-                for task in tasks
             )
-        )
+            for task in tasks
+        ]
+        by_task_index = {t: i for i, t in enumerate(launched)}
+        ordered: list[AgentResult | None] = [None] * total
+        done_count = 0
+        for fut in asyncio.as_completed(launched):
+            res = await fut
+            done_count += 1
+            ctx.report_progress(f"{done_count}/{total} agents done")
+        # ``as_completed`` loses the mapping, so read each future's
+        # result back into task order once all have resolved.
+        for fut, idx in by_task_index.items():
+            ordered[idx] = fut.result()
+        results: list[AgentResult] = [r for r in ordered if r is not None]
 
         # ---- Merge briefs into one model-facing string ----
         blocks: list[str] = []

@@ -344,6 +344,10 @@ export function useStreamingChat(): UseStreamingChatResult {
           store.startToolInvocation(data.id, data.name);
           continue;
         }
+        if (data.event === "tool_progress" && data.id && data.message) {
+          store.updateToolProgress(data.id, data.message);
+          continue;
+        }
         if (data.event === "tool_finished" && data.id) {
           store.finishToolInvocation(data.id, {
             ok: !!data.ok,

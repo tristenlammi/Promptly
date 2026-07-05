@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import abc
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -47,6 +48,21 @@ class ToolContext:
     # not the assistant message about to be produced (which doesn't
     # exist yet at dispatch time).
     user_message_id: uuid.UUID
+    # Optional progress channel. When the dispatcher wires one in, a
+    # long-running tool can call ``ctx.report_progress("…")`` to push a
+    # ``tool_progress`` SSE event mid-run so the UI can update its
+    # spinner label instead of sitting on a single frozen string. The
+    # default is a no-op, so tools can call it unconditionally and
+    # unit tests need no wiring.
+    on_progress: Callable[[str], None] | None = None
+
+    def report_progress(self, message: str) -> None:
+        """Emit a progress note if the dispatcher provided a channel."""
+        if self.on_progress is not None:
+            try:
+                self.on_progress(message)
+            except Exception:  # noqa: BLE001 — progress is best-effort
+                pass
 
 
 @dataclass

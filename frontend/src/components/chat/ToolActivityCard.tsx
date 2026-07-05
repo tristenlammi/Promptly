@@ -44,6 +44,7 @@ interface ActivityStep {
   status: StepStatus;
   errorKind?: string | null;
   elapsedMs?: number | null;
+  progressMessage?: string | null;
   meta?: Record<string, unknown> | null;
 }
 
@@ -261,6 +262,12 @@ export function ToolActivityCard({
               </span>
             )}
             …
+            {current?.progressMessage && (
+              <span className="text-[var(--text-muted)]">
+                {" · "}
+                {current.progressMessage}
+              </span>
+            )}
           </span>
         </div>
         {steps.some((s) => s.status !== "pending") && (
@@ -396,6 +403,7 @@ export function stepsFromInvocations(
       status: t.status,
       errorKind: t.errorKind ?? null,
       elapsedMs: t.elapsedMs ?? null,
+      progressMessage: t.progressMessage ?? null,
       meta: t.meta ?? null,
     })),
   );

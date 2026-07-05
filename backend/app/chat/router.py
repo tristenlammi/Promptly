@@ -3256,6 +3256,7 @@ async def _run_native_tool(
     conversation_id: uuid.UUID,
     user_message_id: uuid.UUID,
     sem: asyncio.Semaphore,
+    on_progress: Any = None,  # callable: str -> None | None
 ) -> tuple[str, Any, int]:
     """Run one native tool on its own DB session, bounded by ``sem``.
 
@@ -3298,6 +3299,7 @@ async def _run_native_tool(
                     user=tool_user,
                     conversation_id=conversation_id,
                     user_message_id=user_message_id,
+                    on_progress=on_progress,
                 )
                 if timeout_s:
                     async with asyncio.timeout(timeout_s):
@@ -3344,6 +3346,7 @@ async def _dispatch_tools(
     on_tool_event=None,  # noqa: ANN001 — callable: dict -> None | None
     invocation_counts: dict[str, int] | None = None,
     per_tool_caps: dict[str, int] | None = None,
+    dedup_cache: dict[str, str] | None = None,
     mcp_dispatch: dict[str, tuple[uuid.UUID, str]] | None = None,
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
@@ -3378,14 +3381,37 @@ async def _dispatch_tools(
     * MCP connector tools run inline on the main session during the
       drain (their service helper is session-bound); they naturally
       overlap with any native tools still in flight.
+
+    ``dedup_cache`` (turn-scoped, owned by the caller) maps a
+    ``name + canonical-args`` hash to the model-facing content the tool
+    returned earlier this turn. A repeat call across hops replays that
+    content instead of re-executing — saving a hop, a round-trip, and
+    (for paid tools) money. Only successful, side-effect-light results
+    are cached (see the cache-write in phase 2).
+
+    Long-running tools can push ``tool_progress`` SSE events via
+    ``ctx.report_progress`` (wired here to a queue the drain loop polls),
+    so a fan-out like ``run_agents`` can report "2/4 agents done" instead
+    of leaving the spinner on one frozen label.
     """
     sem = asyncio.Semaphore(_TOOL_CONCURRENCY)
+    # Progress events pushed by running tools, drained in phase 2. Each
+    # item is a ready-to-send ``tool_progress`` dict tagged with call id.
+    progress_q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     # Execution plan, one entry per well-formed call, in model order:
-    #   kind="task" -> payload (tool, asyncio.Task)
-    #   kind="mcp"  -> payload ((connector_id, real_tool), args)
-    #   kind="fail" -> payload (err_msg, audit_code | None, extra_sse | None)
+    #   kind="task"   -> payload (tool, asyncio.Task)
+    #   kind="cached" -> payload (content_str)
+    #   kind="mcp"    -> payload ((connector_id, real_tool), args)
+    #   kind="fail"   -> payload (err_msg, audit_code | None, extra_sse | None)
     plan: list[tuple[str, str, str, Any]] = []
     tasks: list[asyncio.Task] = []
+
+    def _dedup_key(tool_name: str, parsed: dict[str, Any]) -> str:
+        try:
+            canonical = json.dumps(parsed, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            canonical = repr(parsed)
+        return f"{tool_name}:{canonical}"
 
     # ---- Phase 1: validate, account, launch --------------------------
     for idx in sorted(pending_calls.keys()):
@@ -3457,6 +3483,17 @@ async def _dispatch_tools(
             )
             continue
 
+        # Cross-hop dedup: if the model already ran this exact tool with
+        # these exact args earlier in the turn, replay the cached content
+        # instead of re-executing. Checked BEFORE the cap so a replay
+        # never spends budget. Deliberately not applied within a single
+        # hop (both calls launch before either finishes) — the valuable
+        # case is a model repeating a search on a later hop.
+        cache_key = _dedup_key(name, args)
+        if dedup_cache is not None and cache_key in dedup_cache:
+            plan.append((call_id, name, "cached", dedup_cache[cache_key]))
+            continue
+
         # Per-turn cap (e.g. ``web_search`` budget, ``generate_image``
         # budget). Counted at launch so a refusal never bumps and a
         # burst of parallel calls in ONE hop still lands inside the
@@ -3496,6 +3533,21 @@ async def _dispatch_tools(
                 continue
             invocation_counts[name] = spent + 1
 
+        # Progress emitter for THIS call — queues a ready-to-send
+        # ``tool_progress`` event tagged with the call id. Bound per
+        # call so a concurrent tool's progress lands on the right chip.
+        def _make_progress(cid: str, tname: str):
+            def _emit(message: str) -> None:
+                progress_q.put_nowait(
+                    {
+                        "event": "tool_progress",
+                        "id": cid,
+                        "name": tname,
+                        "message": str(message)[:200],
+                    }
+                )
+            return _emit
+
         task = asyncio.create_task(
             _run_native_tool(
                 tool=tool,
@@ -3504,10 +3556,11 @@ async def _dispatch_tools(
                 conversation_id=ctx.conversation_id,
                 user_message_id=ctx.user_message_id,
                 sem=sem,
+                on_progress=_make_progress(call_id, name),
             )
         )
         tasks.append(task)
-        plan.append((call_id, name, "task", (tool, task)))
+        plan.append((call_id, name, "task", (tool, task, cache_key)))
 
     # ---- Phase 2: drain results in call order -------------------------
     def _record_tool_event(
@@ -3533,6 +3586,11 @@ async def _dispatch_tools(
         if isinstance(meta, dict) and meta:
             rec["meta"] = meta
         on_tool_event(rec)
+
+    async def _drain_progress():
+        """Yield any queued ``tool_progress`` events (non-blocking)."""
+        while not progress_q.empty():
+            yield sse_yield(progress_q.get_nowait()), None
 
     try:
         for call_id, name, kind, payload in plan:
@@ -3563,6 +3621,30 @@ async def _dispatch_tools(
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": err_msg,
+                    },
+                )
+                continue
+
+            if kind == "cached":
+                # Cross-hop dedup hit — replay the earlier content
+                # without re-executing. No attachments/sources/cost are
+                # re-applied (the first call already stamped those onto
+                # the message); the model just gets the same answer back.
+                content = str(payload)
+                event = {
+                    "event": "tool_finished",
+                    "id": call_id,
+                    "name": name,
+                    "ok": True,
+                    "meta": {"cached": True},
+                }
+                _record_tool_event(event, meta={"cached": True})
+                yield (
+                    sse_yield(event),
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": content,
                     },
                 )
                 continue
@@ -3639,7 +3721,22 @@ async def _dispatch_tools(
                 continue
 
             # kind == "task" — a native tool running concurrently.
-            tool, task = payload
+            tool, task, cache_key = payload
+            # Interleave progress while this task runs: poll the queue
+            # every 100ms (imperceptible for a multi-second tool, and
+            # the sleep yields the loop). Progress from OTHER still-
+            # running tasks drains here too — fine, each event carries
+            # its own call id so it lands on the right chip.
+            while not task.done():
+                async for prog in _drain_progress():
+                    yield prog
+                if task.done():
+                    break
+                await asyncio.sleep(0.1)
+            # Final flush so nothing queued right before completion is
+            # dropped.
+            async for prog in _drain_progress():
+                yield prog
             outcome, out, elapsed_ms = await task
 
             if outcome in ("tool_error", "timeout"):
@@ -3765,6 +3862,17 @@ async def _dispatch_tools(
             content = _cap_tool_content(
                 getattr(tool, "max_content_chars", None), result.content
             )
+
+            # Cache the model-facing content so an identical call on a
+            # later hop replays instead of re-executing. Only cache
+            # results with NO attachments: a cached replay doesn't
+            # re-resolve attachments, so caching an image/PDF result
+            # would let a duplicate reference a chip the second
+            # tool_finished never carried. Informational tools
+            # (search/fetch) — the ones models actually repeat — cache
+            # cleanly.
+            if dedup_cache is not None and not attachment_snaps:
+                dedup_cache[cache_key] = content
 
             event = {
                 "event": "tool_finished",
@@ -4528,6 +4636,11 @@ async def _stream_generator(
         # the entire tool-calling loop (not just within a single hop).
         tool_invocation_counts: dict[str, int] = {}
 
+        # Per-turn dedup cache: ``name+canonical-args`` -> model-facing
+        # content, so an identical tool call on a later hop replays
+        # instead of re-executing. Spans every hop of this turn.
+        tool_dedup_cache: dict[str, str] = {}
+
         # Admin-tunable per-tool caps loaded once for this stream so
         # both the forced "always" web_search and the regular tool
         # loop see the same value, even if an admin edits the setting
@@ -4617,6 +4730,7 @@ async def _stream_generator(
                     on_tool_event=tool_call_log.append,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
+                    dedup_cache=tool_dedup_cache,
                 ):
                     yield sse_event
                     if tool_history_msg is not None:
@@ -5121,6 +5235,7 @@ async def _stream_generator(
                     on_tool_event=tool_call_log.append,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
+                    dedup_cache=tool_dedup_cache,
                     mcp_dispatch=mcp_dispatch,
                 ):
                     # Always forward the SSE event. ``tool_history_msg``
