@@ -276,6 +276,30 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("task_complete", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Mentions"
+                subtitle="Someone @-mentioned you in a workspace comment."
+                checked={prefs.mention}
+                busy={prefsBusy === "mention"}
+                onChange={(v) => toggle("mention", v)}
+                dimmed={!prefs.enabled}
+              />
+              <CategoryRow
+                title="Assignments"
+                subtitle="A board card was assigned to you."
+                checked={prefs.assignment}
+                busy={prefsBusy === "assignment"}
+                onChange={(v) => toggle("assignment", v)}
+                dimmed={!prefs.enabled}
+              />
+              <CategoryRow
+                title="Invites"
+                subtitle="Someone invited you to collaborate on a workspace."
+                checked={prefs.invite}
+                busy={prefsBusy === "invite"}
+                onChange={(v) => toggle("invite", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

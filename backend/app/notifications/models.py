@@ -17,6 +17,43 @@ from app.database import Base
 from app.db_types import UUIDPKMixin
 
 
+class Notification(UUIDPKMixin, Base):
+    """One inbox row — the durable copy of a ``notify_user`` event.
+
+    Push is the real-time nudge; this is what the in-app Inbox reads so
+    mentions / assignments / invites / automation outcomes can be caught
+    up on later. Rows are cheap and pruned per-user beyond a cap (see
+    ``dispatch._persist``)."""
+
+    __tablename__ = "notifications"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # mention | assignment | invite | task_complete | shared_message | …
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # In-app deep link, relative ("/workspaces/<id>?item=…").
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Who triggered it — the inbox row's avatar. SET NULL so account
+    # deletion doesn't erase other people's history.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
+    )
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+
+
 class PushSubscription(UUIDPKMixin, Base):
     __tablename__ = "push_subscriptions"
     __table_args__ = (
@@ -70,6 +107,18 @@ class PushPreferences(Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
     task_complete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Collaboration events (0133): someone @-mentioned you, assigned you a
+    # card, or invited you to a workspace. These gate the *push* only — the
+    # inbox row is always written.
+    mention: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    assignment: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    invite: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
     created_at: Mapped[datetime] = mapped_column(

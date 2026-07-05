@@ -26,6 +26,7 @@ import { StudyTopicPage } from "@/pages/StudyTopicPage";
 import { ArchivePage } from "@/pages/ArchivePage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
+import { MyWorkPage } from "@/pages/MyWorkPage";
 import { TrashPage } from "@/pages/TrashPage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
@@ -210,6 +211,7 @@ export default function App() {
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
+        <Route path="/work" element={<MyWorkPage />} />
         {/* Study home + topic detail are fully mobile-friendly. */}
         <Route path="/study" element={<StudyPage />} />
         <Route path="/study/topics/:id" element={<StudyTopicPage />} />

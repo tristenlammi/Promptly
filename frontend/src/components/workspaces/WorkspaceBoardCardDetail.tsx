@@ -45,6 +45,7 @@ import {
 } from "@/hooks/useWorkspaces";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
+import { MentionTextarea } from "./MentionTextarea";
 import { WorkspaceFileImage } from "./WorkspaceFileImage";
 
 /** Preset palette for board labels (hex; rendered via inline style). */
@@ -697,9 +698,10 @@ function ActivitySection({
 
       {canEdit && (
         <div className="mt-3 flex items-end gap-2">
-          <textarea
+          <MentionTextarea
+            workspaceId={workspaceId}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onValueChange={setDraft}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -707,8 +709,8 @@ function ActivitySection({
               }
             }}
             rows={1}
-            placeholder="Write a comment…"
-            className="min-w-0 flex-1 resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
+            placeholder="Write a comment… (@ to mention)"
+            className="min-w-0 resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
           />
           <button
             type="button"

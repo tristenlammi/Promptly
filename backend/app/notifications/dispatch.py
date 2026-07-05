@@ -37,7 +37,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.database import SessionLocal
-from app.notifications.models import PushPreferences, PushSubscription
+from app.notifications.models import (
+    Notification,
+    PushPreferences,
+    PushSubscription,
+)
 
 logger = logging.getLogger("promptly.notifications")
 
@@ -51,6 +55,12 @@ Category = Literal[
     "import_done",
     "shared_message",
     "task_complete",
+    # Collaboration events (0133): @-mentions in comments, card
+    # assignments, and workspace invites. These also land in the
+    # persistent inbox (all notify_user calls do).
+    "mention",
+    "assignment",
+    "invite",
     # Phase 12 — email integration notifications.
     # ``email_brief``  — daily AI digest of what needs attention.
     # ``email_action`` — instant alert for high-priority / VIP / deadline mail.
@@ -68,6 +78,9 @@ CATEGORIES: tuple[str, ...] = (
     "import_done",
     "shared_message",
     "task_complete",
+    "mention",
+    "assignment",
+    "invite",
     "email_brief",
     "email_action",
     "test",
@@ -114,17 +127,30 @@ async def notify_user(
     body: str,
     url: str | None = None,
     tag: str | None = None,
+    actor_user_id: UUID | None = None,
+    workspace_id: UUID | None = None,
 ) -> None:
-    """Schedule a push for every active subscription on ``user_id``.
+    """Schedule a push for every active subscription on ``user_id`` and
+    write the durable inbox row.
 
     Non-blocking. Any failure is logged and swallowed — a broken
     notification subsystem must never surface as an HTTP 500 to the
-    user whose request incidentally triggered it."""
+    user whose request incidentally triggered it. The inbox row is
+    written regardless of push preferences (those gate the nudge, not
+    the record); ``test`` pushes are the one category that never
+    persists."""
     payload = PushPayload(
         title=title, body=body, url=url, tag=tag, category=category
     )
+    coro = _dispatch(
+        user_id=user_id,
+        category=category,
+        payload=payload,
+        actor_user_id=actor_user_id,
+        workspace_id=workspace_id,
+    )
     try:
-        asyncio.create_task(_dispatch(user_id=user_id, category=category, payload=payload))
+        asyncio.create_task(coro)
     except RuntimeError:
         # No running event loop (e.g. called from a sync context —
         # we don't expect that, but defensive). Fall back to
@@ -132,15 +158,58 @@ async def notify_user(
         # delivery without having to know about loops.
         logger.warning("notify_user: no running loop; running synchronously")
         try:
-            asyncio.run(_dispatch(user_id=user_id, category=category, payload=payload))
+            asyncio.run(coro)
         except Exception:
             logger.exception("notify_user: sync fallback dispatch failed")
 
 
+# Per-user inbox cap — enough scroll-back to catch up after a holiday
+# without the table growing unboundedly.
+_INBOX_CAP = 200
+
+
 async def _dispatch(
-    *, user_id: UUID, category: Category, payload: PushPayload
+    *,
+    user_id: UUID,
+    category: Category,
+    payload: PushPayload,
+    actor_user_id: UUID | None = None,
+    workspace_id: UUID | None = None,
 ) -> None:
     async with _session_maker() as db:
+        # 1) Durable inbox row first — it must land even when the user
+        #    has push muted or owns no subscriptions.
+        if category != "test":
+            try:
+                db.add(
+                    Notification(
+                        user_id=user_id,
+                        category=category,
+                        title=payload.title[:200],
+                        body=payload.body,
+                        url=payload.url,
+                        actor_user_id=actor_user_id,
+                        workspace_id=workspace_id,
+                    )
+                )
+                await db.flush()
+                # Prune beyond the cap (cheap: only fires on insert).
+                stale = (
+                    await db.execute(
+                        select(Notification.id)
+                        .where(Notification.user_id == user_id)
+                        .order_by(Notification.created_at.desc())
+                        .offset(_INBOX_CAP)
+                    )
+                ).scalars().all()
+                if stale:
+                    await db.execute(
+                        delete(Notification).where(Notification.id.in_(stale))
+                    )
+                await db.commit()
+            except Exception:
+                logger.exception("inbox row write failed")
+                await db.rollback()
         # Read VAPID material from the DB rather than ``settings`` —
         # the bootstrap auto-generates a keypair on first boot and
         # admins can rotate via Admin → Settings without touching

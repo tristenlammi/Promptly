@@ -436,6 +436,26 @@ async def update_task(
     await db.commit()
     await db.refresh(task)
     _reindex_board(background, ws.id, task.board_item_id)
+    # A card landing on someone's plate deserves a nudge (not self-assigns).
+    if (
+        "assignee_user_id" in sent
+        and task.assignee_user_id is not None
+        and task.assignee_user_id != old_assignee
+    ):
+        from app.workspaces.mentions import notify_assignment
+
+        await notify_assignment(
+            db,
+            ws=ws,
+            actor=user,
+            assignee_user_id=task.assignee_user_id,
+            card_title=task.title,
+            url=(
+                f"/workspaces/{ws.id}?item={task.board_item_id}"
+                if task.board_item_id
+                else f"/workspaces/{ws.id}"
+            ),
+        )
     return task
 
 
@@ -542,6 +562,21 @@ async def add_comment(
     await db.refresh(comment)
     # Comments are real content — keep the board's RAG text fresh.
     _reindex_board(background, ws.id, task.board_item_id)
+    # @-mentions → inbox + push for named members (best-effort).
+    from app.workspaces.mentions import notify_comment_mentions
+
+    await notify_comment_mentions(
+        db,
+        ws=ws,
+        author=user,
+        text=comment.text,
+        url=(
+            f"/workspaces/{ws.id}?item={task.board_item_id}"
+            if task.board_item_id
+            else f"/workspaces/{ws.id}"
+        ),
+        where=f'a comment on the card "{task.title}"',
+    )
     return WorkspaceTaskCommentResponse(
         id=comment.id,
         task_id=comment.task_id,

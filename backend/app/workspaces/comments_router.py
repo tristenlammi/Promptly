@@ -100,9 +100,9 @@ async def create_comment(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CommentResponse:
-    _ws, role = await get_accessible_workspace(workspace_id, user, db)
+    ws, role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(role)
-    await _require_item(workspace_id, item_id, db)
+    item = await _require_item(workspace_id, item_id, db)
 
     comment = WorkspaceItemComment(
         workspace_id=workspace_id,
@@ -113,6 +113,18 @@ async def create_comment(
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
+
+    # @-mentions → inbox + push for named members (best-effort).
+    from app.workspaces.mentions import notify_comment_mentions
+
+    await notify_comment_mentions(
+        db,
+        ws=ws,
+        author=user,
+        text=comment.body,
+        url=f"/workspaces/{workspace_id}?item={item_id}",
+        where=f'a comment on "{item.title or "an item"}"',
+    )
 
     return CommentResponse(
         id=comment.id,

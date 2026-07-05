@@ -2,6 +2,7 @@ import {
   BookOpen,
   FolderKanban,
   FolderOpen,
+  ListTodo,
   MessagesSquare,
   Star,
   Trash2,
@@ -78,6 +79,16 @@ export const NAV_ITEMS: NavItem[] = [
     // Workspaces are a desktop surface by design (multi-pane layout,
     // drag-first navigator) — the route itself also renders a notice on
     // phones for direct links.
+    desktopOnly: true,
+    optionalKey: "workspaces",
+  },
+  {
+    to: "/work",
+    icon: ListTodo,
+    label: "My work",
+    section: "chat",
+    // Card deep-links land inside desktop-gated workspaces, so the page
+    // follows the same rule.
     desktopOnly: true,
     optionalKey: "workspaces",
   },

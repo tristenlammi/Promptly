@@ -32,8 +32,15 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 from app.notifications.dispatch import notify_user
-from app.notifications.models import PushPreferences, PushSubscription
+from app.notifications.models import (
+    Notification,
+    PushPreferences,
+    PushSubscription,
+)
 from app.notifications.schemas import (
+    InboxResponse,
+    NotificationActor,
+    NotificationRow,
     PreferencesSchema,
     PreferencesUpdate,
     PublicKeyResponse,
@@ -46,6 +53,93 @@ from app.notifications.schemas import (
 logger = logging.getLogger("promptly.notifications.router")
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------
+# Inbox — the durable notification list (0133)
+# ---------------------------------------------------------------------
+
+
+@router.get("/inbox", response_model=InboxResponse)
+async def get_inbox(
+    limit: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> InboxResponse:
+    """Newest-first inbox page + the unread badge count."""
+    limit = max(1, min(100, limit))
+    rows = (
+        await db.execute(
+            select(Notification, User)
+            .outerjoin(User, User.id == Notification.actor_user_id)
+            .where(Notification.user_id == user.id)
+            .order_by(Notification.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    from sqlalchemy import func as sa_func
+
+    unread = await db.scalar(
+        select(sa_func.count())
+        .select_from(Notification)
+        .where(Notification.user_id == user.id, Notification.read_at.is_(None))
+    )
+    return InboxResponse(
+        items=[
+            NotificationRow(
+                id=n.id,
+                category=n.category,
+                title=n.title,
+                body=n.body,
+                url=n.url,
+                workspace_id=n.workspace_id,
+                actor=(
+                    NotificationActor(
+                        username=actor.username,
+                        avatar_url=actor.avatar_url,
+                        avatar_color=actor.avatar_color,
+                    )
+                    if actor is not None
+                    else None
+                ),
+                read_at=n.read_at,
+                created_at=n.created_at,
+            )
+            for n, actor in rows
+        ],
+        unread_count=int(unread or 0),
+    )
+
+
+@router.post("/inbox/{notification_id}/read", response_model=InboxResponse)
+async def mark_read(
+    notification_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> InboxResponse:
+    row = await db.get(Notification, notification_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if row.read_at is None:
+        row.read_at = datetime.now(timezone.utc)
+        await db.commit()
+    return await get_inbox(db=db, user=user)
+
+
+@router.post("/inbox/read-all", response_model=InboxResponse)
+async def mark_all_read(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> InboxResponse:
+    from sqlalchemy import update as sa_update
+
+    await db.execute(
+        sa_update(Notification)
+        .where(Notification.user_id == user.id, Notification.read_at.is_(None))
+        .values(read_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return await get_inbox(db=db, user=user)
 
 
 # ---------------------------------------------------------------------

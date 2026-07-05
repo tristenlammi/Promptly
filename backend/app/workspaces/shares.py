@@ -311,6 +311,25 @@ async def create_workspace_share(
         await db.commit()
         await db.refresh(share)
 
+    # Tell the invitee — until now invites sat silently in the sidebar
+    # waiting to be noticed. Best-effort (inbox row + push).
+    if share.status == "pending":
+        try:
+            from app.notifications import notify_user
+
+            await notify_user(
+                user_id=invitee.id,
+                category="invite",
+                title=f"{user.username} invited you to a workspace",
+                body=f'"{ws.title}" — accept or decline from the sidebar.',
+                url="/workspaces",
+                tag=f"promptly-invite-{ws.id}",
+                actor_user_id=user.id,
+                workspace_id=ws.id,
+            )
+        except Exception:  # pragma: no cover — never fail the invite
+            logger.warning("invite notification failed", exc_info=True)
+
     return WorkspaceShareRow(
         id=share.id,
         workspace_id=share.workspace_id,

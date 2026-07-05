@@ -599,6 +599,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             owner_id = task.user_id
             title = task.title
             task_id = task.id
+            task_workspace_id = task.workspace_id
             retention = task.retention_runs
 
         # Retention sweep (T.4): keep only the newest ``retention_runs``
@@ -648,6 +649,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                     body=push_body,
                     url=f"/tasks/{task_id}",
                     tag=f"promptly-task-{task_id}",
+                    workspace_id=task_workspace_id,
                 )
             except Exception:  # pragma: no cover — push is never critical
                 logger.warning("task completion push failed", exc_info=True)

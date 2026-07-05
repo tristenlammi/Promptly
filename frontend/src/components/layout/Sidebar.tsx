@@ -30,9 +30,11 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
+import { InboxPanel } from "./InboxPanel";
+import { useInbox } from "@/hooks/useInbox";
 import { authApi } from "@/api/auth";
 import type { ConversationSummary } from "@/api/types";
-import { Inbox } from "lucide-react";
+import { Bell, Inbox } from "lucide-react";
 
 import { ConversationSearchBox } from "./ConversationSearchBox";
 import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
@@ -581,6 +583,12 @@ function UserFooter() {
   const [invitesOpen, setInvitesOpen] = useState(false);
   const { data: workspaceInvites } = useWorkspaceInvites();
   const inviteCount = workspaceInvites?.length ?? 0;
+  // The durable notification inbox (mentions / assignments / invites /
+  // automation results). Always rendered — unlike invites it's the
+  // catch-up surface, so an empty state is still meaningful.
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const { data: inbox } = useInbox();
+  const unreadCount = inbox?.unread_count ?? 0;
 
   const onLogout = async () => {
     try {
@@ -606,6 +614,23 @@ function UserFooter() {
       >
         <Archive className="h-4 w-4" />
         <span className="font-medium">Archive</span>
+      </button>
+      {/* Notification inbox — mentions, card assignments, invites, and
+          automation results. The unread badge is the "3 things need your
+          attention" retention hook. */}
+      <button
+        onClick={() => setInboxOpen(true)}
+        className="relative mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+        title="Notifications"
+        aria-label="Open notification inbox"
+      >
+        <Bell className="h-4 w-4" />
+        <span className="font-medium">Inbox</span>
+        {unreadCount > 0 && (
+          <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
+            {unreadCount}
+          </span>
+        )}
       </button>
       {/* Workspace invites — pending collaboration invites the user can
           accept or decline. Click opens a modal listing them. Rendered only
@@ -695,6 +720,7 @@ function UserFooter() {
         open={invitesOpen}
         onClose={() => setInvitesOpen(false)}
       />
+      <InboxPanel open={inboxOpen} onClose={() => setInboxOpen(false)} />
     </div>
   );
 }

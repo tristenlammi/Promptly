@@ -15,6 +15,30 @@ export interface NotificationPreferences {
   import_done: boolean;
   shared_message: boolean;
   task_complete: boolean;
+  mention: boolean;
+  assignment: boolean;
+  invite: boolean;
+}
+
+export interface NotificationRow {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  url: string | null;
+  workspace_id: string | null;
+  actor: {
+    username: string;
+    avatar_url?: string | null;
+    avatar_color?: string | null;
+  } | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface InboxResponse {
+  items: NotificationRow[];
+  unread_count: number;
 }
 
 export interface SubscribePayload {
@@ -88,5 +112,25 @@ export const notificationsApi = {
       "/notifications/test"
     );
     return data.sent;
+  },
+  // ---- Inbox (durable notification list) ----
+  async inbox(limit = 30): Promise<InboxResponse> {
+    const { data } = await apiClient.get<InboxResponse>(
+      "/notifications/inbox",
+      { params: { limit } }
+    );
+    return data;
+  },
+  async markRead(id: string): Promise<InboxResponse> {
+    const { data } = await apiClient.post<InboxResponse>(
+      `/notifications/inbox/${id}/read`
+    );
+    return data;
+  },
+  async markAllRead(): Promise<InboxResponse> {
+    const { data } = await apiClient.post<InboxResponse>(
+      "/notifications/inbox/read-all"
+    );
+    return data;
   },
 };

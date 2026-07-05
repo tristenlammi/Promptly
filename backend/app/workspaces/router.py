@@ -42,8 +42,10 @@ from fastapi import (
     Response,
     status,
 )
+from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
@@ -53,6 +55,7 @@ from app.chat.models import (
     Workspace,
     WorkspaceFile,
     WorkspaceItem,
+    WorkspaceTask,
 )
 from app.workspaces.schemas import (
     WorkspaceCreate,
@@ -306,6 +309,80 @@ async def list_workspaces(
     res = await db.execute(q)
     rows = list(res.scalars().all())
     return [await _summary_with_rollups(w, db, user) for w in rows]
+
+
+class MyWorkCard(BaseModel):
+    """One open card assigned to the caller, with enough context to
+    render outside its board (workspace + board titles, deep link)."""
+
+    id: uuid.UUID
+    title: str
+    status: str
+    priority: str
+    due_at: datetime | None = None
+    created_at: datetime
+    workspace_id: uuid.UUID
+    workspace_title: str
+    board_item_id: uuid.UUID | None = None
+    board_title: str | None = None
+
+
+class MyWorkResponse(BaseModel):
+    cards: list[MyWorkCard]
+
+
+# NOTE: registered before the /{workspace_id} routes — FastAPI matches in
+# declaration order and "my-work" must not be parsed as a workspace UUID.
+@router.get("/my-work", response_model=MyWorkResponse)
+async def my_work(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MyWorkResponse:
+    """Every open card assigned to the caller across their workspaces.
+
+    The cross-workspace "what's on my plate" view: open (non-done)
+    cards in active workspaces the caller can still access, due-date
+    first (nulls last). Mentions and invites come from the inbox and
+    invites endpoints — this only owns the cards."""
+    accessible_ids = await list_accessible_workspace_ids(user, db)
+    if not accessible_ids:
+        return MyWorkResponse(cards=[])
+    board = aliased(WorkspaceItem)
+    rows = (
+        await db.execute(
+            select(WorkspaceTask, Workspace.title, board.title)
+            .join(Workspace, Workspace.id == WorkspaceTask.workspace_id)
+            .outerjoin(board, board.id == WorkspaceTask.board_item_id)
+            .where(
+                WorkspaceTask.assignee_user_id == user.id,
+                WorkspaceTask.status != "done",
+                WorkspaceTask.workspace_id.in_(accessible_ids),
+                Workspace.archived_at.is_(None),
+            )
+            .order_by(
+                WorkspaceTask.due_at.asc().nulls_last(),
+                WorkspaceTask.created_at.desc(),
+            )
+            .limit(200)
+        )
+    ).all()
+    return MyWorkResponse(
+        cards=[
+            MyWorkCard(
+                id=t.id,
+                title=t.title,
+                status=t.status,
+                priority=t.priority,
+                due_at=t.due_at,
+                created_at=t.created_at,
+                workspace_id=t.workspace_id,
+                workspace_title=ws_title,
+                board_item_id=t.board_item_id,
+                board_title=board_title,
+            )
+            for t, ws_title, board_title in rows
+        ]
+    )
 
 
 @router.post(

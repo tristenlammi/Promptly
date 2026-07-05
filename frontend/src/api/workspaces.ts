@@ -241,6 +241,24 @@ export interface WorkspaceAskResponse {
   citations: WorkspaceAskCitation[];
 }
 
+/** One open card assigned to the caller (the "My work" page). */
+export interface MyWorkCard {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  due_at: string | null;
+  created_at: string;
+  workspace_id: string;
+  workspace_title: string;
+  board_item_id: string | null;
+  board_title: string | null;
+}
+
+export interface MyWorkResponse {
+  cards: MyWorkCard[];
+}
+
 export interface WorkspaceTaskItem {
   text: string;
   checked: boolean;
@@ -900,6 +918,15 @@ export const workspacesApi = {
   async overview(id: string): Promise<WorkspaceOverview> {
     const { data } = await apiClient.get<WorkspaceOverview>(
       `/workspaces/${id}/overview`
+    );
+    return data;
+  },
+
+  /** Every open card assigned to the caller, across all their
+   *  workspaces — the "My work" page's data. */
+  async myWork(): Promise<MyWorkResponse> {
+    const { data } = await apiClient.get<MyWorkResponse>(
+      "/workspaces/my-work"
     );
     return data;
   },

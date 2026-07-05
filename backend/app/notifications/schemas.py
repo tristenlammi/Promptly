@@ -45,6 +45,9 @@ class PreferencesSchema(BaseModel):
     import_done: bool
     shared_message: bool
     task_complete: bool
+    mention: bool
+    assignment: bool
+    invite: bool
 
 
 class PreferencesUpdate(BaseModel):
@@ -58,6 +61,36 @@ class PreferencesUpdate(BaseModel):
     import_done: bool | None = None
     shared_message: bool | None = None
     task_complete: bool | None = None
+    mention: bool | None = None
+    assignment: bool | None = None
+    invite: bool | None = None
+
+
+class NotificationActor(BaseModel):
+    """Who triggered the notification — drives the inbox row avatar."""
+
+    username: str
+    avatar_url: str | None = None
+    avatar_color: str | None = None
+
+
+class NotificationRow(BaseModel):
+    """One inbox entry."""
+
+    id: uuid.UUID
+    category: str
+    title: str
+    body: str
+    url: str | None = None
+    workspace_id: uuid.UUID | None = None
+    actor: NotificationActor | None = None
+    read_at: datetime | None = None
+    created_at: datetime
+
+
+class InboxResponse(BaseModel):
+    items: list[NotificationRow]
+    unread_count: int
 
 
 class PublicKeyResponse(BaseModel):

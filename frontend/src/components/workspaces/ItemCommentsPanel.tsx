@@ -7,6 +7,7 @@ import {
 } from "@/api/workspaces";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
+import { MentionTextarea } from "./MentionTextarea";
 
 interface Props {
   workspaceId: string;
@@ -128,9 +129,10 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
 
         {canEdit && (
           <div className="mt-2 flex items-end gap-2">
-            <textarea
+            <MentionTextarea
+              workspaceId={workspaceId}
               value={draft}
-              onChange={(e) => setDraft(e.target.value.slice(0, 4000))}
+              onValueChange={(next) => setDraft(next.slice(0, 4000))}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -138,9 +140,9 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
                 }
               }}
               rows={2}
-              placeholder="Add a comment… (⌘/Ctrl+Enter to post)"
+              placeholder="Add a comment… (@ to mention, ⌘/Ctrl+Enter to post)"
               className={cn(
-                "min-h-0 flex-1 resize-y rounded-md border bg-[var(--bg)] px-2.5 py-1.5 text-sm",
+                "min-h-0 resize-y rounded-md border bg-[var(--bg)] px-2.5 py-1.5 text-sm",
                 "border-[var(--border)] text-[var(--text)] outline-none focus:border-[var(--accent)]"
               )}
             />
