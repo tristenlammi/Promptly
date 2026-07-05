@@ -53,14 +53,18 @@ class ToolContext:
     # ``tool_progress`` SSE event mid-run so the UI can update its
     # spinner label instead of sitting on a single frozen string. The
     # default is a no-op, so tools can call it unconditionally and
-    # unit tests need no wiring.
-    on_progress: Callable[[str], None] | None = None
+    # unit tests need no wiring. ``data`` carries an optional structured
+    # payload (e.g. run_agents' per-agent state array) surfaced on the
+    # SSE event alongside the human ``message``.
+    on_progress: Callable[[str, dict[str, Any] | None], None] | None = None
 
-    def report_progress(self, message: str) -> None:
+    def report_progress(
+        self, message: str, data: dict[str, Any] | None = None
+    ) -> None:
         """Emit a progress note if the dispatcher provided a channel."""
         if self.on_progress is not None:
             try:
-                self.on_progress(message)
+                self.on_progress(message, data)
             except Exception:  # noqa: BLE001 — progress is best-effort
                 pass
 

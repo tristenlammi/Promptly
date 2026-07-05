@@ -3537,15 +3537,16 @@ async def _dispatch_tools(
         # ``tool_progress`` event tagged with the call id. Bound per
         # call so a concurrent tool's progress lands on the right chip.
         def _make_progress(cid: str, tname: str):
-            def _emit(message: str) -> None:
-                progress_q.put_nowait(
-                    {
-                        "event": "tool_progress",
-                        "id": cid,
-                        "name": tname,
-                        "message": str(message)[:200],
-                    }
-                )
+            def _emit(message: str, data: dict[str, Any] | None = None) -> None:
+                event: dict[str, Any] = {
+                    "event": "tool_progress",
+                    "id": cid,
+                    "name": tname,
+                    "message": str(message)[:200],
+                }
+                if isinstance(data, dict) and data:
+                    event["data"] = data
+                progress_q.put_nowait(event)
             return _emit
 
         task = asyncio.create_task(

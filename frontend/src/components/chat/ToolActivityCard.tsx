@@ -14,7 +14,12 @@ import {
   X,
 } from "lucide-react";
 
-import type { PersistedToolCall, ToolInvocation } from "@/api/types";
+import type {
+  AgentProgress,
+  PersistedToolCall,
+  ToolInvocation,
+  ToolProgressData,
+} from "@/api/types";
 import { cn } from "@/utils/cn";
 
 /**
@@ -45,6 +50,7 @@ interface ActivityStep {
   errorKind?: string | null;
   elapsedMs?: number | null;
   progressMessage?: string | null;
+  progressData?: ToolProgressData | null;
   meta?: Record<string, unknown> | null;
 }
 
@@ -242,6 +248,86 @@ function joinClauses(clauses: string[]): string {
   return `${head} and ${tail}`;
 }
 
+/** Growing progress-bar width for one agent. We don't have a true %,
+ *  so map the agent's tool-step count to an ever-advancing fill that
+ *  eases toward — but never reaches — full while running; done snaps to
+ *  100%. Reads as real progress without fabricating a number. */
+function agentWidth(a: AgentProgress): number {
+  if (a.status !== "running") return 100;
+  return Math.min(85, 18 + a.activity * 16);
+}
+
+/** One sub-agent's live row — the terracotta-accented mini-card from
+ *  the mockup: label + task, a status glyph, a growing progress bar,
+ *  and the agent's own "reading dxomark.com" sub-status underneath. */
+function AgentRow({ agent }: { agent: AgentProgress }) {
+  const running = agent.status === "running";
+  const failed = agent.status === "failed";
+  return (
+    <div className="rounded-md border border-[var(--border)] border-l-2 border-l-[var(--accent)] bg-[var(--bg)] px-3 py-2">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-[11px] font-medium text-[var(--accent)]">
+          {agent.label}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--text)]">
+          {agent.task}
+        </span>
+        {running ? (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
+        ) : failed ? (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
+        ) : (
+          <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)] stroke-[2.5]" />
+        )}
+      </div>
+      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
+        <div
+          className={cn(
+            "h-full rounded-full transition-[width] duration-700 ease-out",
+            failed ? "bg-[var(--warning)]" : "bg-[var(--accent)]",
+            running && "animate-pulse",
+          )}
+          style={{ width: `${agentWidth(agent)}%` }}
+        />
+      </div>
+      <div className="mt-1 truncate font-mono text-[11px] text-[var(--text-muted)]">
+        {agent.detail}
+        {running && "…"}
+      </div>
+    </div>
+  );
+}
+
+/** The full live fan-out card — header pill + one AgentRow per agent. */
+function AgentFanout({ agents }: { agents: AgentProgress[] }) {
+  const done = agents.filter((a) => a.status !== "running").length;
+  const allDone = done === agents.length;
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
+        <span className="shrink-0 rounded-md bg-[var(--accent)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--accent)]">
+          run_agents
+        </span>
+        <span className="text-[13px] text-[var(--text-muted)]">
+          {allDone
+            ? `${agents.length} agents finished`
+            : `Fanning out ${agents.length} research agents…`}
+        </span>
+        {!allDone && (
+          <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[var(--text-muted)]">
+            {done}/{agents.length}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-col gap-2 p-3">
+        {agents.map((a) => (
+          <AgentRow key={a.label} agent={a} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ToolActivityCard({
   steps,
   streaming,
@@ -254,6 +340,17 @@ export function ToolActivityCard({
   const running = streaming && steps.some((s) => s.status === "pending");
   const current = running
     ? steps.find((s) => s.status === "pending") ?? null
+    : null;
+
+  // A live run_agents fan-out owns the card: show the per-agent view
+  // (the mockup) rather than a single "Running agents…" line.
+  const liveAgents = running
+    ? steps.find(
+        (s) =>
+          s.status === "pending" &&
+          s.name === "run_agents" &&
+          (s.progressData?.agents?.length ?? 0) > 0,
+      )?.progressData?.agents ?? null
     : null;
 
   const totalMs = useMemo(
@@ -270,6 +367,11 @@ export function ToolActivityCard({
   );
 
   if (steps.length === 0) return null;
+
+  // ---- Live run_agents fan-out (the rich per-agent view) ----
+  if (liveAgents) {
+    return <AgentFanout agents={liveAgents} />;
+  }
 
   // ---- While running: live header + settled timeline, always open ----
   if (running) {
@@ -349,13 +451,63 @@ export function ToolActivityCard({
         )}
       </button>
       {open && (
-        <div className="flex flex-col gap-1 border-t border-[var(--border)] px-3 py-1.5">
-          {steps.map((s) => (
-            <StepRow key={s.id} step={s} />
-          ))}
+        <div className="flex flex-col gap-1.5 border-t border-[var(--border)] px-3 py-2">
+          {steps.map((s) => {
+            const agents =
+              s.name === "run_agents" && Array.isArray(s.meta?.agents)
+                ? (s.meta!.agents as FinishedAgent[])
+                : null;
+            return agents ? (
+              <FinishedAgents key={s.id} agents={agents} />
+            ) : (
+              <StepRow key={s.id} step={s} />
+            );
+          })}
         </div>
       )}
     </div>
+  );
+}
+
+interface FinishedAgent {
+  task?: string;
+  ok?: boolean;
+  tool_calls?: number;
+  sources?: number;
+}
+
+/** Persisted per-agent breakdown, shown when a finished run_agents card
+ *  is expanded — same terracotta-accented row as the live view, minus
+ *  the moving parts. */
+function FinishedAgents({ agents }: { agents: FinishedAgent[] }) {
+  return (
+    <>
+      {agents.map((a, i) => (
+        <div
+          key={i}
+          className="rounded-md border border-[var(--border)] border-l-2 border-l-[var(--accent)] bg-[var(--bg)] px-2.5 py-1.5"
+        >
+          <div className="flex items-center gap-2 text-xs">
+            <span className="shrink-0 text-[11px] font-medium text-[var(--accent)]">
+              Agent {i + 1}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[var(--text)]">
+              {a.task || "research task"}
+            </span>
+            {a.ok === false ? (
+              <AlertTriangle className="h-3 w-3 shrink-0 text-[var(--warning)]" />
+            ) : (
+              <Check className="h-3 w-3 shrink-0 text-[var(--success)] stroke-[2.5]" />
+            )}
+            {typeof a.sources === "number" && a.sources > 0 && (
+              <span className="shrink-0 tabular-nums text-[var(--text-muted)]">
+                {a.sources} source{a.sources === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -367,33 +519,41 @@ function StepRow({ step }: { step: ActivityStep }) {
   const detail = stepDetail(step);
   const isError = step.status === "error";
 
+  // A hard failure tints the accent rail amber; everything else keeps
+  // the terracotta rail so the whole card reads as one cohesive family.
+  const hardError = isError && step.errorKind !== "per_turn_cap";
   return (
-    <div className="flex items-center gap-2 text-xs">
-      {isError ? (
-        step.errorKind === "timeout" || step.errorKind === "per_turn_cap" ? (
-          <AlertTriangle className="h-3 w-3 shrink-0 text-[var(--warning)]" />
+    <div
+      className={cn(
+        "rounded-md border border-[var(--border)] border-l-2 bg-[var(--bg)] px-2.5 py-1.5",
+        hardError ? "border-l-[var(--warning)]" : "border-l-[var(--accent)]",
+      )}
+    >
+      <div className="flex items-center gap-2 text-xs">
+        {isError ? (
+          step.errorKind === "timeout" || step.errorKind === "per_turn_cap" ? (
+            <AlertTriangle className="h-3 w-3 shrink-0 text-[var(--warning)]" />
+          ) : (
+            <X className="h-3 w-3 shrink-0 text-[var(--danger)]" />
+          )
         ) : (
-          <X className="h-3 w-3 shrink-0 text-[var(--danger)]" />
-        )
-      ) : (
-        <Icon className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
-      )}
-      <span className="min-w-0 flex-1 truncate text-[var(--text-muted)]">
-        <span className="text-[var(--text)]">{pastVerb(info.verb)}</span>
-        {arg && <span> {arg}</span>}
-      </span>
-      {detail && (
-        <span
-          className={cn(
-            "shrink-0 tabular-nums",
-            isError && step.errorKind !== "per_turn_cap"
-              ? "text-[var(--warning)]"
-              : "text-[var(--text-muted)]",
-          )}
-        >
-          {detail}
+          <Icon className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-[var(--text-muted)]">
+          <span className="text-[var(--text)]">{pastVerb(info.verb)}</span>
+          {arg && <span> {arg}</span>}
         </span>
-      )}
+        {detail && (
+          <span
+            className={cn(
+              "shrink-0 tabular-nums",
+              hardError ? "text-[var(--warning)]" : "text-[var(--text-muted)]",
+            )}
+          >
+            {detail}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -434,6 +594,7 @@ export function stepsFromInvocations(
       errorKind: t.errorKind ?? null,
       elapsedMs: t.elapsedMs ?? null,
       progressMessage: t.progressMessage ?? null,
+      progressData: t.progressData ?? null,
       meta: t.meta ?? null,
     })),
   );

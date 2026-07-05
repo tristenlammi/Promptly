@@ -175,17 +175,51 @@ class RunAgentsTool(Tool):
         )
 
         total = len(tasks)
-        ctx.report_progress(f"0/{total} agents done")
 
-        # Launch all agents (with a small stagger — see _LAUNCH_STAGGER_S),
-        # then report as each finishes so the UI can count down instead
-        # of staring at a frozen spinner for up to a few minutes.
-        # Results are re-ordered back to the task order afterwards so
-        # the merged brief reads in the order the model asked for.
-        async def _launch(index: int, task: str):
+        # Per-agent live state, surfaced as structured progress so the
+        # UI can draw one row per agent (label, task, status, and the
+        # "reading dxomark.com" / "web_search ×2" sub-status the agent
+        # reports as it works). ``activity`` counts the agent's tool
+        # steps so the row can show a growing progress bar without
+        # fabricating a percentage.
+        states: list[dict[str, Any]] = [
+            {
+                "label": f"Agent {i + 1}",
+                "task": task,
+                "status": "running",
+                "detail": "queued…",
+                "activity": 0,
+            }
+            for i, task in enumerate(tasks)
+        ]
+
+        def _emit() -> None:
+            done = sum(1 for s in states if s["status"] != "running")
+            ctx.report_progress(
+                f"{done}/{total} agents done", data={"agents": states}
+            )
+
+        _emit()
+
+        # Launch all agents (with a small stagger — see _LAUNCH_STAGGER_S).
+        # Each agent's on_progress updates its own row and re-emits the
+        # whole structured payload; as_completed flips rows to done as
+        # results land. Results re-order back to task order afterwards
+        # so the merged brief reads in the order the model asked for.
+        def _agent_progress(idx: int):
+            def _cb(detail: str) -> None:
+                states[idx]["detail"] = detail
+                states[idx]["activity"] = states[idx]["activity"] + 1
+                _emit()
+            return _cb
+
+        # Each agent returns ``(index, result)`` so ``as_completed`` — whose
+        # yielded awaitables are internal wrappers, NOT the original
+        # futures — can still tell us which agent just landed.
+        async def _launch(index: int, task: str) -> tuple[int, AgentResult]:
             if index:
                 await asyncio.sleep(index * _LAUNCH_STAGGER_S)
-            return await run_agent(
+            res = await run_agent(
                 user_id=ctx.user.id,
                 conversation_id=ctx.conversation_id,
                 user_message_id=ctx.user_message_id,
@@ -194,23 +228,23 @@ class RunAgentsTool(Tool):
                 model_id=conv.model_id,
                 tools_payload=agent_tools,
                 per_tool_caps=dict(_AGENT_TOOL_CAPS),
+                on_progress=_agent_progress(index),
             )
+            return index, res
 
         launched = [
             asyncio.ensure_future(_launch(i, task))
             for i, task in enumerate(tasks)
         ]
-        by_task_index = {t: i for i, t in enumerate(launched)}
         ordered: list[AgentResult | None] = [None] * total
-        done_count = 0
         for fut in asyncio.as_completed(launched):
-            res = await fut
-            done_count += 1
-            ctx.report_progress(f"{done_count}/{total} agents done")
-        # ``as_completed`` loses the mapping, so read each future's
-        # result back into task order once all have resolved.
-        for fut, idx in by_task_index.items():
-            ordered[idx] = fut.result()
+            idx, res = await fut
+            ordered[idx] = res
+            states[idx]["status"] = "failed" if res.error else "done"
+            states[idx]["detail"] = (
+                "couldn't complete" if res.error else "brief returned"
+            )
+            _emit()
         results: list[AgentResult] = [r for r in ordered if r is not None]
 
         # ---- Merge briefs into one model-facing string ----

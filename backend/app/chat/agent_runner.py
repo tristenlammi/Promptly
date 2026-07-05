@@ -30,9 +30,12 @@ Design invariants that keep fan-out safe:
 """
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 import uuid
 
 from app.auth.models import User
@@ -107,6 +110,7 @@ async def run_agent(
     max_hops: int = DEFAULT_AGENT_HOPS,
     temperature: float = 0.4,
     max_tokens: int | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> AgentResult:
     """Run one focused task to completion on its own DB session.
 
@@ -114,7 +118,18 @@ async def run_agent(
     result) is caught and returned as an :class:`AgentResult` with
     ``error`` set, so a fan-out caller can surface a per-agent failure
     without losing the agents that succeeded.
+
+    ``on_progress`` (optional) receives a short human phrase describing
+    what the agent is doing right now ("searching…", "web_search ×2",
+    "reading dxomark.com", "writing brief…") so a fan-out caller can
+    render live per-agent status.
     """
+    def _report(detail: str) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(detail)
+            except Exception:  # noqa: BLE001 — progress is best-effort
+                pass
     # Lazy import: router imports the registry which imports the
     # run_agents tool which imports this module — importing the
     # dispatcher at module load would close that cycle.
@@ -141,8 +156,10 @@ async def run_agent(
         sources: list[dict[str, Any]] = []
         cost_usd = 0.0
         tool_count = 0
+        search_count = 0
         invocation_counts: dict[str, int] = {}
         hops_used = 0
+        _report("searching…")
 
         def _noop_sse(_: dict[str, Any]) -> str:
             return ""
@@ -204,7 +221,22 @@ async def run_agent(
                 # Done: the model answered in text, or we're out of hops,
                 # or nothing callable came back.
                 if is_final or hop_finish != "tool_calls" or not pending_calls:
+                    _report("writing brief…")
                     break
+
+                # Live substatus from what this hop is about to run:
+                # a fetch shows the host it's reading; otherwise the
+                # running tally of searches.
+                read_host = _first_fetch_host(pending_calls)
+                search_count += _count_searches(pending_calls)
+                if read_host:
+                    _report(f"reading {read_host}")
+                elif search_count:
+                    _report(
+                        f"web_search ×{search_count}"
+                        if search_count > 1
+                        else "web_search"
+                    )
 
                 # Append the assistant tool-call turn, then dispatch.
                 from app.chat.router import _build_tool_calls_payload
@@ -284,6 +316,37 @@ async def run_agent(
             tool_calls=tool_count,
             hops=hops_used,
         )
+
+
+def _parsed_calls(pending: dict[int, dict[str, str]]) -> list[tuple[str, dict]]:
+    """(name, parsed-args) for each well-formed call in a hop's buffer."""
+    out: list[tuple[str, dict]] = []
+    for slot in pending.values():
+        name = slot.get("name") or ""
+        if not name:
+            continue
+        try:
+            args = json.loads(slot.get("arguments") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        out.append((name, args if isinstance(args, dict) else {}))
+    return out
+
+
+def _count_searches(pending: dict[int, dict[str, str]]) -> int:
+    return sum(1 for name, _ in _parsed_calls(pending) if name == "web_search")
+
+
+def _first_fetch_host(pending: dict[int, dict[str, str]]) -> str | None:
+    for name, args in _parsed_calls(pending):
+        if name == "fetch_url":
+            url = str(args.get("url") or "")
+            try:
+                host = urlparse(url).hostname or ""
+                return host.replace("www.", "") or None
+            except Exception:  # noqa: BLE001
+                return None
+    return None
 
 
 def _dedupe(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

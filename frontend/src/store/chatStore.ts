@@ -100,9 +100,14 @@ interface ChatState {
    *  id already exists (defensive against duplicate ``tool_started``
    *  events from a flaky proxy). */
   startToolInvocation: (id: string, name: string) => void;
-  /** Update a running invocation's progress note (``tool_progress``).
+  /** Update a running invocation's progress note (``tool_progress``),
+   *  plus any structured payload (e.g. run_agents per-agent state).
    *  No-op if the id isn't tracked. */
-  updateToolProgress: (id: string, message: string) => void;
+  updateToolProgress: (
+    id: string,
+    message: string,
+    data?: Record<string, unknown> | null
+  ) => void;
   /** Move an invocation from ``pending`` to ``ok`` / ``error`` and
    *  attach its result. Silently dropped if the id isn't tracked
    *  (would only happen if a ``tool_finished`` arrived without a
@@ -257,10 +262,17 @@ export const useChatStore = create<ChatState>((set) => ({
         ],
       };
     }),
-  updateToolProgress: (id, message) =>
+  updateToolProgress: (id, message, data) =>
     set((state) => ({
       toolInvocations: state.toolInvocations.map((t) =>
-        t.id === id ? { ...t, progressMessage: message } : t
+        t.id === id
+          ? {
+              ...t,
+              progressMessage: message,
+              progressData:
+                (data as ToolInvocation["progressData"]) ?? t.progressData,
+            }
+          : t
       ),
     })),
   finishToolInvocation: (id, update) =>

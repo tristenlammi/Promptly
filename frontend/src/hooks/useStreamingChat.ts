@@ -106,6 +106,8 @@ interface SSEPayload {
   elapsed_ms?: number | null;
   error_kind?: string | null;
   tool_calls?: PersistedToolCall[] | null;
+  // tool_progress structured payload (run_agents per-agent state).
+  data?: Record<string, unknown> | null;
   // vision_relay_started / vision_relay_finished events. Driven by the
   // chat router when a non-vision chat model receives an image
   // attachment and the admin has configured a vision-capable relay
@@ -345,7 +347,7 @@ export function useStreamingChat(): UseStreamingChatResult {
           continue;
         }
         if (data.event === "tool_progress" && data.id && data.message) {
-          store.updateToolProgress(data.id, data.message);
+          store.updateToolProgress(data.id, data.message, data.data ?? null);
           continue;
         }
         if (data.event === "tool_finished" && data.id) {

@@ -781,6 +781,9 @@ export interface ToolInvocation {
    *  run_agents "2/4 agents done"). Shown under the running header;
    *  cleared irrelevant once the call finishes. */
   progressMessage?: string | null;
+  /** Structured progress payload from a ``tool_progress`` event — e.g.
+   *  run_agents' per-agent state array for the live fan-out view. */
+  progressData?: ToolProgressData | null;
   /** Wall-clock duration of the call, reported on ``tool_finished``. */
   elapsedMs?: number | null;
   /** Files the tool produced. Only present on the ``finished`` event,
@@ -790,6 +793,22 @@ export interface ToolInvocation {
   /** Tool-specific structured data (e.g. an image-gen prompt + model)
    *  surfaced for richer UI affordances. Opaque to the chat layer. */
   meta?: Record<string, unknown> | null;
+}
+
+/** One sub-agent's live row in a run_agents fan-out (from the
+ *  ``tool_progress`` event's structured ``data.agents``). */
+export interface AgentProgress {
+  label: string;
+  task: string;
+  status: "running" | "done" | "failed";
+  detail: string;
+  activity: number;
+}
+
+/** Structured ``tool_progress`` payload. Currently only run_agents
+ *  emits one (the per-agent fan-out state). */
+export interface ToolProgressData {
+  agents?: AgentProgress[];
 }
 
 /** One entry of ``messages.tool_calls`` — the persisted per-turn tool
