@@ -7,8 +7,10 @@ import {
   Archive,
   CheckCircle2,
   ChevronRight,
+  Download,
   FileText,
   GraduationCap,
+  Grid3X3,
   Loader2,
   MessageCircleQuestion,
   Plus,
@@ -167,6 +169,150 @@ function CourseList({
           ))}
         </ul>
       )}
+
+      {canEdit && courses && courses.length > 0 && (
+        <CompetencySection workspaceId={workspaceId} />
+      )}
+    </div>
+  );
+}
+
+/** Competency matrix (L3): members × courses — "who on the team knows
+ *  what". Same measured-only contract as the per-course dashboard. */
+function CompetencySection({ workspaceId }: { workspaceId: string }) {
+  const { data: matrix } = useQuery({
+    queryKey: ["workspace-competency", workspaceId],
+    queryFn: () => courseApi.competency(workspaceId),
+  });
+
+  if (!matrix || matrix.courses.length === 0 || matrix.members.length === 0)
+    return null;
+
+  const exportCsv = () => {
+    const header = [
+      "Member",
+      ...matrix.courses.map((c) => `"${c.title.replace(/"/g, '""')}"`),
+    ];
+    const lines = matrix.members.map((m) => {
+      const cells = matrix.courses.map((c) => {
+        const cell = m.cells.find((x) => x.course_id === c.id);
+        if (!cell) return "";
+        if (cell.status === "completed")
+          return cell.exam_score != null
+            ? `completed (${cell.exam_score}/100)`
+            : "completed";
+        return cell.overall_mastery != null
+          ? `${cell.status} (${cell.overall_mastery} mastery)`
+          : cell.status;
+      });
+      return [`"${(m.username ?? "member").replace(/"/g, '""')}"`, ...cells]
+        .join(",");
+    });
+    const csv = [header.join(","), ...lines].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "team-competency.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div className="mt-8 border-t border-[var(--border)] pt-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+          <Grid3X3 className="h-4 w-4 text-[var(--accent)]" />
+          Team competency
+        </h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={exportCsv}
+          leftIcon={<Download className="h-4 w-4" />}
+        >
+          Export CSV
+        </Button>
+      </div>
+      <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+        Who's covered what, across every course in this workspace. ✓ = passed
+        the final exam (independently graded).
+      </p>
+      <div className="overflow-x-auto rounded-card border border-[var(--border)]">
+        <table className="w-full min-w-[420px] text-left text-xs">
+          <thead>
+            <tr className="border-b border-[var(--border)] bg-[var(--surface)] text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+              <th className="px-3 py-2 font-medium">Member</th>
+              {matrix.courses.map((c) => (
+                <th
+                  key={c.id}
+                  className="max-w-[9rem] truncate px-3 py-2 font-medium"
+                  title={c.title}
+                >
+                  {c.title}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.members.map((m) => (
+              <tr
+                key={m.user_id}
+                className="border-b border-[var(--border)] last:border-b-0"
+              >
+                <td className="px-3 py-2 font-medium text-[var(--text)]">
+                  {m.username ?? "member"}
+                </td>
+                {matrix.courses.map((c) => {
+                  const cell = m.cells.find((x) => x.course_id === c.id);
+                  if (!cell)
+                    return (
+                      <td
+                        key={c.id}
+                        className="px-3 py-2 text-[var(--text-muted)]"
+                      >
+                        —
+                      </td>
+                    );
+                  return (
+                    <td key={c.id} className="px-3 py-2">
+                      {cell.status === "completed" ? (
+                        <span
+                          className="font-medium text-emerald-600 dark:text-emerald-400"
+                          title={
+                            cell.exam_score != null
+                              ? `Final exam: ${cell.exam_score}/100`
+                              : "Completed"
+                          }
+                        >
+                          ✓{cell.exam_score != null ? ` ${cell.exam_score}` : ""}
+                        </span>
+                      ) : (
+                        <span
+                          className={cn(
+                            cell.status === "overdue"
+                              ? "text-red-600 dark:text-red-400"
+                              : "text-[var(--text-muted)]"
+                          )}
+                          title={
+                            cell.overall_mastery != null
+                              ? `Mastery so far: ${cell.overall_mastery}/100`
+                              : undefined
+                          }
+                        >
+                          {cell.status.replace("_", " ")}
+                          {cell.overall_mastery != null
+                            ? ` · ${cell.overall_mastery}`
+                            : ""}
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

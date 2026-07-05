@@ -874,6 +874,14 @@ class StudyEnrollment(UUIDPKMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="assigned", server_default="assigned"
     )
+    # One-shot reminder stamps (L3): the hourly sweep sends "due soon"
+    # (≤24h out) and "overdue" notices exactly once each.
+    due_reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    overdue_notice_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         return f"<StudyEnrollment course={self.course_id} learner={self.learner_user_id}>"

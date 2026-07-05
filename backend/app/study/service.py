@@ -1108,6 +1108,15 @@ and reorder steps) · misconception spotter (spot the wrong claim) ·
 hotspot (click region) · flashcards · ranking / sorting ·
 timed mini-challenges · interactive calculators. Pick the format that
 best tests the specific objective — don't default to multiple choice.
+
+**Trace exercises (great for course material about systems, code, or
+processes):** show a concrete scenario from the material — a request, a
+config change, a failing step, a snippet — and have the student trace
+what happens next: "what runs first?", "which component sees this?",
+"what breaks if X is missing?". Build it as ordered steps to arrange, a
+predict-the-output textarea, or step-by-step reveal with a prediction at
+each stage. Ground every trace in the ACTUAL names and behaviour from
+the course material — never an invented lookalike system.
 """
 
 

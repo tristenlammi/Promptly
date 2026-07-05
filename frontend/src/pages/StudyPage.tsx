@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, BookOpen, Plus } from "lucide-react";
+import { Archive, GraduationCap, Plus } from "lucide-react";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -93,8 +93,13 @@ export function StudyPage() {
           ) : projects.length === 0 ? (
             <EmptyState tab={tab} onNewTopic={() => setWizardOpen(true)} />
           ) : (
-            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {projects.map((p) => (
+            (() => {
+              // Team Learning (L3): assigned courses surface above personal
+              // topics — they carry someone else's expectations (and maybe a
+              // due date), so they get first billing.
+              const assigned = projects.filter((p) => p.source_course_id);
+              const personal = projects.filter((p) => !p.source_course_id);
+              const renderCard = (p: (typeof projects)[number]) => (
                 <StudyTopicCard
                   key={p.id}
                   project={p}
@@ -111,8 +116,35 @@ export function StudyPage() {
                       : undefined
                   }
                 />
-              ))}
-            </div>
+              );
+              if (assigned.length === 0) {
+                return (
+                  <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {personal.map(renderCard)}
+                  </div>
+                );
+              }
+              return (
+                <>
+                  <h2 className="mt-6 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Assigned to you
+                  </h2>
+                  <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {assigned.map(renderCard)}
+                  </div>
+                  {personal.length > 0 && (
+                    <>
+                      <h2 className="mt-8 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                        Your topics
+                      </h2>
+                      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {personal.map(renderCard)}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()
           )}
         </div>
       </div>
@@ -185,7 +217,7 @@ function Tabs({
       <TabButton
         active={tab === "active"}
         onClick={() => onChange("active")}
-        icon={<BookOpen className="h-3.5 w-3.5" />}
+        icon={<GraduationCap className="h-3.5 w-3.5" />}
         label="Active"
         count={activeCount}
       />
@@ -264,7 +296,7 @@ function EmptyState({
   return (
     <div className="mt-10 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 text-center">
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/10">
-        <BookOpen className="h-5 w-5 text-[var(--accent)]" />
+        <GraduationCap className="h-5 w-5 text-[var(--accent)]" />
       </div>
       <h2 className="text-lg font-semibold">Start your first study topic</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">

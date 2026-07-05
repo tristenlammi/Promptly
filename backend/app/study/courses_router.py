@@ -1063,3 +1063,127 @@ async def resolve_material_gap(
     await db.commit()
     await db.refresh(gap)
     return MaterialGapRow.model_validate(gap)
+
+
+# ====================================================================
+# Competency matrix (L3) — who on the team knows what
+# ====================================================================
+class CompetencyCell(BaseModel):
+    course_id: uuid.UUID
+    status: str  # assigned | in_progress | completed | overdue
+    overall_mastery: int | None
+    exam_score: int | None
+    exam_passed: bool | None
+
+
+class CompetencyMember(BaseModel):
+    user_id: uuid.UUID
+    username: str | None
+    cells: list[CompetencyCell]
+
+
+class CompetencyCourseRef(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: str
+
+
+class CompetencyMatrix(BaseModel):
+    courses: list[CompetencyCourseRef]
+    members: list[CompetencyMember]
+
+
+@router.get(
+    "/workspaces/{workspace_id}/competency", response_model=CompetencyMatrix
+)
+async def workspace_competency(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CompetencyMatrix:
+    """Members × courses rollup for the whole workspace ("who knows X?").
+
+    Same privacy contract as the per-course dashboard: measured state
+    only. Requires workspace write access (it's a lead's view).
+    """
+    from app.study.models import StudyExam
+
+    _ws, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(role)
+
+    courses = (
+        await db.execute(
+            select(StudyCourse)
+            .where(
+                StudyCourse.workspace_id == workspace_id,
+                StudyCourse.status != "draft",
+            )
+            .order_by(StudyCourse.created_at)
+        )
+    ).scalars().all()
+    if not courses:
+        return CompetencyMatrix(courses=[], members=[])
+    course_ids = [c.id for c in courses]
+
+    enr_rows = (
+        await db.execute(
+            select(StudyEnrollment, User.username)
+            .join(User, User.id == StudyEnrollment.learner_user_id)
+            .where(StudyEnrollment.course_id.in_(course_ids))
+            .order_by(StudyEnrollment.created_at)
+        )
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    by_member: dict[uuid.UUID, dict] = {}
+    for enr, username in enr_rows:
+        # Unit mastery rollup for the learner's materialised project.
+        units = (
+            await db.execute(
+                select(StudyUnit.mastery_score).where(
+                    StudyUnit.project_id == enr.project_id,
+                    StudyUnit.mastery_score.is_not(None),
+                )
+            )
+        ).scalars().all()
+        exam = (
+            await db.execute(
+                select(StudyExam)
+                .where(
+                    StudyExam.project_id == enr.project_id,
+                    StudyExam.score.is_not(None),
+                )
+                .order_by(StudyExam.attempt_number.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        status_out = enr.status
+        if (
+            status_out != "completed"
+            and enr.due_at is not None
+            and enr.due_at < now
+        ):
+            status_out = "overdue"
+        entry = by_member.setdefault(
+            enr.learner_user_id,
+            {"user_id": enr.learner_user_id, "username": username, "cells": []},
+        )
+        entry["cells"].append(
+            CompetencyCell(
+                course_id=enr.course_id,
+                status=status_out,
+                overall_mastery=(
+                    int(round(sum(units) / len(units))) if units else None
+                ),
+                exam_score=exam.score if exam else None,
+                exam_passed=exam.passed if exam else None,
+            )
+        )
+
+    return CompetencyMatrix(
+        courses=[
+            CompetencyCourseRef(id=c.id, title=c.title, status=c.status)
+            for c in courses
+        ],
+        members=[CompetencyMember(**m) for m in by_member.values()],
+    )

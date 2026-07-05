@@ -78,11 +78,16 @@ async def lifespan(_: FastAPI):
     # can blend keyword + meaning-based recall. No-op when embeddings
     # aren't configured.
     indexer_task = start_semantic_indexer()
+    # Team Learning (Study L3) — hourly due-date reminder sweep for
+    # assigned courses (one-shot due-soon + overdue notices).
+    from app.study.reminders import start_study_reminders
+
+    study_reminders_task = start_study_reminders()
     try:
         yield
     finally:
         logger.info("Promptly backend shutting down")
-        for bg in (sweeper_task, scheduler_task, indexer_task):
+        for bg in (sweeper_task, scheduler_task, indexer_task, study_reminders_task):
             bg.cancel()
             try:
                 await bg

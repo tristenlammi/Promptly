@@ -181,6 +181,22 @@ export interface CourseProgressRow {
   open_struggle_flags: number;
 }
 
+/** Workspace-wide competency rollup (L3): who on the team knows what. */
+export interface CompetencyMatrix {
+  courses: { id: string; title: string; status: string }[];
+  members: {
+    user_id: string;
+    username: string | null;
+    cells: {
+      course_id: string;
+      status: string;
+      overall_mastery: number | null;
+      exam_score: number | null;
+      exam_passed: boolean | null;
+    }[];
+  }[];
+}
+
 /** A question the course materials couldn't answer (L2 gap inbox). */
 export interface MaterialGap {
   id: string;
@@ -305,6 +321,13 @@ export const courseApi = {
   async resolveGap(courseId: string, gapId: string): Promise<MaterialGap> {
     const { data } = await apiClient.post<MaterialGap>(
       `/study/courses/${courseId}/gaps/${gapId}/resolve`
+    );
+    return data;
+  },
+  /** Competency matrix (L3): members × courses rollup for the workspace. */
+  async competency(workspaceId: string): Promise<CompetencyMatrix> {
+    const { data } = await apiClient.get<CompetencyMatrix>(
+      `/study/workspaces/${workspaceId}/competency`
     );
     return data;
   },
