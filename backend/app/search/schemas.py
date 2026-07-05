@@ -43,6 +43,10 @@ class SearchProviderCreate(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     is_default: bool = False
     enabled: bool = True
+    # ``system`` rows (user_id NULL) are visible to every account and
+    # power the instance-wide default + failover chain. Creating one
+    # requires admin; the plain ``user`` scope stays self-service.
+    scope: Literal["user", "system"] = "user"
 
 
 class SearchProviderUpdate(BaseModel):

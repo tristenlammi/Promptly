@@ -9,6 +9,7 @@ import { ConsolePanel } from "@/components/admin/ConsolePanel";
 import { GroupsPanel } from "@/components/admin/GroupsPanel";
 import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
+import { SearchProvidersPanel } from "@/components/admin/SearchProvidersPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
 import { TopNav } from "@/components/layout/TopNav";
 import { cn } from "@/utils/cn";
@@ -56,7 +57,7 @@ const TABS: TabDef[] = [
     label: "Connectors",
     icon: <Plug className="h-3.5 w-3.5" />,
     subtitle:
-      "Connect remote MCP servers so the AI can use their tools in chat.",
+      "Web-search providers and remote MCP servers the AI can use in chat.",
   },
   {
     id: "analytics",
@@ -127,7 +128,22 @@ export function AdminPage() {
             {tab === "users" && <UsersPanel />}
             {tab === "groups" && <GroupsPanel />}
             {tab === "models" && <ModelsPanel />}
-            {tab === "connectors" && <McpConnectorsPanel />}
+            {tab === "connectors" && (
+              <div className="space-y-8">
+                <section>
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    Web search
+                  </h2>
+                  <SearchProvidersPanel />
+                </section>
+                <section className="border-t border-[var(--border)] pt-6">
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    MCP connectors
+                  </h2>
+                  <McpConnectorsPanel />
+                </section>
+              </div>
+            )}
             {tab === "analytics" && <AnalyticsPanel />}
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}

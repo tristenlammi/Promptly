@@ -100,8 +100,20 @@ async def create_provider(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SearchProviderResponse:
+    # ``system`` scope (user_id NULL) = instance-wide: visible to every
+    # account and eligible as the system default + failover candidate.
+    # Admin-only, since it changes search behaviour for all users.
+    owner_id: uuid.UUID | None = user.id
+    if payload.scope == "system":
+        if not user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can create system-wide search providers.",
+            )
+        owner_id = None
+
     sp = SearchProvider(
-        user_id=user.id,
+        user_id=owner_id,
         name=payload.name,
         type=payload.type,
         config=encrypt_config_secrets(payload.config),
@@ -112,7 +124,7 @@ async def create_provider(
     await db.flush()
 
     if payload.is_default:
-        await _clear_other_defaults(db, user.id, sp.id)
+        await _clear_other_defaults(db, owner_id, sp.id)
 
     await db.commit()
     await db.refresh(sp)
@@ -130,7 +142,7 @@ async def update_provider(
     user: User = Depends(get_current_user),
 ) -> SearchProviderResponse:
     sp = await _get_visible(provider_id, user, db)
-    if sp.user_id is None:
+    if sp.user_id is None and not user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="System-wide providers can't be modified — create a user-scoped override instead.",
@@ -174,7 +186,7 @@ async def delete_provider(
     user: User = Depends(get_current_user),
 ) -> Response:
     sp = await _get_visible(provider_id, user, db)
-    if sp.user_id is None:
+    if sp.user_id is None and not user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="System-wide providers cannot be deleted by regular users",
