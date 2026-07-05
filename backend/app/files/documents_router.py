@@ -138,13 +138,18 @@ _DEFAULT_DOCUMENT_TITLE = "Untitled document"
 def _mint_collab_token(*, document_id: uuid.UUID, user: User, perm: str) -> tuple[str, int]:
     now = int(time.time())
     exp = now + COLLAB_TOKEN_TTL_SECONDS
+    from app.auth.avatars import avatar_url_for
+
     payload: dict[str, Any] = {
         "sub": str(user.id),
         "type": "collab",
         "document_id": str(document_id),
         "perm": perm,
         "name": user.username,
-        "color": _color_for_user(user.id),
+        # Chosen profile colour wins; the palette hash is the fallback so
+        # cursors stay stable for users who never picked one.
+        "color": user.avatar_color or _color_for_user(user.id),
+        "avatar": avatar_url_for(user),
         "iat": now,
         "exp": exp,
         "jti": uuid.uuid4().hex,
@@ -472,7 +477,8 @@ async def get_collab_token(
         user=CollabTokenUser(
             id=user.id,
             name=user.username,
-            color=_color_for_user(user.id),
+            color=user.avatar_color or _color_for_user(user.id),
+            avatar=user.avatar_url,
         ),
     )
 

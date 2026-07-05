@@ -28,6 +28,8 @@ export interface CollabTokenResponse {
     id: string;
     name: string;
     color: string;
+    /** Signed profile-picture URL (null = initials chip). */
+    avatar?: string | null;
   };
 }
 

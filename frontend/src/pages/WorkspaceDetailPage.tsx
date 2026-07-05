@@ -68,7 +68,10 @@ const WorkspaceSheetPane = lazyWithRetry(
     })),
   "WorkspaceSheetPane"
 );
-import { WorkspaceCommandPalette } from "@/components/workspaces/WorkspaceCommandPalette";
+import {
+  WorkspaceCommandPalette,
+  recordRecentItem,
+} from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -269,6 +272,7 @@ export function WorkspaceDetailPage() {
     setSettingsOpen(false);
     setDriveOpen(false);
     setSelected(node);
+    if (id) recordRecentItem(id, node.id); // feeds the ⌘K "Recent" section
   };
 
   // Split-screen: open a note/canvas/chat alongside the primary one. Folders

@@ -9,6 +9,7 @@ import {
 } from "@/hooks/useWorkspaces";
 import type { WorkspaceParticipant } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 
 /**
  * Members + sharing UI, shared by the owner's quick "Share" dialog and the
@@ -226,6 +227,13 @@ function ReadOnlyRoster({
               key={person.user_id}
               className="flex items-center gap-3 px-3 py-2 text-sm"
             >
+              <UserAvatar
+                name={person.username}
+                userId={person.user_id}
+                avatarUrl={person.avatar_url}
+                color={person.avatar_color}
+                size={28}
+              />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium text-[var(--text)]">
                   {person.username}

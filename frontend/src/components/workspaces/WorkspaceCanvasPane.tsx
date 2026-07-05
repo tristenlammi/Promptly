@@ -21,6 +21,7 @@ import {
 } from "@/components/files/documents/WikiLinkExtension";
 import { ErrorState } from "@/components/shared/Callout";
 import { ItemPaneHeader } from "./ItemPaneHeader";
+import { PresenceChips, usePresencePeers } from "./PresenceChips";
 import { WorkspaceItemPicker } from "./WorkspaceItemPicker";
 import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
@@ -96,6 +97,7 @@ export function WorkspaceCanvasPane({
 }) {
   const { ydoc, provider, user, error, status } =
     useCanvasCollabProvider(canvasId);
+  const presencePeers = usePresencePeers(provider);
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawImperativeAPI | null>(null);
 
@@ -482,7 +484,12 @@ export function WorkspaceCanvasPane({
         kind="canvas"
         fallbackTitle={header.node.title}
         canEdit={!readOnly}
-        status={<CanvasSyncChip status={status} ready={binding.ready} />}
+        status={
+          <>
+            <PresenceChips peers={presencePeers} />
+            <CanvasSyncChip status={status} ready={binding.ready} />
+          </>
+        }
       />
       {canvasSurface}
     </div>

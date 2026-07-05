@@ -83,13 +83,17 @@ def _mint_canvas_token(
 ) -> tuple[str, int]:
     now = int(time.time())
     exp = now + CANVAS_TOKEN_TTL_SECONDS
+    from app.auth.avatars import avatar_url_for
+
     payload = {
         "sub": str(user.id),
         "type": "canvas",
         "canvas_id": str(canvas_id),
         "perm": perm,
         "name": user.username,
-        "color": _color_for_user(user.id),
+        # Chosen profile colour wins; palette hash is the fallback.
+        "color": user.avatar_color or _color_for_user(user.id),
+        "avatar": avatar_url_for(user),
         "iat": now,
         "exp": exp,
         "jti": uuid.uuid4().hex,
@@ -218,7 +222,10 @@ async def get_canvas_collab_token(
         token=token,
         expires_at=exp,
         user=CollabTokenUser(
-            id=user.id, name=user.username, color=_color_for_user(user.id)
+            id=user.id,
+            name=user.username,
+            color=user.avatar_color or _color_for_user(user.id),
+            avatar=user.avatar_url,
         ),
     )
 

@@ -10,6 +10,7 @@ import { workspacesApi, type WorkspaceItemNode } from "@/api/workspaces";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/Callout";
 import { ItemPaneHeader } from "./ItemPaneHeader";
+import { PresenceChips } from "./PresenceChips";
 import { useSheetCollabProvider } from "./useSheetCollabProvider";
 import { useSheetCollab } from "./useSheetCollab";
 
@@ -174,7 +175,7 @@ export function WorkspaceSheetPane({
   // the sheet schema). Collab is best-effort: if it can't connect, the sheet
   // keeps working single-user off the snapshot save.
   const collab = useSheetCollabProvider(workspaceId, sheetId);
-  const { onLocalChange, clearAll, peers } = useSheetCollab({
+  const { onLocalChange, clearAll, peers, peerUsers } = useSheetCollab({
     workbookRef,
     ydoc: collab.ydoc,
     provider: collab.provider,
@@ -358,6 +359,7 @@ export function WorkspaceSheetPane({
   // container a real ``flex-1`` height below the thin status/actions bar.
   const statusChips = (
     <>
+      <PresenceChips peers={peerUsers} />
       <CollabStatus status={collab.status} peers={peers} />
       <span className="mx-1 h-3 w-px bg-[var(--border)]" />
       <SaveStatus state={saveState} />

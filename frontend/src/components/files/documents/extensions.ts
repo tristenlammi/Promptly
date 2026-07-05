@@ -83,7 +83,14 @@ import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 export interface BuildExtensionsOptions {
   ydoc: YDoc | null;
   provider: HocuspocusProvider | null;
-  user: { id: string; name: string; color: string } | null;
+  /** ``avatar`` rides through CollaborationCursor into awareness so
+   *  peers can render profile pictures on their collaborator chips. */
+  user: {
+    id: string;
+    name: string;
+    color: string;
+    avatar?: string | null;
+  } | null;
   placeholder?: string;
   /** Workspace-note-only: enables the ``[[`` wiki-link autocomplete.
    *  Absent for normal Drive documents, so nothing changes there. The

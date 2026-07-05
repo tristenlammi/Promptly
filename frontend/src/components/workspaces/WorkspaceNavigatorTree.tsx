@@ -80,8 +80,9 @@ import { cn } from "@/utils/cn";
  * synthesised (no ref row), so they're read-only here — their rename /
  * delete lives in the chat UI.
  *
- * // TODO P1: drag reorder — the /move endpoint supports float positions,
- * // but DnD adds enough surface area that it's deferred for this MVP.
+ * Drag reorder / reparent / pin all work — ``handleDragEnd`` computes a
+ * float midpoint position among the new siblings and calls the ``/move``
+ * endpoint (optimistic tree update first).
  */
 export function WorkspaceNavigatorTree({
   workspaceId,

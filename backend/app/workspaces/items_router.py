@@ -859,13 +859,17 @@ def _mint_sheet_token(
     settings = get_settings()
     now = int(time.time())
     exp = now + _SHEET_TOKEN_TTL_SECONDS
+    from app.auth.avatars import avatar_url_for
+
     payload = {
         "sub": str(user.id),
         "type": "sheet",
         "sheet_id": str(sheet_id),
         "perm": perm,
         "name": user.username,
-        "color": _color_for_user(user.id),
+        # Chosen profile colour wins; palette hash is the fallback.
+        "color": user.avatar_color or _color_for_user(user.id),
+        "avatar": avatar_url_for(user),
         "iat": now,
         "exp": exp,
         "jti": uuid.uuid4().hex,
@@ -894,7 +898,10 @@ async def get_sheet_collab_token(
         token=token,
         expires_at=exp,
         user=CollabTokenUser(
-            id=user.id, name=user.username, color=_color_for_user(user.id)
+            id=user.id,
+            name=user.username,
+            color=user.avatar_color or _color_for_user(user.id),
+            avatar=user.avatar_url,
         ),
     )
 

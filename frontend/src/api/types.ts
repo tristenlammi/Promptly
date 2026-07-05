@@ -125,6 +125,10 @@ export interface User {
    */
   allowed_models: string[] | null;
   settings: UserSettings;
+  /** Signed profile-picture URL (null = initials chip). */
+  avatar_url?: string | null;
+  /** User-chosen chip colour ("#RRGGBB"); null = deterministic palette. */
+  avatar_color?: string | null;
   created_at: string;
   /** Forces the user through a password-change screen on next login. */
   must_change_password?: boolean;

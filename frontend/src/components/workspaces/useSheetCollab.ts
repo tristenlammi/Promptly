@@ -79,6 +79,14 @@ function parseKey(key: string): { sheetId: string; r: number; c: number } | null
   return { sheetId, r, c };
 }
 
+/** A connected peer, straight from the awareness channel. */
+export interface SheetPeer {
+  id: string;
+  name: string;
+  color: string;
+  avatar: string | null;
+}
+
 export interface UseSheetCollabResult {
   /** Feed every Fortune-sheet ``onChange`` here to broadcast local edits. */
   onLocalChange: (sheets: Sheet[]) => void;
@@ -88,6 +96,8 @@ export interface UseSheetCollabResult {
   ready: boolean;
   /** Other connected editors (excludes self). */
   peers: number;
+  /** Who those peers are — drives the presence chips in the pane header. */
+  peerUsers: SheetPeer[];
 }
 
 export function useSheetCollab({
@@ -105,6 +115,7 @@ export function useSheetCollab({
 }): UseSheetCollabResult {
   const [ready, setReady] = useState(false);
   const [peers, setPeers] = useState(0);
+  const [peerUsers, setPeerUsers] = useState<SheetPeer[]>([]);
 
   const readyRef = useRef(false);
   const readOnlyRef = useRef(readOnly);
@@ -202,15 +213,35 @@ export function useSheetCollab({
     yCells.observe(observer);
     unsubs.push(() => yCells.unobserve(observer));
 
-    // ----- presence (peer count) ---------------------------------------
+    // ----- presence ------------------------------------------------------
     if (awareness && user) {
       awareness.setLocalStateField("user", {
         id: user.id,
         name: user.name,
         color: user.color,
+        avatar: user.avatar ?? null,
       });
       const onAwareness = () => {
-        setPeers(Math.max(0, awareness.getStates().size - 1));
+        const others: SheetPeer[] = [];
+        awareness.getStates().forEach((state, clientId) => {
+          if (clientId === awareness.clientID) return;
+          const u = state.user as
+            | {
+                id?: string;
+                name?: string;
+                color?: string;
+                avatar?: string | null;
+              }
+            | undefined;
+          others.push({
+            id: u?.id ?? String(clientId),
+            name: u?.name ?? "Anonymous",
+            color: u?.color ?? "#D97757",
+            avatar: u?.avatar ?? null,
+          });
+        });
+        setPeers(others.length);
+        setPeerUsers(others);
       };
       awareness.on("change", onAwareness);
       onAwareness();
@@ -268,9 +299,10 @@ export function useSheetCollab({
       readyRef.current = false;
       setReady(false);
       setPeers(0);
+      setPeerUsers([]);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ydoc, provider, user?.id, user?.name, user?.color, onLocalChange]);
 
-  return { onLocalChange, clearAll, ready, peers };
+  return { onLocalChange, clearAll, ready, peers, peerUsers };
 }

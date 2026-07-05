@@ -40,6 +40,28 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     )
 
     # ------------------------------------------------------------------
+    # Profile appearance (0132_user_avatars)
+    # ------------------------------------------------------------------
+    # Non-null = a profile picture exists on disk (avatars/<id>.webp).
+    # The timestamp also versions the signed avatar URL for cache-busting.
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    # User-chosen initials-chip colour ("#RRGGBB"). NULL = deterministic
+    # palette hash (the same one collab cursors use).
+    avatar_color: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
+
+    @property
+    def avatar_url(self) -> str | None:
+        """Signed picture URL (None = initials chip). A property so every
+        ``model_validate(user)`` serializer picks it up without threading."""
+        from app.auth.avatars import avatar_url_for  # avoid import cycle
+
+        return avatar_url_for(self)
+
+    # ------------------------------------------------------------------
     # Account security state (added in 0007_security_foundation)
     # ------------------------------------------------------------------
     # Counter of consecutive failed login attempts. Reset to 0 on success.

@@ -421,6 +421,9 @@ class CollabTokenUser(BaseModel):
     id: uuid.UUID
     name: str
     color: str
+    # Signed profile-picture URL (None = initials chip) — rides into
+    # awareness so collaborator chips can show real pictures.
+    avatar: str | None = None
 
 
 CollabTokenResponse.model_rebuild()

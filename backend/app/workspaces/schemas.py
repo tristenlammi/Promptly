@@ -56,6 +56,9 @@ class WorkspaceParticipant(BaseModel):
     user_id: uuid.UUID
     username: str
     email: str
+    # Appearance for chips — mirrors ShareUserBrief.
+    avatar_url: str | None = None
+    avatar_color: str | None = None
 
 
 class WorkspaceSummary(BaseModel):

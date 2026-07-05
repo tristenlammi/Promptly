@@ -28,6 +28,10 @@ export interface WorkspaceParticipant {
   user_id: string;
   username: string;
   email: string;
+  /** Signed profile-picture URL (null = initials chip). */
+  avatar_url?: string | null;
+  /** Chosen chip colour; null = deterministic palette hash. */
+  avatar_color?: string | null;
 }
 
 export interface WorkspaceSummary {
@@ -312,6 +316,8 @@ export interface TaskAttachment {
 export interface BoardMember {
   id: string;
   username: string;
+  avatar_url?: string | null;
+  avatar_color?: string | null;
 }
 
 /** A comment ("comment") or auto-logged change ("activity") on a card. */

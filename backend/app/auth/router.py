@@ -18,10 +18,20 @@ Phase 1 hardening (2026-04-19):
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -780,7 +790,15 @@ async def list_directory_users(
 
     rows = (await db.execute(stmt)).scalars().all()
     # ``email`` intentionally omitted (defaults to None) — see DirectoryUser.
-    return [DirectoryUser(user_id=u.id, username=u.username) for u in rows]
+    return [
+        DirectoryUser(
+            user_id=u.id,
+            username=u.username,
+            avatar_url=u.avatar_url,
+            avatar_color=u.avatar_color,
+        )
+        for u in rows
+    ]
 
 
 @router.patch("/me/preferences", response_model=UserResponse)
@@ -820,3 +838,116 @@ async def update_preferences(
     await db.commit()
     await db.refresh(current_user)
     return UserResponse.model_validate(current_user)
+
+
+# --------------------------------------------------------------------
+# Profile appearance — picture + initials-chip colour (0132)
+# --------------------------------------------------------------------
+_ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class ProfileUpdate(BaseModel):
+    """Only appearance knobs live here — identity fields stay admin-only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # "#RRGGBB" to set, None to clear back to the deterministic palette.
+    avatar_color: str | None = None
+
+
+@router.patch("/me/profile", response_model=UserResponse)
+async def update_profile(
+    payload: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    if payload.avatar_color is not None and not _HEX_COLOR_RE.match(
+        payload.avatar_color
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Colour must be a #RRGGBB hex value.",
+        )
+    current_user.avatar_color = payload.avatar_color
+    await db.commit()
+    await db.refresh(current_user)
+    return UserResponse.model_validate(current_user)
+
+
+@router.post("/me/avatar", response_model=UserResponse)
+async def upload_avatar(
+    file: UploadFile,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Set the profile picture. The image is square-cropped, resized and
+    re-encoded server-side, so the stored blob is always small and never
+    the raw upload."""
+    from app.auth.avatars import MAX_UPLOAD_BYTES, process_and_store
+
+    if (file.content_type or "").lower() not in _ALLOWED_AVATAR_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Use a PNG, JPEG, WEBP, or GIF image.",
+        )
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Avatar images are capped at 5 MB.",
+        )
+    try:
+        process_and_store(current_user, raw)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        ) from e
+    await db.commit()
+    await db.refresh(current_user)
+    return UserResponse.model_validate(current_user)
+
+
+@router.delete("/me/avatar", response_model=UserResponse)
+async def delete_avatar(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    from app.auth.avatars import remove_avatar
+
+    remove_avatar(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return UserResponse.model_validate(current_user)
+
+
+@router.get("/avatar/{user_id}")
+async def serve_avatar(user_id: uuid.UUID, sig: str) -> Response:
+    """Serve a processed avatar image.
+
+    No session auth — ``<img src>`` can't send Bearer headers, so the
+    HMAC in ``sig`` is the credential (same pattern as Drive document
+    inline assets). The signature only unlocks *viewing an avatar*,
+    which every authenticated user can do anyway via any payload that
+    embeds the URL.
+    """
+    from fastapi.responses import FileResponse
+
+    from app.auth.avatars import avatar_abs_path, verify_signature
+
+    if not verify_signature(user_id, sig):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    path = avatar_abs_path(user_id)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return FileResponse(
+        path,
+        media_type="image/webp",
+        headers={
+            # The URL carries a ``v=`` cache-buster, so long immutable
+            # caching is safe — a new upload mints a new URL.
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
+        },
+    )

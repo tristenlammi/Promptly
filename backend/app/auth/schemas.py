@@ -113,6 +113,11 @@ class UserResponse(BaseModel):
     # ignore this field (they always see everything).
     allowed_models: list[str] | None = None
     settings: dict[str, Any]
+    # Profile appearance: signed picture URL (None = initials chip; a
+    # model property, so it serializes from anywhere) and the chosen
+    # chip colour (None = deterministic palette hash).
+    avatar_url: str | None = None
+    avatar_color: str | None = None
     created_at: datetime
     # Surfaced so the frontend can route the user to a password-change
     # screen on next login when the admin reset their password.
@@ -141,6 +146,10 @@ class DirectoryUser(BaseModel):
     # phishing + targeted lockout. The picker resolves invites by username or
     # a free-typed email, so it never needs the directory to hand emails back.
     email: EmailStr | None = None
+    # Appearance for the picker rows (safe to expose: avatars are
+    # visible to every authenticated user anyway).
+    avatar_url: str | None = None
+    avatar_color: str | None = None
 
 
 class UserPreferencesUpdate(BaseModel):

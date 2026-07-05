@@ -28,6 +28,7 @@ import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Skeleton } from "@/components/shared/Skeleton";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
 import { authApi } from "@/api/auth";
 import type { ConversationSummary } from "@/api/types";
@@ -591,8 +592,6 @@ function UserFooter() {
     navigate("/login");
   };
 
-  const initials = (user?.username ?? "?").slice(0, 2).toUpperCase();
-
   return (
     <div className="border-t border-[var(--border)] p-3 pb-safe">
       <InstallAppButton />
@@ -653,9 +652,14 @@ function UserFooter() {
         </button>
       )}
       <div className="flex items-center gap-2.5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)]/20 text-xs font-semibold text-[var(--text)]">
-          {initials}
-        </div>
+        <UserAvatar
+          name={user?.username ?? "?"}
+          userId={user?.id}
+          avatarUrl={user?.avatar_url}
+          color={user?.avatar_color}
+          size={32}
+          initialsCount={2}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-medium">

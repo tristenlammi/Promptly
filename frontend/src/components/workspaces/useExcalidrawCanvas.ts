@@ -177,6 +177,7 @@ export function useExcalidrawCanvas({
           name: user.name,
           color: user.color,
           id: user.id,
+          avatar: user.avatar ?? null,
         });
       }
       const awarenessObserver = () => {
@@ -186,7 +187,12 @@ export function useExcalidrawCanvas({
         awareness.getStates().forEach((state, clientId) => {
           if (clientId === awareness.clientID) return;
           const u = state.user as
-            | { name?: string; color?: string; id?: string }
+            | {
+                name?: string;
+                color?: string;
+                id?: string;
+                avatar?: string | null;
+              }
             | undefined;
           const pointer = state.pointer as Collaborator["pointer"] | undefined;
           // Only surface peers with a live pointer — avoids ghost cursors
@@ -199,6 +205,8 @@ export function useExcalidrawCanvas({
             username: u?.name ?? "Anonymous",
             color: color ? { background: color, stroke: color } : undefined,
             id: u?.id,
+            // Excalidraw renders this on the cursor label + laser chip.
+            avatarUrl: u?.avatar ?? undefined,
           });
         });
         api.updateScene({ collaborators });

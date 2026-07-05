@@ -283,6 +283,9 @@ const server = new Server({
         id: payload.sub,
         name: payload.name || "Anonymous",
         color: payload.color || "#D97757",
+        // Signed profile-picture URL (null = initials chip). Pure
+        // pass-through — clients put it in awareness for presence chips.
+        avatar: payload.avatar || null,
       },
       readOnly: perm === "read",
     };

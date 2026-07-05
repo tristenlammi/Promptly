@@ -43,6 +43,7 @@ import type {
 } from "@/api/workspaces";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { cn } from "@/utils/cn";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { WorkspaceBoardCalendar } from "./WorkspaceBoardCalendar";
 import {
   WorkspaceBoardCardDetail,
@@ -253,9 +254,16 @@ export function WorkspaceBoardPane({
       out.push({
         id: workspace.owner.user_id,
         username: workspace.owner.username,
+        avatar_url: workspace.owner.avatar_url,
+        avatar_color: workspace.owner.avatar_color,
       });
     for (const c of workspace?.collaborators ?? [])
-      out.push({ id: c.user_id, username: c.username });
+      out.push({
+        id: c.user_id,
+        username: c.username,
+        avatar_url: c.avatar_url,
+        avatar_color: c.avatar_color,
+      });
     return out;
   }, [workspace]);
   const memberMap = useMemo(
@@ -940,7 +948,8 @@ function ColumnsManager({
   );
 }
 
-/** Small initials avatar, colour derived from the user id so it's stable. */
+/** Card-sized avatar — profile picture / chosen colour / palette hash,
+ *  via the shared UserAvatar so chips match cursors everywhere. */
 export function MemberAvatar({
   member,
   size = 18,
@@ -948,21 +957,14 @@ export function MemberAvatar({
   member: BoardMember;
   size?: number;
 }) {
-  const hue =
-    Array.from(member.id).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return (
-    <span
-      title={member.username}
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: `hsl(${hue} 55% 45%)`,
-        fontSize: size * 0.5,
-      }}
-      className="inline-flex shrink-0 items-center justify-center rounded-full font-semibold uppercase text-white"
-    >
-      {member.username.slice(0, 1)}
-    </span>
+    <UserAvatar
+      name={member.username}
+      userId={member.id}
+      avatarUrl={member.avatar_url}
+      color={member.avatar_color}
+      size={size}
+    />
   );
 }
 

@@ -208,6 +208,10 @@ class ShareUserBrief(BaseModel):
     user_id: uuid.UUID
     username: str
     email: str
+    # Appearance for chips — signed picture URL (None = initials) and
+    # the chosen chip colour (None = deterministic palette hash).
+    avatar_url: str | None = None
+    avatar_color: str | None = None
 
 
 class ConversationParticipants(BaseModel):
@@ -261,7 +265,13 @@ async def _resolve_invitee(
 
 
 def _brief(u: User) -> ShareUserBrief:
-    return ShareUserBrief(user_id=u.id, username=u.username, email=u.email)
+    return ShareUserBrief(
+        user_id=u.id,
+        username=u.username,
+        email=u.email,
+        avatar_url=u.avatar_url,
+        avatar_color=u.avatar_color,
+    )
 
 
 async def load_participants(

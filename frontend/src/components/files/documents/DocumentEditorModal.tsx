@@ -21,6 +21,7 @@ import { documentsApi, type DocumentDownloadFormat } from "@/api/documents";
 import { useQueryClient } from "@tanstack/react-query";
 import { DocumentHistoryPanel } from "./DocumentHistoryPanel";
 import { cn } from "@/utils/cn";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import {
   NOTE_WIDTH_CLASS,
   NOTE_WIDTH_LABEL,
@@ -443,7 +444,7 @@ export function DocumentEditorModal({
   // publishes each client's user object into the provider's
   // awareness state. We subscribe here to render little avatars.
   const [collaborators, setCollaborators] = useState<
-    { clientId: number; name: string; color: string }[]
+    { clientId: number; name: string; color: string; avatar: string | null }[]
   >([]);
   useEffect(() => {
     if (!provider) return;
@@ -452,7 +453,9 @@ export function DocumentEditorModal({
     const update = () => {
       const states = Array.from(awareness.getStates().entries()) as [
         number,
-        { user?: { name?: string; color?: string } }
+        {
+          user?: { name?: string; color?: string; avatar?: string | null };
+        }
       ][];
       const list = states
         .filter(([id]) => id !== awareness.clientID)
@@ -460,6 +463,7 @@ export function DocumentEditorModal({
           clientId: id,
           name: state.user?.name ?? "Anonymous",
           color: state.user?.color ?? "#D97757",
+          avatar: state.user?.avatar ?? null,
         }));
       setCollaborators(list);
     };
@@ -1094,27 +1098,37 @@ function Collaborators({
   avatars,
   self,
 }: {
-  avatars: { clientId: number; name: string; color: string }[];
-  self: { name: string; color: string } | null;
+  avatars: {
+    clientId: number;
+    name: string;
+    color: string;
+    avatar?: string | null;
+  }[];
+  self: { name: string; color: string; avatar?: string | null } | null;
 }) {
   if (!self && avatars.length === 0) return null;
   const all = self
     ? [
         ...avatars,
-        { clientId: -1, name: `${self.name} (you)`, color: self.color },
+        {
+          clientId: -1,
+          name: `${self.name} (you)`,
+          color: self.color,
+          avatar: self.avatar ?? null,
+        },
       ]
     : avatars;
   return (
     <div className="hidden items-center -space-x-2 sm:flex">
       {all.slice(0, 4).map((a) => (
-        <span
+        <UserAvatar
           key={a.clientId}
-          title={a.name}
-          style={{ backgroundColor: a.color }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-[var(--surface)] text-[11px] font-semibold text-white"
-        >
-          {a.name.charAt(0).toUpperCase()}
-        </span>
+          name={a.name}
+          avatarUrl={a.avatar}
+          color={a.color}
+          size={28}
+          className="border-2 border-[var(--surface)]"
+        />
       ))}
       {all.length > 4 && (
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-[var(--surface)] bg-neutral-500 text-[10px] font-semibold text-white">

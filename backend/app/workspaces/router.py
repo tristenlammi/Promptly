@@ -257,6 +257,8 @@ async def _summary_with_rollups(
                 user_id=owner.id,
                 username=owner.username,
                 email=owner.email,
+                avatar_url=owner.avatar_url,
+                avatar_color=owner.avatar_color,
             )
     return base
 
@@ -411,10 +413,16 @@ async def get_workspace(
             user_id=participants.owner.user_id,
             username=participants.owner.username,
             email=participants.owner.email,
+            avatar_url=participants.owner.avatar_url,
+            avatar_color=participants.owner.avatar_color,
         ),
         collaborators=[
             WorkspaceParticipant(
-                user_id=c.user_id, username=c.username, email=c.email
+                user_id=c.user_id,
+                username=c.username,
+                email=c.email,
+                avatar_url=c.avatar_url,
+                avatar_color=c.avatar_color,
             )
             for c in participants.collaborators
         ],

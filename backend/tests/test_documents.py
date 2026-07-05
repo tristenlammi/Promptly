@@ -55,6 +55,13 @@ class FakeUser:
     username: str = "alice"
     role: str = "user"
     token_version: int = 0
+    # Profile appearance (0132) — the token minter reads both.
+    avatar_color: str | None = None
+    avatar_updated_at: object | None = None
+
+    @property
+    def avatar_url(self) -> str | None:
+        return None
 
 
 # ---------------------------------------------------------------------------

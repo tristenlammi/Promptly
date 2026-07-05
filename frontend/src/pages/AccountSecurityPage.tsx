@@ -17,6 +17,7 @@ import { FeatureVisibilityPanel } from "@/components/account/FeatureVisibilityPa
 import { MemoryPanel } from "@/components/account/MemoryPanel";
 import { NotificationsPanel } from "@/components/account/NotificationsPanel";
 import { PersonalContextPanel } from "@/components/account/PersonalContextPanel";
+import { ProfilePanel } from "@/components/account/ProfilePanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { UsagePanel } from "@/components/account/UsagePanel";
 import { VoicePanel } from "@/components/account/VoicePanel";
@@ -50,6 +51,7 @@ export function AccountSecurityPage() {
   const [active, setActive] = useState<string>("about");
 
   const sections: Section[] = [
+    { id: "profile", label: "Profile", icon: UserRound, node: <ProfilePanel /> },
     { id: "about", label: "About you", icon: UserRound, node: <PersonalContextPanel /> },
     { id: "chat", label: "Chat defaults", icon: SlidersHorizontal, node: <ChatPreferencesPanel /> },
     { id: "memory", label: "Memory", icon: Brain, node: <MemoryPanel /> },

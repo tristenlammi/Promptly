@@ -118,6 +118,38 @@ interface FlatItem {
   path: string;
 }
 
+// ---------------------------------------------------------------------
+// Recents — the empty-query palette shows what you touched last instead
+// of an arbitrary tree slice. Plain localStorage (per workspace, newest
+// first, small cap); ids that no longer resolve in the tree are ignored
+// at read time, so stale entries age out harmlessly.
+// ---------------------------------------------------------------------
+const RECENTS_CAP = 8;
+const recentsKey = (workspaceId: string) => `promptly.ws.recents.${workspaceId}`;
+
+export function recordRecentItem(workspaceId: string, itemId: string): void {
+  try {
+    const key = recentsKey(workspaceId);
+    const prev: string[] = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const next = [itemId, ...prev.filter((id) => id !== itemId)].slice(
+      0,
+      RECENTS_CAP
+    );
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Quota/parse failures just mean no recents — never break selection.
+  }
+}
+
+function readRecentIds(workspaceId: string): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(recentsKey(workspaceId)) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function flatten(
   nodes: WorkspaceItemNode[],
   trail: string[] = []
@@ -162,17 +194,34 @@ export function WorkspaceCommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const flat = useMemo(() => flatten(tree), [tree]);
-  const results = useMemo(() => {
+  const { results, recentCount } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return flat.slice(0, 50);
-    return flat
-      .filter(
-        (f) =>
-          f.node.title.toLowerCase().includes(q) ||
-          f.path.toLowerCase().includes(q)
-      )
-      .slice(0, 50);
-  }, [flat, query]);
+    if (!q) {
+      // Empty query: lead with what was opened last (``open`` is a dep so
+      // reopening the palette re-reads localStorage).
+      const byId = new Map(flat.map((f) => [f.node.id, f]));
+      const recents = readRecentIds(workspaceId)
+        .map((id) => byId.get(id))
+        .filter((f): f is FlatItem => Boolean(f));
+      const recentIds = new Set(recents.map((f) => f.node.id));
+      const rest = flat.filter((f) => !recentIds.has(f.node.id));
+      return {
+        results: [...recents, ...rest].slice(0, 50),
+        recentCount: recents.length,
+      };
+    }
+    return {
+      results: flat
+        .filter(
+          (f) =>
+            f.node.title.toLowerCase().includes(q) ||
+            f.path.toLowerCase().includes(q)
+        )
+        .slice(0, 50),
+      recentCount: 0,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ``open`` only re-reads recents
+  }, [flat, query, workspaceId, open]);
 
   // Reset everything each time the palette opens.
   useEffect(() => {
@@ -362,8 +411,21 @@ export function WorkspaceCommandPalette({
             )}
             {results.map((f, i) => {
               const row = i + (canAsk ? 1 : 0);
+              // Recents only exist on an empty query, so these labels never
+              // collide with the "Ask …" row (which needs query text).
+              const header =
+                recentCount > 0 && i === 0
+                  ? "Recent"
+                  : recentCount > 0 && i === recentCount
+                    ? "Everything else"
+                    : null;
               return (
                 <li key={f.node.id}>
+                  {header && (
+                    <div className="px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                      {header}
+                    </div>
+                  )}
                   <button
                     type="button"
                     onMouseEnter={() => setCursor(row)}

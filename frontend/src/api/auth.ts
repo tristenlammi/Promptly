@@ -21,6 +21,10 @@ export interface DirectoryUser {
   /** Omitted by the directory endpoint on multi-user hosts (privacy) — the
    *  picker resolves invites by username / free-typed email, not this. */
   email?: string | null;
+  /** Signed profile-picture URL (null = initials chip). */
+  avatar_url?: string | null;
+  /** Chosen chip colour; null = deterministic palette hash. */
+  avatar_color?: string | null;
 }
 
 export const authApi = {
@@ -70,6 +74,25 @@ export const authApi = {
       "/auth/me/preferences",
       payload
     );
+    return data;
+  },
+  /** Set / clear the initials-chip colour ("#RRGGBB" or null). */
+  async updateProfile(payload: {
+    avatar_color: string | null;
+  }): Promise<User> {
+    const { data } = await apiClient.patch<User>("/auth/me/profile", payload);
+    return data;
+  },
+  /** Upload a profile picture (PNG/JPEG/WEBP/GIF ≤ 5 MB). The server
+   *  square-crops + re-encodes, so any reasonable image works. */
+  async uploadAvatar(file: File): Promise<User> {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await apiClient.post<User>("/auth/me/avatar", form);
+    return data;
+  },
+  async deleteAvatar(): Promise<User> {
+    const { data } = await apiClient.delete<User>("/auth/me/avatar");
     return data;
   },
   /** Search the user directory for ``q`` (matches username or email,
