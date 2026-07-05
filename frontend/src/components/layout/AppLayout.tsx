@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { SearchPalette } from "@/components/chat/SearchPalette";
@@ -19,6 +19,29 @@ export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Inside a workspace the page has its own rail — three columns of
+  // chrome is too many, so the app sidebar auto-collapses on entry and
+  // restores the user's previous state on exit (Batch 10). Manual
+  // toggles while inside are respected: we only touch the state on the
+  // enter/leave transitions.
+  const inWorkspace = /^\/workspaces\/[0-9a-fA-F-]{36}/.test(
+    location.pathname
+  );
+  const wasInWorkspace = useRef(false);
+  const preWorkspaceCollapsed = useRef(false);
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+  useEffect(() => {
+    if (isMobile) return;
+    if (inWorkspace && !wasInWorkspace.current) {
+      preWorkspaceCollapsed.current = collapsedRef.current;
+      setCollapsed(true);
+    } else if (!inWorkspace && wasInWorkspace.current) {
+      setCollapsed(preWorkspaceCollapsed.current);
+    }
+    wasInWorkspace.current = inWorkspace;
+  }, [inWorkspace, isMobile]);
 
   const mobileNavOpen = useUIStore((s) => s.mobileNavOpen);
   const closeMobileNav = useUIStore((s) => s.closeMobileNav);

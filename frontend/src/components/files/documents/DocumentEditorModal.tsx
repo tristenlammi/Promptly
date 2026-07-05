@@ -919,6 +919,29 @@ export function DocumentEditorModal({
                 NOTE_WIDTH_CLASS[noteWidth]
               )}
             >
+              {/* In-page display title (Batch 10) — the page reads like a
+                  document, not a form. Same state + rename flow as the
+                  compact header input; prints with the content. */}
+              <input
+                value={filename}
+                onChange={(e) => setFilename(e.target.value)}
+                onBlur={handleFilenameBlur}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                readOnly={sharedWithMe}
+                placeholder="Untitled"
+                aria-label="Document title"
+                className={cn(
+                  // px-6 matches the ProseMirror content's 24px padding so
+                  // the title's left edge lines up with the body text.
+                  "w-full bg-transparent px-6 pb-1 pt-6 text-3xl font-bold tracking-tight text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]/40",
+                  sharedWithMe && "cursor-default"
+                )}
+              />
               <EditorContent editor={editor} />
             </div>
           )}

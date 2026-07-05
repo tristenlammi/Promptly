@@ -124,8 +124,9 @@ export function WorkspacesPage() {
               variant="ghost"
               leftIcon={<Upload className="h-4 w-4" />}
               onClick={() => setImportOpen(true)}
+              title="Import chat conversations (ChatGPT / Claude exports). Workspace import lives in the New-workspace dialog."
             >
-              Import
+              Import chats
             </Button>
             <Button
               variant="primary"

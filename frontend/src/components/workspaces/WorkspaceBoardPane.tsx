@@ -1628,8 +1628,8 @@ function BoardCard({
           </div>
         )}
 
-        {/* Edit cog — same as clicking the card body; kept as an
-            explicit affordance. */}
+        {/* Edit cog — same as clicking the card body; kept as an explicit
+            affordance, but hover-only so cards read as content at rest. */}
         <div className="mt-1.5 flex justify-end">
           <button
             type="button"
@@ -1638,7 +1638,7 @@ function BoardCard({
               onOpen();
             }}
             title="Edit card"
-            className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            className="rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text)] group-hover:opacity-100"
           >
             <Settings className="h-3.5 w-3.5" />
           </button>
