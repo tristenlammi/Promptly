@@ -72,7 +72,12 @@ export function WorkspaceAutomationPane({
     setAnimateRunId(created.id);
   };
 
-  const onRunClick = (id: string) => setSelectedRunId(id);
+  // Picking a run always shows it — flip out of the Flow tab if needed,
+  // otherwise the selection highlights but nothing visible changes.
+  const onRunClick = (id: string) => {
+    setSelectedRunId(id);
+    setShowFlow(false);
+  };
 
   const controls = (
     <div className="flex items-center gap-1.5">

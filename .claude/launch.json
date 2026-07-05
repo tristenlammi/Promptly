@@ -14,6 +14,13 @@
       "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--config", "vite.preview-claude.config.ts"],
       "port": 5199,
       "autoPort": false
+    },
+    {
+      "name": "promptly-vite-alt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--config", "vite.preview-claude-alt.config.ts"],
+      "port": 5201,
+      "autoPort": false
     }
   ]
 }

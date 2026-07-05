@@ -993,7 +993,7 @@ function BoardCard({
   onDragEnd: () => void;
   onCyclePriority: () => void;
   onDelete: () => void;
-  /** Open the full edit panel (now via the cog, not a card-body click). */
+  /** Open the full edit panel (card-body click or the cog). */
   onOpen: () => void;
 }) {
   const prio = PRIORITY_META[task.priority];
@@ -1016,9 +1016,16 @@ function BoardCard({
       draggable={canEdit}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onClick={() => {
+        // Whole card opens the detail panel. Inner controls (priority
+        // dot, checklist, links…) stopPropagation, and a drag suppresses
+        // the click natively — only guard against text-selection clicks.
+        if (window.getSelection()?.toString()) return;
+        onOpen();
+      }}
       className={cn(
-        "group overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-sm transition hover:border-[var(--accent)]",
-        canEdit && "cursor-grab active:cursor-grabbing",
+        "group cursor-pointer overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-sm transition hover:border-[var(--accent)]",
+        canEdit && "active:cursor-grabbing",
         dragging && "opacity-40"
       )}
     >
@@ -1211,7 +1218,8 @@ function BoardCard({
           </div>
         )}
 
-        {/* Edit cog — opens the full detail panel (card body is inert). */}
+        {/* Edit cog — same as clicking the card body; kept as an
+            explicit affordance. */}
         <div className="mt-1.5 flex justify-end">
           <button
             type="button"

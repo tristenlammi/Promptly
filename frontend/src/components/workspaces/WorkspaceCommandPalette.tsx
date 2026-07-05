@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   CornerDownLeft,
   FileText,
@@ -12,10 +14,93 @@ import {
 
 import {
   workspacesApi,
+  type WorkspaceAskCitation,
   type WorkspaceAskResponse,
   type WorkspaceItemNode,
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+
+/** Rewrite bare ``[n]`` citation markers into markdown links on a
+ *  ``#ws-cite-n`` anchor so the renderer below can turn them into
+ *  clickable jumps. Only indices that actually exist in the citation
+ *  list are rewritten, and code spans / fences are left untouched so a
+ *  literal ``[0]`` in a code sample doesn't become a link. */
+function linkifyCitations(
+  markdown: string,
+  citations: WorkspaceAskCitation[]
+): string {
+  if (citations.length === 0) return markdown;
+  const known = new Set(citations.map((c) => c.index));
+  // Split out fenced blocks and inline code, transform the rest.
+  return markdown
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(/\[(\d{1,2})\]/g, (m, n) =>
+            known.has(Number(n)) ? `[\\[${n}\\]](#ws-cite-${n})` : m
+          )
+    )
+    .join("");
+}
+
+/** The grounded answer, rendered as real markdown. Inline ``[n]``
+ *  markers become clickable and jump to the cited item, matching the
+ *  source pills underneath. */
+function AskAnswer({
+  answer,
+  onJump,
+}: {
+  answer: WorkspaceAskResponse;
+  onJump: (itemId: string | null) => void;
+}) {
+  const byIndex = useMemo(
+    () => new Map(answer.citations.map((c) => [c.index, c])),
+    [answer.citations]
+  );
+  const body = useMemo(
+    () => linkifyCitations(answer.answer, answer.citations),
+    [answer]
+  );
+  return (
+    <div className="promptly-prose text-sm leading-relaxed text-[var(--text)]">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children, ...props }) => {
+            const cite = href?.match(/^#ws-cite-(\d+)$/);
+            if (cite) {
+              const c = byIndex.get(Number(cite[1]));
+              return (
+                <button
+                  type="button"
+                  disabled={!c?.item_id}
+                  onClick={() => onJump(c?.item_id ?? null)}
+                  title={c ? (c.item_id ? `Open ${c.title}` : c.title) : undefined}
+                  className={cn(
+                    "mx-0.5 inline-flex -translate-y-[1px] items-center rounded-full border border-[var(--border)] px-1.5 text-[11px] font-medium no-underline",
+                    c?.item_id
+                      ? "text-[var(--accent)] hover:bg-[var(--hover)]"
+                      : "cursor-default text-[var(--text-muted)]"
+                  )}
+                >
+                  {c ? c.index : children}
+                </button>
+              );
+            }
+            return (
+              <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                {children}
+              </a>
+            );
+          },
+        }}
+      >
+        {body}
+      </ReactMarkdown>
+    </div>
+  );
+}
 
 /**
  * ⌘K command palette for a workspace (Phase 3).
@@ -201,9 +286,7 @@ export function WorkspaceCommandPalette({
             )}
             {answer && (
               <div>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text)]">
-                  {answer.answer}
-                </p>
+                <AskAnswer answer={answer} onJump={jumpToCitation} />
                 {answer.citations.length > 0 && (
                   <div className="mt-3 border-t border-[var(--border)] pt-2">
                     <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
