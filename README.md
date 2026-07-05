@@ -22,33 +22,37 @@ A self-hosted AI chat platform. Connect your own API keys, run local models, and
 
 ## Install
 
-**Requirements:** Docker and Docker Compose (v2).
+**Requirements:** Docker and Docker Compose (v2). That's it — no `.env` to edit.
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/tristenlammi/Promptly.git
 cd Promptly
-
-# 2. Create your .env from the example
-cp .env.example .env
-```
-
-Open `.env` and set the three required secrets:
-
-```env
-SECRET_KEY=        # run:  openssl rand -hex 32
-POSTGRES_PASSWORD= # any strong password
-SEARXNG_SECRET=    # run:  openssl rand -hex 32
-```
-
-```bash
-# 3. Start everything
 docker compose up -d
 ```
 
-Open **http://localhost:8087** — the first-run wizard will walk you through creating your admin account and connecting your first AI provider.
+On first boot the stack generates its own secrets (a strong random `SECRET_KEY`
+is created and kept in a Docker volume; the internal Postgres/SearXNG secrets
+get safe local defaults). Then open **http://localhost:8087** — the first-run
+wizard walks you through creating your admin account and connecting your first
+AI provider.
 
-> Ports default to **8087** (HTTP) and **8488** (HTTPS). Change them in `.env` if needed.
+> Ports default to **8087** (HTTP) and **8488** (HTTPS).
+
+### Before exposing it publicly
+
+The auto-generated `SECRET_KEY` is strong and unique per install, but the
+Postgres/SearXNG defaults are only meant for a localhost box (the database is
+never published to the host). Before you put Promptly behind a public domain,
+seed real secrets — the boot guard will refuse a public `DOMAIN` with default
+datastore credentials until you do:
+
+```bash
+cp .env.example .env
+./install.sh          # or  .\install.ps1  on Windows — generates all secrets
+```
+
+`.env` always overrides the auto-generated values, so this is also how you pin
+your own secrets or change ports/`DOMAIN`.
 
 ---
 
