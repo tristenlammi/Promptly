@@ -138,6 +138,11 @@ function stepDetail(step: ActivityStep): string | null {
     if (meta.failover === true && typeof meta.provider === "string") {
       bits.push(`via ${meta.provider} (fallback)`);
     }
+    // A page that hard-blocked the direct crawler was recovered through
+    // Tavily's Extract API.
+    if (meta.via_tavily === true) {
+      bits.push("via Tavily");
+    }
     if (typeof meta.chart_count === "number" && meta.chart_count > 0) {
       bits.push(`${meta.chart_count} chart${meta.chart_count === 1 ? "" : "s"}`);
     } else if (typeof meta.file_count === "number" && meta.file_count > 0) {

@@ -31,6 +31,8 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import select
+
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 from app.chat.tools.validation import clean_model_text
 from app.net.safe_fetch import (
@@ -39,6 +41,8 @@ from app.net.safe_fetch import (
     UnsafeURLError,
     safe_fetch,
 )
+from app.search.models import SearchProvider
+from app.search.providers import tavily_extract
 
 logger = logging.getLogger("promptly.tools.fetch_url")
 
@@ -108,6 +112,43 @@ def _fallback_title(html: str) -> str:
     return raw[:200] or _DEFAULT_TITLE
 
 
+def _title_from_url(url: str) -> str:
+    """Cheap human-ish title from a URL's last path segment, used when a
+    Tavily-extracted page has no HTML ``<title>`` of its own."""
+    try:
+        from urllib.parse import urlparse
+
+        parts = [p for p in urlparse(url).path.split("/") if p]
+        if parts:
+            slug = parts[-1].rsplit(".", 1)[0].replace("-", " ").replace("_", " ")
+            if slug:
+                return slug[:120]
+        return urlparse(url).hostname or _DEFAULT_TITLE
+    except Exception:  # noqa: BLE001
+        return _DEFAULT_TITLE
+
+
+async def _tavily_provider(ctx: ToolContext) -> SearchProvider | None:
+    """Any enabled Tavily provider visible to the user, for Extract fallback."""
+    rows = (
+        (
+            await ctx.db.execute(
+                select(SearchProvider).where(
+                    (
+                        (SearchProvider.user_id == ctx.user.id)
+                        | (SearchProvider.user_id.is_(None))
+                    )
+                    & (SearchProvider.enabled.is_(True))
+                    & (SearchProvider.type == "tavily")
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return rows[0] if rows else None
+
+
 class FetchUrlTool(Tool):
     name = "fetch_url"
     category = "search"
@@ -156,6 +197,17 @@ class FetchUrlTool(Tool):
         if not url.lower().startswith(("http://", "https://")):
             raise ToolError("`url` must be an http(s) URL")
 
+        # --- Attempt 1: direct fetch + local extraction (free). ---
+        # ``block_reason`` is set when the direct path fails in a way
+        # Tavily Extract might get past (anti-bot 4xx, empty body/text).
+        # It stays None on a clean success. SSRF refusals never set it —
+        # bypassing the guard via a third party would defeat it.
+        text: str | None = None
+        title: str | None = None
+        final_url = url
+        block_reason: str | None = None
+        via_tavily = False
+
         try:
             response = await safe_fetch(
                 "GET",
@@ -179,63 +231,87 @@ class FetchUrlTool(Tool):
                 },
             )
         except UnsafeURLError as e:
+            # Intentional block — do NOT fall back to a third-party
+            # fetcher, that would defeat the SSRF guard.
             raise ToolError(
                 f"Refusing to fetch {url!r}: {e.reason}. URL must be a "
                 "public http(s) address."
             ) from e
-        except ResponseTooLargeError as e:
-            raise ToolError(
-                f"Page is too large to fetch (>{_MAX_HTML_BYTES // 1024} KB). "
-                "Try a more specific URL or summarise from the search snippet."
-            ) from e
+        except ResponseTooLargeError:
+            block_reason = (
+                f"Page is too large to fetch directly (>{_MAX_HTML_BYTES // 1024} KB)."
+            )
+            response = None
         except Exception as e:  # noqa: BLE001 — network / parse errors
-            raise ToolError(f"Fetch failed: {type(e).__name__}: {e}") from e
+            block_reason = f"Fetch failed: {type(e).__name__}: {e}"
+            response = None
 
-        if not response.is_success:
+        if response is not None:
+            if not response.is_success:
+                block_reason = (
+                    f"HTTP {response.status_code} — the page is unreachable "
+                    "or blocking automated requests."
+                )
+            else:
+                final_url = str(response.url)
+                try:
+                    html = response.text
+                except Exception:  # noqa: BLE001 — broken encoding etc.
+                    html = ""
+                if html:
+                    text, title = await asyncio.to_thread(
+                        _extract_with_trafilatura, html, final_url
+                    )
+                    if not title:
+                        title = _fallback_title(html)
+                    if not (text and text.strip()):
+                        block_reason = "no readable text extracted"
+                        text = None
+                else:
+                    block_reason = "empty body"
+
+        # --- Attempt 2: Tavily Extract fallback (1 credit / 5 URLs). ---
+        # Only when the direct path was blocked/empty AND a Tavily
+        # provider is configured. This is what makes tesla.com /
+        # cars.com etc. — which 403 a self-hosted crawler — actually
+        # readable, because Tavily fetches from its own infra.
+        if (text is None or not text.strip()) and block_reason is not None:
+            provider = await _tavily_provider(ctx)
+            if provider is not None:
+                extracted = await tavily_extract(provider, url)
+                if extracted and extracted.strip():
+                    text = extracted
+                    title = _title_from_url(url)
+                    final_url = url
+                    via_tavily = True
+                    logger.info(
+                        "fetch_url: direct path blocked (%s); recovered via "
+                        "Tavily Extract for %s",
+                        block_reason,
+                        url[:120],
+                    )
+
+        if text is None or not text.strip():
+            # Both paths failed. Surface the original block reason so the
+            # model knows it's a dead page, not a transient hiccup.
             raise ToolError(
-                f"Fetch returned HTTP {response.status_code} for {url!r}. "
-                "The page is unreachable or blocking automated requests."
+                f"Couldn't read {url!r} ({block_reason or 'no content'}). "
+                "The page is likely JavaScript-rendered, paywalled, or "
+                "hard-blocking automated access — answer from the search "
+                "snippet instead of retrying this URL."
             )
-
-        # Use the *final* URL (after redirects) for the citation so the
-        # user sees what was actually read, not what was requested.
-        final_url = str(response.url)
-        try:
-            html = response.text
-        except Exception as e:  # noqa: BLE001 — broken encoding etc.
-            raise ToolError(
-                f"Couldn't decode page body ({type(e).__name__})."
-            ) from e
-
-        if not html:
-            raise ToolError(
-                f"Fetch returned an empty body for {url!r}."
-            )
-
-        text, title = await asyncio.to_thread(
-            _extract_with_trafilatura, html, final_url
-        )
-        if not title:
-            title = _fallback_title(html)
 
         # Page text is adversarial input: strip control characters and
         # the zero-width / bidi-override code points that can hide
         # instructions inside otherwise innocent-looking prose before
         # it's handed to the model or persisted as a citation.
         text = clean_model_text(text)
-        title = clean_model_text(title).strip() or _DEFAULT_TITLE
+        title = clean_model_text(title or "").strip() or _title_from_url(final_url)
 
         original_chars = len(text)
         truncated = original_chars > _MAX_TEXT_CHARS
         if truncated:
             text = text[:_MAX_TEXT_CHARS].rstrip() + "\n\n... [truncated]"
-
-        if not text.strip():
-            raise ToolError(
-                f"Couldn't extract readable text from {url!r}. The page "
-                "may be JavaScript-rendered or behind a paywall — tell "
-                "the user and stop."
-            )
 
         body = (
             f"Title: {title}\n"
@@ -247,11 +323,12 @@ class FetchUrlTool(Tool):
         snippet = re.sub(r"\s+", " ", text[:240]).strip()
 
         logger.info(
-            "fetch_url ok user=%s url=%s chars=%d truncated=%s",
+            "fetch_url ok user=%s url=%s chars=%d truncated=%s via_tavily=%s",
             ctx.user.id,
             final_url[:120],
             original_chars,
             truncated,
+            via_tavily,
         )
 
         return ToolResult(
@@ -262,6 +339,7 @@ class FetchUrlTool(Tool):
                 "title": title,
                 "original_chars": original_chars,
                 "truncated": truncated,
+                "via_tavily": via_tavily,
             },
         )
 

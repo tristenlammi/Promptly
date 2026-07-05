@@ -392,6 +392,56 @@ _ADAPTERS = {
 }
 
 
+async def tavily_extract(provider: SearchProvider, url: str) -> str | None:
+    """Fetch a page's readable content via Tavily's Extract API.
+
+    Direct ``fetch_url`` gets 403'd by DataDome/Cloudflare-protected
+    sites (tesla.com, cars.com, most retailers). Tavily runs the fetch
+    from its own infrastructure and hands back cleaned text, so it
+    sails past the anti-bot walls a self-hosted crawler can't. Only
+    meaningful for a ``tavily`` provider; returns ``None`` for any
+    other type or when nothing usable comes back (caller then keeps
+    whatever error it already had).
+
+    Costs 1 Tavily credit per 5 URLs — negligible next to a whole
+    turn's search spend, and only spent as a *fallback* after the free
+    direct fetch already failed.
+    """
+    if provider.type != "tavily":
+        return None
+    api_key = _api_key(provider) or get_settings().TAVILY_API_KEY
+    if not api_key:
+        return None
+    try:
+        resp = await _safe_request(
+            "POST",
+            "https://api.tavily.com/extract",
+            provider_label="Tavily",
+            json={
+                "api_key": api_key,
+                "urls": [url],
+                # Advanced depth renders more of the page (heavier JS,
+                # tables) and gets past more anti-bot walls than basic.
+                # Costs 2 credits/5 URLs vs 1 — worth it as a fallback
+                # that only fires after the free direct fetch failed.
+                "extract_depth": "advanced",
+            },
+        )
+        if not resp.is_success:
+            return None
+        data = resp.json()
+    except (SearchError, ValueError):
+        return None
+    results = data.get("results") if isinstance(data, dict) else None
+    if not results:
+        return None
+    first = results[0] if isinstance(results, list) else None
+    if not isinstance(first, dict):
+        return None
+    text = str(first.get("raw_content") or first.get("content") or "").strip()
+    return text or None
+
+
 async def run_search(
     provider: SearchProvider, query: str, count: int | None = None
 ) -> list[SearchResult]:
