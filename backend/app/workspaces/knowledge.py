@@ -448,9 +448,21 @@ async def index_note_for_workspace(
             if cfg is None:
                 return  # leave queued until an embedding provider exists
 
-            # Empty / never-typed note → nothing to embed. Leave queued
-            # (not failed) so the first real edit indexes it cleanly.
+            # Empty / never-typed note → nothing to embed. Mark it
+            # ``empty`` (a terminal, honest state — "queued" made the UI
+            # report a blank note as stuck indexing) and drop any stale
+            # chunks in case the content was just deleted. The first real
+            # edit re-runs this and indexes cleanly.
             if not (file.content_text or "").strip():
+                await delete_existing_chunks(
+                    db,
+                    scope_kind="workspace",
+                    scope_id=workspace_id,
+                    user_file_id=file.id,
+                )
+                await _set_note_index_status(
+                    db, item_id=item_id, status="empty"
+                )
                 return
 
             current_hash = await run_in_threadpool(file_content_hash, file)
@@ -564,7 +576,8 @@ async def index_canvas_for_workspace(
             if cfg is None:
                 return
 
-            # Empty board → drop any stale chunks, leave queued.
+            # Empty canvas → drop any stale chunks; ``empty`` is terminal
+            # and honest (parked "queued" read as stuck in the UI).
             if not (file.content_text or "").strip():
                 await delete_existing_chunks(
                     db,
@@ -573,7 +586,7 @@ async def index_canvas_for_workspace(
                     user_file_id=file.id,
                 )
                 await _set_note_index_status(
-                    db, item_id=item_id, status="queued"
+                    db, item_id=item_id, status="empty"
                 )
                 return
 
@@ -669,7 +682,7 @@ async def index_sheet_for_workspace(
             text = (sheet.content_text or "").strip()
             if not text:
                 # Empty sheet → drop any stale chunks + blank the backing file
-                # so full-dump stops inlining old cells; park at queued.
+                # so full-dump stops inlining old cells; mark ``empty``.
                 if sheet.text_file_id is not None:
                     await delete_existing_chunks(
                         db,
@@ -689,7 +702,7 @@ async def index_sheet_for_workspace(
                         except OSError:
                             pass
                 await _set_note_index_status(
-                    db, item_id=item_id, status="queued"
+                    db, item_id=item_id, status="empty"
                 )
                 return
 
@@ -1340,7 +1353,7 @@ async def index_board_for_workspace(
                         except OSError:
                             pass
                 await _set_note_index_status(
-                    db, item_id=item_id, status="queued"
+                    db, item_id=item_id, status="empty"
                 )
                 return
 
