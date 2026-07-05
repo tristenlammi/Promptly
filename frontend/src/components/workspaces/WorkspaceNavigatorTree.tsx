@@ -12,17 +12,15 @@ import {
   DragOverlay,
   MeasuringStrategy,
   PointerSensor,
+  pointerWithin,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragMoveEvent,
 } from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
   Archive,
@@ -180,6 +178,12 @@ export function WorkspaceNavigatorTree({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [offsetLeft, setOffsetLeft] = useState(0);
+  // Where the drop would land relative to the hovered row: on a folder's
+  // middle band = file *into* it; near a row's edge = insert before/after
+  // (shown as an explicit indicator line). Rows never shift while dragging.
+  const [dropEdge, setDropEdge] = useState<"before" | "after" | "into" | null>(
+    null
+  );
   // Keyboard navigation (7.1): a roving focus separate from the *open*
   // item, so ↑↓ can walk the rail without loading every pane it passes.
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -218,12 +222,31 @@ export function WorkspaceNavigatorTree({
     ? flatItems.find((i) => i.id === activeId) ?? null
     : null;
 
-  const projected =
-    activeId && overId && overId !== PIN_ZONE_ID
-      ? getProjection(visibleItems, activeId, overId, offsetLeft)
-      : null;
   const overItem = overId ? flatItems.find((i) => i.id === overId) : null;
   const dropInPinned = overId === PIN_ZONE_ID || overItem?.group === "pinned";
+  // Reorder projection (inserting before/after the hovered row). "Into" mode
+  // bypasses it — the hovered folder itself is the destination.
+  const projected =
+    activeId && overId && !dropInPinned && dropEdge && dropEdge !== "into"
+      ? getProjection(visibleItems, activeId, overId, dropEdge, offsetLeft)
+      : null;
+  const intoFolder =
+    dropEdge === "into" &&
+    overItem &&
+    overItem.node.kind === "folder" &&
+    overItem.group === "main" &&
+    overItem.id !== activeId
+      ? overItem
+      : null;
+
+  // Hovering "into" a collapsed folder springs it open after a beat, so you
+  // can keep dragging deeper without having to drop first.
+  const intoFolderId = intoFolder?.id ?? null;
+  useEffect(() => {
+    if (!intoFolderId || !collapsed.has(intoFolderId)) return;
+    const t = window.setTimeout(() => toggleCollapse(intoFolderId), 700);
+    return () => window.clearTimeout(t);
+  }, [intoFolderId, collapsed, toggleCollapse]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -232,7 +255,34 @@ export function WorkspaceNavigatorTree({
     setActiveId(null);
     setOverId(null);
     setOffsetLeft(0);
+    setDropEdge(null);
     document.body.style.removeProperty("cursor");
+  };
+
+  // Classify the pointer's position within the hovered row: a folder's middle
+  // band means "file inside it"; the outer bands (and any non-folder row)
+  // mean insert before/after — shown as an indicator line, not by shuffling
+  // rows around.
+  const handleDragMove = ({ activatorEvent, delta, over }: DragMoveEvent) => {
+    setOffsetLeft(delta.x);
+    if (!over || over.id === PIN_ZONE_ID) {
+      setDropEdge(null);
+      return;
+    }
+    const startY = (activatorEvent as PointerEvent | null)?.clientY;
+    const rect = over.rect;
+    if (startY == null || !rect) {
+      setDropEdge("after");
+      return;
+    }
+    const frac = (startY + delta.y - rect.top) / Math.max(rect.height, 1);
+    const overFlat = flatItems.find((i) => i.id === String(over.id));
+    const folderish =
+      overFlat?.node.kind === "folder" &&
+      overFlat.group === "main" &&
+      overFlat.id !== activeId;
+    if (folderish && frac >= 0.3 && frac <= 0.7) setDropEdge("into");
+    else setDropEdge(frac < 0.5 ? "before" : "after");
   };
 
   // Chats + automations (0140) are draggable now: they carry their own
@@ -330,30 +380,57 @@ export function WorkspaceNavigatorTree({
     // Tasks can't live in the pinned section — snap them back if dropped there.
     if (toPinned && isTask) return;
     // Reparent + reorder only when the item lands in the tree region.
-    if (toPinned || over.id === PIN_ZONE_ID || !projected) return;
-    const { parentId, depth } = projected;
+    if (toPinned || over.id === PIN_ZONE_ID) return;
 
-    const clone = flatItems.map((i) => ({ ...i }));
-    const oldIndex = clone.findIndex((i) => i.id === active.id);
-    const newIndex = clone.findIndex((i) => i.id === over.id);
-    const ordered = arrayMove(clone, oldIndex, newIndex);
-    const at = ordered.findIndex((i) => i.id === active.id);
-    ordered[at] = { ...ordered[at], parentId, depth, group: "main" };
-    // Siblings among the tree (main) items sharing the new parent.
-    const sibs = ordered.filter(
-      (i) => i.parentId === parentId && (i.id === active.id || i.group === "main")
-    );
-    const si = sibs.findIndex((i) => i.id === active.id);
-    const prev = sibs[si - 1]?.node.position;
-    const next = sibs[si + 1]?.node.position;
-    const position =
-      prev != null && next != null
-        ? (prev + next) / 2
-        : prev != null
-          ? prev + 1
-          : next != null
-            ? next - 1
-            : 1;
+    let parentId: string | null;
+    let position: number;
+    if (
+      dropEdge === "into" &&
+      overFlat &&
+      overFlat.node.kind === "folder" &&
+      overFlat.id !== String(active.id)
+    ) {
+      // Filing straight into the hovered folder: append as its last child.
+      parentId = overFlat.id;
+      const kids = overFlat.node.children ?? [];
+      const lastPos = kids.length ? kids[kids.length - 1].position : null;
+      position = lastPos != null ? lastPos + 1 : 1;
+    } else if (projected) {
+      // Inserting at the indicator line: midpoint between the neighbouring
+      // siblings that share the projected parent.
+      parentId = projected.parentId;
+      const { without, insertAt, depth } = projected;
+      let prevSib: FlatItem | null = null;
+      for (let i = insertAt - 1; i >= 0; i--) {
+        const it = without[i];
+        if (it.depth < depth || it.group !== "main") break;
+        if (it.depth === depth && it.parentId === parentId) {
+          prevSib = it;
+          break;
+        }
+      }
+      let nextSib: FlatItem | null = null;
+      for (let i = insertAt; i < without.length; i++) {
+        const it = without[i];
+        if (it.depth < depth || it.group !== "main") break;
+        if (it.depth === depth && it.parentId === parentId) {
+          nextSib = it;
+          break;
+        }
+      }
+      const prev = prevSib?.node.position;
+      const next = nextSib?.node.position;
+      position =
+        prev != null && next != null
+          ? (prev + next) / 2
+          : prev != null
+            ? prev + 1
+            : next != null
+              ? next - 1
+              : 1;
+    } else {
+      return;
+    }
 
     qc.setQueryData<WorkspaceItemNode[]>(
       ["workspaces", "tree", workspaceId],
@@ -536,14 +613,14 @@ export function WorkspaceNavigatorTree({
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={rowUnderPointer}
         measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
         onDragStart={({ active }) => {
           setActiveId(String(active.id));
           setOverId(String(active.id));
           document.body.style.cursor = "grabbing";
         }}
-        onDragMove={({ delta }) => setOffsetLeft(delta.x)}
+        onDragMove={handleDragMove}
         onDragOver={({ over }) => setOverId(over ? String(over.id) : null)}
         onDragEnd={handleDragEnd}
         onDragCancel={resetDrag}
@@ -557,7 +634,7 @@ export function WorkspaceNavigatorTree({
         >
           <SortableContext
             items={[...pinnedIds, ...mainIds]}
-            strategy={verticalListSortingStrategy}
+            strategy={staticRowsStrategy}
           >
             {/* Pinned section — always rendered (a faint standing hint when
                 empty, so pinning is discoverable without mid-drag luck),
@@ -638,7 +715,17 @@ export function WorkspaceNavigatorTree({
                         !!activeId &&
                         !dropInPinned &&
                         item.node.kind === "folder" &&
-                        projected?.parentId === item.id
+                        (intoFolder?.id === item.id ||
+                          projected?.parentId === item.id)
+                      }
+                      dropIndicator={
+                        activeId &&
+                        !dropInPinned &&
+                        overId === item.id &&
+                        projected &&
+                        (dropEdge === "before" || dropEdge === "after")
+                          ? { edge: dropEdge, depth: projected.depth }
+                          : null
                       }
                       onCreateInside={
                         canEdit
@@ -702,6 +789,18 @@ export function WorkspaceNavigatorTree({
 const PIN_ZONE_ID = "__pin_zone__";
 const INDENT = 14; // px of indentation per depth level
 
+// Rows hold still while dragging — the drop location is communicated by the
+// indicator line / folder highlight instead of sortable shuffling, so the
+// folder you're aiming at can never slide away from the cursor.
+const staticRowsStrategy = () => null;
+
+// Prefer the row directly under the pointer (the before/after/into bands need
+// it); fall back to nearest-centre when the pointer is outside every row.
+const rowUnderPointer: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  return hits.length > 0 ? hits : closestCenter(args);
+};
+
 interface FlatItem {
   id: string;
   node: WorkspaceItemNode;
@@ -745,22 +844,31 @@ function removeChildrenOf(items: FlatItem[], id: string): FlatItem[] {
   return out;
 }
 
-/** Where the dragged row would land: a depth (from the horizontal drag) clamped
- *  so it can only nest under a folder, and the resulting parent id. */
+/** Where the dragged row would land when inserted on ``edge`` of the row under
+ *  the pointer: a depth (nudged by the horizontal drag, clamped to the levels
+ *  that exist at that boundary) and the resulting parent id. ``insertAt`` /
+ *  ``without`` let the caller find the neighbouring siblings for positioning. */
 function getProjection(
   items: FlatItem[],
   activeId: string,
   overId: string,
+  edge: "before" | "after",
   dragOffset: number
-): { depth: number; parentId: string | null } {
-  const overIndex = items.findIndex((i) => i.id === overId);
-  const activeIndex = items.findIndex((i) => i.id === activeId);
-  const active = items[activeIndex];
-  const newItems = arrayMove(items, activeIndex, overIndex);
-  const prev = newItems[overIndex - 1];
-  const next = newItems[overIndex + 1];
+): {
+  depth: number;
+  parentId: string | null;
+  insertAt: number;
+  without: FlatItem[];
+} | null {
+  const active = items.find((i) => i.id === activeId);
+  const without = items.filter((i) => i.id !== activeId);
+  let insertAt = without.findIndex((i) => i.id === overId);
+  if (insertAt === -1 || !active) return null;
+  if (edge === "after") insertAt += 1;
+  const prev = without[insertAt - 1];
+  const next = without[insertAt];
   const dragDepth = Math.round(dragOffset / INDENT);
-  const projected = (active?.depth ?? 0) + dragDepth;
+  const projectedDepth = active.depth + dragDepth;
   // Can only nest one level under the previous row, and only if it's a folder.
   const maxDepth = prev
     ? prev.node.kind === "folder"
@@ -768,19 +876,19 @@ function getProjection(
       : prev.depth
     : 0;
   const minDepth = next ? next.depth : 0;
-  const depth = Math.max(minDepth, Math.min(projected, maxDepth));
+  const depth = Math.max(minDepth, Math.min(projectedDepth, maxDepth));
 
   const parentId = (() => {
     if (depth === 0 || !prev) return null;
     if (depth === prev.depth) return prev.parentId;
     if (depth > prev.depth) return prev.id;
-    const ancestor = newItems
-      .slice(0, overIndex)
+    const ancestor = without
+      .slice(0, insertAt)
       .reverse()
       .find((i) => i.depth === depth);
     return ancestor?.parentId ?? null;
   })();
-  return { depth, parentId };
+  return { depth, parentId, insertAt, without };
 }
 
 /** The "Drop here to pin" target (a dnd-kit droppable) shown while dragging. */
@@ -1261,6 +1369,7 @@ function TreeRow({
   toggleCollapse,
   sortable,
   isDropParent,
+  dropIndicator,
   overlay,
   onCreateInside,
   focused,
@@ -1280,6 +1389,8 @@ function TreeRow({
   sortable: boolean;
   /** Highlight — the folder the dragged item will drop into. */
   isDropParent?: boolean;
+  /** Insertion line while dragging: which edge of this row, at what indent. */
+  dropIndicator?: { edge: "before" | "after"; depth: number } | null;
   /** Rendered inside the DragOverlay (the lifted copy). */
   overlay?: boolean;
   /** Folder rows only — create an item inside this folder (⋯ menu). */
@@ -1506,12 +1617,27 @@ function TreeRow({
     <li
       id={overlay ? undefined : `ws-tree-row-${node.id}`}
       ref={overlay ? undefined : setNodeRef}
+      className="relative"
       style={
         overlay
           ? undefined
           : { transform: CSS.Translate.toString(transform), transition }
       }
     >
+      {/* Insertion line (drag): where the row will land, at its final indent. */}
+      {dropIndicator && (
+        <div
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute right-1 z-10 flex items-center",
+            dropIndicator.edge === "before" ? "-top-[3px]" : "-bottom-[3px]"
+          )}
+          style={{ left: dropIndicator.depth * INDENT + 6 }}
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full border-2 border-[var(--accent)] bg-[var(--bg)]" />
+          <span className="h-[3px] flex-1 rounded-full bg-[var(--accent)]" />
+        </div>
+      )}
       <div
         {...dragHandle}
         className={cn(
@@ -1523,7 +1649,7 @@ function TreeRow({
             !overlay &&
             "ring-1 ring-inset ring-[var(--accent)]/60",
           isDropParent &&
-            "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/50",
+            "bg-[var(--accent)]/15 ring-2 ring-inset ring-[var(--accent)]/70",
           isDragging && !overlay && "opacity-40",
           // The lifted copy: shrink slightly (origin-left keeps it aligned to
           // the cursor) + shadow/ring so it reads as picked up.
@@ -1578,7 +1704,7 @@ function TreeRow({
             <span className="w-3 shrink-0" aria-hidden />
           )}
 
-          <NodeIcon node={node} expanded={expanded} />
+          <NodeIcon node={node} expanded={expanded || !!isDropParent} />
 
           {renaming ? (
             <input
@@ -1736,30 +1862,35 @@ function NodeIcon({
   if (node.icon && isEmoji(node.icon)) {
     return <span className="shrink-0 text-sm leading-none">{node.icon}</span>;
   }
-  const cls = "h-4 w-4 shrink-0 text-[var(--text-muted)]";
+  // Soft per-kind tints so the rail scans by colour, echoing the Drive's
+  // type-coloured icons (folders match its accent-coloured folders). Kept to
+  // the icons only — row backgrounds stay reserved for selection/hover/drop.
+  const base = "h-4 w-4 shrink-0";
   switch (node.kind) {
-    case "folder":
+    case "folder": {
+      const cls = cn(base, "text-[var(--accent)]");
       return expanded ? (
         <FolderOpen className={cls} />
       ) : (
         <Folder className={cls} />
       );
+    }
     case "chat":
-      return <MessageSquare className={cls} />;
+      return <MessageSquare className={cn(base, "text-sky-500/90")} />;
     case "canvas":
-      return <Shapes className={cls} />;
+      return <Shapes className={cn(base, "text-fuchsia-500/80")} />;
     case "board":
-      return <Columns3 className={cls} />;
+      return <Columns3 className={cn(base, "text-violet-500/90")} />;
     case "sheet":
-      return <Table2 className={cls} />;
+      return <Table2 className={cn(base, "text-emerald-500/90")} />;
     case "container":
-      return <Layers className={cls} />;
+      return <Layers className={cn(base, "text-indigo-400/90")} />;
     case "task":
       // A clock reads "scheduled"; reserve the bolt for the context flag.
-      return <Clock className={cls} />;
+      return <Clock className={cn(base, "text-rose-500/80")} />;
     case "note":
     default:
-      return <FileText className={cls} />;
+      return <FileText className={cn(base, "text-amber-500/90")} />;
   }
 }
 
