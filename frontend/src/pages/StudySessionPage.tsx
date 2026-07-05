@@ -500,6 +500,18 @@ export function StudySessionPage() {
                     onSet={() => setSessionGoalSet(true)}
                   />
                 )}
+              {/* Privacy line (L2, principle 5): assigned courses share
+                  measured progress with the assigner — never the chat. Said
+                  plainly so learners can be honestly confused with the tutor. */}
+              {kind === "unit" && project?.source_course_id && (
+                <p className="px-4 pb-0.5 text-center text-[10px] text-[var(--text-muted)]">
+                  Assigned course —{" "}
+                  {project.assigned_by_name
+                    ? `${project.assigned_by_name} sees`
+                    : "your lead sees"}{" "}
+                  your progress and mastery, never this conversation.
+                </p>
+              )}
               <div className="px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
                 <InputBar
                   streaming={isStreaming}

@@ -10,6 +10,7 @@ import {
   FileText,
   GraduationCap,
   Loader2,
+  MessageCircleQuestion,
   Plus,
   Send,
   Sparkles,
@@ -894,33 +895,40 @@ function IconBtn({
 }
 
 // ====================================================================
-// Assign + enrollments (published)
+// Assign + progress dashboard + gap inbox (published, L2)
 // ====================================================================
 function AssignSection({ course }: { course: CourseDetail }) {
   const qc = useQueryClient();
   const { data: workspace } = useWorkspace(course.workspace_id);
-  const { data: enrollments } = useQuery({
-    queryKey: ["course-enrollments", course.id],
-    queryFn: () => courseApi.enrollments(course.id),
+  const { data: progress } = useQuery({
+    queryKey: ["course-progress", course.id],
+    queryFn: () => courseApi.progress(course.id),
+    refetchInterval: 30_000,
   });
   const [pickedUser, setPickedUser] = useState("");
+  const [dueDate, setDueDate] = useState("");
 
   const enrolledIds = useMemo(
-    () => new Set((enrollments ?? []).map((e) => e.learner_user_id)),
-    [enrollments]
+    () => new Set((progress ?? []).map((r) => r.learner_user_id)),
+    [progress]
   );
   const candidates = (workspace?.members ?? []).filter(
     (m) => !enrolledIds.has(m.user_id)
   );
 
   const enroll = useMutation({
-    mutationFn: () => courseApi.enroll(course.id, { user_id: pickedUser }),
+    mutationFn: () =>
+      courseApi.enroll(course.id, {
+        user_id: pickedUser,
+        due_at: dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null,
+      }),
     onSuccess: (e) => {
       toast.success(
         `Assigned to ${e.learner_name ?? "member"} — it's now in their Study list.`
       );
       setPickedUser("");
-      void qc.invalidateQueries({ queryKey: ["course-enrollments", course.id] });
+      setDueDate("");
+      void qc.invalidateQueries({ queryKey: ["course-progress", course.id] });
       void qc.invalidateQueries({
         queryKey: ["workspace-courses", course.workspace_id],
       });
@@ -931,15 +939,19 @@ function AssignSection({ course }: { course: CourseDetail }) {
 
   return (
     <div className="mt-6 border-t border-[var(--border)] pt-5">
-      <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+      <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
         <UserPlus className="h-4 w-4 text-[var(--accent)]" />
-        Assignments
+        Assignments &amp; progress
       </h3>
-      <div className="mb-3 flex items-center gap-2">
+      <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+        You see measured progress — mastery, exams, struggle flags. You never
+        see a learner's tutor conversation.
+      </p>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <select
           value={pickedUser}
           onChange={(e) => setPickedUser(e.target.value)}
-          className={cn(inputCls, "max-w-xs")}
+          className={cn(inputCls, "max-w-[14rem]")}
         >
           <option value="">Pick a member…</option>
           {candidates.map((m) => (
@@ -948,6 +960,15 @@ function AssignSection({ course }: { course: CourseDetail }) {
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+          Due
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className={cn(inputCls, "w-auto py-1.5")}
+          />
+        </label>
         <Button
           variant="primary"
           size="sm"
@@ -959,29 +980,198 @@ function AssignSection({ course }: { course: CourseDetail }) {
           Assign
         </Button>
       </div>
-      {enrollments && enrollments.length > 0 ? (
-        <ul className="space-y-1">
-          {enrollments.map((e) => (
-            <li
-              key={e.id}
-              className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
-            >
-              <span className="text-[var(--text)]">
-                {e.learner_name ?? e.learner_user_id}
-              </span>
-              <span className="text-xs text-[var(--text-muted)]">
-                {e.status}
-              </span>
-            </li>
-          ))}
-        </ul>
+
+      {progress && progress.length > 0 ? (
+        <div className="overflow-x-auto rounded-card border border-[var(--border)]">
+          <table className="w-full min-w-[560px] text-left text-xs">
+            <thead>
+              <tr className="border-b border-[var(--border)] bg-[var(--surface)] text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                <th className="px-3 py-2 font-medium">Learner</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Units</th>
+                <th className="px-3 py-2 font-medium">Mastery</th>
+                <th className="px-3 py-2 font-medium">Exam</th>
+                <th className="px-3 py-2 font-medium">Flags</th>
+                <th className="px-3 py-2 font-medium">Last active</th>
+              </tr>
+            </thead>
+            <tbody>
+              {progress.map((r) => (
+                <tr
+                  key={r.enrollment_id}
+                  className="border-b border-[var(--border)] last:border-b-0"
+                >
+                  <td className="px-3 py-2 font-medium text-[var(--text)]">
+                    {r.learner_name ?? "member"}
+                    {r.due_at && (
+                      <span className="block text-[10px] font-normal text-[var(--text-muted)]">
+                        due {new Date(r.due_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <EnrollmentStatusChip status={r.status} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <div
+                      className="flex items-center gap-1"
+                      title={r.units
+                        .map(
+                          (u) =>
+                            `${u.order_index + 1}. ${u.title}${
+                              u.mastery_score != null
+                                ? ` — ${u.mastery_score}/100`
+                                : ""
+                            } (${u.status.replace("_", " ")})`
+                        )
+                        .join("\n")}
+                    >
+                      {r.units.map((u) => (
+                        <span
+                          key={u.order_index}
+                          className={cn(
+                            "inline-block h-2.5 w-2.5 rounded-full",
+                            u.status === "completed"
+                              ? "bg-emerald-500"
+                              : u.status === "in_progress"
+                              ? "bg-amber-500"
+                              : "border border-[var(--border)] bg-transparent"
+                          )}
+                        />
+                      ))}
+                      <span className="ml-1.5 text-[var(--text-muted)]">
+                        {r.completed_units}/{r.total_units}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-[var(--text)]">
+                    {r.overall_mastery != null ? `${r.overall_mastery}` : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-[var(--text)]">
+                    {r.latest_exam_score != null ? (
+                      <span
+                        className={
+                          r.latest_exam_passed
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-amber-600 dark:text-amber-400"
+                        }
+                      >
+                        {r.latest_exam_score}/100
+                        {r.exam_attempts > 1 ? ` (#${r.exam_attempts})` : ""}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.open_struggle_flags > 0 ? (
+                      <span
+                        className="text-amber-600 dark:text-amber-400"
+                        title="Recurring misconceptions the tutor has logged more than once"
+                      >
+                        {r.open_struggle_flags}
+                      </span>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-[var(--text-muted)]">
+                    {r.last_active_at
+                      ? new Date(r.last_active_at).toLocaleDateString()
+                      : "not started"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <p className="text-xs text-[var(--text-muted)]">
           Nobody's enrolled yet. Assigning creates the course as a study topic
-          in the member's own Study space — progress dashboards land in the
-          next phase.
+          in the member's own Study space and notifies them.
         </p>
       )}
+
+      <GapInbox course={course} />
+    </div>
+  );
+}
+
+function EnrollmentStatusChip({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    assigned:
+      "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]",
+    in_progress:
+      "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    completed:
+      "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    overdue: "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
+  };
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+        styles[status] ?? styles.assigned
+      )}
+    >
+      {status.replace("_", " ")}
+    </span>
+  );
+}
+
+/** Gap inbox (L2, principle 3): questions the course material couldn't
+ *  answer — each one is a documentation improvement waiting to happen. */
+function GapInbox({ course }: { course: CourseDetail }) {
+  const qc = useQueryClient();
+  const { data: gaps } = useQuery({
+    queryKey: ["course-gaps", course.id],
+    queryFn: () => courseApi.gaps(course.id),
+    refetchInterval: 60_000,
+  });
+  const resolve = useMutation({
+    mutationFn: (gapId: string) => courseApi.resolveGap(course.id, gapId),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ["course-gaps", course.id] }),
+  });
+
+  if (!gaps || gaps.length === 0) return null;
+  return (
+    <div className="mt-5">
+      <h4 className="mb-1 flex items-center gap-2 text-xs font-semibold text-[var(--text)]">
+        <MessageCircleQuestion className="h-4 w-4 text-amber-500" />
+        Material gaps
+        <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+          {gaps.length}
+        </span>
+      </h4>
+      <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+        Learners asked these, and the course material couldn't answer them.
+        Update your docs (and the course sources), then mark them resolved.
+      </p>
+      <ul className="space-y-1.5">
+        {gaps.map((g) => (
+          <li
+            key={g.id}
+            className="flex items-start justify-between gap-3 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+          >
+            <div className="min-w-0">
+              <p className="text-xs text-[var(--text)]">{g.question}</p>
+              <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
+                {g.unit_title ? `${g.unit_title} · ` : ""}
+                {new Date(g.created_at).toLocaleDateString()}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void resolve.mutate(g.id)}
+              loading={resolve.isPending}
+            >
+              Resolve
+            </Button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

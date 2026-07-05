@@ -810,6 +810,27 @@ async def enroll_learner(
             name=f"course-material-{project.id}-{file_uuid}",
         )
 
+    # Tell the learner (L2). Assigning yourself is a valid self-test but
+    # doesn't need a ping.
+    if learner.id != user.id:
+        from app.notifications import notify_user
+
+        due_part = (
+            f" Due {payload.due_at.strftime('%d %b %Y')}."
+            if payload.due_at
+            else ""
+        )
+        await notify_user(
+            user_id=learner.id,
+            category="assignment",
+            title="New course assigned to you",
+            body=f"{user.username} assigned you '{course.title}'.{due_part}",
+            url=f"/study/topics/{project.id}",
+            tag=f"promptly-course-assign-{enrollment.id}",
+            actor_user_id=user.id,
+            workspace_id=course.workspace_id,
+        )
+
     return EnrollmentResponse(
         id=enrollment.id,
         course_id=enrollment.course_id,
@@ -856,3 +877,189 @@ async def list_enrollments(
         )
         for e, username in rows
     ]
+
+
+# ====================================================================
+# Lead dashboard (L2) — measured progress, never transcripts
+# ====================================================================
+class ProgressUnitCell(BaseModel):
+    order_index: int
+    title: str
+    status: str  # not_started | in_progress | completed
+    mastery_score: int | None
+
+
+class ProgressRow(BaseModel):
+    enrollment_id: uuid.UUID
+    learner_user_id: uuid.UUID
+    learner_name: str | None
+    status: str  # assigned | in_progress | completed | overdue (derived)
+    due_at: datetime | None
+    last_active_at: datetime | None
+    completed_units: int
+    total_units: int
+    overall_mastery: int | None
+    units: list[ProgressUnitCell]
+    latest_exam_score: int | None
+    latest_exam_passed: bool | None
+    exam_attempts: int
+    open_struggle_flags: int
+
+
+@router.get("/courses/{course_id}/progress", response_model=list[ProgressRow])
+async def course_progress(
+    course_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ProgressRow]:
+    """The lead's progress view: per-learner unit mastery, activity, exam
+    results, and struggle flags.
+
+    Privacy line (principle 5): this endpoint exposes MEASURED state only
+    — mastery numbers, statuses, timestamps, flags. It never returns
+    session transcripts, notes, or the learner's chat in any form.
+    """
+    from app.study.models import StudyExam, StudyMisconception
+
+    course = await _get_course_for_author(course_id, user, db)
+    enr_rows = (
+        await db.execute(
+            select(StudyEnrollment, User.username)
+            .join(User, User.id == StudyEnrollment.learner_user_id)
+            .where(StudyEnrollment.course_id == course.id)
+            .order_by(StudyEnrollment.created_at)
+        )
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    out: list[ProgressRow] = []
+    for enr, username in enr_rows:
+        units = (
+            await db.execute(
+                select(StudyUnit)
+                .where(StudyUnit.project_id == enr.project_id)
+                .order_by(StudyUnit.order_index)
+            )
+        ).scalars().all()
+        completed = sum(1 for u in units if u.status == "completed")
+        scored = [u.mastery_score for u in units if u.mastery_score is not None]
+        last_active = max(
+            (u.last_studied_at for u in units if u.last_studied_at), default=None
+        )
+        exams = (
+            await db.execute(
+                select(StudyExam)
+                .where(StudyExam.project_id == enr.project_id)
+                .order_by(StudyExam.attempt_number.desc())
+            )
+        ).scalars().all()
+        graded = [e for e in exams if e.score is not None]
+        latest = graded[0] if graded else None
+        struggles = (
+            await db.execute(
+                select(func.count()).where(
+                    StudyMisconception.project_id == enr.project_id,
+                    StudyMisconception.resolved_at.is_(None),
+                    StudyMisconception.times_seen >= 2,
+                )
+            )
+        ).scalar_one() or 0
+
+        status_out = enr.status
+        if (
+            status_out != "completed"
+            and enr.due_at is not None
+            and enr.due_at < now
+        ):
+            status_out = "overdue"
+
+        out.append(
+            ProgressRow(
+                enrollment_id=enr.id,
+                learner_user_id=enr.learner_user_id,
+                learner_name=username,
+                status=status_out,
+                due_at=enr.due_at,
+                last_active_at=last_active,
+                completed_units=completed,
+                total_units=len(units),
+                overall_mastery=(
+                    int(round(sum(scored) / len(scored))) if scored else None
+                ),
+                units=[
+                    ProgressUnitCell(
+                        order_index=u.order_index,
+                        title=u.title,
+                        status=u.status,
+                        mastery_score=u.mastery_score,
+                    )
+                    for u in units
+                ],
+                latest_exam_score=latest.score if latest else None,
+                latest_exam_passed=latest.passed if latest else None,
+                exam_attempts=len(exams),
+                open_struggle_flags=int(struggles),
+            )
+        )
+    return out
+
+
+# ====================================================================
+# Material-gap inbox (L2, principle 3)
+# ====================================================================
+class MaterialGapRow(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    course_id: uuid.UUID
+    unit_title: str | None
+    question: str
+    status: str
+    created_at: datetime
+    resolved_at: datetime | None
+
+
+@router.get("/courses/{course_id}/gaps", response_model=list[MaterialGapRow])
+async def list_material_gaps(
+    course_id: uuid.UUID,
+    include_resolved: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[MaterialGapRow]:
+    """Questions the course material couldn't answer — each one is a
+    documentation improvement waiting to happen."""
+    from app.study.models import StudyMaterialGap
+
+    course = await _get_course_for_author(course_id, user, db)
+    stmt = select(StudyMaterialGap).where(
+        StudyMaterialGap.course_id == course.id
+    )
+    if not include_resolved:
+        stmt = stmt.where(StudyMaterialGap.status == "open")
+    rows = (
+        await db.execute(stmt.order_by(StudyMaterialGap.created_at.desc()))
+    ).scalars().all()
+    return [MaterialGapRow.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/courses/{course_id}/gaps/{gap_id}/resolve",
+    response_model=MaterialGapRow,
+)
+async def resolve_material_gap(
+    course_id: uuid.UUID,
+    gap_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MaterialGapRow:
+    from app.study.models import StudyMaterialGap
+
+    course = await _get_course_for_author(course_id, user, db)
+    gap = await db.get(StudyMaterialGap, gap_id)
+    if gap is None or gap.course_id != course.id:
+        raise HTTPException(status_code=404, detail="Gap not found.")
+    gap.status = "resolved"
+    gap.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(gap)
+    return MaterialGapRow.model_validate(gap)

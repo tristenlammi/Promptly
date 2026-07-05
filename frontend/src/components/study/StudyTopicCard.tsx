@@ -83,6 +83,31 @@ export function StudyTopicCard({
           {project.title}
         </h3>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {/* Team Learning (L2): assigned-course badge with assigner + due. */}
+          {project.source_course_id && (
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                project.assigned_due_at &&
+                  new Date(project.assigned_due_at).getTime() < Date.now() &&
+                  project.status !== "completed"
+                  ? "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+                  : "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+              )}
+              title={
+                project.assigned_by_name
+                  ? `Assigned by ${project.assigned_by_name}`
+                  : "Assigned course"
+              }
+            >
+              Assigned
+              {project.assigned_due_at
+                ? ` · due ${new Date(
+                    project.assigned_due_at
+                  ).toLocaleDateString()}`
+                : ""}
+            </span>
+          )}
           {project.difficulty && (
             <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] capitalize text-[var(--text-muted)]">
               {project.difficulty}

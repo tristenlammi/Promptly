@@ -149,6 +149,10 @@ class StudyProjectSummary(BaseModel):
     # Team Learning (L1): set when this topic was assigned from a workspace
     # course — the UI badges it and the tutor stays on the authored rails.
     source_course_id: uuid.UUID | None = None
+    # Assignment context for the learner's card (L2). Only populated on
+    # course-assigned topics; both None for personal ones.
+    assigned_due_at: datetime | None = None
+    assigned_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
 

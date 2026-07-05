@@ -1585,7 +1585,15 @@ def build_unit_system_prompt(
             "`insert_prerequisites` or propose restructuring the plan. If the "
             "student is missing a prerequisite, remediate inside this unit "
             "with simpler groundwork, and tell them the gap is worth "
-            "mentioning to whoever assigned the course."
+            "mentioning to whoever assigned the course.\n\n"
+            "**Material gaps:** when the student asks something the course "
+            "material does not cover (and it's genuinely in-scope for this "
+            "course), say so honestly, then flag it for the course author by "
+            "emitting:\n"
+            '`<unit_action>{"type": "flag_material_gap", "question": '
+            '"<the unanswered question, one sentence>"}</unit_action>`\n'
+            "Flag sparingly — real documentation gaps only, not tangents. "
+            "The lead reviews these to improve the course material."
         )
 
     staleness_block = _build_staleness_block(unit)
@@ -3004,6 +3012,11 @@ async def handle_exam_action(
     # Update the project + affected units.
     if passed:
         project.status = "completed"
+        # Team Learning (L2): roll the enrollment forward and tell the
+        # assigner. The exam is independently graded, so this completion
+        # is a *measured* result, not self-reported.
+        if getattr(project, "source_course_id", None) is not None:
+            await _complete_enrollment_and_notify(db, project, score)
     else:
         project.status = "active"
         # Re-open weak units for targeted re-study.
@@ -3027,6 +3040,56 @@ async def handle_exam_action(
 
     project.updated_at = now
     return True
+
+
+async def _complete_enrollment_and_notify(
+    db: AsyncSession, project: StudyProject, score: int
+) -> None:
+    """Mark the course enrollment completed + notify the assigner (L2).
+
+    Best-effort: a notification hiccup must never fail exam grading.
+    """
+    try:
+        from app.study.models import StudyEnrollment
+
+        enr = (
+            await db.execute(
+                select(StudyEnrollment).where(
+                    StudyEnrollment.project_id == project.id
+                )
+            )
+        ).scalar_one_or_none()
+        if enr is None:
+            return
+        enr.status = "completed"
+        enr.updated_at = datetime.now(timezone.utc)
+        if enr.assigned_by and enr.assigned_by != project.user_id:
+            from app.auth.models import User as _User
+            from app.notifications import notify_user
+            from app.study.models import StudyCourse
+
+            learner = await db.get(_User, project.user_id)
+            course = await db.get(StudyCourse, project.source_course_id)
+            await notify_user(
+                user_id=enr.assigned_by,
+                category="study_graded",
+                title="Course completed",
+                body=(
+                    f"{learner.username if learner else 'A member'} completed "
+                    f"'{course.title if course else project.title}' — "
+                    f"passed the final exam with {score}/100."
+                ),
+                url=(
+                    f"/workspaces/{course.workspace_id}"
+                    if course is not None
+                    else None
+                ),
+                tag=f"promptly-course-complete-{enr.id}",
+                actor_user_id=project.user_id,
+                workspace_id=course.workspace_id if course else None,
+            )
+    except Exception:  # noqa: BLE001 — never fail grading over a ping
+        logger.warning("enrollment completion notify failed", exc_info=True)
 
 
 def _coerce_uuid_list(value: Any) -> list[uuid.UUID]:
@@ -3305,6 +3368,27 @@ async def _apply_single_capture(
     """
     if cap.tag == "unit_action" and unit is not None:
         action_type = str(payload.get("type", "")).lower()
+        if action_type == "flag_material_gap":
+            # Gap inbox (L2, principle 3): record a question the course
+            # material couldn't answer so the lead can improve the docs.
+            # Only meaningful on assigned-course projects.
+            course_id = getattr(project, "source_course_id", None)
+            question = str(payload.get("question", "")).strip()[:1000]
+            if course_id is not None and question:
+                from app.study.models import StudyMaterialGap
+
+                db.add(
+                    StudyMaterialGap(
+                        course_id=course_id,
+                        project_id=project.id,
+                        unit_title=unit.title[:255],
+                        question=question,
+                    )
+                )
+                logger.info(
+                    "material gap flagged course=%s unit=%s", course_id, unit.id
+                )
+            return
         if action_type == "insert_prerequisites":
             # Adaptivity rails (L1, principle 6): a project materialised
             # from a published course runs the lead-authored curriculum —

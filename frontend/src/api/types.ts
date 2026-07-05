@@ -967,6 +967,13 @@ export interface StudyProjectSummary {
   planning_error: string | null;
   total_units: number;
   completed_units: number;
+  /** Team Learning (L1/L2): set when this topic was assigned from a
+   *  workspace course. The card badges it and the tutor stays on the
+   *  authored rails. */
+  source_course_id: string | null;
+  /** Assignment context (only on course-assigned topics). */
+  assigned_due_at: string | null;
+  assigned_by_name: string | null;
   created_at: string;
   updated_at: string;
 }

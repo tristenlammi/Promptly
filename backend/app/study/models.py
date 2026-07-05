@@ -877,3 +877,38 @@ class StudyEnrollment(UUIDPKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<StudyEnrollment course={self.course_id} learner={self.learner_user_id}>"
+
+
+class StudyMaterialGap(UUIDPKMixin, CreatedAtMixin, Base):
+    """A question the course materials couldn't answer (L2 gap inbox).
+
+    Recorded by the tutor's ``flag_material_gap`` action on assigned-course
+    sessions (grounded-or-silent, principle 3). The course's lead reviews
+    these — every gap is a documentation improvement waiting to happen.
+    """
+
+    __tablename__ = "study_material_gaps"
+
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The asking learner's project (SET NULL if they delete the topic —
+    # the gap is still useful to the lead).
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("study_projects.id", ondelete="SET NULL"), nullable=True
+    )
+    unit_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The unanswered question, as the tutor phrased it.
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    # open → resolved (lead updated the docs / dismissed it)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="open", server_default="open"
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<StudyMaterialGap course={self.course_id} status={self.status}>"

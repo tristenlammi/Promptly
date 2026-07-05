@@ -157,6 +157,41 @@ export interface CourseEnrollment {
   created_at: string;
 }
 
+/** One learner-row in the lead's progress dashboard (L2). Measured state
+ *  only — the API never exposes transcripts. */
+export interface CourseProgressRow {
+  enrollment_id: string;
+  learner_user_id: string;
+  learner_name: string | null;
+  status: string; // assigned | in_progress | completed | overdue
+  due_at: string | null;
+  last_active_at: string | null;
+  completed_units: number;
+  total_units: number;
+  overall_mastery: number | null;
+  units: {
+    order_index: number;
+    title: string;
+    status: string;
+    mastery_score: number | null;
+  }[];
+  latest_exam_score: number | null;
+  latest_exam_passed: boolean | null;
+  exam_attempts: number;
+  open_struggle_flags: number;
+}
+
+/** A question the course materials couldn't answer (L2 gap inbox). */
+export interface MaterialGap {
+  id: string;
+  course_id: string;
+  unit_title: string | null;
+  question: string;
+  status: "open" | "resolved";
+  created_at: string;
+  resolved_at: string | null;
+}
+
 export const courseApi = {
   async create(payload: {
     workspace_id: string;
@@ -249,6 +284,27 @@ export const courseApi = {
   async enrollments(id: string): Promise<CourseEnrollment[]> {
     const { data } = await apiClient.get<CourseEnrollment[]>(
       `/study/courses/${id}/enrollments`
+    );
+    return data;
+  },
+  /** Lead dashboard (L2): per-learner mastery/activity/exam rollups. */
+  async progress(id: string): Promise<CourseProgressRow[]> {
+    const { data } = await apiClient.get<CourseProgressRow[]>(
+      `/study/courses/${id}/progress`
+    );
+    return data;
+  },
+  /** Gap inbox (L2): questions the materials couldn't answer. */
+  async gaps(id: string, includeResolved = false): Promise<MaterialGap[]> {
+    const { data } = await apiClient.get<MaterialGap[]>(
+      `/study/courses/${id}/gaps`,
+      { params: includeResolved ? { include_resolved: true } : undefined }
+    );
+    return data;
+  },
+  async resolveGap(courseId: string, gapId: string): Promise<MaterialGap> {
+    const { data } = await apiClient.post<MaterialGap>(
+      `/study/courses/${courseId}/gaps/${gapId}/resolve`
     );
     return data;
   },

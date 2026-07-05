@@ -478,7 +478,12 @@ async def _project_summary(
     total = len(units)
     done = sum(1 for u in units if u.status == "completed")
     return StudyProjectSummary.model_validate(
-        {**_project_fields(project), "total_units": total, "completed_units": done}
+        {
+            **_project_fields(project),
+            **(await _assignment_fields(db, project)),
+            "total_units": total,
+            "completed_units": done,
+        }
     )
 
 
@@ -568,6 +573,7 @@ async def _project_detail(
     return StudyProjectDetail.model_validate(
         {
             **_project_fields(project),
+            **(await _assignment_fields(db, project)),
             "total_units": total_units,
             "completed_units": completed_units,
             "units": [_summary_for(u) for u in units],
@@ -595,9 +601,32 @@ def _project_fields(project: StudyProject) -> dict[str, Any]:
         "model_id": project.model_id,
         "archived_at": project.archived_at,
         "planning_error": project.planning_error,
+        "source_course_id": getattr(project, "source_course_id", None),
         "created_at": project.created_at,
         "updated_at": project.updated_at,
     }
+
+
+async def _assignment_fields(
+    db: AsyncSession, project: StudyProject
+) -> dict[str, Any]:
+    """Due date + assigner for a course-assigned project (L2) — {} for
+    personal topics so the summary stays a plain column dump."""
+    if getattr(project, "source_course_id", None) is None:
+        return {}
+    from app.study.models import StudyEnrollment
+
+    row = (
+        await db.execute(
+            select(StudyEnrollment, User.username)
+            .join(User, User.id == StudyEnrollment.assigned_by, isouter=True)
+            .where(StudyEnrollment.project_id == project.id)
+        )
+    ).first()
+    if row is None:
+        return {}
+    enr, assigner_name = row
+    return {"assigned_due_at": enr.due_at, "assigned_by_name": assigner_name}
 
 
 # ====================================================================
@@ -1471,6 +1500,22 @@ async def enter_unit(
         unit.status = "in_progress"
     unit.last_studied_at = now
     unit.updated_at = now
+
+    # Team Learning (L2): first real activity rolls the enrollment
+    # assigned → in_progress so the lead's dashboard reflects reality.
+    if getattr(project, "source_course_id", None) is not None:
+        from app.study.models import StudyEnrollment
+
+        enr = (
+            await db.execute(
+                select(StudyEnrollment).where(
+                    StudyEnrollment.project_id == project.id
+                )
+            )
+        ).scalar_one_or_none()
+        if enr is not None and enr.status == "assigned":
+            enr.status = "in_progress"
+            enr.updated_at = now
     project.updated_at = now
 
     # Resolve the admin-designated teaching model for the kickoff stream.
