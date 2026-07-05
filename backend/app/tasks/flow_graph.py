@@ -211,11 +211,17 @@ class EventTriggerData(BaseModel):
       case-insensitively against the column key/name).
     * ``item_created`` — a workspace item was created. ``item_kind``
       (optional) narrows to one kind (note / canvas / board / sheet …).
+
+    ``folder_id`` (optional, ``file_added`` only) narrows to files landing
+    in one folder *or anywhere beneath it*. Personal automations (no home
+    workspace) listen to the owner's personal Drive instead — for those
+    only ``file_added`` is meaningful.
     """
 
     event: str = "file_added"
     column: str | None = None
     item_kind: str | None = None
+    folder_id: str | None = None
 
 
 class AIPromptData(BaseModel):

@@ -451,6 +451,8 @@ async def upload_drive_file(
             "mime_type": row.mime_type,
             "size_bytes": row.size_bytes,
             "uploaded_by": user.username,
+            "folder_id": str(target.id),
+            "folder_name": target.name,
         },
     )
     return _pin_to_drive_file(pin, row, in_subtree=True, root_id=root.id)

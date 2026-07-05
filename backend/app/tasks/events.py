@@ -34,6 +34,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from app.database import SessionLocal
+from app.files.models import FileFolder
 from app.tasks.models import Task, TaskRun
 from app.tasks.queue import enqueue_run
 
@@ -56,9 +57,9 @@ def emit_workspace_event(
     event: str,
     payload: dict[str, Any],
 ) -> None:
-    """Schedule event dispatch for every matching automation. Non-blocking;
-    all failures are logged and swallowed — emitting an event must never
-    break the request that caused it."""
+    """Schedule event dispatch for every matching automation homed in this
+    workspace. Non-blocking; all failures are logged and swallowed —
+    emitting an event must never break the request that caused it."""
     try:
         asyncio.create_task(
             _dispatch(workspace_id=workspace_id, event=event, payload=payload),
@@ -66,6 +67,24 @@ def emit_workspace_event(
         )
     except RuntimeError:  # no running loop — sync/test context
         logger.warning("emit_workspace_event: no running loop; dropped")
+
+
+def emit_user_event(
+    *,
+    user_id: uuid.UUID,
+    event: str,
+    payload: dict[str, Any],
+) -> None:
+    """Personal-scope twin of :func:`emit_workspace_event` — matches the
+    user's *personal* automations (``workspace_id IS NULL``), e.g. a file
+    uploaded to their own Drive."""
+    try:
+        asyncio.create_task(
+            _dispatch(user_id=user_id, event=event, payload=payload),
+            name=f"user-event-{event}-{user_id}",
+        )
+    except RuntimeError:  # no running loop — sync/test context
+        logger.warning("emit_user_event: no running loop; dropped")
 
 
 def _trigger_matches(
@@ -88,15 +107,52 @@ def _trigger_matches(
     return True
 
 
+async def _folder_matches(
+    db, want_folder_id: str, payload_folder_id: Any
+) -> bool:
+    """True when the file landed in the filtered folder *or anywhere
+    beneath it* — a filter on "Invoices" should catch a drop into
+    "Invoices / 2026". Walks the ``parent_id`` chain upward (bounded)."""
+    try:
+        want = uuid.UUID(want_folder_id)
+    except (ValueError, TypeError):
+        return True  # unparseable filter — don't silently kill the trigger
+    if not payload_folder_id:
+        return False  # file landed at the root; a folder filter can't match
+    try:
+        cur: uuid.UUID | None = uuid.UUID(str(payload_folder_id))
+    except ValueError:
+        return False
+    for _ in range(25):  # depth bound — no folder tree is this deep
+        if cur is None:
+            return False
+        if cur == want:
+            return True
+        cur = await db.scalar(
+            select(FileFolder.parent_id).where(FileFolder.id == cur)
+        )
+    return False
+
+
 async def _dispatch(
-    *, workspace_id: uuid.UUID, event: str, payload: dict[str, Any]
+    *,
+    event: str,
+    payload: dict[str, Any],
+    workspace_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> None:
     try:
         async with SessionLocal() as db:
+            scope = (
+                Task.workspace_id == workspace_id
+                if workspace_id is not None
+                # Personal automations: owned by the actor, no home workspace.
+                else (Task.user_id == user_id) & Task.workspace_id.is_(None)
+            )
             tasks = (
                 await db.execute(
                     select(Task).where(
-                        Task.workspace_id == workspace_id,
+                        scope,
                         Task.enabled.is_(True),
                         Task.flow_graph.is_not(None),
                     )
@@ -117,6 +173,16 @@ async def _dispatch(
                 )
                 if trigger is None:
                     continue
+                # Folder filter (file_added only) — needs the DB for the
+                # ancestor walk, so it runs after the pure-config match.
+                want_folder = str(
+                    (trigger.get("data") or {}).get("folder_id") or ""
+                ).strip()
+                if event == EVENT_FILE_ADDED and want_folder:
+                    if not await _folder_matches(
+                        db, want_folder, payload.get("folder_id")
+                    ):
+                        continue
                 # Flood guard — a busy workspace can't queue-bomb one task.
                 queued = await db.scalar(
                     select(func.count()).where(
@@ -157,6 +223,7 @@ async def _dispatch(
 
 __all__ = [
     "emit_workspace_event",
+    "emit_user_event",
     "EVENT_FILE_ADDED",
     "EVENT_CARD_MOVED",
     "EVENT_ITEM_CREATED",

@@ -348,6 +348,10 @@ export interface EventTriggerData {
   column?: string | null;
   /** item_created filter: only fire for this item kind. */
   item_kind?: string | null;
+  /** file_added filter: only fire for files landing in this folder (or any
+   *  subfolder). Workspace drive folder or personal Drive folder depending
+   *  on where the automation lives. */
+  folder_id?: string | null;
 }
 
 export interface AIPromptData {

@@ -107,7 +107,8 @@ import {
   useTaskGraph,
   useUpdateTask,
 } from "@/hooks/useTasks";
-import { useWorkspaceTree } from "@/hooks/useWorkspaces";
+import { useWorkspaceDrive, useWorkspaceTree } from "@/hooks/useWorkspaces";
+import { filesApi } from "@/api/files";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { secretsApi } from "@/api/secrets";
 import { useThemeStore } from "@/store/themeStore";
@@ -125,6 +126,10 @@ interface FlowEditCtx {
   boards: BoardOption[];
   chats: BoardOption[];
   folders: BoardOption[];
+  /** Drive folders for the event-trigger file filter — the workspace's
+   *  drive when the automation is workspace-homed, else the owner's
+   *  personal Drive. Nested-path labels. */
+  driveFolders: BoardOption[];
   connectors: AvailableTaskConnector[];
   inWorkspace: boolean;
   outputsCount: number;
@@ -205,6 +210,7 @@ function InlineNodeSettings({
         boards={ctx.boards}
         chats={ctx.chats}
         folders={ctx.folders}
+        driveFolders={ctx.driveFolders}
         memory={ctx.memory[node.id]?.entries ?? []}
         onClearMemory={() => ctx.clearMemory(node.id)}
         nodeData={ctx.nodeData[node.id]}
@@ -395,7 +401,7 @@ function nodeModalTitle(type?: string): string {
   )
     return "Output";
   if (type === "trigger.webhook") return "Webhook";
-  if (type === "trigger.event") return "Workspace event";
+  if (type === "trigger.event") return "Event";
   if (type?.startsWith("trigger.")) return "Schedule";
   return "Node";
 }
@@ -582,7 +588,7 @@ function TriggerNode({ id, type, data, selected }: NodeProps) {
     return (
       <NodeShell
         icon={<Zap className="h-3.5 w-3.5" />}
-        label="Workspace event"
+        label="Event"
         accent="var(--success)"
         selected={selected}
         hasOut
@@ -590,7 +596,7 @@ function TriggerNode({ id, type, data, selected }: NodeProps) {
         {detail ?? (
           <>
             <div className="truncate text-[var(--text)]">{eventSummary(ev)}</div>
-            <div className="mt-0.5 truncate">Fires on workspace activity</div>
+            <div className="mt-0.5 truncate">Fires on activity</div>
           </>
         )}
       </NodeShell>
@@ -2135,6 +2141,37 @@ export function TaskFlowEditor({
     return out;
   }, [tree]);
 
+  // Drive folders for the event trigger's file filter. Workspace-homed
+  // automations list the workspace drive; personal ones list the owner's
+  // own Drive (Workspaces subtree excluded server-side).
+  const driveQuery = useWorkspaceDrive(task?.workspace_id ?? undefined);
+  const personalFoldersQuery = useQuery({
+    queryKey: ["files", "folders", "flat"],
+    queryFn: () => filesApi.allFolders(),
+    enabled: !!task && !task.workspace_id,
+    staleTime: 60_000,
+  });
+  const driveFolders = useMemo<BoardOption[]>(() => {
+    const rows: { id: string; parent_id: string | null; name: string }[] =
+      task?.workspace_id
+        ? driveQuery.data?.folders ?? []
+        : personalFoldersQuery.data ?? [];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const label = (r: { parent_id: string | null; name: string }): string => {
+      const path = [r.name];
+      let cur = r.parent_id ? byId.get(r.parent_id) : undefined;
+      let hops = 0;
+      while (cur && hops++ < 15) {
+        path.unshift(cur.name);
+        cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+      }
+      return path.join(" / ");
+    };
+    return rows
+      .map((r) => ({ id: r.id, title: label(r) }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [task?.workspace_id, driveQuery.data?.folders, personalFoldersQuery.data]);
+
   // Title editing lives in the flow toolbar (it's task metadata, not a node).
   const updateTask = useUpdateTask();
   const [title, setTitle] = useState("");
@@ -2638,7 +2675,12 @@ export function TaskFlowEditor({
             return {
               ...n,
               type,
-              data: { event: "file_added", column: null, item_kind: null },
+              data: {
+                event: "file_added",
+                column: null,
+                item_kind: null,
+                folder_id: null,
+              },
             };
           }
           return {
@@ -2902,6 +2944,7 @@ export function TaskFlowEditor({
     boards,
     chats,
     folders,
+    driveFolders,
     connectors: connectors ?? [],
     inWorkspace: !!task?.workspace_id,
     outputsCount,
@@ -3380,6 +3423,7 @@ export function TaskFlowEditor({
               onRunToHere={() => runToHere(selected.id)}
               onTogglePin={() => togglePin(selected.id)}
               inWorkspace={!!task?.workspace_id}
+              driveFolders={driveFolders}
               connectors={connectors ?? []}
               canDelete={
                 PROCESSING_NODE_TYPES.has(selected.type ?? "") ||
@@ -3444,6 +3488,7 @@ function NodeInspector({
   boards,
   chats,
   folders,
+  driveFolders,
   memory,
   onClearMemory,
   nodeData,
@@ -3466,6 +3511,7 @@ function NodeInspector({
   boards: BoardOption[];
   chats: BoardOption[];
   folders: BoardOption[];
+  driveFolders: BoardOption[];
   memory: import("@/api/tasks").TaskMemoryEntry[];
   onClearMemory: () => void;
   nodeData?: { input: string; output: string; status: string };
@@ -4676,9 +4722,9 @@ function NodeInspector({
               >
                 <option value="trigger.schedule">A schedule</option>
                 <option value="trigger.webhook">An inbound webhook</option>
-                {(inWorkspace || isEvent) && (
-                  <option value="trigger.event">A workspace event</option>
-                )}
+                <option value="trigger.event">
+                  {inWorkspace ? "A workspace event" : "Drive activity"}
+                </option>
               </select>
             </label>
           );
@@ -4697,16 +4743,49 @@ function NodeInspector({
                         event: e.target.value,
                         column: null,
                         item_kind: null,
+                        folder_id: null,
                       })
                     }
                   >
-                    {WORKSPACE_EVENTS.map((w) => (
+                    {(inWorkspace
+                      ? WORKSPACE_EVENTS
+                      : // Personal automations listen to the owner's Drive —
+                        // boards/items only exist in workspaces.
+                        WORKSPACE_EVENTS.filter((w) => w.value === "file_added")
+                    ).map((w) => (
                       <option key={w.value} value={w.value}>
                         {w.label}
                       </option>
                     ))}
                   </select>
                 </label>
+                {ev.event === "file_added" && (
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Only in folder
+                    <select
+                      value={ev.folder_id ?? ""}
+                      className={selCls}
+                      onChange={(e) =>
+                        onPatch({ folder_id: e.target.value || null })
+                      }
+                    >
+                      <option value="">
+                        {inWorkspace
+                          ? "Anywhere in the workspace drive"
+                          : "Anywhere in your Drive"}
+                      </option>
+                      {driveFolders.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.title}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-0.5 block text-[10px] font-normal leading-snug">
+                      Subfolders count — a filter on a folder also catches
+                      files dropped anywhere beneath it.
+                    </span>
+                  </label>
+                )}
                 {ev.event === "card_moved" && (
                   <label className="text-xs font-medium text-[var(--text-muted)]">
                     Only when moved into column
@@ -4741,18 +4820,19 @@ function NodeInspector({
                   </label>
                 )}
                 <p className="text-[10px] leading-snug text-[var(--text-muted)]">
-                  Fires when this happens in the automation's home workspace.
+                  {inWorkspace
+                    ? "Fires when this happens in the automation's home workspace."
+                    : "Fires when a file is uploaded to your personal Drive (chat uploads included)."}{" "}
                   The event's details reach the flow as{" "}
                   <code>{"{{trigger.json.<field>}}"}</code> — e.g.{" "}
-                  <code>{"{{trigger.json.filename}}"}</code> or{" "}
-                  <code>{"{{trigger.json.card_title}}"}</code>.
+                  <code>{"{{trigger.json.filename}}"}</code>
+                  {inWorkspace && (
+                    <>
+                      {" "}or <code>{"{{trigger.json.card_title}}"}</code>
+                    </>
+                  )}
+                  .
                 </p>
-                {!inWorkspace && (
-                  <p className="text-[11px] text-[var(--warning)]">
-                    This automation has no home workspace, so this trigger will
-                    never fire. Move it into a workspace first.
-                  </p>
-                )}
               </>
             );
           }

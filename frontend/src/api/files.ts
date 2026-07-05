@@ -290,6 +290,17 @@ export interface FileSourceContent {
 }
 
 export const filesApi = {
+  /** Every live folder in the caller's personal Drive, flat (excludes the
+   *  Workspaces subtree). For pickers needing the whole tree at once. */
+  async allFolders(): Promise<
+    { id: string; parent_id: string | null; name: string }[]
+  > {
+    const { data } = await apiClient.get<
+      { id: string; parent_id: string | null; name: string }[]
+    >("/files/folders/all");
+    return data;
+  },
+
   async browse(
     scope: FileScope,
     folderId: string | null,

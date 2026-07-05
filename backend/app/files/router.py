@@ -125,6 +125,7 @@ from app.files.schemas import (
     UserSearchResult,
 )
 from app.files.system_folders import (
+    SystemKind,
     folder_for_chat_upload,
     folder_for_generated,
 )
@@ -770,6 +771,53 @@ async def _shared_breadcrumbs(
 # --------------------------------------------------------------------
 # Folder CRUD
 # --------------------------------------------------------------------
+class FlatFolder(BaseModel):
+    """Minimal folder row for flat pickers (automation folder filters)."""
+
+    id: uuid.UUID
+    parent_id: uuid.UUID | None
+    name: str
+
+
+@router.get("/folders/all", response_model=list[FlatFolder])
+async def list_all_folders(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[FlatFolder]:
+    """Every live folder in the caller's *personal* Drive as a flat list —
+    used by pickers that need the whole tree at once (e.g. the automation
+    event-trigger folder filter). Excludes the trash and the system-managed
+    ``Workspaces`` subtree (workspace drives have their own picker)."""
+    rows = list(
+        (
+            await db.execute(
+                select(FileFolder).where(
+                    FileFolder.user_id == user.id,
+                    FileFolder.trashed_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+    # Drop the Workspaces root and everything beneath it.
+    ws_roots = {
+        f.id for f in rows if f.system_kind == SystemKind.WORKSPACES_ROOT.value
+    }
+    excluded: set[uuid.UUID] = set(ws_roots)
+    if ws_roots:
+        changed = True
+        while changed:
+            changed = False
+            for f in rows:
+                if f.id not in excluded and f.parent_id in excluded:
+                    excluded.add(f.id)
+                    changed = True
+    keep = [f for f in rows if f.id not in excluded]
+    keep.sort(key=lambda f: f.name.lower())
+    return [
+        FlatFolder(id=f.id, parent_id=f.parent_id, name=f.name) for f in keep
+    ]
+
+
 @router.post("/folders", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
 async def create_folder(
     payload: FolderCreateRequest,
@@ -1211,6 +1259,25 @@ async def upload_file(
         # Roll back any partial session state so the upload response
         # still represents the clean persisted row.
         await db.rollback()
+
+    # Automations (E-batch): a personal-Drive upload can fire the owner's
+    # personal event-triggered flows. Best-effort, non-blocking. Workspace
+    # drive uploads have their own endpoint + workspace-scoped emit.
+    from app.tasks.events import EVENT_FILE_ADDED, emit_user_event
+
+    emit_user_event(
+        user_id=owner_id,
+        event=EVENT_FILE_ADDED,
+        payload={
+            "file_id": str(row.id),
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "size_bytes": row.size_bytes,
+            "uploaded_by": user.username,
+            "folder_id": str(parent_folder.id) if parent_folder else None,
+            "folder_name": parent_folder.name if parent_folder else None,
+        },
+    )
 
     return _file_to_response(row, caller=user)
 
