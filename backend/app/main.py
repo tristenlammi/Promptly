@@ -294,6 +294,7 @@ from app.workspaces.overview_router import router as workspace_overview_router  
 from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa: E402
 from app.workspaces.comments_router import router as workspace_comments_router  # noqa: E402
 from app.workspaces.meetings_router import router as workspace_meetings_router  # noqa: E402
+from app.workspaces.export_router import router as workspace_export_router  # noqa: E402
 from app.mcp.router import router as mcp_admin_router  # noqa: E402
 from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E402
 from app.groups.router import router as groups_admin_router  # noqa: E402
@@ -379,6 +380,10 @@ app.include_router(
 # Meeting notes from a recording (chunked transcription → summarised note).
 app.include_router(
     workspace_meetings_router, prefix="/api/workspaces", tags=["workspaces"]
+)
+# Workspace export bundle (zip) + Markdown-zip import.
+app.include_router(
+    workspace_export_router, prefix="/api/workspaces", tags=["workspaces"]
 )
 # MCP connectors (admin-managed external tool servers — Phase 10).
 app.include_router(

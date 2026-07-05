@@ -33,6 +33,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Request,
     Response,
     status,
 )
@@ -1533,6 +1534,7 @@ async def get_item_backlinks(
 async def delete_workspace_item(
     workspace_id: uuid.UUID,
     item_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
@@ -1625,6 +1627,20 @@ async def delete_workspace_item(
 
     # Deleting the top row cascades the descendant item rows via the
     # self-FK ON DELETE CASCADE.
+    from app.auth.audit import record_event
+    from app.auth.events import EVENT_WORKSPACE_ITEM_DELETED
+
+    subtree = (
+        f" (+{len(doomed) - 1} nested item(s))" if len(doomed) > 1 else ""
+    )
+    await record_event(
+        db,
+        event_type=EVENT_WORKSPACE_ITEM_DELETED,
+        request=request,
+        user_id=user.id,
+        detail=f'{item.kind} "{item.title}"{subtree} in "{ws.title}" '
+        f"(ws={ws.id})",
+    )
     await db.delete(item)
     ws.updated_at = now
     await db.commit()

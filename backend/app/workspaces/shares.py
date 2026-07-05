@@ -25,6 +25,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Request,
     Response,
     status,
 )
@@ -250,6 +251,7 @@ async def list_workspace_shares(
 async def create_workspace_share(
     workspace_id: uuid.UUID,
     payload: CreateWorkspaceShareRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceShareRow:
@@ -286,6 +288,9 @@ async def create_workspace_share(
         )
     ).scalars().first()
 
+    from app.auth.audit import record_event
+    from app.auth.events import EVENT_WORKSPACE_SHARE_CREATED
+
     now = datetime.now(timezone.utc)
     if existing is not None:
         # Re-inviting updates the role (lets an owner promote/demote a
@@ -296,6 +301,14 @@ async def create_workspace_share(
         if existing.status == "declined":
             existing.status = "pending"
         existing.updated_at = now
+        await record_event(
+            db,
+            event_type=EVENT_WORKSPACE_SHARE_CREATED,
+            request=request,
+            user_id=user.id,
+            detail=f'"{ws.title}" (ws={ws.id}) → {invitee.username} '
+            f"as {payload.role} (re-invite)",
+        )
         await db.commit()
         await db.refresh(existing)
         share = existing
@@ -308,6 +321,14 @@ async def create_workspace_share(
             role=payload.role,
         )
         db.add(share)
+        await record_event(
+            db,
+            event_type=EVENT_WORKSPACE_SHARE_CREATED,
+            request=request,
+            user_id=user.id,
+            detail=f'"{ws.title}" (ws={ws.id}) → {invitee.username} '
+            f"as {payload.role}",
+        )
         await db.commit()
         await db.refresh(share)
 
@@ -350,6 +371,7 @@ async def revoke_workspace_share(
     workspace_id: uuid.UUID,
     share_id: uuid.UUID,
     background: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -402,7 +424,19 @@ async def revoke_workspace_share(
     for pin in member_pins:
         await db.delete(pin)
 
+    departing_id = share.invitee_user_id
     await db.delete(share)
+    from app.auth.audit import record_event
+    from app.auth.events import EVENT_WORKSPACE_SHARE_REVOKED
+
+    await record_event(
+        db,
+        event_type=EVENT_WORKSPACE_SHARE_REVOKED,
+        request=request,
+        user_id=user.id,
+        detail=f'"{ws.title}" (ws={workspace_id}) — member {departing_id} '
+        + ("left" if is_invitee and not is_owner else "removed by owner"),
+    )
     await db.commit()
 
     if purged_file_ids:

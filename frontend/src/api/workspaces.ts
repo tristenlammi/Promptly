@@ -929,6 +929,36 @@ export const workspacesApi = {
     return data;
   },
 
+  /** Download the full workspace bundle (zip). Owner only. */
+  async exportZip(id: string): Promise<Blob> {
+    const { data } = await apiClient.get(`/workspaces/${id}/export`, {
+      responseType: "blob",
+      timeout: 300_000,
+    });
+    return data as Blob;
+  },
+
+  /** Build a new workspace from a zip of Markdown files. */
+  async importZip(
+    file: File,
+    title?: string
+  ): Promise<{
+    id: string;
+    title: string;
+    notes: number;
+    folders: number;
+    skipped: number;
+  }> {
+    const form = new FormData();
+    form.append("file", file);
+    if (title) form.append("title", title);
+    const { data } = await apiClient.post("/workspaces/import", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 300_000,
+    });
+    return data;
+  },
+
   /** Upload a meeting recording — returns the job to poll. */
   async createMeetingJob(
     id: string,

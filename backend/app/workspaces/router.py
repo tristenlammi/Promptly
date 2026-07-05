@@ -40,6 +40,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Request,
     Response,
     status,
 )
@@ -48,7 +49,14 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.auth.audit import record_event
 from app.auth.deps import get_current_user
+from app.auth.events import (
+    EVENT_WORKSPACE_ARCHIVED,
+    EVENT_WORKSPACE_CREATED,
+    EVENT_WORKSPACE_DELETED,
+    EVENT_WORKSPACE_UNARCHIVED,
+)
 from app.auth.models import User
 from app.chat.models import (
     Conversation,
@@ -393,6 +401,7 @@ async def my_work(
 )
 async def create_workspace(
     payload: WorkspaceCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceSummary:
@@ -432,6 +441,13 @@ async def create_workspace(
                 payload.template,
                 exc_info=True,
             )
+    await record_event(
+        db,
+        event_type=EVENT_WORKSPACE_CREATED,
+        request=request,
+        user_id=user.id,
+        detail=f'"{ws.title}" (ws={ws.id})',
+    )
     await db.commit()
     await db.refresh(ws)
     return await _summary_with_rollups(ws, db, user)
@@ -623,6 +639,7 @@ async def update_workspace(
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
@@ -631,7 +648,15 @@ async def delete_workspace(
     back up to the top-level list — we never silently destroy chat
     history."""
     ws = await _get_owned_workspace(workspace_id, user, db)
+    title = ws.title
     await db.delete(ws)
+    await record_event(
+        db,
+        event_type=EVENT_WORKSPACE_DELETED,
+        request=request,
+        user_id=user.id,
+        detail=f'"{title}" (ws={workspace_id})',
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -644,6 +669,7 @@ async def delete_workspace(
 @router.post("/{workspace_id}/archive", response_model=WorkspaceSummary)
 async def archive_workspace(
     workspace_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceSummary:
@@ -651,6 +677,13 @@ async def archive_workspace(
     if ws.archived_at is None:
         ws.archived_at = datetime.now(timezone.utc)
         ws.updated_at = ws.archived_at
+        await record_event(
+            db,
+            event_type=EVENT_WORKSPACE_ARCHIVED,
+            request=request,
+            user_id=user.id,
+            detail=f'"{ws.title}" (ws={ws.id})',
+        )
         await db.commit()
         await db.refresh(ws)
     return await _summary_with_rollups(ws, db, user)
@@ -659,6 +692,7 @@ async def archive_workspace(
 @router.post("/{workspace_id}/unarchive", response_model=WorkspaceSummary)
 async def unarchive_workspace(
     workspace_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceSummary:
@@ -666,6 +700,13 @@ async def unarchive_workspace(
     if ws.archived_at is not None:
         ws.archived_at = None
         ws.updated_at = datetime.now(timezone.utc)
+        await record_event(
+            db,
+            event_type=EVENT_WORKSPACE_UNARCHIVED,
+            request=request,
+            user_id=user.id,
+            detail=f'"{ws.title}" (ws={ws.id})',
+        )
         await db.commit()
         await db.refresh(ws)
     return await _summary_with_rollups(ws, db, user)

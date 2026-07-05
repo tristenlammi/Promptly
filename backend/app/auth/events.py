@@ -99,6 +99,26 @@ EVENT_GENERATED_SOURCE_EDITED = "generated_source_edited"
 # source / rendered file ids and the exception class.
 EVENT_GENERATED_RERENDER_FAILED = "generated_rerender_failed"
 
+# ---------------------------------------------------------------------
+# Batch 6 — workspace content lifecycle. The security log already
+# answers "who got in"; these answer the enterprise follow-up: "who
+# created, shared, exported, or destroyed what". ``detail`` carries the
+# workspace/item title + ids; never document content.
+# ---------------------------------------------------------------------
+EVENT_WORKSPACE_CREATED = "workspace_created"
+EVENT_WORKSPACE_DELETED = "workspace_deleted"
+EVENT_WORKSPACE_ARCHIVED = "workspace_archived"
+EVENT_WORKSPACE_UNARCHIVED = "workspace_unarchived"
+# A full workspace bundle left the building (zip download) / arrived
+# (Markdown-zip import). The single most audit-worthy pair for firms.
+EVENT_WORKSPACE_EXPORTED = "workspace_exported"
+EVENT_WORKSPACE_IMPORTED = "workspace_imported"
+EVENT_WORKSPACE_SHARE_CREATED = "workspace_share_created"
+EVENT_WORKSPACE_SHARE_REVOKED = "workspace_share_revoked"
+# Permanent deletion of a tree item (note/canvas/board/sheet/folder —
+# a folder delete logs once with its subtree count, not per child).
+EVENT_WORKSPACE_ITEM_DELETED = "workspace_item_deleted"
+
 
 class AuthEvent(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "auth_events"

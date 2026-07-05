@@ -1,6 +1,15 @@
-import { useState } from "react";
-import { Briefcase, FileText, Handshake, Rocket } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  Briefcase,
+  FileText,
+  FileUp,
+  Handshake,
+  Loader2,
+  Rocket,
+} from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 
+import { workspacesApi } from "@/api/workspaces";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
@@ -59,7 +68,35 @@ export function NewWorkspaceModal({
   const [modelId, setModelId] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
   const [template, setTemplate] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const queryClient = useQueryClient();
   const create = useCreateWorkspace();
+
+  // Markdown-zip import (Obsidian vault / Notion export) — an alternate
+  // door out of this modal: pick a zip, land in the new workspace.
+  const handleImportFile = async (zip: File | null | undefined) => {
+    if (!zip || importing) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const result = await workspacesApi.importZip(
+        zip,
+        title.trim() || undefined
+      );
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      reset();
+      onCreated?.(result.id);
+      onClose();
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })
+        .response?.data?.detail;
+      setImportError(detail || "Import failed — is it a zip of .md files?");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const reset = () => {
     setTitle("");
@@ -217,6 +254,45 @@ export function NewWorkspaceModal({
             Couldn't create the workspace. Please try again.
           </div>
         )}
+
+        <div className="border-t border-[var(--border)] pt-3">
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            className="flex w-full items-center gap-2 rounded-md border border-dashed border-[var(--border)] px-3 py-2 text-left text-xs text-[var(--text-muted)] transition hover:border-[var(--accent)] hover:text-[var(--text)] disabled:opacity-60"
+          >
+            {importing ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            ) : (
+              <FileUp className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span>
+              <span className="font-medium">
+                {importing
+                  ? "Importing notes…"
+                  : "Or import from a Markdown export (.zip)"}
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-snug">
+                Obsidian vaults and Notion / Confluence Markdown exports —
+                folders become folders, .md files become notes.
+              </span>
+            </span>
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            onChange={(e) => {
+              void handleImportFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+          {importError && (
+            <p className="mt-1.5 text-xs text-[var(--danger)]">{importError}</p>
+          )}
+        </div>
       </form>
     </Modal>
   );

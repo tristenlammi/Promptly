@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Download,
   Gauge,
   Lightbulb,
   Loader2,
@@ -26,6 +27,7 @@ import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField
 import { WorkspaceMembersPanel } from "@/components/workspaces/WorkspaceMembersPanel";
 import { WorkspaceConnectorsTab } from "@/components/workspaces/WorkspaceConnectorsTab";
 import type { WorkspaceDetail, WorkspaceMemoryMode } from "@/api/workspaces";
+import { workspacesApi } from "@/api/workspaces";
 import {
   useUpdateWorkspace,
   useWorkspaceDrive,
@@ -525,7 +527,34 @@ function SettingsTab({
   const [memProviderId, setMemProviderId] = useState(
     workspace.memory_provider_id ?? null
   );
+  const [exporting, setExporting] = useState(false);
   const update = useUpdateWorkspace(workspace.id);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const blob = await workspacesApi.exportZip(workspace.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `promptly-workspace-${workspace.title
+        .replace(/[^\w\- ]+/g, "_")
+        .slice(0, 60)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      await confirm({
+        title: "Export failed",
+        message: "The bundle couldn't be built — try again in a moment.",
+        confirmLabel: "OK",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const dirty =
     title.trim() !== workspace.title ||
@@ -751,6 +780,33 @@ function SettingsTab({
           />
             </>
           )}
+        </section>
+      )}
+
+      {isOwner && (
+        <section className="space-y-3 border-t border-[var(--border)] pt-6">
+          <h3 className="text-sm font-semibold">Export</h3>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              leftIcon={
+                exporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )
+              }
+              onClick={() => void handleExport()}
+              disabled={exporting}
+            >
+              {exporting ? "Preparing bundle..." : "Export workspace (.zip)"}
+            </Button>
+          </div>
+          <p className="text-xs text-[var(--text-muted)]">
+            Everything in one archive: notes as Markdown, boards and sheets
+            as CSV, chat transcripts, pinned files, and a manifest. Good for
+            backups, hand-offs, and records requests.
+          </p>
         </section>
       )}
 

@@ -42,6 +42,16 @@ const EVENT_LABELS: Record<string, string> = {
   mfa_device_trusted: "Device trusted",
   mfa_device_revoked: "Device revoked",
   app_settings_changed: "App settings changed",
+  // Batch 6 — workspace content lifecycle.
+  workspace_created: "Workspace created",
+  workspace_deleted: "Workspace deleted",
+  workspace_archived: "Workspace archived",
+  workspace_unarchived: "Workspace unarchived",
+  workspace_exported: "Workspace exported",
+  workspace_imported: "Workspace imported",
+  workspace_share_created: "Workspace shared",
+  workspace_share_revoked: "Workspace share revoked",
+  workspace_item_deleted: "Workspace item deleted",
 };
 
 /** Filter dropdown options. Order matters — top items are most-used. */
@@ -64,6 +74,13 @@ const EVENT_FILTERS: { value: string; label: string }[] = [
   { value: "mfa_backup_used", label: EVENT_LABELS.mfa_backup_used },
   { value: "mfa_device_trusted", label: EVENT_LABELS.mfa_device_trusted },
   { value: "app_settings_changed", label: EVENT_LABELS.app_settings_changed },
+  { value: "workspace_created", label: EVENT_LABELS.workspace_created },
+  { value: "workspace_deleted", label: EVENT_LABELS.workspace_deleted },
+  { value: "workspace_exported", label: EVENT_LABELS.workspace_exported },
+  { value: "workspace_imported", label: EVENT_LABELS.workspace_imported },
+  { value: "workspace_share_created", label: EVENT_LABELS.workspace_share_created },
+  { value: "workspace_share_revoked", label: EVENT_LABELS.workspace_share_revoked },
+  { value: "workspace_item_deleted", label: EVENT_LABELS.workspace_item_deleted },
 ];
 
 export function AuditLogPanel() {
