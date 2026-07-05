@@ -97,6 +97,163 @@ export interface PlanningProgress {
   error: string | null;
 }
 
+// ---------------------------------------------------------------------
+// Team Learning (L1) — workspace courses + enrollments.
+// ---------------------------------------------------------------------
+export type CourseStatus = "draft" | "published" | "archived";
+
+export interface CourseUnitPayload {
+  title: string;
+  description?: string | null;
+  learning_objectives: string[];
+  source_file_ids: string[];
+}
+
+export interface CourseUnit extends CourseUnitPayload {
+  id: string;
+  order_index: number;
+}
+
+export interface CourseSummary {
+  id: string;
+  workspace_id: string;
+  title: string;
+  brief: string;
+  difficulty_preset: string | null;
+  status: CourseStatus;
+  unit_count: number;
+  enrollment_count: number;
+  drafting_error: string | null;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CourseDetail extends CourseSummary {
+  source_file_ids: string[];
+  unit_mastery_floor: number;
+  exam_pass_score: number;
+  units: CourseUnit[];
+}
+
+export interface CourseDraftProgress {
+  status: CourseStatus;
+  drafting: boolean;
+  stage: string | null;
+  units_drafted: number;
+  unit_count: number;
+  error: string | null;
+}
+
+export interface CourseEnrollment {
+  id: string;
+  course_id: string;
+  learner_user_id: string;
+  learner_name: string | null;
+  assigned_by: string | null;
+  project_id: string;
+  due_at: string | null;
+  status: string;
+  created_at: string;
+}
+
+export const courseApi = {
+  async create(payload: {
+    workspace_id: string;
+    title: string;
+    brief: string;
+    difficulty_preset?: string | null;
+    source_file_ids?: string[];
+    draft_with_ai?: boolean;
+  }): Promise<CourseDetail> {
+    const { data } = await apiClient.post<CourseDetail>(
+      "/study/courses",
+      payload
+    );
+    return data;
+  },
+  async list(workspaceId: string): Promise<CourseSummary[]> {
+    const { data } = await apiClient.get<CourseSummary[]>("/study/courses", {
+      params: { workspace_id: workspaceId },
+    });
+    return data;
+  },
+  async get(id: string): Promise<CourseDetail> {
+    const { data } = await apiClient.get<CourseDetail>(`/study/courses/${id}`);
+    return data;
+  },
+  async draftProgress(id: string): Promise<CourseDraftProgress> {
+    const { data } = await apiClient.get<CourseDraftProgress>(
+      `/study/courses/${id}/draft-progress`
+    );
+    return data;
+  },
+  async redraft(id: string): Promise<CourseDraftProgress> {
+    const { data } = await apiClient.post<CourseDraftProgress>(
+      `/study/courses/${id}/redraft`
+    );
+    return data;
+  },
+  async update(
+    id: string,
+    payload: Partial<{
+      title: string;
+      brief: string;
+      difficulty_preset: string | null;
+      source_file_ids: string[];
+      unit_mastery_floor: number;
+      exam_pass_score: number;
+    }>
+  ): Promise<CourseDetail> {
+    const { data } = await apiClient.patch<CourseDetail>(
+      `/study/courses/${id}`,
+      payload
+    );
+    return data;
+  },
+  async replaceUnits(
+    id: string,
+    units: CourseUnitPayload[]
+  ): Promise<CourseDetail> {
+    const { data } = await apiClient.put<CourseDetail>(
+      `/study/courses/${id}/units`,
+      units
+    );
+    return data;
+  },
+  async publish(id: string): Promise<CourseDetail> {
+    const { data } = await apiClient.post<CourseDetail>(
+      `/study/courses/${id}/publish`
+    );
+    return data;
+  },
+  async archive(id: string): Promise<CourseDetail> {
+    const { data } = await apiClient.post<CourseDetail>(
+      `/study/courses/${id}/archive`
+    );
+    return data;
+  },
+  async remove(id: string): Promise<void> {
+    await apiClient.delete(`/study/courses/${id}`);
+  },
+  async enroll(
+    id: string,
+    payload: { user_id: string; due_at?: string | null }
+  ): Promise<CourseEnrollment> {
+    const { data } = await apiClient.post<CourseEnrollment>(
+      `/study/courses/${id}/enroll`,
+      payload
+    );
+    return data;
+  },
+  async enrollments(id: string): Promise<CourseEnrollment[]> {
+    const { data } = await apiClient.get<CourseEnrollment[]>(
+      `/study/courses/${id}/enrollments`
+    );
+    return data;
+  },
+};
+
 export const studyApi = {
   async listProjects(
     params: ListProjectsParams = {}

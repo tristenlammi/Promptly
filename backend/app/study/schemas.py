@@ -146,6 +146,9 @@ class StudyProjectSummary(BaseModel):
     # the topics list.
     total_units: int = 0
     completed_units: int = 0
+    # Team Learning (L1): set when this topic was assigned from a workspace
+    # course — the UI badges it and the tutor stays on the authored rails.
+    source_course_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -316,6 +316,7 @@ from app.notifications.router import router as notifications_router  # noqa: E40
 from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
 from app.study.router import router as study_router  # noqa: E402
+from app.study.courses_router import router as study_courses_router  # noqa: E402
 from app.memory.router import router as memory_router  # noqa: E402
 from app.tasks.router import router as tasks_router  # noqa: E402
 from app.voice.router import router as voice_router  # noqa: E402
@@ -442,6 +443,10 @@ app.include_router(
     tags=["local-models"],
 )
 app.include_router(study_router, prefix="/api/study", tags=["study"])
+# Team Learning (Study L1): workspace courses + enrollments.
+app.include_router(
+    study_courses_router, prefix="/api/study", tags=["study-courses"]
+)
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
 # Voice — speech-to-text dictation (Phase 1). POST /api/voice/transcribe.

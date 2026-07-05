@@ -1573,6 +1573,21 @@ def build_unit_system_prompt(
     else:
         diagnostic_block = ""
 
+    # Assigned-course rails (L1, principle 6): the curriculum was authored
+    # and approved by a lead — the tutor adapts pacing/examples/remediation
+    # INSIDE units but never restructures the plan. Reuses the diagnostic
+    # slot (always empty here: course projects start calibrated).
+    if getattr(project, "source_course_id", None) is not None:
+        diagnostic_block = (
+            "## Assigned course\n"
+            "This topic was assigned from a course authored by the student's "
+            "team lead. The unit plan is fixed: do NOT emit "
+            "`insert_prerequisites` or propose restructuring the plan. If the "
+            "student is missing a prerequisite, remediate inside this unit "
+            "with simpler groundwork, and tell them the gap is worth "
+            "mentioning to whoever assigned the course."
+        )
+
     staleness_block = _build_staleness_block(unit)
 
     learner_profile_block = _format_learner_profile_block(
@@ -3291,6 +3306,16 @@ async def _apply_single_capture(
     if cap.tag == "unit_action" and unit is not None:
         action_type = str(payload.get("type", "")).lower()
         if action_type == "insert_prerequisites":
+            # Adaptivity rails (L1, principle 6): a project materialised
+            # from a published course runs the lead-authored curriculum —
+            # the tutor may not restructure it. Remediate in-unit instead;
+            # the L2 gap inbox is how the lead learns a prereq is missing.
+            if getattr(project, "source_course_id", None) is not None:
+                logger.info(
+                    "insert_prerequisites ignored on course project %s",
+                    project.id,
+                )
+                return
             # Capture the pre-insert calibration source so we can
             # tell "user skipped" from "tutor already set" after
             # the handler flips the project forward.

@@ -101,6 +101,18 @@ class StudyProject(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Team Learning (L1): set when this project was materialised from a
+    # published workspace course (one per enrollment). Non-null puts the
+    # tutor on rails — the authored curriculum can't be restructured
+    # (``insert_prerequisites`` no-ops; remediation stays in-unit). SET NULL
+    # on course deletion so the learner's progress survives as a personal
+    # topic.
+    source_course_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("study_courses.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     def __repr__(self) -> str:
         return f"<StudyProject id={self.id} title={self.title!r} status={self.status}>"
 
@@ -718,3 +730,150 @@ class StudyMaterial(UUIDPKMixin, Base):
 
     def __repr__(self) -> str:
         return f"<StudyMaterial project={self.study_project_id} file={self.user_file_id} status={self.indexing_status}>"
+
+
+# ======================================================================
+# Team Learning (L1) — authored courses assigned to workspace members.
+# A Course is the workspace-owned, lead-authored artifact (what is
+# taught); an Enrollment materialises it into a per-learner
+# StudyProject (one person's progress) so the entire existing engine —
+# orchestrator, SM-2, gates, exams — runs unchanged. See
+# docs/study-collab-plan.md.
+# ======================================================================
+
+
+class StudyCourse(UUIDPKMixin, TimestampMixin, Base):
+    """A lead-authored course blueprint, scoped to a workspace.
+
+    Lifecycle: ``draft`` (AI-drafted, being edited) → ``published``
+    (assignable; blueprint edits stop) → ``archived``. Deleting a course
+    SET-NULLs the materialised projects' ``source_course_id`` so learner
+    progress survives as personal topics.
+    """
+
+    __tablename__ = "study_courses"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    # The lead's description of what the course should teach — doubles as
+    # the planner brief for AI drafting and the materialised project's
+    # ``learning_request``.
+    brief: Mapped[str] = mapped_column(Text, nullable=False)
+    # Difficulty preset applied to every learner: one of the existing
+    # ``beginner`` / ``some_exposure`` / ``refresher`` levels.
+    difficulty_preset: Mapped[str | None] = mapped_column(
+        String(24), nullable=True
+    )
+    # Source workspace files the course teaches from (UserFile ids as
+    # strings). Copied onto each enrollment as study materials so lessons
+    # are grounded + cited (L0.5).
+    source_file_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list, server_default="{}"
+    )
+    # Authored passing criteria. Stored now, surfaced in the editor;
+    # engine enforcement of custom thresholds lands with the L2
+    # dashboard (defaults match the engine: floor 75, exam pass 70).
+    unit_mastery_floor: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=75, server_default="75"
+    )
+    exam_pass_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=70, server_default="70"
+    )
+    # draft → published → archived
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="draft", server_default="draft"
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Set while the AI blueprint draft runs / when it fails, mirroring
+    # StudyProject.planning_error so the editor can retry.
+    drafting_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<StudyCourse id={self.id} title={self.title!r} status={self.status}>"
+
+
+class StudyCourseUnit(UUIDPKMixin, TimestampMixin, Base):
+    """One unit in a course blueprint — the authored curriculum row.
+
+    Materialised into per-learner ``StudyUnit`` rows on enrollment.
+    """
+
+    __tablename__ = "study_course_units"
+
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    learning_objectives: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list, server_default="{}"
+    )
+    # Optional per-unit source anchors (UserFile ids) — which documents
+    # this unit teaches from. Superset-checked against the course's
+    # source files at publish time.
+    source_file_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list, server_default="{}"
+    )
+
+    def __repr__(self) -> str:
+        return f"<StudyCourseUnit course={self.course_id} idx={self.order_index} title={self.title!r}>"
+
+
+class StudyEnrollment(UUIDPKMixin, TimestampMixin, Base):
+    """One learner's assignment to a published course.
+
+    ``project_id`` points at the materialised :class:`StudyProject` the
+    learner actually studies in (their own row — the engine is unchanged).
+    Enrollment rows carry the team-side state (who assigned, due date,
+    rollup status) that the L2 dashboard reads.
+    """
+
+    __tablename__ = "study_enrollments"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id", "learner_user_id", name="uq_enrollment_course_learner"
+        ),
+    )
+
+    course_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    learner_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    assigned_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # The learner's materialised project. CASCADE: deleting the project
+    # (learner deletes the topic) removes the enrollment — the dashboard
+    # then shows it as unassigned rather than pointing at nothing.
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("study_projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # assigned → in_progress → completed (rollup maintained from the
+    # learner's project/units; overdue is derived from due_at at read time).
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="assigned", server_default="assigned"
+    )
+
+    def __repr__(self) -> str:
+        return f"<StudyEnrollment course={self.course_id} learner={self.learner_user_id}>"
