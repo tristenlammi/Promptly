@@ -72,6 +72,9 @@ export interface Task {
   last_run_at: string | null;
   last_status: TaskRunStatus | null;
   latest_run: TaskRunSummary | null;
+  /** Credential segment of the inbound-hook URL. Minted on first save of a
+   *  flow containing a webhook trigger; only ever returned to the owner. */
+  webhook_secret: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -215,6 +218,7 @@ export const tasksApi = {
 export type FlowNodeType =
   | "trigger.schedule"
   | "trigger.manual"
+  | "trigger.webhook"
   | "ai.prompt"
   | "ai.summarise"
   | "ai.extract"
@@ -395,4 +399,6 @@ export interface BoardCardOutputData {
   board_item_id: string | null;
   column: string;
   priority: string;
+  /** Update the live card with the same title instead of filing a duplicate. */
+  update_existing?: boolean;
 }

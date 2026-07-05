@@ -298,6 +298,7 @@ from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E40
 from app.groups.router import router as groups_admin_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.chat.proposals_router import router as proposals_router  # noqa: E402
+from app.tasks.hooks_router import router as hooks_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
@@ -336,6 +337,9 @@ app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(
     proposals_router, prefix="/api/chat", tags=["workspace-proposals"]
 )
+# Inbound automation webhooks (0136) — the per-task random secret in the
+# path is the credential; see hooks_router for the safety model.
+app.include_router(hooks_router, prefix="/api/hooks", tags=["hooks"])
 app.include_router(
     saved_prompts_router, prefix="/api/saved-prompts", tags=["saved-prompts"]
 )

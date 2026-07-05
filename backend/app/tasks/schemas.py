@@ -143,6 +143,11 @@ class TaskResponse(BaseModel):
     # True when a stored Advanced flow graph exists (drives Simple vs. Advanced
     # UI). See Task.is_advanced / tasks.flow_graph.
     is_advanced: bool = False
+    # Inbound-hook credential (0136). Only ever serialised to the owner
+    # (every /tasks endpoint is owner-scoped); the editor renders the
+    # /api/hooks/{id}/{secret} URL from it. NULL until a webhook trigger
+    # is saved.
+    webhook_secret: str | None = None
 
     next_run_at: datetime | None
     last_run_at: datetime | None

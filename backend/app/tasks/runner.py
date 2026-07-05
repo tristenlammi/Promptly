@@ -562,6 +562,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 graph=graph,
                 user=user,
                 run_started_at=run.started_at,
+                # Webhook runs (0136) carry the inbound request body; the
+                # flow reads it as {{trigger.payload}} / {{trigger.json.*}}.
+                trigger_payload=run.trigger_payload,
                 db=db,
             )
             run.output_markdown = text
@@ -622,6 +625,41 @@ async def execute_run(run_id: uuid.UUID) -> None:
                     await db.commit()
             except Exception:  # pragma: no cover — pruning is best-effort
                 logger.warning("task run retention sweep failed", exc_info=True)
+
+        # Consecutive-failure alert (5.5): three failed runs in a row is a
+        # broken automation, not bad luck — say so once per streak (the
+        # check fires exactly at the third, not on every later failure).
+        if final_status == "failed":
+            try:
+                recent = (
+                    (
+                        await db.execute(
+                            select(TaskRun.status)
+                            .where(TaskRun.task_id == task_id)
+                            .order_by(TaskRun.created_at.desc())
+                            .limit(3)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                if len(recent) == 3 and all(s == "failed" for s in recent):
+                    from app.notifications import notify_user
+
+                    await notify_user(
+                        user_id=owner_id,
+                        category="task_complete",
+                        title="Automation is failing repeatedly",
+                        body=(
+                            f"'{title}' has failed 3 times in a row — it "
+                            "likely needs attention, not another retry."
+                        ),
+                        url=f"/tasks/{task_id}",
+                        tag=f"promptly-task-streak-{task_id}",
+                        workspace_id=task_workspace_id,
+                    )
+            except Exception:  # pragma: no cover — alerting is best-effort
+                logger.warning("failure-streak alert failed", exc_info=True)
 
         if notify:
             try:

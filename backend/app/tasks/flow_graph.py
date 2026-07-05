@@ -44,6 +44,10 @@ class NodeType:
 
     TRIGGER_SCHEDULE = "trigger.schedule"
     TRIGGER_MANUAL = "trigger.manual"
+    # Inbound-webhook trigger (0136): POST /api/hooks/{task_id}/{secret}
+    # starts a run; the request body reaches the flow as
+    # ``{{trigger.payload}}``. Connects CI, forms, monitoring, Zapier…
+    TRIGGER_WEBHOOK = "trigger.webhook"
     AI_PROMPT = "ai.prompt"
     # AI presets — specialised prompts that "just work" on the upstream text.
     SUMMARISE = "ai.summarise"
@@ -397,6 +401,9 @@ class BoardCardOutputData(BaseModel):
     board_item_id: str | None = None
     column: str = "todo"  # board column / status id
     priority: str = "medium"  # low | medium | high
+    # Update-in-place (5.4): refresh a live same-titled card on this board
+    # instead of filing a duplicate — the recurring-automation mode.
+    update_existing: bool = False
 
 
 # ---------------------------------------------------------------------
@@ -504,7 +511,10 @@ def is_simple_graph(graph: FlowGraph) -> bool:
     """True when a graph is the canonical linear shape a Simple Task can hold:
     one schedule/manual trigger → one ai.prompt → one output.report, wired in a
     line. This is what the UI checks to decide whether "Simple mode" can still
-    represent a flow (or whether it must open in the Advanced editor)."""
+    represent a flow (or whether it must open in the Advanced editor).
+
+    A webhook trigger is never "simple" — Simple tasks are driven by the
+    schedule columns, which a webhook flow doesn't have."""
     triggers = [
         n
         for n in graph.nodes
@@ -546,7 +556,7 @@ def is_linear_flow(graph: FlowGraph) -> bool:
     triggers = [
         n
         for n in graph.nodes
-        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK)
     ]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
@@ -631,7 +641,7 @@ def is_executable_graph(graph: FlowGraph, *, require_output: bool = True) -> boo
     triggers = [
         n
         for n in graph.nodes
-        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK)
     ]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
@@ -709,7 +719,7 @@ def ordered_flow_nodes(graph: FlowGraph) -> list[FlowNode]:
     trig = [
         n
         for n in graph.nodes
-        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL)
+        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK)
     ][0]
     ordered: list[FlowNode] = []
     cur = trig.id

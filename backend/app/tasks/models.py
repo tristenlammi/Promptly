@@ -96,6 +96,14 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
         JSONB, nullable=True
     )
 
+    # Inbound-webhook credential (0136). NULL until the owner adds a
+    # webhook trigger; the hook URL is /api/hooks/{task_id}/{secret}.
+    # Stored (not derived from SECRET_KEY) so one task's leaked URL can
+    # be rotated without touching anything else.
+    webhook_secret: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -175,10 +183,13 @@ class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending"
     )
-    # schedule | manual
+    # schedule | manual | webhook
     trigger: Mapped[str] = mapped_column(
         String(10), nullable=False, default="schedule"
     )
+    # Inbound request body for webhook-triggered runs (0136) — exposed to
+    # the flow as ``{{trigger.payload}}``. NULL for schedule/manual runs.
+    trigger_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -153,6 +153,12 @@ def _step_context(
         "date": now_local[:10],
         "time": now_local[11:16] if len(now_local) >= 16 else "",
     }
+    # Webhook payloads that are JSON get field access anywhere in the flow:
+    # ``{{trigger.json.<path>}}`` — not just on the node right after the trigger.
+    trig_struct = _try_json(trigger_payload) if trigger_payload else None
+    if trig_struct is not None:
+        ctx["trigger.json"] = _json_dumps(trig_struct)
+        _flatten_json(trig_struct, "trigger.json", ctx)
     for nid, txt in outputs.items():
         ctx[f"node_{nid}.output"] = txt
     # Structured (JSON) field access.
@@ -443,26 +449,62 @@ async def _file_board_card(
     if isinstance(lb, list) and lb:
         label_ids = _resolve_labels(board, [str(x) for x in lb]) or None
 
-    max_pos = await db.scalar(
-        select(func.max(WorkspaceTask.position)).where(
-            WorkspaceTask.workspace_id == task.workspace_id
+    # Update-in-place (5.4): recurring automations shouldn't litter the
+    # board with near-duplicates — with ``update_existing`` on, a live card
+    # with the same title on this board is refreshed (and moved to the
+    # configured column) instead of duplicated.
+    existing = None
+    if getattr(data, "update_existing", False):
+        existing = (
+            (
+                await db.execute(
+                    select(WorkspaceTask).where(
+                        WorkspaceTask.board_item_id == board_id,
+                        WorkspaceTask.status != "done",
+                        func.lower(WorkspaceTask.title) == title.lower(),
+                    )
+                )
+            )
+            .scalars()
+            .first()
         )
-    )
-    card = WorkspaceTask(
-        workspace_id=task.workspace_id,
-        board_item_id=board_id,
-        title=title,
-        description=description,
-        status=data.column or "todo",
-        priority=priority,
-        subtasks=subtasks,
-        labels=label_ids,
-        links=links,
-        due_at=due_at,
-        position=float(max_pos or 0.0) + 1.0,
-        created_by=task.user_id,
-    )
-    db.add(card)
+    if existing is not None:
+        existing.description = description
+        existing.priority = priority
+        if data.column:
+            existing.status = data.column
+        if due_at is not None:
+            existing.due_at = due_at
+        if subtasks is not None:
+            existing.subtasks = subtasks
+        if label_ids is not None:
+            existing.labels = label_ids
+        if links is not None:
+            existing.links = links
+        card = existing
+        verb = "Updated"
+    else:
+        max_pos = await db.scalar(
+            select(func.max(WorkspaceTask.position)).where(
+                WorkspaceTask.workspace_id == task.workspace_id
+            )
+        )
+        card = WorkspaceTask(
+            workspace_id=task.workspace_id,
+            board_item_id=board_id,
+            title=title,
+            description=description,
+            status=data.column or "todo",
+            priority=priority,
+            subtasks=subtasks,
+            labels=label_ids,
+            links=links,
+            due_at=due_at,
+            position=float(max_pos or 0.0) + 1.0,
+            created_by=task.user_id,
+        )
+        db.add(card)
+        verb = "Filed"
     await db.commit()
     # Keep the board's RAG text fresh (best-effort; owns its own session).
     try:
@@ -482,7 +524,7 @@ async def _file_board_card(
     if links:
         extras.append(f"{len(links)} link(s)")
     suffix = f" ({', '.join(extras)})" if extras else ""
-    return f'Filed "{title}" on "{board.title or "board"}"{suffix}.'
+    return f'{verb} "{title}" on "{board.title or "board"}"{suffix}.'
 
 
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
@@ -1368,7 +1410,11 @@ async def run_graph_flow(
         if run_set is not None and nid not in run_set:
             continue
 
-        if node.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL):
+        if node.type in (
+            NodeType.TRIGGER_SCHEDULE,
+            NodeType.TRIGGER_MANUAL,
+            NodeType.TRIGGER_WEBHOOK,
+        ):
             active.add(nid)
             outputs[nid] = trigger_payload or ""
             structured[nid] = _try_json(trigger_payload or "")

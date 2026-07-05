@@ -5,6 +5,7 @@ to another user 404s (not 403s) so its existence isn't probeable.
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -179,6 +180,7 @@ def _serialize(
         notify=task.notify,
         retention_runs=task.retention_runs,
         is_advanced=task.is_advanced,
+        webhook_secret=task.webhook_secret,
         next_run_at=task.next_run_at,
         last_run_at=task.last_run_at,
         last_status=task.last_status,
@@ -555,8 +557,22 @@ async def put_task_graph(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         )
-    # The schedule may have changed — recompute the next fire time.
-    task.next_run_at = _compute_next(task)
+    # The schedule may have changed — recompute the next fire time. A flow
+    # whose only trigger is a webhook (0136) must never fire on the clock:
+    # the stale schedule columns are just a projection, so park next_run_at.
+    from app.tasks.flow_graph import NodeType as _NT
+
+    stored = task.flow_graph
+    has_schedule_trigger = stored is None or any(
+        n.get("type") == _NT.TRIGGER_SCHEDULE for n in stored.get("nodes", [])
+    )
+    task.next_run_at = _compute_next(task) if has_schedule_trigger else None
+    # A webhook trigger needs its inbound credential minted exactly once.
+    has_webhook_trigger = stored is not None and any(
+        n.get("type") == _NT.TRIGGER_WEBHOOK for n in stored.get("nodes", [])
+    )
+    if has_webhook_trigger and not task.webhook_secret:
+        task.webhook_secret = secrets.token_urlsafe(32)[:64]
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(task)

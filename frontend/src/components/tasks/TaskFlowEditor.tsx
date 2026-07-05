@@ -58,6 +58,7 @@ import {
   Timer,
   Trash2,
   TextQuote,
+  Webhook,
   Zap,
 } from "lucide-react";
 
@@ -379,6 +380,7 @@ function nodeModalTitle(type?: string): string {
     type === "output.sheet"
   )
     return "Output";
+  if (type === "trigger.webhook") return "Webhook";
   if (type?.startsWith("trigger.")) return "Schedule";
   return "Node";
 }
@@ -516,6 +518,24 @@ function NodeShell({
 function TriggerNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as ScheduleTriggerData;
   const detail = useDetailed(id, type ?? "trigger.schedule", data);
+  if (type === "trigger.webhook") {
+    return (
+      <NodeShell
+        icon={<Webhook className="h-3.5 w-3.5" />}
+        label="Webhook"
+        accent="var(--success)"
+        selected={selected}
+        hasOut
+      >
+        {detail ?? (
+          <>
+            <div className="truncate text-[var(--text)]">POST to fire</div>
+            <div className="mt-0.5 truncate">URL in the trigger settings</div>
+          </>
+        )}
+      </NodeShell>
+    );
+  }
   return (
     <NodeShell
       icon={<Clock className="h-3.5 w-3.5" />}
@@ -1093,6 +1113,7 @@ function SheetOutNode({ id, type, data, selected }: NodeProps) {
 const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
+  "trigger.webhook": TriggerNode,
   "ai.prompt": AINode,
   "ai.summarise": SummariseNode,
   "ai.extract": ExtractNode,
@@ -1494,6 +1515,39 @@ export function TaskFlowEditor({
       if (selectedId) setOutputTypeFor(selectedId, type);
     },
     [selectedId, setOutputTypeFor]
+  );
+
+  // Trigger kind switch (5.2): the flow always has exactly one trigger —
+  // this swaps what fires it (clock vs. inbound webhook) in place,
+  // keeping the node id + edges.
+  const setTriggerType = useCallback(
+    (type: string) => {
+      if (!selectedId) return;
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.id !== selectedId) return n;
+          if (type === "trigger.webhook") {
+            return { ...n, type, data: {} };
+          }
+          return {
+            ...n,
+            type,
+            data: {
+              frequency: "daily",
+              hour: 9,
+              minute: 0,
+              weekday: null,
+              day_of_month: null,
+              timezone:
+                Intl.DateTimeFormat().resolvedOptions().timeZone ||
+                "Australia/Brisbane",
+            },
+          };
+        })
+      );
+      setDirty(true);
+    },
+    [selectedId, setNodes]
   );
 
   const aiNodes = nodes.filter((n) => n.type === "ai.prompt");
@@ -2012,6 +2066,12 @@ export function TaskFlowEditor({
             }
             onPatch={patchSelected}
             onSetOutputType={setOutputType}
+            onSetTriggerType={setTriggerType}
+            webhookUrl={
+              task?.webhook_secret
+                ? `${window.location.origin}/api/hooks/${task.id}/${task.webhook_secret}`
+                : null
+            }
             onDelete={() => {
               removeNode(selected.id);
               setSelectedId(null);
@@ -2041,6 +2101,8 @@ function NodeInspector({
   canDelete,
   onPatch,
   onSetOutputType,
+  onSetTriggerType,
+  webhookUrl,
   onDelete,
   inline,
 }: {
@@ -2060,6 +2122,10 @@ function NodeInspector({
   canDelete: boolean;
   onPatch: (patch: Record<string, unknown>) => void;
   onSetOutputType: (type: string) => void;
+  /** Swap the trigger kind in place (schedule ⇄ webhook). */
+  onSetTriggerType?: (type: string) => void;
+  /** Full inbound-hook URL once the secret is minted (after first save). */
+  webhookUrl?: string | null;
   onDelete: () => void;
   inline?: boolean;
 }) {
@@ -3097,6 +3163,28 @@ function NodeInspector({
                     </select>
                   </label>
                 </div>
+                <label className="flex items-start gap-2 text-xs font-medium text-[var(--text-muted)]">
+                  <input
+                    type="checkbox"
+                    checked={
+                      (node.data as unknown as BoardCardOutputData)
+                        .update_existing ?? false
+                    }
+                    onChange={(e) =>
+                      onPatch({ update_existing: e.target.checked })
+                    }
+                    className="mt-0.5 accent-[var(--accent)]"
+                  />
+                  <span>
+                    Update the existing card with the same title
+                    <span className="mt-0.5 block font-normal text-[10px] leading-snug">
+                      If a live (not-done) card on this board already has the
+                      same title, refresh its description, priority, column and
+                      details instead of filing a duplicate — good for recurring
+                      status cards.
+                    </span>
+                  </span>
+                </label>
               </>
             ))}
 
@@ -3198,8 +3286,62 @@ function NodeInspector({
           const tzOptions = Array.from(
             new Set([...TIMEZONES, s.timezone].filter(Boolean))
           );
+          const isWebhook = node.type === "trigger.webhook";
+          const firesOn = (
+            <label className="text-xs font-medium text-[var(--text-muted)]">
+              Fires on
+              <select
+                value={isWebhook ? "trigger.webhook" : "trigger.schedule"}
+                className={selCls}
+                onChange={(e) => onSetTriggerType?.(e.target.value)}
+              >
+                <option value="trigger.schedule">A schedule</option>
+                <option value="trigger.webhook">An inbound webhook</option>
+              </select>
+            </label>
+          );
+          if (isWebhook) {
+            return (
+              <>
+                {firesOn}
+                {webhookUrl ? (
+                  <div>
+                    <div className="text-xs font-medium text-[var(--text-muted)]">
+                      Webhook URL
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <code className="min-w-0 flex-1 truncate rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[11px] text-[var(--text)]">
+                        {webhookUrl}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void navigator.clipboard.writeText(webhookUrl)
+                        }
+                        className="shrink-0 rounded-md border border-[var(--border)] px-2 py-1.5 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[10px] leading-snug text-[var(--text-muted)]">
+                      POST anything to this URL to start a run. The request
+                      body reaches the flow as{" "}
+                      <code>{"{{trigger.payload}}"}</code> (JSON fields as{" "}
+                      <code>{"{{trigger.json.<field>}}"}</code>). Anyone with
+                      the URL can fire it — treat it like a password.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Save the flow to mint this automation's webhook URL.
+                  </p>
+                )}
+              </>
+            );
+          }
           return (
             <>
+              {firesOn}
               <label className="text-xs font-medium text-[var(--text-muted)]">
                 Frequency
                 <select
