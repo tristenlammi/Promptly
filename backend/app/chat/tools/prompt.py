@@ -115,6 +115,17 @@ def build_tools_system_prompt(categories: set[str]) -> str:
             "snippet is too short to answer confidently, call `fetch_url` "
             "on its URL to read the page in full before replying."
         )
+    if "agents" in categories:
+        guidelines.append(
+            "- When a request splits into several INDEPENDENT lines of "
+            "research — comparing multiple products/candidates/options, "
+            "or gathering distinct facets that don't depend on each "
+            "other — call `run_agents` with one specific task per "
+            "sub-agent (2–4) to research them in parallel, then "
+            "synthesise their briefs into one cited answer. For a single "
+            "fact or when each step needs the previous step's result, "
+            "use `web_search` / `fetch_url` directly instead."
+        )
     guidelines.append(
         "- Briefly summarise what you produced after the tool returns "
         "(one or two sentences); don't paste the full content back."

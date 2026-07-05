@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Search,
+  Users,
   Wrench,
   X,
 } from "lucide-react";
@@ -77,6 +78,11 @@ const TOOL_INFO: Record<
     noun: (n) => (n === 1 ? "code run" : "code runs"),
     icon: Code2,
   },
+  run_agents: {
+    verb: "Running agents",
+    noun: (n) => (n === 1 ? "agent fan-out" : "agent fan-outs"),
+    icon: Users,
+  },
 };
 
 const GENERIC_INFO = {
@@ -115,7 +121,14 @@ function stepDetail(step: ActivityStep): string | null {
   const meta = step.meta;
   const bits: string[] = [];
   if (meta) {
-    if (typeof meta.result_count === "number" && meta.result_count > 0) {
+    // run_agents reports agent_count + merged result_count; lead with
+    // the agent count so the row reads "4 agents · 12 sources".
+    if (step.name === "run_agents" && typeof meta.agent_count === "number") {
+      bits.push(`${meta.agent_count} agent${meta.agent_count === 1 ? "" : "s"}`);
+      if (typeof meta.result_count === "number" && meta.result_count > 0) {
+        bits.push(`${meta.result_count} source${meta.result_count === 1 ? "" : "s"}`);
+      }
+    } else if (typeof meta.result_count === "number" && meta.result_count > 0) {
       bits.push(`${meta.result_count} result${meta.result_count === 1 ? "" : "s"}`);
     }
     if (typeof meta.chart_count === "number" && meta.chart_count > 0) {
@@ -141,6 +154,8 @@ function formatElapsed(ms?: number | null): string | null {
  *  phrase; failures are folded into a trailing "· 1 failed". */
 function summarise(steps: ActivityStep[]): string {
   const okByTool = new Map<string, number>();
+  // Sum of agents fanned out across any run_agents calls, from meta.
+  let agentTotal = 0;
   let failed = 0;
   for (const s of steps) {
     if (s.status === "error") {
@@ -148,6 +163,9 @@ function summarise(steps: ActivityStep[]): string {
       continue;
     }
     okByTool.set(s.name, (okByTool.get(s.name) ?? 0) + 1);
+    if (s.name === "run_agents" && typeof s.meta?.agent_count === "number") {
+      agentTotal += s.meta.agent_count;
+    }
   }
   const clauses: string[] = [];
   for (const [name, count] of okByTool) {
@@ -155,7 +173,10 @@ function summarise(steps: ActivityStep[]): string {
     // "Searched the web", "read 2 pages" — first clause carries the
     // verb capitalised, later ones lower-case for the "and" join.
     const past = pastVerb(info.verb);
-    if (name === "web_search") {
+    if (name === "run_agents") {
+      const n = agentTotal || count;
+      clauses.push(`Ran ${n} agent${n === 1 ? "" : "s"} in parallel`);
+    } else if (name === "web_search") {
       clauses.push(count === 1 ? past : `${past} (${count}×)`);
     } else {
       clauses.push(`${past} ${count} ${info.noun(count)}`);
@@ -179,6 +200,8 @@ function pastVerb(verb: string): string {
       return "generated";
     case "Running code":
       return "ran";
+    case "Running agents":
+      return "ran agents";
     default:
       return "ran";
   }

@@ -17,6 +17,7 @@ from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
+from app.chat.tools.run_agents import RunAgentsTool
 from app.chat.tools.web_search import WebSearchTool
 from app.chat.tools.workspace_write import (
     ProposeBoardCardsTool,
@@ -41,6 +42,10 @@ REGISTRY: list[Tool] = [
     CodeInterpreterTool(),
     WebSearchTool(),
     FetchUrlTool(),
+    # Parallel research sub-agents (category "agents") — advertised only
+    # when Tools AND web search are both on, since each sub-agent's tool
+    # set is search-only.
+    RunAgentsTool(),
     # Workspace write-back proposals (Batch 4.1) — category "workspace",
     # only advertised in workspace chats.
     ProposeWorkspaceNoteTool(),

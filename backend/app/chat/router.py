@@ -4377,6 +4377,12 @@ async def _stream_generator(
                 enabled_categories.add("workspace")
         if web_search_mode != "off":
             enabled_categories.add("search")
+            # Parallel research sub-agents ride on both toggles: they
+            # need the Tools toggle (they're a heavyweight capability)
+            # and only make sense when web search is on, since each
+            # sub-agent's tool set is search-only.
+            if ctx.get("tools_enabled"):
+                enabled_categories.add("agents")
 
         tools_payload: list[dict[str, Any]] | None = (
             list_openai_tools(enabled_categories) if enabled_categories else None
