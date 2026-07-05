@@ -50,6 +50,15 @@ _MAX_MARKDOWN_CHARS = 100_000
 
 class GeneratePdfTool(Tool):
     name = "generate_pdf"
+    # A user turn legitimately produces one document, occasionally a
+    # revision or a split ("one PDF per chapter"). Three per turn covers
+    # that; without a cap, a looped model could render MAX_TOOL_HOPS
+    # PDFs (16 MB each) in a single turn and chew through the user's
+    # storage quota.
+    max_per_turn = 3
+    # xhtml2pdf typesets a 100k-char report in seconds; two minutes is
+    # deep in "something is wedged" territory.
+    timeout_seconds = 120.0
     description = (
         "Render a PDF file from Markdown and attach it to your reply. "
         "ONLY call this when the user explicitly asks for an actual "

@@ -93,6 +93,9 @@ class GenerateImageTool(Tool):
     # call once, react to the result, and call again on the *next*
     # user turn if iteration is needed.
     max_per_turn = 1
+    # Image providers routinely take 30-60s on busy models; three
+    # minutes marks the line between "slow" and "hung".
+    timeout_seconds = 180.0
     description = (
         "Generate (or edit) an image and attach it to your reply. "
         "Call this whenever the user asks for an image, picture, "

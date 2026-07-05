@@ -35,6 +35,7 @@ import logging
 from typing import Any
 
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
+from app.chat.tools.validation import clean_model_text
 from app.search.providers import SearchError, run_search
 from app.search.service import pick_search_provider
 
@@ -98,6 +99,9 @@ class WebSearchTool(Tool):
     # silently-binding constraint by accident. Admins can tune this
     # under Admin → Settings → Chat tool limits.
     max_per_turn = 5
+    # Provider adapters carry their own HTTP timeouts (~10s); this is
+    # the dispatch-layer backstop for a stalled provider or slow DNS.
+    timeout_seconds = 30.0
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         query = args.get("query")
@@ -152,13 +156,41 @@ class WebSearchTool(Tool):
                 },
             )
 
+        # Providers occasionally return non-web schemes (a misconfigured
+        # SearXNG can surface file:// or magnet: rows). Only http(s)
+        # results become citations the user can click.
+        results = [
+            r
+            for r in results
+            if str(r.url or "").lower().startswith(("http://", "https://"))
+        ]
+        if not results:
+            return ToolResult(
+                content=(
+                    f"No usable results for {query!r} via {provider.type} "
+                    "(every hit had a non-web URL). Tell the user the "
+                    "search came back empty and ask them to refine the "
+                    "query."
+                ),
+                sources=[],
+                meta={
+                    "provider": provider.type,
+                    "query": query,
+                    "result_count": 0,
+                },
+            )
+
         # Render the model-facing content. Numbered list keeps the
         # citation contract identical to the legacy "always" path so
-        # existing prompt habits (cite with [n]) keep working.
+        # existing prompt habits (cite with [n]) keep working. Titles
+        # and snippets are third-party text — scrub control characters
+        # and invisible/bidi code points before the model (or the
+        # sources JSONB) sees them.
         lines = [f"Search results for {query!r}:"]
         for idx, r in enumerate(results, start=1):
-            snippet = (r.snippet or "").strip().replace("\n", " ")
-            lines.append(f"[{idx}] {r.title}")
+            title = clean_model_text(r.title).strip()
+            snippet = clean_model_text(r.snippet).strip().replace("\n", " ")
+            lines.append(f"[{idx}] {title}")
             lines.append(f"    URL: {r.url}")
             if snippet:
                 lines.append(f"    Snippet: {snippet}")
@@ -170,7 +202,11 @@ class WebSearchTool(Tool):
         content = "\n".join(lines)
 
         sources = [
-            {"title": r.title, "url": r.url, "snippet": r.snippet}
+            {
+                "title": clean_model_text(r.title).strip(),
+                "url": r.url,
+                "snippet": clean_model_text(r.snippet).strip(),
+            }
             for r in results
         ]
 

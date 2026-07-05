@@ -45,6 +45,8 @@ class ProposeWorkspaceNoteTool(Tool):
     name = "propose_workspace_note"
     category = "workspace"
     max_per_turn = 3
+    # Pure DB write — anything past 30s means the pool is wedged.
+    timeout_seconds = 30.0
     description = (
         "Propose creating a new note in this chat's workspace from Markdown "
         "content. Use when the user asks to save, capture, or turn the "
@@ -111,6 +113,8 @@ class ProposeBoardCardsTool(Tool):
     name = "propose_board_cards"
     category = "workspace"
     max_per_turn = 3
+    # Pure DB write — anything past 30s means the pool is wedged.
+    timeout_seconds = 30.0
     description = (
         "Propose adding task cards to this workspace's board. Use when the "
         "user asks to capture action items, to-dos, or next steps as board "

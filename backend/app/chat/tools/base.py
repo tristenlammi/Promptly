@@ -119,6 +119,21 @@ class Tool(abc.ABC):
     # the user's budget against a runaway loop without lowering the
     # global hop limit for cheap tools (echo / attach_demo).
     max_per_turn: int | None = None
+    # Wall-clock budget for one ``run()`` invocation, enforced at the
+    # dispatch layer with ``asyncio.timeout``. ``None`` means the
+    # dispatcher trusts the tool's own internal timeouts (only
+    # appropriate when those exist and are tighter — see
+    # ``code_interpreter``, whose sandbox owns the budget). On expiry
+    # the call is cancelled and surfaced to the model as a controlled
+    # "timed out" tool error, so one hung DNS lookup or stalled
+    # provider can no longer wedge the whole turn.
+    timeout_seconds: float | None = None
+    # Cap on ``ToolResult.content`` (the string re-sent to the model on
+    # every subsequent hop of the turn). ``None`` falls back to the
+    # dispatcher's global safety net. Set this tighter on tools whose
+    # useful signal fits in less — the cheapest token you'll ever save
+    # is one you don't feed back eight times.
+    max_content_chars: int | None = None
 
     def to_openai_schema(self) -> dict[str, Any]:
         """Render this tool as an entry in OpenAI's ``tools[]`` array."""

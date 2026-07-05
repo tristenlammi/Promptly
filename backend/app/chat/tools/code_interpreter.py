@@ -64,6 +64,41 @@ _DATA_MIMES = {
     "application/x-parquet",
 }
 
+# Output-file gate. The sandbox is trusted-ish (our own container) but
+# defence-in-depth says we don't persist arbitrary blobs a compromised
+# or buggy sandbox hands back: no executables / scripts land in the
+# user's Drive with a download button on them. MIME is whitelisted
+# (prefixes + exact types) and the extension is deny-listed as a second
+# gate because ``application/octet-stream`` is a legitimate fallback
+# for e.g. parquet output.
+_ALLOWED_OUTPUT_MIME_PREFIXES = ("text/", "image/", "audio/", "video/")
+_ALLOWED_OUTPUT_MIMES = {
+    "application/json",
+    "application/pdf",
+    "application/zip",
+    "application/gzip",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/x-parquet",
+    "application/octet-stream",
+}
+_BLOCKED_OUTPUT_EXTS = {
+    ".exe", ".dll", ".so", ".dylib", ".msi", ".bat", ".cmd", ".ps1",
+    ".sh", ".com", ".scr", ".vbs", ".jar", ".apk", ".deb", ".rpm",
+    ".pyc",
+}
+
+
+def _output_allowed(name: str, mime: str) -> bool:
+    ext = os.path.splitext(name or "")[1].lower()
+    if ext in _BLOCKED_OUTPUT_EXTS:
+        return False
+    m = (mime or "").lower().split(";")[0].strip()
+    if any(m.startswith(p) for p in _ALLOWED_OUTPUT_MIME_PREFIXES):
+        return True
+    return m in _ALLOWED_OUTPUT_MIMES
+
 
 def _looks_like_data(f: UserFile) -> bool:
     ext = os.path.splitext(f.filename or "")[1].lower()
@@ -81,6 +116,11 @@ class CodeInterpreterTool(Tool):
     # Allow genuine iteration (write → inspect error → fix) within a
     # turn, but cap so a stuck model can't spin the sandbox forever.
     max_per_turn = 6
+    # timeout_seconds stays None ON PURPOSE: the sandbox owns the
+    # budget (settings.CODE_SANDBOX_TIMEOUT_S, admin-tunable) and the
+    # httpx client already waits timeout_s + 15. A static dispatch cap
+    # here would silently undercut an admin who raises the sandbox
+    # limit.
     description = (
         "Execute Python code in a secure, sandboxed environment and return "
         "stdout, errors, and any files produced. Use this ONLY when the "
@@ -156,6 +196,17 @@ class CodeInterpreterTool(Tool):
                 "The code interpreter isn't configured on this server. "
                 "Ask an admin to enable the sandbox service."
             )
+        # The sandbox fails closed without a shared secret, so an empty
+        # value here can only ever produce a confusing 503 from it.
+        # Surface the misconfiguration as a clear, actionable error
+        # instead. (Config normally mirrors SECRET_KEY into this at
+        # boot, so this should never fire on a healthy install.)
+        sandbox_secret = (settings.CODE_SANDBOX_SECRET or "").strip()
+        if not sandbox_secret:
+            raise ToolError(
+                "The code interpreter is disabled: no sandbox secret is "
+                "configured. Ask an admin to set CODE_SANDBOX_SECRET."
+            )
 
         # ---- Resolve input files (explicit ∪ auto-attached) ----
         files = await self._gather_input_files(ctx, args.get("input_file_ids"))
@@ -182,9 +233,7 @@ class CodeInterpreterTool(Tool):
         timeout_s = max(1, int(settings.CODE_SANDBOX_TIMEOUT_S or 30))
 
         # ---- Ship the job to the sandbox ----
-        headers = {}
-        if settings.CODE_SANDBOX_SECRET:
-            headers["X-Sandbox-Secret"] = settings.CODE_SANDBOX_SECRET
+        headers = {"X-Sandbox-Secret": sandbox_secret}
         try:
             async with httpx.AsyncClient(timeout=timeout_s + 15) as client:
                 resp = await client.post(
@@ -221,11 +270,21 @@ class CodeInterpreterTool(Tool):
         # ---- Persist produced files → attachment chips ----
         attachment_ids: list[uuid.UUID] = []
         produced_names: list[str] = []
+        skipped_names: list[str] = []
         chart_count = 0
         for out in outputs:
             name = str(out.get("name") or "output")
             mime = str(out.get("mime") or "application/octet-stream")
             content_b64 = out.get("content_b64") or ""
+            if not _output_allowed(name, mime):
+                logger.warning(
+                    "code_interpreter: refusing output %r (mime=%s) user=%s",
+                    name,
+                    mime,
+                    ctx.user.id,
+                )
+                skipped_names.append(name)
+                continue
             try:
                 blob = base64.b64decode(content_b64)
             except Exception:
@@ -255,6 +314,7 @@ class CodeInterpreterTool(Tool):
             stdout=stdout,
             stderr=stderr,
             produced_names=produced_names,
+            skipped_names=skipped_names,
         )
 
         errored = timed_out or (exit_code is not None and exit_code != 0)
@@ -362,6 +422,7 @@ class CodeInterpreterTool(Tool):
         stdout: str,
         stderr: str,
         produced_names: list[str],
+        skipped_names: list[str] | None = None,
     ) -> str:
         def _clip(s: str) -> str:
             s = s.rstrip()
@@ -390,6 +451,14 @@ class CodeInterpreterTool(Tool):
                 f"Produced {len(produced_names)} file(s), now attached to "
                 f"your reply and shown to the user: {listed}. Don't paste "
                 "their contents back; just reference them."
+            )
+
+        if skipped_names:
+            parts.append(
+                f"NOT attached (file type not allowed as an output): "
+                f"{', '.join(skipped_names)}. If the user needs this "
+                "content, write it out in an allowed format instead "
+                "(e.g. .txt, .csv, .json, .png, .zip)."
             )
 
         if exit_code != 0 or timed_out:

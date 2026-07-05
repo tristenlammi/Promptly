@@ -136,6 +136,7 @@ from app.chat.tools import (
     get_tool,
     list_openai_tools,
 )
+from app.chat.tools.validation import ToolArgsInvalid, validate_tool_args
 from app.database import SessionLocal, get_db
 from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.models import UserFile
@@ -3210,6 +3211,111 @@ async def _audit_tool_event(
         logger.exception("Failed to record %s audit event", event_type)
 
 
+# ---- Parallel tool dispatch (Foundation batch) ----------------------
+# Native tool calls from one assistant turn execute CONCURRENTLY, each
+# on its own short-lived ``SessionLocal`` session — the shared-session
+# constraint that historically forced sequential dispatch is gone.
+# Results still drain in the model's call order, so audit rows, SSE
+# events, and history messages stay byte-for-byte deterministic; the
+# only observable difference is wall-clock: a turn that fires three
+# searches now costs ~max(tool times) instead of their sum.
+
+# Ceiling on simultaneously-executing native tools per turn. Each task
+# holds a DB connection while it runs; four keeps even a maximally
+# parallel turn from monopolising the pool when several streams are
+# active at once.
+_TOOL_CONCURRENCY = 4
+
+# Dispatch-layer safety net on ``ToolResult.content`` — the string that
+# gets re-sent to the model on *every* subsequent hop of the turn.
+# Individual tools can set a tighter ``max_content_chars``; this cap
+# exists so no future tool can accidentally feed a 200 KB blob into
+# the history. ~24k chars ≈ 6k tokens.
+_TOOL_CONTENT_FALLBACK_CAP = 24_000
+
+
+def _cap_tool_content(tool_cap: int | None, content: str) -> str:
+    """Truncate a tool's model-facing output with a visible marker."""
+    cap = tool_cap if tool_cap is not None else _TOOL_CONTENT_FALLBACK_CAP
+    if cap <= 0 or len(content) <= cap:
+        return content
+    logger.info(
+        "tool output truncated at dispatch: %d -> %d chars", len(content), cap
+    )
+    return (
+        content[:cap].rstrip()
+        + f"\n…[tool output truncated at {cap:,} characters]"
+    )
+
+
+async def _run_native_tool(
+    *,
+    tool,  # noqa: ANN001 — Tool instance from the registry
+    args: dict[str, Any],
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    user_message_id: uuid.UUID,
+    sem: asyncio.Semaphore,
+) -> tuple[str, Any]:
+    """Run one native tool on its own DB session, bounded by ``sem``.
+
+    Never raises (except cancellation): returns ``(kind, payload)``:
+
+    * ``("ok", ToolResult)`` — success
+    * ``("tool_error", message)`` — controlled :class:`ToolError`
+    * ``("timeout", message)`` — ``tool.timeout_seconds`` expired
+    * ``("unexpected", exception_class_name)`` — tool bug; message is
+      never surfaced, mirroring the sequential dispatcher's contract
+
+    The fresh session is the whole point: no two concurrent tasks ever
+    touch the same ``AsyncSession``, and a timeout-cancelled task can
+    only ever poison its *own* session, which closes on exit. The user
+    row is re-loaded here rather than shared from the caller so an
+    ``expire_on_commit`` refresh can't ping-pong across sessions.
+    """
+    timeout_s = getattr(tool, "timeout_seconds", None)
+    try:
+        async with sem:
+            async with SessionLocal() as tool_db:
+                tool_user = await tool_db.get(User, user_id)
+                if tool_user is None:
+                    return ("tool_error", "Your account is no longer available.")
+                tool_ctx = ToolContext(
+                    db=tool_db,
+                    user=tool_user,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                )
+                if timeout_s:
+                    async with asyncio.timeout(timeout_s):
+                        result = await tool.run(tool_ctx, args)
+                else:
+                    result = await tool.run(tool_ctx, args)
+                # Most tools commit their own writes (``persist_generated_
+                # file`` commits; the proposal tools commit). This final
+                # commit publishes anything a tool left pending so the
+                # dispatcher's main session can see the rows during
+                # attachment resolution.
+                await tool_db.commit()
+                return ("ok", result)
+    except asyncio.CancelledError:
+        raise
+    except TimeoutError:
+        return (
+            "timeout",
+            f"Tool call timed out after {int(timeout_s or 0)}s and was "
+            "aborted. Try a simpler request, or tell the user the "
+            "operation is too slow right now.",
+        )
+    except ToolError as e:
+        return ("tool_error", str(e))
+    except Exception as e:  # noqa: BLE001 — uncaught tool bug
+        logger.exception(
+            "Tool %s raised unexpectedly", getattr(tool, "name", "?")
+        )
+        return ("unexpected", type(e).__name__)
+
+
 async def _dispatch_tools(
     *,
     db: AsyncSession,
@@ -3227,7 +3333,7 @@ async def _dispatch_tools(
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
-    """Execute every pending tool call sequentially.
+    """Execute every pending tool call for this hop.
 
     Yields ``(sse_event_string, history_message_or_None)`` tuples. The
     caller forwards the SSE string to the client; if ``history_message``
@@ -3236,14 +3342,30 @@ async def _dispatch_tools(
     pre-event, which has no equivalent in the OpenAI conversation
     schema — only ``tool`` rows belong in history.
 
-    Sequential rather than concurrent for two reasons:
+    Concurrency model:
 
-    * Tools share the chat router's ``AsyncSession``; concurrent writes
-      on a single AsyncSession are unsafe.
-    * Preserving call order makes the audit log + the UI reflect the
-      model's intent. Concurrency wouldn't buy much for Phase A1's
-      tool shapes (every one is sub-second).
+    * Phase 1 walks the calls in the model's order: emits every
+      ``tool_started`` pre-event, parses + schema-validates arguments,
+      applies per-turn caps, and LAUNCHES each runnable native tool as
+      its own task (own DB session, own ``timeout_seconds`` budget,
+      bounded by ``_TOOL_CONCURRENCY``).
+    * Phase 2 drains outcomes strictly in call order — a fast tool that
+      finished early simply waits its turn to be reported. Audit rows,
+      ``tool_finished`` events, and history messages are therefore
+      identical to what the old sequential dispatcher produced.
+    * MCP connector tools run inline on the main session during the
+      drain (their service helper is session-bound); they naturally
+      overlap with any native tools still in flight.
     """
+    sem = asyncio.Semaphore(_TOOL_CONCURRENCY)
+    # Execution plan, one entry per well-formed call, in model order:
+    #   kind="task" -> payload (tool, asyncio.Task)
+    #   kind="mcp"  -> payload ((connector_id, real_tool), args)
+    #   kind="fail" -> payload (err_msg, audit_code | None, extra_sse | None)
+    plan: list[tuple[str, str, str, Any]] = []
+    tasks: list[asyncio.Task] = []
+
+    # ---- Phase 1: validate, account, launch --------------------------
     for idx in sorted(pending_calls.keys()):
         slot = pending_calls[idx]
         call_id = slot.get("id") or ""
@@ -3257,168 +3379,68 @@ async def _dispatch_tools(
             # this index either, so the conversation stays consistent.
             continue
 
-        # 1) "started" pre-event so the UI can render a pending block
-        #    before the tool completes. No history message — the
-        #    assistant turn carrying the call was appended by the
-        #    caller already.
+        # "started" pre-event so the UI can render a pending block
+        # before the tool completes. No history message — the
+        # assistant turn carrying the call was appended by the caller.
         yield (
             sse_yield({"event": "tool_started", "id": call_id, "name": name}),
             None,
         )
+
+        # Parse arguments once for every branch. Bad JSON is a
+        # controlled failure — fed back to the model so it can retry.
+        parse_error: str | None = None
+        args: dict[str, Any] = {}
+        try:
+            args = json.loads(raw_args) if raw_args.strip() else {}
+            if not isinstance(args, dict):
+                raise TypeError("tool arguments must be a JSON object")
+        except (json.JSONDecodeError, TypeError) as e:
+            parse_error = f"Invalid tool arguments: {e}"
 
         # MCP connector tools (Phase 10) dispatch to the external server
         # rather than the native registry. Recognised by the per-turn
         # ``mcp_dispatch`` map (advertised name -> (connector_id, real tool)).
         mcp_target = mcp_dispatch.get(name) if mcp_dispatch else None
         if mcp_target is not None:
-            try:
-                args = json.loads(raw_args) if raw_args.strip() else {}
-                if not isinstance(args, dict):
-                    raise TypeError("tool arguments must be a JSON object")
-            except (json.JSONDecodeError, TypeError) as e:
-                err_msg = f"Invalid tool arguments: {e}"
-                yield (
-                    sse_yield(
-                        {
-                            "event": "tool_finished",
-                            "id": call_id,
-                            "name": name,
-                            "ok": False,
-                            "error": err_msg,
-                        }
-                    ),
-                    {"role": "tool", "tool_call_id": call_id, "content": err_msg},
-                )
-                continue
-            connector_id, real_tool = mcp_target
-            try:
-                from app.mcp.service import call_connector_tool
-
-                content = await call_connector_tool(
-                    db,
-                    connector_id=connector_id,
-                    real_tool=real_tool,
-                    arguments=args,
-                )
-                await _audit_tool_event(
-                    db,
-                    request=request,
-                    user=user,
-                    event_type=EVENT_TOOL_INVOKED,
-                    tool_name=name,
-                    detail={"mcp": True},
-                )
-                yield (
-                    sse_yield(
-                        {
-                            "event": "tool_finished",
-                            "id": call_id,
-                            "name": name,
-                            "ok": True,
-                        }
-                    ),
-                    {"role": "tool", "tool_call_id": call_id, "content": content},
-                )
-            except Exception as e:  # noqa: BLE001 — McpError + anything else
-                err_msg = str(e) or "The connector call failed."
-                logger.info("MCP tool %s failed: %s", name, e)
-                await _audit_tool_event(
-                    db,
-                    request=request,
-                    user=user,
-                    event_type=EVENT_TOOL_FAILED,
-                    tool_name=name,
-                    detail={"mcp": True, "error": type(e).__name__},
-                )
-                yield (
-                    sse_yield(
-                        {
-                            "event": "tool_finished",
-                            "id": call_id,
-                            "name": name,
-                            "ok": False,
-                            "error": err_msg,
-                        }
-                    ),
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": f"Error: {err_msg}",
-                    },
-                )
+            if parse_error is not None:
+                plan.append((call_id, name, "fail", (parse_error, None, None)))
+            else:
+                plan.append((call_id, name, "mcp", (mcp_target, args)))
             continue
 
         tool = get_tool(name)
         if tool is None:
-            err_msg = f"Unknown tool: {name!r}"
-            await _audit_tool_event(
-                db,
-                request=request,
-                user=user,
-                event_type=EVENT_TOOL_FAILED,
-                tool_name=name,
-                detail={"error": "unknown_tool"},
-            )
-            yield (
-                sse_yield(
-                    {
-                        "event": "tool_finished",
-                        "id": call_id,
-                        "name": name,
-                        "ok": False,
-                        "error": err_msg,
-                    }
-                ),
-                {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": err_msg,
-                },
+            plan.append(
+                (
+                    call_id,
+                    name,
+                    "fail",
+                    (f"Unknown tool: {name!r}", "unknown_tool", None),
+                )
             )
             continue
 
-        # 2) Parse arguments. Bad JSON is a controlled failure — feed
-        #    the error back to the model so it can retry with a fix.
-        try:
-            args = json.loads(raw_args) if raw_args.strip() else {}
-            if not isinstance(args, dict):
-                raise TypeError("tool arguments must be a JSON object")
-        except (json.JSONDecodeError, TypeError) as e:
-            err_msg = f"Invalid tool arguments: {e}"
-            await _audit_tool_event(
-                db,
-                request=request,
-                user=user,
-                event_type=EVENT_TOOL_FAILED,
-                tool_name=name,
-                detail={"error": "bad_arguments"},
-            )
-            yield (
-                sse_yield(
-                    {
-                        "event": "tool_finished",
-                        "id": call_id,
-                        "name": name,
-                        "ok": False,
-                        "error": err_msg,
-                    }
-                ),
-                {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": err_msg,
-                },
+        # Enforce the declared JSON Schema server-side so it's a real
+        # contract — a wrong type or surprise key never reaches
+        # ``Tool.run`` even if that tool's own manual checks miss it.
+        if parse_error is None:
+            try:
+                validate_tool_args(tool.parameters, args)
+            except ToolArgsInvalid as e:
+                parse_error = f"Invalid tool arguments: {e}"
+        if parse_error is not None:
+            plan.append(
+                (call_id, name, "fail", (parse_error, "bad_arguments", None))
             )
             continue
 
-        # 3) Per-turn cap (e.g. ``web_search`` budget, ``generate_image``
-        #    budget). Counted before the call so a refusal still bumps
-        #    the counter — the model can't get around the cap by spamming
-        #    retries. ``per_tool_caps`` overrides the tool-class default
-        #    (used by the chat stream to honour the admin-configured
-        #    ``chat_max_web_searches_per_turn``); falls back to the
-        #    static ``Tool.max_per_turn`` attribute when no override is
-        #    in scope.
+        # Per-turn cap (e.g. ``web_search`` budget, ``generate_image``
+        # budget). Counted at launch so a refusal never bumps and a
+        # burst of parallel calls in ONE hop still lands inside the
+        # budget. ``per_tool_caps`` overrides the tool-class default
+        # (used by the chat stream to honour the admin-configured
+        # ``chat_max_web_searches_per_turn``).
         effective_cap: int | None = None
         if per_tool_caps is not None and name in per_tool_caps:
             effective_cap = per_tool_caps[name]
@@ -3432,19 +3454,182 @@ async def _dispatch_tools(
                     "call(s) per turn. Ask the user to send another "
                     "message if more are needed."
                 )
+                # ``error_kind`` lets the frontend recognise this as a
+                # benign overshoot rather than a real provider failure
+                # — the consolidation rule in MessageBubble uses it to
+                # suppress these chips when at least one call of the
+                # same tool already succeeded this turn.
+                plan.append(
+                    (
+                        call_id,
+                        name,
+                        "fail",
+                        (
+                            err_msg,
+                            "per_turn_cap",
+                            {"error_kind": "per_turn_cap"},
+                        ),
+                    )
+                )
+                continue
+            invocation_counts[name] = spent + 1
+
+        task = asyncio.create_task(
+            _run_native_tool(
+                tool=tool,
+                args=args,
+                user_id=user.id,
+                conversation_id=ctx.conversation_id,
+                user_message_id=ctx.user_message_id,
+                sem=sem,
+            )
+        )
+        tasks.append(task)
+        plan.append((call_id, name, "task", (tool, task)))
+
+    # ---- Phase 2: drain results in call order -------------------------
+    try:
+        for call_id, name, kind, payload in plan:
+            if kind == "fail":
+                err_msg, audit_code, extra_sse = payload
+                if audit_code is not None:
+                    await _audit_tool_event(
+                        db,
+                        request=request,
+                        user=user,
+                        event_type=EVENT_TOOL_FAILED,
+                        tool_name=name,
+                        detail={"error": audit_code},
+                    )
+                event: dict[str, Any] = {
+                    "event": "tool_finished",
+                    "id": call_id,
+                    "name": name,
+                    "ok": False,
+                    "error": err_msg,
+                }
+                if extra_sse:
+                    event.update(extra_sse)
+                yield (
+                    sse_yield(event),
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": err_msg,
+                    },
+                )
+                continue
+
+            if kind == "mcp":
+                (connector_id, real_tool), args = payload
+                try:
+                    from app.mcp.service import call_connector_tool
+
+                    content = await call_connector_tool(
+                        db,
+                        connector_id=connector_id,
+                        real_tool=real_tool,
+                        arguments=args,
+                    )
+                    content = _cap_tool_content(None, content)
+                    await _audit_tool_event(
+                        db,
+                        request=request,
+                        user=user,
+                        event_type=EVENT_TOOL_INVOKED,
+                        tool_name=name,
+                        detail={"mcp": True},
+                    )
+                    yield (
+                        sse_yield(
+                            {
+                                "event": "tool_finished",
+                                "id": call_id,
+                                "name": name,
+                                "ok": True,
+                            }
+                        ),
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": content,
+                        },
+                    )
+                except Exception as e:  # noqa: BLE001 — McpError + anything else
+                    err_msg = str(e) or "The connector call failed."
+                    logger.info("MCP tool %s failed: %s", name, e)
+                    await _audit_tool_event(
+                        db,
+                        request=request,
+                        user=user,
+                        event_type=EVENT_TOOL_FAILED,
+                        tool_name=name,
+                        detail={"mcp": True, "error": type(e).__name__},
+                    )
+                    yield (
+                        sse_yield(
+                            {
+                                "event": "tool_finished",
+                                "id": call_id,
+                                "name": name,
+                                "ok": False,
+                                "error": err_msg,
+                            }
+                        ),
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": f"Error: {err_msg}",
+                        },
+                    )
+                continue
+
+            # kind == "task" — a native tool running concurrently.
+            tool, task = payload
+            outcome, out = await task
+
+            if outcome in ("tool_error", "timeout"):
+                err_msg = str(out)
                 await _audit_tool_event(
                     db,
                     request=request,
                     user=user,
                     event_type=EVENT_TOOL_FAILED,
                     tool_name=name,
-                    detail={"error": "per_turn_cap"},
+                    detail={"error": outcome},
                 )
-                # ``error_kind`` lets the frontend recognise this as a
-                # benign overshoot rather than a real provider failure
-                # — the consolidation rule in MessageBubble uses it to
-                # suppress these chips when at least one call of the
-                # same tool already succeeded this turn.
+                event = {
+                    "event": "tool_finished",
+                    "id": call_id,
+                    "name": name,
+                    "ok": False,
+                    "error": err_msg,
+                }
+                if outcome == "timeout":
+                    event["error_kind"] = "timeout"
+                yield (
+                    sse_yield(event),
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": f"Error: {err_msg}",
+                    },
+                )
+                continue
+
+            if outcome == "unexpected":
+                # Don't surface the exception message to the user /
+                # model; it can leak internals. A generic error is
+                # plenty; the class name went to the log + audit row.
+                await _audit_tool_event(
+                    db,
+                    request=request,
+                    user=user,
+                    event_type=EVENT_TOOL_FAILED,
+                    tool_name=name,
+                    detail={"error": str(out)},
+                )
+                err_msg = "The tool failed unexpectedly."
                 yield (
                     sse_yield(
                         {
@@ -3453,7 +3638,6 @@ async def _dispatch_tools(
                             "name": name,
                             "ok": False,
                             "error": err_msg,
-                            "error_kind": "per_turn_cap",
                         }
                     ),
                     {
@@ -3463,141 +3647,95 @@ async def _dispatch_tools(
                     },
                 )
                 continue
-            invocation_counts[name] = spent + 1
 
-        # 4) Run the tool.
-        try:
-            result = await tool.run(ctx, args)
-        except ToolError as e:
-            err_msg = str(e)
+            result = out
+
+            # Audit the success.
             await _audit_tool_event(
                 db,
                 request=request,
                 user=user,
-                event_type=EVENT_TOOL_FAILED,
+                event_type=EVENT_TOOL_INVOKED,
                 tool_name=name,
-                detail={"error": "tool_error"},
             )
-            yield (
-                sse_yield(
-                    {
-                        "event": "tool_finished",
-                        "id": call_id,
-                        "name": name,
-                        "ok": False,
-                        "error": err_msg,
-                    }
-                ),
-                {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": f"Error: {err_msg}",
-                },
-            )
-            continue
-        except Exception as e:  # noqa: BLE001 — uncaught tool bug
-            logger.exception("Tool %s raised unexpectedly", name)
-            await _audit_tool_event(
-                db,
-                request=request,
-                user=user,
-                event_type=EVENT_TOOL_FAILED,
-                tool_name=name,
-                detail={"error": type(e).__name__},
-            )
-            # Don't surface the exception message to the user / model;
-            # it can leak internals. A generic error is plenty.
-            err_msg = "The tool failed unexpectedly."
-            yield (
-                sse_yield(
-                    {
-                        "event": "tool_finished",
-                        "id": call_id,
-                        "name": name,
-                        "ok": False,
-                        "error": err_msg,
-                    }
-                ),
-                {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": err_msg,
-                },
-            )
-            continue
 
-        # 5) Audit the success.
-        await _audit_tool_event(
-            db,
-            request=request,
-            user=user,
-            event_type=EVENT_TOOL_INVOKED,
-            tool_name=name,
-        )
-
-        # 6) Resolve any attachment ids the tool produced into the same
-        #    chip-snapshot shape user uploads use, so the frontend
-        #    renders them next to the assistant bubble identically.
-        attachment_snaps: list[dict[str, Any]] = []
-        if result.attachment_ids:
-            rows = (
-                (
-                    await db.execute(
-                        select(UserFile).where(
-                            UserFile.id.in_(result.attachment_ids)
+            # Resolve any attachment ids the tool produced into the same
+            # chip-snapshot shape user uploads use, so the frontend
+            # renders them next to the assistant bubble identically.
+            # (The tool's own session committed these rows, so the main
+            # session sees them.)
+            attachment_snaps: list[dict[str, Any]] = []
+            if result.attachment_ids:
+                rows = (
+                    (
+                        await db.execute(
+                            select(UserFile).where(
+                                UserFile.id.in_(result.attachment_ids)
+                            )
                         )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
+                # Preserve the order the tool returned ids in.
+                by_id = {r.id: r for r in rows}
+                for fid in result.attachment_ids:
+                    row = by_id.get(fid)
+                    if row is None:
+                        continue
+                    snap = attachment_snapshot(row)
+                    attachment_snaps.append(snap)
+                    on_attachment(snap)
+
+            # Drain any web citations the tool collected (Phase D1) into
+            # the per-stream sources accumulator so they end up on
+            # ``messages.sources`` exactly like the legacy "always-mode"
+            # pre-search did. The accumulator is owned by the caller —
+            # keeping the dispatch loop ignorant of the merge strategy
+            # means a future "deep research" tool that wants to push
+            # sources mid-turn can use the same hook unchanged.
+            if result.sources and on_sources is not None:
+                on_sources(result.sources)
+
+            # Sum any tool-reported USD spend into the per-message total
+            # so the assistant message bubble can show "this turn cost
+            # ~$x" including image-gen + future paid tools.
+            if on_cost is not None and isinstance(result.meta, dict):
+                tool_cost = result.meta.get("cost_usd")
+                if isinstance(tool_cost, (int, float)) and tool_cost > 0:
+                    on_cost(float(tool_cost))
+
+            content = _cap_tool_content(
+                getattr(tool, "max_content_chars", None), result.content
             )
-            # Preserve the order the tool returned ids in.
-            by_id = {r.id: r for r in rows}
-            for fid in result.attachment_ids:
-                row = by_id.get(fid)
-                if row is None:
-                    continue
-                snap = attachment_snapshot(row)
-                attachment_snaps.append(snap)
-                on_attachment(snap)
 
-        # 7) Drain any web citations the tool collected (Phase D1) into
-        #    the per-stream sources accumulator so they end up on
-        #    ``messages.sources`` exactly like the legacy "always-mode"
-        #    pre-search did. The accumulator is owned by the caller —
-        #    keeping the dispatch loop ignorant of the merge strategy
-        #    means a future "deep research" tool that wants to push
-        #    sources mid-turn can use the same hook unchanged.
-        if result.sources and on_sources is not None:
-            on_sources(result.sources)
-
-        # Sum any tool-reported USD spend into the per-message total so
-        # the assistant message bubble can show "this turn cost ~$x"
-        # including image-gen + future paid tools (currently only
-        # generate_image emits ``meta["cost_usd"]``).
-        if on_cost is not None and isinstance(result.meta, dict):
-            tool_cost = result.meta.get("cost_usd")
-            if isinstance(tool_cost, (int, float)) and tool_cost > 0:
-                on_cost(float(tool_cost))
-
-        yield (
-            sse_yield(
+            yield (
+                sse_yield(
+                    {
+                        "event": "tool_finished",
+                        "id": call_id,
+                        "name": name,
+                        "ok": True,
+                        "attachments": attachment_snaps or None,
+                        "sources": result.sources or None,
+                        "meta": result.meta or None,
+                    }
+                ),
                 {
-                    "event": "tool_finished",
-                    "id": call_id,
-                    "name": name,
-                    "ok": True,
-                    "attachments": attachment_snaps or None,
-                    "sources": result.sources or None,
-                    "meta": result.meta or None,
-                }
-            ),
-            {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": result.content,
-            },
-        )
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": content,
+                },
+            )
+    finally:
+        # The stream died mid-drain (client abort, provider error, or
+        # the consumer closed us): cancel whatever is still running and
+        # reap the tasks so no session or coroutine leaks.
+        still_running = [t for t in tasks if not t.done()]
+        for t in still_running:
+            t.cancel()
+        if still_running:
+            await asyncio.gather(*still_running, return_exceptions=True)
 
 
 async def _stream_generator(

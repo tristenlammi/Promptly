@@ -32,6 +32,7 @@ import re
 from typing import Any
 
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
+from app.chat.tools.validation import clean_model_text
 from app.net.safe_fetch import (
     DEFAULT_MAX_BYTES,
     ResponseTooLargeError,
@@ -143,6 +144,9 @@ class FetchUrlTool(Tool):
         "additionalProperties": False,
     }
     max_per_turn = 4
+    # The fetch itself is capped at 12s; the margin covers redirects
+    # plus trafilatura extraction on a large page.
+    timeout_seconds = 30.0
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         url = args.get("url")
@@ -213,6 +217,13 @@ class FetchUrlTool(Tool):
         )
         if not title:
             title = _fallback_title(html)
+
+        # Page text is adversarial input: strip control characters and
+        # the zero-width / bidi-override code points that can hide
+        # instructions inside otherwise innocent-looking prose before
+        # it's handed to the model or persisted as a citation.
+        text = clean_model_text(text)
+        title = clean_model_text(title).strip() or _DEFAULT_TITLE
 
         original_chars = len(text)
         truncated = original_chars > _MAX_TEXT_CHARS
