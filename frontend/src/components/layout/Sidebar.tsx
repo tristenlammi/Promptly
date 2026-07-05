@@ -13,7 +13,11 @@ import {
   Star,
 } from "lucide-react";
 
-import { NAV_ITEMS, type NavItem as NavItemConfig } from "./navItems";
+import {
+  NAV_ITEMS,
+  OPT_IN_NAV_KEYS,
+  type NavItem as NavItemConfig,
+} from "./navItems";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -53,6 +57,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Per-user feature visibility (Phase 2): optional nav surfaces the
   // user chose to hide from their sidebar. Purely cosmetic.
   const hiddenNav = useAuthStore((s) => s.user?.settings?.hidden_nav);
+  // Opt-in surfaces (Study) ship hidden and appear only once enabled here.
+  const enabledNav = useAuthStore((s) => s.user?.settings?.enabled_nav);
   // Study is desktop/tablet only — the chat/whiteboard split and the
   // interactive exercises are too cramped below the md breakpoint (<768px).
   const isMobile = useIsMobile();
@@ -90,10 +96,20 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     () => new Set(hiddenNav ?? []),
     [hiddenNav]
   );
+  const enabledSet = useMemo(
+    () => new Set(enabledNav ?? []),
+    [enabledNav]
+  );
   const visibleNavItems: NavItemConfig[] = NAV_ITEMS.filter((it) => {
     if (it.desktopOnly && isMobile) return false;
     if (it.adminOnly && !isAdmin) return false;
-    if (it.optionalKey && hiddenSet.has(it.optionalKey)) return false;
+    if (it.optionalKey) {
+      // Opt-in surfaces (Study): shown only when explicitly enabled.
+      // Opt-out surfaces: shown unless the user hid them.
+      if (OPT_IN_NAV_KEYS.has(it.optionalKey))
+        return enabledSet.has(it.optionalKey);
+      if (hiddenSet.has(it.optionalKey)) return false;
+    }
     return true;
   });
 

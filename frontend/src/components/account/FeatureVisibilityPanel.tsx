@@ -6,6 +6,7 @@ import { Button } from "@/components/shared/Button";
 import { useAuthStore } from "@/store/authStore";
 import {
   OPTIONAL_NAV_KEYS,
+  OPT_IN_NAV_KEYS,
   type OptionalNavKey,
 } from "@/components/layout/navItems";
 import { cn } from "@/utils/cn";
@@ -25,22 +26,36 @@ export function FeatureVisibilityPanel() {
   const setUser = useAuthStore((s) => s.setUser);
 
   const hidden = new Set<string>(user?.settings?.hidden_nav ?? []);
+  const enabled = new Set<string>(user?.settings?.enabled_nav ?? []);
   const [busy, setBusy] = useState<OptionalNavKey | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // A surface is "on" when: opt-in and enabled, OR opt-out and not hidden.
+  const isOn = (key: OptionalNavKey) =>
+    OPT_IN_NAV_KEYS.has(key) ? enabled.has(key) : !hidden.has(key);
 
   const setVisible = async (key: OptionalNavKey, visible: boolean) => {
     setError(null);
     setBusy(key);
-    const previous = (user?.settings?.hidden_nav ?? []) as string[];
-    const nextHidden = visible
-      ? previous.filter((k) => k !== key)
-      : [...new Set([...previous, key])];
-    patchSettings({ hidden_nav: nextHidden });
+    // Opt-in surfaces toggle the ``enabled_nav`` allowlist; opt-out surfaces
+    // toggle the ``hidden_nav`` denylist. Kept separate so a fresh install
+    // starts with Study hidden without a per-key default table.
+    const optIn = OPT_IN_NAV_KEYS.has(key);
+    const field = optIn ? "enabled_nav" : "hidden_nav";
+    const previous = (user?.settings?.[field] ?? []) as string[];
+    const next = optIn
+      ? visible
+        ? [...new Set([...previous, key])]
+        : previous.filter((k) => k !== key)
+      : visible
+        ? previous.filter((k) => k !== key)
+        : [...new Set([...previous, key])];
+    patchSettings({ [field]: next });
     try {
-      const fresh = await authApi.updatePreferences({ hidden_nav: nextHidden });
+      const fresh = await authApi.updatePreferences({ [field]: next });
       setUser(fresh);
     } catch (err) {
-      patchSettings({ hidden_nav: previous });
+      patchSettings({ [field]: previous });
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(null);
@@ -76,7 +91,7 @@ export function FeatureVisibilityPanel() {
                 </p>
               </div>
               <Toggle
-                checked={!hidden.has(key)}
+                checked={isOn(key)}
                 onChange={(v) => void setVisible(key, v)}
                 disabled={busy === key}
               />

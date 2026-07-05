@@ -1,6 +1,6 @@
 import {
-  BookOpen,
-  FolderKanban,
+  GraduationCap,
+  LayoutGrid,
   FolderOpen,
   ListTodo,
   MessagesSquare,
@@ -31,7 +31,14 @@ export type NavSection = "chat" | "drive" | "study" | "admin";
  *  Files are core and intentionally absent. */
 export type OptionalNavKey = "workspaces" | "study" | "tasks";
 
-export const OPTIONAL_NAV_KEYS: { key: OptionalNavKey; label: string; description: string }[] = [
+export const OPTIONAL_NAV_KEYS: {
+  key: OptionalNavKey;
+  label: string;
+  description: string;
+  /** Opt-in surfaces ship hidden and only appear once the user enables them
+   *  here (persisted to ``settings.enabled_nav``, not ``hidden_nav``). */
+  defaultHidden?: boolean;
+}[] = [
   {
     key: "workspaces",
     label: "Workspaces",
@@ -43,9 +50,17 @@ export const OPTIONAL_NAV_KEYS: { key: OptionalNavKey; label: string; descriptio
   {
     key: "study",
     label: "Study",
-    description: "Interactive study mode with a whiteboard and exercises.",
+    description:
+      "Interactive study mode with a whiteboard and exercises. Off by default — a solo-learning tool that sits apart from the collaboration features.",
+    defaultHidden: true,
   },
 ];
+
+/** Opt-in nav keys: hidden until the user turns them on (stored in
+ *  ``settings.enabled_nav``). Everything else is opt-out (``hidden_nav``). */
+export const OPT_IN_NAV_KEYS = new Set<OptionalNavKey>(
+  OPTIONAL_NAV_KEYS.filter((k) => k.defaultHidden).map((k) => k.key)
+);
 
 export interface NavItem {
   to: string;
@@ -73,7 +88,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     to: "/workspaces",
-    icon: FolderKanban,
+    icon: LayoutGrid,
     label: "Workspaces",
     section: "chat",
     // Workspaces are a desktop surface by design (multi-pane layout,
@@ -94,7 +109,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     to: "/study",
-    icon: BookOpen,
+    icon: GraduationCap,
     label: "Study",
     section: "study",
     desktopOnly: true,

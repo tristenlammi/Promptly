@@ -212,6 +212,11 @@ class UserPreferencesUpdate(BaseModel):
     # or its routes, it just declutters the nav. Unknown keys are dropped
     # so a stale client can't poison the list. ``[]`` = show everything.
     hidden_nav: list[str] | None = None
+    # Per-user interface curation, opt-*in* side: surfaces that ship hidden by
+    # default and only appear once the user turns them on here (currently just
+    # ``study``, which is an outlier for a team-collaboration app). Absent /
+    # ``[]`` = nothing opted in → those surfaces stay hidden.
+    enabled_nav: list[str] | None = None
     # One-shot flag: the org admin has finished (or skipped) the post-signup
     # onboarding wizard. Gates the wizard so it shows once and never nags again,
     # even if they later remove every provider. Purely a client-driven marker.
@@ -291,6 +296,21 @@ class UserPreferencesUpdate(BaseModel):
         allowed = {"projects", "study", "tasks"}
         # Preserve order, dedupe, and drop anything outside the optional
         # set (Chat + Files are core and can never be hidden).
+        seen: list[str] = []
+        for item in v:
+            key = str(item).strip().lower()
+            if key in allowed and key not in seen:
+                seen.append(key)
+        return seen
+
+    @field_validator("enabled_nav")
+    @classmethod
+    def _clean_enabled_nav(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        # Only opt-in (default-hidden) surfaces belong here. Kept as its own
+        # allowlist so a key can't be both opt-in and opt-out at once.
+        allowed = {"study"}
         seen: list[str] = []
         for item in v:
             key = str(item).strip().lower()

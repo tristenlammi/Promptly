@@ -53,6 +53,10 @@ export interface UserSettings {
    *  sidebar (purely cosmetic — routes still work). One of
    *  ``"workspaces" | "study" | "tasks"``. Absent / ``[]`` = show all. */
   hidden_nav?: string[];
+  /** Opt-in nav surfaces the user has explicitly enabled. These ship hidden
+   *  by default (currently only ``"study"``) and appear once listed here.
+   *  Absent / ``[]`` = none opted in → they stay hidden. */
+  enabled_nav?: string[];
   /** One-shot marker: the org admin has finished (or skipped) the
    *  post-signup onboarding wizard. Absent/false = still to onboard. */
   onboarding_completed?: boolean;
@@ -96,6 +100,9 @@ export interface UserPreferencesUpdate {
   default_provider_id?: string;
   /** Replace the full set of hidden nav surfaces. ``[]`` shows all. */
   hidden_nav?: string[];
+  /** Replace the full set of opt-in (default-hidden) surfaces the user has
+   *  enabled. ``[]`` = none → they stay hidden. Currently only ``"study"``. */
+  enabled_nav?: string[];
   /** Mark the post-signup onboarding wizard as finished/skipped. */
   onboarding_completed?: boolean;
   /** Toggle cross-chat memory capture + injection (legacy). */
