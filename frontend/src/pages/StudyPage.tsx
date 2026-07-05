@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, GraduationCap, Plus } from "lucide-react";
+import { Archive, GraduationCap, Plus, Users } from "lucide-react";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -8,6 +8,7 @@ import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { NewStudyWizard } from "@/components/study/NewStudyWizard";
 import { StudyTopicCard } from "@/components/study/StudyTopicCard";
+import { TeamCoursesHome } from "@/components/study/CoursesPane";
 import { TopNav } from "@/components/layout/TopNav";
 import {
   useArchiveStudyProject,
@@ -18,7 +19,7 @@ import {
 import type { StudyProjectSummary } from "@/api/types";
 import { cn } from "@/utils/cn";
 
-type Tab = "active" | "archived";
+type Tab = "active" | "archived" | "courses";
 
 export function StudyPage() {
   const navigate = useNavigate();
@@ -86,7 +87,9 @@ export function StudyPage() {
             archivedCount={archivedProjects?.length ?? 0}
           />
 
-          {isLoading ? (
+          {tab === "courses" ? (
+            <TeamCoursesHome />
+          ) : isLoading ? (
             <div className="mt-10 text-sm text-[var(--text-muted)]">
               Loading study topics...
             </div>
@@ -228,6 +231,15 @@ function Tabs({
         label="Archive"
         count={archivedCount}
       />
+      {/* Team Learning: author workspace-scoped courses + assign them.
+          Lives here (not in the workspace UI) — Study is the one home
+          for everything learning-shaped. */}
+      <TabButton
+        active={tab === "courses"}
+        onClick={() => onChange("courses")}
+        icon={<Users className="h-3.5 w-3.5" />}
+        label="Team courses"
+      />
     </div>
   );
 }
@@ -243,7 +255,8 @@ function TabButton({
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
-  count: number;
+  /** Omit to render a plain tab (no counter chip). */
+  count?: number;
 }) {
   return (
     <button
@@ -257,16 +270,18 @@ function TabButton({
     >
       {icon}
       {label}
-      <span
-        className={cn(
-          "rounded-full px-1.5 text-[10px]",
-          active
-            ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-            : "bg-[var(--border)]/40 text-[var(--text-muted)]"
-        )}
-      >
-        {count}
-      </span>
+      {count !== undefined && (
+        <span
+          className={cn(
+            "rounded-full px-1.5 text-[10px]",
+            active
+              ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+              : "bg-[var(--border)]/40 text-[var(--text-muted)]"
+          )}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

@@ -29,18 +29,19 @@ import {
 import { workspacesApi } from "@/api/workspaces";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
-import { useWorkspace } from "@/hooks/useWorkspaces";
+import { useWorkspace, useWorkspaces } from "@/hooks/useWorkspaces";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
-/** Team Learning (Study L1) — the workspace's course authoring surface.
+/** Team Learning — course authoring, assignment, and team progress.
  *
- * A lead drafts a course from workspace materials with the AI, edits the
- * blueprint (the human sign-off), publishes it, and assigns it to
- * members. Learners study through the normal tutor engine; the lead's
- * progress dashboard lands in L2.
+ * Lives on the Study page (a course is still *scoped* to a workspace —
+ * its materials, members, and permissions come from there — but the
+ * surface belongs to Study, not the workspace UI). A lead drafts a
+ * course from workspace materials with the AI, edits the blueprint (the
+ * human sign-off), publishes it, and assigns it to members.
  */
-export function WorkspaceLearningPane({
+export function CoursesPane({
   workspaceId,
   canEdit,
 }: {
@@ -105,7 +106,7 @@ function CourseList({
       <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text)]">
           <GraduationCap className="h-5 w-5 text-[var(--accent)]" />
-          Learning
+          Team courses
         </h2>
         {canEdit && (
           <Button variant="primary" size="sm" onClick={onNew} leftIcon={<Plus className="h-4 w-4" />}>
@@ -1327,3 +1328,68 @@ const inputCls = cn(
   "border-[var(--border)] text-[var(--text)]",
   "focus:border-[var(--accent)]/60 focus:outline-none"
 );
+
+// ====================================================================
+// Study-page host: workspace picker + the courses pane
+// ====================================================================
+/** The "Courses" tab on /study. Courses are scoped to a workspace (its
+ *  files, members, permissions), so this hosts a picker and remembers
+ *  the last choice. */
+export function TeamCoursesHome() {
+  const { data: workspaces } = useWorkspaces();
+  const usable = useMemo(
+    () => (workspaces ?? []).filter((w) => !w.archived_at),
+    [workspaces]
+  );
+  const [wsId, setWsId] = useState<string>(
+    () => localStorage.getItem("promptly.study.courses.ws") ?? ""
+  );
+  const selectedId =
+    usable.some((w) => w.id === wsId) ? wsId : usable[0]?.id ?? "";
+  // Detail carries the caller's fine-grained role; viewers browse read-only.
+  const { data: wsDetail } = useWorkspace(selectedId || undefined);
+  const canEdit = wsDetail ? wsDetail.access_role !== "viewer" : false;
+
+  if (usable.length === 0) {
+    return (
+      <div className="mt-10 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 text-center">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/10">
+          <GraduationCap className="h-5 w-5 text-[var(--accent)]" />
+        </div>
+        <h2 className="text-lg font-semibold">No workspaces yet</h2>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
+          Team courses are built from a workspace's materials and assigned to
+          its members. Create a workspace (and add some docs to its drive)
+          first — then author your first course here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6">
+      {usable.length > 1 && (
+        <label className="mb-4 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+          Workspace
+          <select
+            value={selectedId}
+            onChange={(e) => {
+              setWsId(e.target.value);
+              localStorage.setItem("promptly.study.courses.ws", e.target.value);
+            }}
+            className={cn(inputCls, "w-auto py-1.5")}
+          >
+            {usable.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {selectedId && (
+        <CoursesPane key={selectedId} workspaceId={selectedId} canEdit={canEdit} />
+      )}
+    </div>
+  );
+}

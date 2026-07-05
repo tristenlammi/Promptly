@@ -88,7 +88,6 @@ import { WorkspaceSearchPane } from "@/components/workspaces/WorkspaceSearchPane
 import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
-import { WorkspaceLearningPane } from "@/components/workspaces/WorkspaceLearningPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
@@ -138,8 +137,6 @@ export function WorkspaceDetailPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [driveOpen, setDriveOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  // Team Learning (Study L1) — the workspace's course authoring surface.
-  const [learningOpen, setLearningOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -292,7 +289,6 @@ export function WorkspaceDetailPage() {
     // The search pane also masks the item pane — clear it too, or a tree
     // click while searching updates the URL but visibly does nothing.
     setSearchOpen(false);
-    setLearningOpen(false);
     setSelected(node);
     if (id) recordRecentItem(id, node.id); // feeds the ⌘K "Recent" section
   };
@@ -406,22 +402,14 @@ export function WorkspaceDetailPage() {
                   setSettingsOpen(false);
                   setDriveOpen(false);
                   setSearchOpen(false);
-                  setLearningOpen(false);
                   setSelected(null);
                   setSecondary(null);
                 }}
-                atHome={
-                  !selected &&
-                  !settingsOpen &&
-                  !driveOpen &&
-                  !searchOpen &&
-                  !learningOpen
-                }
+                atHome={!selected && !settingsOpen && !driveOpen && !searchOpen}
                 onSettings={() => {
                   setSecondary(null);
                   setDriveOpen(false);
                   setSearchOpen(false);
-                  setLearningOpen(false);
                   setSettingsOpen(true);
                 }}
                 atSettings={settingsOpen}
@@ -429,7 +417,6 @@ export function WorkspaceDetailPage() {
                   setSecondary(null);
                   setSettingsOpen(false);
                   setSearchOpen(false);
-                  setLearningOpen(false);
                   setSelected(null);
                   setDriveOpen(true);
                 }}
@@ -438,20 +425,10 @@ export function WorkspaceDetailPage() {
                   setSecondary(null);
                   setSettingsOpen(false);
                   setDriveOpen(false);
-                  setLearningOpen(false);
                   setSelected(null);
                   setSearchOpen(true);
                 }}
                 atSearch={searchOpen}
-                onLearning={() => {
-                  setSecondary(null);
-                  setSettingsOpen(false);
-                  setDriveOpen(false);
-                  setSearchOpen(false);
-                  setSelected(null);
-                  setLearningOpen(true);
-                }}
-                atLearning={learningOpen}
                 onNewTask={
                   canEdit && !isArchived
                     ? () => setTaskChooserOpen(true)
@@ -483,11 +460,6 @@ export function WorkspaceDetailPage() {
                   setSearchOpen(false);
                   handleSelect(node);
                 }}
-              />
-            ) : learningOpen ? (
-              <WorkspaceLearningPane
-                workspaceId={id!}
-                canEdit={canEdit && !isArchived}
               />
             ) : driveOpen ? (
               <WorkspaceDrivePane
