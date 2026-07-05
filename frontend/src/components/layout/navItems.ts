@@ -9,6 +9,7 @@ import {
   Share2,
   Clock,
   Search,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -44,9 +45,12 @@ export const OPTIONAL_NAV_KEYS: {
     label: "Workspaces",
     description: "Group chats, files, and context into shared workspaces.",
   },
-  // "tasks" (Automations) is intentionally not offered here — automations now
-  // live only inside workspaces (a private workspace serves personal use), so
-  // there's no standalone personal automations surface to toggle.
+  {
+    key: "tasks",
+    label: "Automations",
+    description:
+      "One page listing every automation you own — personal and across all your workspaces — with pause/run controls.",
+  },
   {
     key: "study",
     label: "Study",
@@ -106,6 +110,16 @@ export const NAV_ITEMS: NavItem[] = [
     // follows the same rule.
     desktopOnly: true,
     optionalKey: "workspaces",
+  },
+  {
+    to: "/tasks",
+    icon: Workflow,
+    label: "Automations",
+    section: "chat",
+    // The flow editor is a desktop canvas, and workspace-homed automations
+    // open inside the (desktop-gated) workspace shell.
+    desktopOnly: true,
+    optionalKey: "tasks",
   },
   {
     to: "/study",
