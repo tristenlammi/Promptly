@@ -42,7 +42,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -195,10 +195,21 @@ async def _summary_with_rollups(
         .select_from(Conversation)
         .where(Conversation.workspace_id == ws.id)
     )
+    # Mirror the Drive pane's filter: the auto-maintained Workspace
+    # Memory doc is pinned for retrieval but hidden from the file list,
+    # so it mustn't inflate the card's "N files" either (hub said
+    # "2 files" while Drive showed 1).
     file_count = await db.scalar(
         select(func.count())
         .select_from(WorkspaceFile)
-        .where(WorkspaceFile.workspace_id == ws.id)
+        .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+        .where(
+            WorkspaceFile.workspace_id == ws.id,
+            or_(
+                UserFile.source_kind.is_(None),
+                UserFile.source_kind != WORKSPACE_MEMORY_SOURCE_KIND,
+            ),
+        )
     )
     # Per-kind item counts (notes / boards / sheets / …) so the card can
     # say what a workspace actually contains. One GROUP BY per workspace.
@@ -212,10 +223,16 @@ async def _summary_with_rollups(
         )
         .group_by(WorkspaceItem.kind)
     )
+    # Caller-scoped, matching the navigator tree (which synthesises only the
+    # caller's own automations) — counting other users' homed tasks made the
+    # card claim "3 automations" while the tree showed one.
     task_count = await db.scalar(
         select(func.count())
         .select_from(AutomationTask)
-        .where(AutomationTask.workspace_id == ws.id)
+        .where(
+            AutomationTask.workspace_id == ws.id,
+            AutomationTask.user_id == caller.id,
+        )
     )
     base = WorkspaceSummary.model_validate(ws)
     base.conversation_count = int(conv_count or 0)

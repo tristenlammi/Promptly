@@ -124,6 +124,9 @@ class TaskResponse(BaseModel):
     reasoning_effort: str | None
     use_web_search: bool
     workspace_id: uuid.UUID | None
+    # Home workspace title, populated only by the ``scope=all`` list so the
+    # unified Automations page can group by home without extra fetches.
+    workspace_title: str | None = None
     connector_ids: list[uuid.UUID]
 
     frequency: str

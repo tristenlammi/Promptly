@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Play } from "lucide-react";
+import { CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
 
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import {
@@ -198,7 +198,64 @@ export function WorkspaceAutomationPane({
           ) : (
             <div className="promptly-scroll h-full overflow-y-auto px-5 py-4">
               {run ? (
-                <TaskRunDocument run={run} />
+                <>
+                  {/* Same meta strip as the standalone run page — cost and
+                      tokens shouldn't require leaving the workspace. */}
+                  <div className="mx-auto mb-3 flex max-w-3xl flex-wrap items-center gap-3 text-xs text-[var(--text-muted)]">
+                    <RunStatusChip status={run.status} />
+                    {run.finished_at && (
+                      <span>
+                        {new Date(run.finished_at).toLocaleString([], {
+                          day: "2-digit",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    )}
+                    {run.cost_usd != null && run.cost_usd > 0 && (
+                      <span>${run.cost_usd.toFixed(4)}</span>
+                    )}
+                    {run.completion_tokens != null && (
+                      <span>{run.completion_tokens} tok</span>
+                    )}
+                  </div>
+                  <TaskRunDocument run={run} />
+                  {(run.node_runs ?? []).length > 0 && (
+                    <div className="mx-auto mt-6 max-w-3xl border-t border-[var(--border)] pt-3">
+                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        Steps
+                      </h4>
+                      <div className="flex flex-col gap-1.5">
+                        {(run.node_runs ?? []).map((s) => (
+                          <details
+                            key={s.node_id}
+                            className="rounded-md border border-[var(--border)] bg-[var(--surface)]"
+                          >
+                            <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs">
+                              {s.status === "success" ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                              ) : (
+                                <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                              )}
+                              <span className="min-w-0 truncate font-medium text-[var(--text)]">
+                                {s.label || s.type}
+                              </span>
+                              {(s.completion_tokens ?? 0) > 0 && (
+                                <span className="ml-auto shrink-0 text-[var(--text-muted)]">
+                                  {s.completion_tokens} tok
+                                </span>
+                              )}
+                            </summary>
+                            <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-[var(--border)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                              {s.output || "(no output)"}
+                            </pre>
+                          </details>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
                   {(runs ?? []).length === 0

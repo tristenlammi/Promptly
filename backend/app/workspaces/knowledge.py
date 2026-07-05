@@ -50,6 +50,7 @@ from app.chat.models import (
     WorkspaceCanvas,
     WorkspaceFile,
     WorkspaceItem,
+    WorkspaceShare,
     WorkspaceTask,
     WorkspaceTaskComment,
 )
@@ -1483,6 +1484,23 @@ def _summarise_flow_graph(graph: dict | None) -> str | None:
     return " → ".join(labels[:12])
 
 
+def _workspace_member_tasks_where(ws: Workspace):
+    """Filter for automations homed in ``ws`` whose owner is still a member
+    (the owner or an *accepted* collaborator).
+
+    ``tasks.workspace_id`` survives share revocation (it only nulls when the
+    workspace itself is deleted), so without this filter an ex-collaborator's
+    — or any stranger's — automation *prompts* would keep flowing into the
+    shared RAG doc and the per-turn workspace map."""
+    from app.tasks.models import Task
+
+    member_ids = select(WorkspaceShare.invitee_user_id).where(
+        WorkspaceShare.workspace_id == ws.id,
+        WorkspaceShare.status == "accepted",
+    )
+    return or_(Task.user_id == ws.user_id, Task.user_id.in_(member_ids))
+
+
 def _flatten_automations(ws: Workspace, tasks: list) -> str:
     """Render a workspace's automations as natural-language text for embedding.
 
@@ -1599,7 +1617,10 @@ async def index_automations_for_workspace(
                 (
                     await db.execute(
                         select(Task)
-                        .where(Task.workspace_id == workspace_id)
+                        .where(
+                            Task.workspace_id == workspace_id,
+                            _workspace_member_tasks_where(ws),
+                        )
                         .order_by(Task.created_at.asc())
                     )
                 )
@@ -2013,14 +2034,14 @@ async def build_workspace_map(
     # every turn, before retrieval even comes into play.
     from app.tasks.models import Task
 
+    map_ws = await db.get(Workspace, workspace_id)
+    autos_q = select(Task).where(Task.workspace_id == workspace_id)
+    if map_ws is not None:
+        # Same member filter as the RAG doc — an ex-collaborator's homed
+        # automations don't belong on the shared map.
+        autos_q = autos_q.where(_workspace_member_tasks_where(map_ws))
     autos = list(
-        (
-            await db.execute(
-                select(Task)
-                .where(Task.workspace_id == workspace_id)
-                .order_by(Task.created_at.asc())
-            )
-        ).scalars()
+        (await db.execute(autos_q.order_by(Task.created_at.asc()))).scalars()
     )
     auto_lines: list[str] = []
     for t in autos:

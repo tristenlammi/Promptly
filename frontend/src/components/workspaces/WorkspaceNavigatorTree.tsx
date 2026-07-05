@@ -1117,9 +1117,17 @@ function TreeRow({
                 : undefined
             }
             onDuplicate={
-              ["note", "sheet", "board"].includes(node.kind)
+              ["note", "sheet", "board", "canvas"].includes(node.kind)
                 ? () => duplicateItem.mutate(node.id)
-                : undefined
+                : isTask && node.ref_id
+                  ? () => {
+                      // Automations are tasks, not items — copy arrives
+                      // paused so it can't double-fire next to the source.
+                      void tasksApi
+                        .duplicate(node.ref_id as string)
+                        .then(invalidateTreeAndArchive);
+                    }
+                  : undefined
             }
             deleting={remove.isPending || archive.isPending || chatBusy}
           />
@@ -1206,7 +1214,8 @@ function NodeActions({
   onToggleContext?: () => void;
   /** Folders only — create a new item inside this folder. */
   onCreateInside?: (kind: "note" | "canvas" | "board" | "sheet") => void;
-  /** Notes / sheets / boards only — deep-copy as a sibling. */
+  /** Notes / sheets / boards / canvases — deep-copy as a sibling;
+   *  automations — copy the task (arrives paused). */
   onDuplicate?: () => void;
   deleting: boolean;
 }) {

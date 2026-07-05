@@ -1,7 +1,14 @@
 import { apiClient } from "./client";
 
 export type TaskFrequency = "hourly" | "daily" | "weekly" | "monthly";
-export type TaskRunStatus = "pending" | "running" | "success" | "failed";
+/** "warning" = the run completed but its output self-reports a dead end
+ *  (empty searches, missing data) — surfaced amber, not green. */
+export type TaskRunStatus =
+  | "pending"
+  | "running"
+  | "success"
+  | "warning"
+  | "failed";
 
 export interface TaskRunSummary {
   id: string;
@@ -44,6 +51,9 @@ export interface Task {
   reasoning_effort: string | null;
   use_web_search: boolean;
   workspace_id: string | null;
+  /** Home workspace title — populated by the ``scope=all`` list so the
+   *  Automations page can group by home. Null for personal automations. */
+  workspace_title: string | null;
   connector_ids: string[];
   frequency: TaskFrequency;
   hour: number | null;
@@ -95,8 +105,10 @@ export interface AvailableTaskConnector {
 }
 
 export const tasksApi = {
-  async list(): Promise<Task[]> {
-    const { data } = await apiClient.get<Task[]>("/tasks");
+  async list(scope: "personal" | "all" = "personal"): Promise<Task[]> {
+    const { data } = await apiClient.get<Task[]>("/tasks", {
+      params: scope === "all" ? { scope } : undefined,
+    });
     return data;
   },
   async get(id: string): Promise<Task> {
@@ -113,6 +125,12 @@ export const tasksApi = {
   },
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/tasks/${id}`);
+  },
+  /** Copy an automation (same prompt/schedule/flow/connectors) — arrives
+   *  paused so it never double-fires next to its source. */
+  async duplicate(id: string): Promise<Task> {
+    const { data } = await apiClient.post<Task>(`/tasks/${id}/duplicate`);
+    return data;
   },
   async availableConnectors(
     workspaceId?: string | null

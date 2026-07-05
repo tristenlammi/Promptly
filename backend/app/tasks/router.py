@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from fastapi import (
@@ -24,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import Conversation, Message
+from app.chat.models import Conversation, Message, Workspace
 from app.chat.pdf_render import PdfRenderError, render_markdown_to_pdf
 from app.database import get_db
 from app.mcp.models import McpConnector
@@ -147,6 +148,7 @@ def _serialize(
     task: Task,
     latest: TaskRun | None,
     connector_ids: list[uuid.UUID] | None = None,
+    workspace_title: str | None = None,
 ) -> TaskResponse:
     return TaskResponse(
         id=task.id,
@@ -157,6 +159,7 @@ def _serialize(
         reasoning_effort=task.reasoning_effort,
         use_web_search=task.use_web_search,
         workspace_id=task.workspace_id,
+        workspace_title=workspace_title,
         connector_ids=connector_ids or [],
         frequency=task.frequency,
         hour=task.hour,
@@ -201,26 +204,41 @@ def _compute_next(task: Task) -> datetime | None:
 
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
+    scope: str = "personal",
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[TaskResponse]:
-    # Personal automations only — workspace-homed ones live in (and are only
-    # reachable from) their workspace, never the top-level /tasks area.
+    # Default scope lists personal automations only — workspace-homed ones
+    # live in their workspace. ``scope=all`` adds them (with their home
+    # workspace's title) so the Automations page can show everything that
+    # runs on the account, grouped by home.
+    q = select(Task).where(Task.user_id == user.id)
+    if scope != "all":
+        q = q.where(Task.workspace_id.is_(None))
     tasks = (
-        (
-            await db.execute(
-                select(Task)
-                .where(Task.user_id == user.id, Task.workspace_id.is_(None))
-                .order_by(Task.created_at.desc())
-            )
-        )
-        .scalars()
-        .all()
+        (await db.execute(q.order_by(Task.created_at.desc()))).scalars().all()
     )
+    ws_titles: dict[uuid.UUID, str] = {}
+    ws_ids = {t.workspace_id for t in tasks if t.workspace_id is not None}
+    if ws_ids:
+        rows = await db.execute(
+            select(Workspace.id, Workspace.title).where(Workspace.id.in_(ws_ids))
+        )
+        ws_titles = {wid: title for wid, title in rows.all()}
     ids = [t.id for t in tasks]
     latest = await _latest_runs(db, ids)
     conns = await _connector_ids_for(db, ids)
-    return [_serialize(t, latest.get(t.id), conns.get(t.id, [])) for t in tasks]
+    return [
+        _serialize(
+            t,
+            latest.get(t.id),
+            conns.get(t.id, []),
+            workspace_title=(
+                ws_titles.get(t.workspace_id) if t.workspace_id else None
+            ),
+        )
+        for t in tasks
+    ]
 
 
 async def _validate_workspace(
@@ -340,6 +358,71 @@ async def create_task(
     _reindex_automations(background, task.workspace_id)
     conns = await _connector_ids_for(db, [task.id])
     return _serialize(task, None, conns.get(task.id, []))
+
+
+@router.post(
+    "/{task_id}/duplicate",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_task(
+    task_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TaskResponse:
+    """Copy an automation — same prompt/schedule/model/connectors/flow,
+    but **paused** (enabled=False) so the copy never double-fires next to
+    its source until the user has adjusted and re-enabled it."""
+    src = await _get_owned_task(task_id, user, db)
+    count = (
+        await db.execute(
+            select(func.count(Task.id)).where(Task.user_id == user.id)
+        )
+    ).scalar_one()
+    if count >= MAX_TASKS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"You can have at most {MAX_TASKS_PER_USER} tasks.",
+        )
+
+    title = f"{src.title} (copy)"
+    copy = Task(
+        user_id=user.id,
+        title=title[:120],
+        prompt=src.prompt,
+        provider_id=src.provider_id,
+        model_id=src.model_id,
+        reasoning_effort=src.reasoning_effort,
+        use_web_search=src.use_web_search,
+        workspace_id=src.workspace_id,
+        frequency=src.frequency,
+        hour=src.hour,
+        minute=src.minute,
+        weekday=src.weekday,
+        day_of_month=src.day_of_month,
+        timezone=src.timezone,
+        enabled=False,
+        notify=src.notify,
+        retention_runs=src.retention_runs,
+        flow_graph=deepcopy(src.flow_graph) if src.flow_graph else None,
+    )
+    copy.next_run_at = None  # paused — the scheduler ignores it until enabled
+    db.add(copy)
+    await db.flush()
+    src_conns = await _connector_ids_for(db, [src.id])
+    await _set_task_connectors(
+        db,
+        copy.id,
+        src_conns.get(src.id, []),
+        user_id=user.id,
+        workspace_id=copy.workspace_id,
+    )
+    await db.commit()
+    await db.refresh(copy)
+    _reindex_automations(background, copy.workspace_id)
+    conns = await _connector_ids_for(db, [copy.id])
+    return _serialize(copy, None, conns.get(copy.id, []))
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

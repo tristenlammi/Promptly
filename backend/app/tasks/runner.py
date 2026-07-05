@@ -62,25 +62,77 @@ _MAX_OUTPUT_TOKENS = 8000
 def _derive_run_title(text: str | None) -> str | None:
     """A short, distinguishing title from a run's Markdown output.
 
-    Prefers the first Markdown heading; otherwise the first non-empty
-    line. Stripped of markup and clipped to fit the column. Returns
+    Prefers the first Markdown heading *anywhere* in the document —
+    models that hedge often open with a prose apology ("I don't have
+    access to…") before the actual "# Report" heading, and the heading
+    is the better label. Falls back to the first non-empty line.
+    Stripped of markup and clipped to a rail-friendly length. Returns
     ``None`` for empty output so the UI falls back to the date.
     """
     if not text:
         return None
     import re as _re
 
+    def _clean(line: str) -> str:
+        line = _re.sub(r"^#{1,6}\s+", "", line)  # strip heading hashes
+        return _re.sub(r"[*_`>#]", "", line).strip()  # strip md emphasis
+
+    first_line: str | None = None
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
-        # First heading wins; else first content line.
-        line = _re.sub(r"^#{1,6}\s+", "", line)  # strip heading hashes
-        line = _re.sub(r"[*_`>#]", "", line).strip()  # strip md emphasis
-        if not line:
-            continue
-        return line[:137] + "…" if len(line) > 138 else line
-    return None
+        if _re.match(r"^#{1,6}\s+\S", line):
+            cleaned = _clean(line)
+            if cleaned:
+                return cleaned[:99] + "…" if len(cleaned) > 100 else cleaned
+        if first_line is None:
+            cleaned = _clean(line)
+            if cleaned:
+                first_line = cleaned
+    if first_line is None:
+        return None
+    return first_line[:99] + "…" if len(first_line) > 100 else first_line
+
+
+# Self-reported-failure phrases. A run that *executed* fine but whose
+# output admits it came back empty-handed shouldn't wear the same green
+# "Done" chip as a real report — it lands as ``status="warning"`` so the
+# rail and notifications flag it for a human look. Deliberately narrow:
+# these phrasings are how models describe their own dead ends, and a
+# false positive only costs an amber chip on a fine report.
+_WARNING_PATTERNS = [
+    r"returned (?:no|empty) results",
+    r"no results (?:were|could be) (?:found|returned|gathered)",
+    r"could not be compiled",
+    r"i (?:don'?t|do not) have (?:access|a previous|any stored)",
+    r"unable to (?:retrieve|access|fetch|gather)",
+    r"no (?:data|information|items?) (?:is |was |were )?(?:available|found|could be gathered)",
+    r"(?:search|fetch|tool) (?:tool )?did not return",
+    r"all searches (?:returned|came back) empty",
+]
+_WARNING_RE = None  # compiled lazily
+
+
+def _detect_run_warning(text: str | None) -> bool:
+    """True when a successful run's output self-reports a dead end."""
+    if not text:
+        return False
+    import re as _re
+
+    # A tiny output that *is* a tool-intent sentence ("Let me search for
+    # more details…") means the model ran out of hops mid-plan and never
+    # wrote the report — seen verbatim in production runs.
+    stripped = text.strip()
+    if len(stripped) < 200 and _re.match(
+        r"(?i)^(let me|i(?:'|’)ll|i will|i am going to|now i(?:'|’)ll)\b",
+        stripped,
+    ):
+        return True
+    global _WARNING_RE
+    if _WARNING_RE is None:
+        _WARNING_RE = _re.compile("|".join(_WARNING_PATTERNS), _re.IGNORECASE)
+    return bool(_WARNING_RE.search(text))
 
 
 class TaskRunError(RuntimeError):
@@ -519,7 +571,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.prompt_tokens = usage["prompt_tokens"] or None
             run.completion_tokens = usage["completion_tokens"] or None
             run.cost_usd = usage["cost_usd"]
-            run.status = "success"
+            # "warning" = the flow ran to completion but the output admits
+            # it came back empty-handed (dead searches, missing data).
+            run.status = "warning" if _detect_run_warning(text) else "success"
         except (TaskRunError, ProviderError) as e:
             run.status = "failed"
             run.error = str(e)
@@ -572,16 +626,26 @@ async def execute_run(run_id: uuid.UUID) -> None:
             try:
                 from app.notifications import notify_user
 
-                ok = final_status == "success"
+                if final_status == "success":
+                    push_title, push_body = (
+                        "Automation report ready",
+                        f"'{title}' has a new report.",
+                    )
+                elif final_status == "warning":
+                    push_title, push_body = (
+                        "Automation needs a look",
+                        f"'{title}' ran, but its report says it came back empty-handed.",
+                    )
+                else:
+                    push_title, push_body = (
+                        "Automation failed",
+                        f"'{title}' failed to run.",
+                    )
                 await notify_user(
                     user_id=owner_id,
                     category="task_complete",
-                    title=("Automation report ready" if ok else "Automation failed"),
-                    body=(
-                        f"'{title}' has a new report."
-                        if ok
-                        else f"'{title}' failed to run."
-                    ),
+                    title=push_title,
+                    body=push_body,
                     url=f"/tasks/{task_id}",
                     tag=f"promptly-task-{task_id}",
                 )

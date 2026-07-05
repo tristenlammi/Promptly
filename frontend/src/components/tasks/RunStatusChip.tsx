@@ -5,6 +5,7 @@ const STYLES: Record<TaskRunStatus, string> = {
   pending: "bg-[var(--accent)]/10 text-[var(--accent)]",
   running: "bg-[var(--accent)]/10 text-[var(--accent)]",
   success: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   failed: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 
@@ -12,6 +13,7 @@ const LABELS: Record<TaskRunStatus, string> = {
   pending: "Queued",
   running: "Running",
   success: "Done",
+  warning: "Check",
   failed: "Failed",
 };
 

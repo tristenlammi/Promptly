@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarClock,
+  Copy,
+  FolderKanban,
   Globe,
   MoreVertical,
   Pencil,
@@ -13,6 +15,7 @@ import {
 import {
   useCreateTask,
   useDeleteTask,
+  useDuplicateTask,
   useRunTask,
   useTasks,
   useUpdateTask,
@@ -31,11 +34,14 @@ import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 export function TasksPage() {
-  const { data: tasks, isLoading } = useTasks();
+  // ``all`` so workspace-homed automations show too — this page is the one
+  // place to audit everything that runs on the account.
+  const { data: tasks, isLoading } = useTasks("all");
   const navigate = useNavigate();
   const runTask = useRunTask();
   const update = useUpdateTask();
   const remove = useDeleteTask();
+  const duplicate = useDuplicateTask();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -91,6 +97,27 @@ export function TasksPage() {
     navigate(`/tasks/${task.id}`);
   };
 
+  // Personal automations first, then one section per home workspace —
+  // the page is the account-wide audit view, but home still matters.
+  const groups = useMemo(() => {
+    const list = tasks ?? [];
+    const personal = list.filter((t) => !t.workspace_id);
+    const byWs = new Map<string, { title: string; tasks: Task[] }>();
+    for (const t of list) {
+      if (!t.workspace_id) continue;
+      const g = byWs.get(t.workspace_id) ?? {
+        title: t.workspace_title ?? "Workspace",
+        tasks: [],
+      };
+      g.tasks.push(t);
+      byWs.set(t.workspace_id, g);
+    }
+    const workspaces = [...byWs.entries()]
+      .map(([id, g]) => ({ id, ...g }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+    return { personal, workspaces };
+  }, [tasks]);
+
   return (
     <>
       <TopNav
@@ -127,8 +154,26 @@ export function TasksPage() {
       ) : !tasks || tasks.length === 0 ? (
         <TasksEmptyState onCreate={openNew} />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {tasks.map((task) => (
+        <div className="flex flex-col gap-7">
+          {[
+            { id: "personal", title: "Personal", tasks: groups.personal },
+            ...groups.workspaces,
+          ]
+            .filter((g) => g.tasks.length > 0)
+            .map((g) => (
+              <section key={g.id}>
+                {/* A lone personal section needs no header — the grouping
+                    only earns its label once workspace sections exist. */}
+                {(groups.workspaces.length > 0 || g.id !== "personal") && (
+                  <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                    {g.id !== "personal" && (
+                      <FolderKanban className="h-3.5 w-3.5" />
+                    )}
+                    {g.title}
+                  </h2>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+          {g.tasks.map((task) => (
             <div
               key={task.id}
               className={cn(
@@ -161,6 +206,24 @@ export function TasksPage() {
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
                       >
                         <Pencil className="h-3.5 w-3.5" /> Edit
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setMenuFor(null);
+                          try {
+                            await duplicate.mutateAsync(task.id);
+                            toast.success(
+                              "Duplicated — the copy is paused until you enable it"
+                            );
+                          } catch {
+                            toast.error(
+                              "Couldn't duplicate the automation. Please try again."
+                            );
+                          }
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
+                      >
+                        <Copy className="h-3.5 w-3.5" /> Duplicate
                       </button>
                       <button
                         onClick={async () => {
@@ -244,6 +307,9 @@ export function TasksPage() {
               </div>
             </div>
           ))}
+                </div>
+              </section>
+            ))}
         </div>
       )}
 

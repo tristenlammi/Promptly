@@ -14,10 +14,10 @@ const runsKey = (id: string) => ["tasks", id, "runs"] as const;
 const runKey = (taskId: string, runId: string) =>
   ["tasks", taskId, "runs", runId] as const;
 
-export function useTasks() {
+export function useTasks(scope: "personal" | "all" = "personal") {
   return useQuery<Task[]>({
-    queryKey: TASKS_KEY,
-    queryFn: () => tasksApi.list(),
+    queryKey: [...TASKS_KEY, scope],
+    queryFn: () => tasksApi.list(scope),
     staleTime: 30_000,
   });
 }
@@ -79,6 +79,14 @@ export function useUpdateTask() {
       qc.invalidateQueries({ queryKey: TASKS_KEY });
       qc.invalidateQueries({ queryKey: taskKey(vars.id) });
     },
+  });
+}
+
+export function useDuplicateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => tasksApi.duplicate(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: TASKS_KEY }),
   });
 }
 

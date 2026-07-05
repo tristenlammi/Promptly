@@ -550,10 +550,13 @@ async def duplicate_workspace_item(
     * **board** — new item with the same ``config`` (columns / labels)
       plus a copy of every card (comments are history, not content —
       they stay behind; attachment references are shared).
+    * **canvas** — new ``WorkspaceCanvas`` + backing text file; the
+      Excalidraw scene (including image binaries — they live *inside*
+      the Y.Doc's ``files`` map, not as external assets) copies with the
+      ``yjs_update`` bytes, so the duplicate is fully self-contained.
 
-    Canvases and automations aren't duplicable yet (a canvas's scene
-    lives in its collab doc with per-element image files; automations
-    have their own lifecycle) — 422 for anything unsupported.
+    Automations aren't duplicable here (they're tasks, not items) — use
+    ``POST /tasks/{id}/duplicate``. 422 for anything else unsupported.
     """
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
@@ -562,7 +565,7 @@ async def duplicate_workspace_item(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Item not found"
         )
-    if src.kind not in ("note", "sheet", "board"):
+    if src.kind not in ("note", "sheet", "board", "canvas"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Duplicating a {src.kind} isn't supported yet.",
@@ -645,6 +648,48 @@ async def duplicate_workspace_item(
             context_enabled=src.context_enabled,
         )
         db.add(item)
+    elif src.kind == "canvas":
+        src_canvas = (
+            await db.get(WorkspaceCanvas, src.ref_id) if src.ref_id else None
+        )
+        if src_canvas is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This canvas has no underlying scene.",
+            )
+        canvases_folder_id = await _resolve_subfolder_id(
+            db, ws, owner, "Canvases"
+        )
+        item = await create_canvas_with_item(
+            db,
+            ws=ws,
+            owner=owner,
+            title=title,
+            parent_id=src.parent_id,
+            position=position,
+            canvases_folder_id=canvases_folder_id,
+        )
+        item.context_enabled = src.context_enabled
+        # The scene is the Y.Doc bytes — images ride along inside its
+        # ``files`` map, so a byte copy is complete.
+        copy_canvas = await db.get(WorkspaceCanvas, item.ref_id)
+        if copy_canvas is not None:
+            copy_canvas.yjs_update = src_canvas.yjs_update
+            copy_canvas.version = src_canvas.version
+            copy_canvas.content_text = src_canvas.content_text
+            # Mirror the flattened text onto the new backing file (same
+            # as POST /canvas/{id}/text) so retrieval picks the copy up
+            # without waiting for a client push.
+            if copy_canvas.text_file_id is not None and src_canvas.content_text:
+                tf = await db.get(UserFile, copy_canvas.text_file_id)
+                if tf is not None:
+                    text = src_canvas.content_text
+                    abs_path = absolute_path(tf.storage_path)
+                    abs_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(abs_path, "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    tf.size_bytes = len(text.encode("utf-8"))
+                    tf.content_text = text
     else:  # board
         item = WorkspaceItem(
             workspace_id=ws.id,
@@ -698,6 +743,7 @@ async def duplicate_workspace_item(
     # Re-embed the copy so workspace chats can retrieve it (best-effort).
     from app.workspaces.knowledge import (
         index_board_for_workspace,
+        index_canvas_for_workspace,
         index_note_for_workspace,
         index_sheet_for_workspace,
     )
@@ -706,6 +752,8 @@ async def duplicate_workspace_item(
         background.add_task(index_note_for_workspace, ws.id, item.id)
     elif src.kind == "sheet":
         background.add_task(index_sheet_for_workspace, ws.id, item.id)
+    elif src.kind == "canvas":
+        background.add_task(index_canvas_for_workspace, ws.id, item.id)
     else:
         background.add_task(index_board_for_workspace, ws.id, item.id)
 

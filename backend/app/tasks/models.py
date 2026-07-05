@@ -169,7 +169,9 @@ class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):
     # distinguishable in the rail (rather than a wall of identical dates).
     title: Mapped[str | None] = mapped_column(String(140), nullable=True)
 
-    # pending → running → success | failed
+    # pending → running → success | warning | failed
+    # ("warning" = ran to completion but the output self-reports a dead
+    # end — empty searches, missing data — so the UI flags it amber.)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending"
     )

@@ -68,13 +68,16 @@ export function TaskDetailPage() {
     if (task.is_advanced || searchParams.get("flow") === "1") setShowFlow(true);
   }, [task, searchParams]);
 
-  // Workspace-homed automations live in (and are only reachable from) their
-  // workspace — bounce them there if someone lands on the standalone page.
+  // Workspace-homed automations live in their workspace — bounce there
+  // with the automation pre-selected (its synthesised tree node id is the
+  // task id) if someone lands on the standalone page.
   useEffect(() => {
     if (task?.workspace_id) {
-      navigate(`/workspaces/${task.workspace_id}`, { replace: true });
+      navigate(`/workspaces/${task.workspace_id}?item=${task.id}`, {
+        replace: true,
+      });
     }
-  }, [task?.workspace_id, navigate]);
+  }, [task?.workspace_id, task?.id, navigate]);
 
   const isAdvanced = task?.is_advanced ?? false;
   const onConvertToFlow = async () => {

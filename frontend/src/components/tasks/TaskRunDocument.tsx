@@ -44,7 +44,7 @@ export function TaskRunDocument({ run }: { run: TaskRun }) {
     );
   }
 
-  if (run.status !== "success") {
+  if (run.status !== "success" && run.status !== "warning") {
     return (
       <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
         <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
@@ -60,6 +60,12 @@ export function TaskRunDocument({ run }: { run: TaskRun }) {
     // centre it, rather than letting it run edge-to-edge across an
     // ultrawide column where the line length hurts readability.
     <article className="promptly-prose mx-auto max-w-3xl">
+      {run.status === "warning" && (
+        <div className="mb-4 rounded-card border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+          This run finished, but its report says it came back empty-handed
+          (dead searches or missing data) — worth a look before trusting it.
+        </div>
+      )}
       {body}
       {sources.length > 0 && (
         <div className="mt-6 border-t border-[var(--border)] pt-3">
