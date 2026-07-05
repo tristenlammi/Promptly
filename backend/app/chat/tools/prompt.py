@@ -126,6 +126,12 @@ def build_tools_system_prompt(categories: set[str]) -> str:
             "fact or when each step needs the previous step's result, "
             "use `web_search` / `fetch_url` directly instead."
         )
+        guidelines.append(
+            "- After `run_agents` returns, write your answer from the "
+            "agent briefs directly. Do not re-run the same searches "
+            "yourself to double-check them — the agents already searched "
+            "and read the pages."
+        )
     guidelines.append(
         "- Briefly summarise what you produced after the tool returns "
         "(one or two sentences); don't paste the full content back."

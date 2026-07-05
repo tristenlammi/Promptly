@@ -35,6 +35,21 @@ logger = logging.getLogger("promptly.tools.run_agents")
 _MAX_AGENTS = 4
 _MAX_TASK_CHARS = 600
 
+# Per-AGENT tool budget — deliberately tighter than the top-level turn
+# caps (web_search 5 / fetch_url 4). A fan-out multiplies whatever each
+# agent spends: 4 agents on the default caps could fire 20 searches in
+# seconds from one IP, which is exactly the burst signature that gets a
+# self-hosted SearXNG CAPTCHA-walled by its upstream engines. 3+2 per
+# agent covers a real search→read→refine chain while keeping a full
+# fan-out at ≤12 searches.
+_AGENT_TOOL_CAPS = {"web_search": 3, "fetch_url": 2}
+
+# Stagger between agent launches. Concurrent agents otherwise fire
+# their first searches in the same instant; a sub-second offset smooths
+# the burst without meaningfully delaying the fan-out (agents run for
+# tens of seconds).
+_LAUNCH_STAGGER_S = 0.75
+
 
 class RunAgentsTool(Tool):
     name = "run_agents"
@@ -162,24 +177,28 @@ class RunAgentsTool(Tool):
         total = len(tasks)
         ctx.report_progress(f"0/{total} agents done")
 
-        # Launch all agents, then report as each finishes so the UI can
-        # count down instead of staring at a frozen spinner for up to a
-        # few minutes. Results are re-ordered back to the task order
-        # afterwards so the merged brief reads in the order the model
-        # asked for.
-        launched = [
-            asyncio.ensure_future(
-                run_agent(
-                    user_id=ctx.user.id,
-                    conversation_id=ctx.conversation_id,
-                    user_message_id=ctx.user_message_id,
-                    task=task,
-                    provider_id=conv.provider_id,
-                    model_id=conv.model_id,
-                    tools_payload=agent_tools,
-                )
+        # Launch all agents (with a small stagger — see _LAUNCH_STAGGER_S),
+        # then report as each finishes so the UI can count down instead
+        # of staring at a frozen spinner for up to a few minutes.
+        # Results are re-ordered back to the task order afterwards so
+        # the merged brief reads in the order the model asked for.
+        async def _launch(index: int, task: str):
+            if index:
+                await asyncio.sleep(index * _LAUNCH_STAGGER_S)
+            return await run_agent(
+                user_id=ctx.user.id,
+                conversation_id=ctx.conversation_id,
+                user_message_id=ctx.user_message_id,
+                task=task,
+                provider_id=conv.provider_id,
+                model_id=conv.model_id,
+                tools_payload=agent_tools,
+                per_tool_caps=dict(_AGENT_TOOL_CAPS),
             )
-            for task in tasks
+
+        launched = [
+            asyncio.ensure_future(_launch(i, task))
+            for i, task in enumerate(tasks)
         ]
         by_task_index = {t: i for i, t in enumerate(launched)}
         ordered: list[AgentResult | None] = [None] * total
@@ -205,9 +224,13 @@ class RunAgentsTool(Tool):
         content = (
             "You ran "
             f"{len(results)} research sub-agent(s) in parallel. Their "
-            "findings are below; synthesise a single answer for the "
-            "user and cite sources inline with [1], [2] using the "
-            "merged citation list.\n\n" + "\n\n".join(blocks)
+            "findings are below. Write your final answer for the user "
+            "NOW from these briefs, citing sources inline with [1], "
+            "[2] from the merged citation list. The agents already "
+            "searched and read pages — do NOT call web_search or "
+            "fetch_url again to re-verify their findings; only search "
+            "again if a fact the user explicitly asked for is missing "
+            "from every brief.\n\n" + "\n\n".join(blocks)
         )
 
         # ---- Merge + renumber citations across agents ----
