@@ -10,9 +10,10 @@ from __future__ import annotations
 import uuid
 
 from arq.connections import RedisSettings
+from arq.worker import func
 
 from app.config import get_settings
-from app.tasks.queue import RUN_TASK
+from app.tasks.queue import RUN_MEETING, RUN_TASK
 
 
 async def execute_task_run(ctx, run_id: str) -> None:
@@ -24,13 +25,27 @@ async def execute_task_run(ctx, run_id: str) -> None:
     await execute_run(uuid.UUID(run_id))
 
 
+async def execute_meeting_job(ctx, job_id: str) -> None:
+    """Arq job: chunk-transcribe a meeting recording and seed the notes note.
+    ``execute_meeting`` owns its session and records failures on the job row."""
+    from app.workspaces.meetings_runner import execute_meeting
+
+    await execute_meeting(uuid.UUID(job_id))
+
+
 # Arq registers functions by their ``__name__``; pin it to the shared constant
 # so the enqueue side (queue.RUN_TASK) and the worker always agree.
 execute_task_run.__name__ = RUN_TASK
+execute_meeting_job.__name__ = RUN_MEETING
 
 
 class WorkerSettings:
-    functions = [execute_task_run]
+    functions = [
+        execute_task_run,
+        # A long recording on CPU Whisper is legitimately slow — give
+        # meeting jobs far more room than the 900s automation ceiling.
+        func(execute_meeting_job, timeout=3 * 3600, max_tries=1),
+    ]
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)
     # A run can be long (LLM turns + tool hops + web search); give it room.
     job_timeout = 900

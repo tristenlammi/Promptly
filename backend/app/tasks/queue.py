@@ -23,8 +23,9 @@ from app.config import get_settings
 
 logger = logging.getLogger("promptly.tasks.queue")
 
-# The Arq function name the worker registers (see app/tasks/worker.py).
+# The Arq function names the worker registers (see app/tasks/worker.py).
 RUN_TASK = "execute_task_run"
+RUN_MEETING = "execute_meeting_job"
 
 _pool = None
 _lock = asyncio.Lock()
@@ -60,4 +61,22 @@ async def enqueue_run(run_id: uuid.UUID) -> None:
     asyncio.create_task(execute_run(run_id), name=f"task_run_{run_id}")
 
 
-__all__ = ["enqueue_run", "RUN_TASK"]
+async def enqueue_meeting(job_id: uuid.UUID) -> None:
+    """Enqueue a meeting-notes job (chunked transcription + summarise).
+
+    Same durability story as :func:`enqueue_run`: prefer the worker, fall
+    back to inline execution so an upload is never silently dropped."""
+    try:
+        pool = await _get_pool()
+        await pool.enqueue_job(RUN_MEETING, str(job_id))
+        return
+    except Exception:  # noqa: BLE001 — never let queueing break the request
+        logger.warning(
+            "enqueue_meeting: queue unavailable, executing inline", exc_info=True
+        )
+    from app.workspaces.meetings_runner import execute_meeting
+
+    asyncio.create_task(execute_meeting(job_id), name=f"meeting_job_{job_id}")
+
+
+__all__ = ["enqueue_run", "enqueue_meeting", "RUN_TASK", "RUN_MEETING"]

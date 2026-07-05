@@ -77,6 +77,7 @@ import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
+import { MeetingNotesModal } from "@/components/workspaces/MeetingNotesModal";
 import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
 import { useCreateTask } from "@/hooks/useTasks";
 import { useAvailableModels } from "@/hooks/useProviders";
@@ -142,6 +143,7 @@ export function WorkspaceDetailPage() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskChooserOpen, setTaskChooserOpen] = useState(false);
+  const [meetingOpen, setMeetingOpen] = useState(false);
   const createTask = useCreateTask();
   const { data: taskModels } = useAvailableModels();
 
@@ -425,6 +427,11 @@ export function WorkspaceDetailPage() {
                     ? () => setTaskChooserOpen(true)
                     : undefined
                 }
+                onNewMeeting={
+                  canEdit && !isArchived
+                    ? () => setMeetingOpen(true)
+                    : undefined
+                }
               />
             )}
           </aside>
@@ -662,6 +669,23 @@ export function WorkspaceDetailPage() {
           navigate(`/tasks/${saved.id}`);
         }}
       />
+
+      {id && (
+        <MeetingNotesModal
+          workspaceId={id}
+          open={meetingOpen}
+          onClose={() => setMeetingOpen(false)}
+          onOpenItem={(itemId) => {
+            const node = findNode(tree, itemId);
+            if (node) {
+              setSettingsOpen(false);
+              setDriveOpen(false);
+              setSearchOpen(false);
+              handleSelect(node);
+            }
+          }}
+        />
+      )}
     </>
   );
 }

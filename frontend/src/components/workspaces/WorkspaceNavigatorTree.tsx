@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Archive,
   ArchiveRestore,
+  AudioLines,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -104,6 +105,7 @@ export function WorkspaceNavigatorTree({
   onSearch,
   atSearch,
   onNewTask,
+  onNewMeeting,
 }: {
   workspaceId: string;
   tree: WorkspaceItemNode[];
@@ -130,6 +132,8 @@ export function WorkspaceNavigatorTree({
   atSearch?: boolean;
   /** Open the "new automation" task form (homed in this workspace). */
   onNewTask?: () => void;
+  /** Open the meeting-notes upload (recording → transcribed note). */
+  onNewMeeting?: () => void;
 }) {
   const create = useCreateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
@@ -406,6 +410,7 @@ export function WorkspaceNavigatorTree({
             onNewNotebook={() => handleCreate("container", null)}
             onNewFolder={() => handleCreate("folder", null)}
             onNewTask={onNewTask}
+            onNewMeeting={onNewMeeting}
           />
         )}
       </div>
@@ -1515,6 +1520,7 @@ function NewMenu({
   onNewNotebook,
   onNewFolder,
   onNewTask,
+  onNewMeeting,
   disabled,
 }: {
   /** Top-level only — chats live at the workspace root, not in folders. */
@@ -1526,6 +1532,8 @@ function NewMenu({
   onNewNotebook: () => void;
   onNewFolder: () => void;
   onNewTask?: () => void;
+  /** Upload a meeting recording → transcribed + summarised note. */
+  onNewMeeting?: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1605,6 +1613,16 @@ function NewMenu({
                 onNewSheet();
               }}
             />
+            {onNewMeeting && (
+              <MenuItem
+                icon={<AudioLines className="h-3.5 w-3.5" />}
+                label="Meeting notes"
+                onClick={() => {
+                  setOpen(false);
+                  onNewMeeting();
+                }}
+              />
+            )}
             <MenuSection label="Organize" />
             <MenuItem
               icon={<Layers className="h-3.5 w-3.5" />}

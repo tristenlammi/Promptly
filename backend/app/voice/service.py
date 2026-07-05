@@ -48,8 +48,13 @@ async def transcribe_audio(
     filename: str,
     content_type: str | None,
     language: str | None = None,
+    timeout_s: int | None = None,
 ) -> TranscriptionResponse:
-    """Transcribe a single dictation clip to text.
+    """Transcribe a single audio clip to text.
+
+    ``timeout_s`` overrides the dictation-tuned ``STT_TIMEOUT_S`` — meeting
+    transcription sends 10-minute chunks that can legitimately take a few
+    minutes each on a CPU-only Whisper.
 
     Raises :class:`TranscriptionError` on any failure.
     """
@@ -62,6 +67,7 @@ async def transcribe_audio(
             filename=filename,
             content_type=content_type,
             language=language,
+            timeout_s=timeout_s,
         )
     # Default / unknown value → local worker.
     return await _transcribe_local(
@@ -69,6 +75,7 @@ async def transcribe_audio(
         filename=filename,
         content_type=content_type,
         language=language,
+        timeout_s=timeout_s,
     )
 
 
@@ -78,6 +85,7 @@ async def _transcribe_local(
     filename: str,
     content_type: str | None,
     language: str | None,
+    timeout_s: int | None = None,
 ) -> TranscriptionResponse:
     settings = get_settings()
     base_url = (settings.WHISPER_URL or "").rstrip("/")
@@ -89,7 +97,7 @@ async def _transcribe_local(
 
     files = {"file": (filename, data, content_type or "application/octet-stream")}
     form = {"language": language or ""}
-    timeout = max(5, int(settings.STT_TIMEOUT_S or 60))
+    timeout = max(5, int(timeout_s or settings.STT_TIMEOUT_S or 60))
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
@@ -170,6 +178,7 @@ async def _transcribe_openai(
     filename: str,
     content_type: str | None,
     language: str | None,
+    timeout_s: int | None = None,
 ) -> TranscriptionResponse:
     settings = get_settings()
     api_key = (settings.OPENAI_API_KEY or "").strip()
@@ -187,7 +196,7 @@ async def _transcribe_openai(
         lang = language.strip().lower()
         if lang and lang != "auto":
             form["language"] = lang.split("-", 1)[0]
-    timeout = max(5, int(settings.STT_TIMEOUT_S or 60))
+    timeout = max(5, int(timeout_s or settings.STT_TIMEOUT_S or 60))
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(

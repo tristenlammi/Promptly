@@ -78,6 +78,12 @@ xhtml2pdf==0.2.11
 # bleach/xhtml2pdf, so adding markdownify doesn't materially grow the
 # image. Used by the documents router's ``?format=md`` download path.
 markdownify==0.13.1
+# Markdown -> ProseMirror/Y.Doc block tree for programmatic note seeding
+# (workspace templates, chat write-back, meeting notes). This used to
+# arrive transitively, so a resolver change silently dropped it from a
+# fresh build — pin it explicitly so seeded notes can never lose their
+# parser again.
+markdown-it-py==3.0.0
 # Magic-byte sniffing for upload safety. Pure-python (no system
 # libmagic dependency), so it runs identically in the slim container
 # image. Used to refuse a ``.exe`` renamed to ``.png`` and to recover

@@ -543,6 +543,22 @@ export interface WorkspaceActivityEvent {
   created_at: string;
 }
 
+/** One meeting-notes job (upload → chunked transcription → seeded note). */
+export interface MeetingJob {
+  id: string;
+  workspace_id: string;
+  title: string | null;
+  status: "pending" | "transcribing" | "summarising" | "done" | "failed";
+  /** Transcription chunk progress; total is 0 until chunking finishes. */
+  progress_done: number;
+  progress_total: number;
+  duration_s: number | null;
+  error: string | null;
+  /** The seeded note's tree item, once status is "done". */
+  note_item_id: string | null;
+  created_at: string;
+}
+
 export const workspacesApi = {
   async list(opts: { archived?: boolean } = {}): Promise<WorkspaceSummary[]> {
     const { data } = await apiClient.get<WorkspaceSummary[]>(
@@ -910,6 +926,39 @@ export const workspacesApi = {
     const { data } = await apiClient.get<{
       events: WorkspaceActivityEvent[];
     }>(`/workspaces/${id}/activity`);
+    return data;
+  },
+
+  /** Upload a meeting recording — returns the job to poll. */
+  async createMeetingJob(
+    id: string,
+    file: File,
+    opts: { title?: string; language?: string } = {}
+  ): Promise<MeetingJob> {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.title) form.append("title", opts.title);
+    if (opts.language) form.append("language", opts.language);
+    const { data } = await apiClient.post<MeetingJob>(
+      `/workspaces/${id}/meetings`,
+      form,
+      { headers: { "Content-Type": "multipart/form-data" }, timeout: 300_000 }
+    );
+    return data;
+  },
+
+  /** Recent meeting jobs, newest first (resume an in-flight one). */
+  async listMeetingJobs(id: string): Promise<MeetingJob[]> {
+    const { data } = await apiClient.get<MeetingJob[]>(
+      `/workspaces/${id}/meetings`
+    );
+    return data;
+  },
+
+  async getMeetingJob(id: string, jobId: string): Promise<MeetingJob> {
+    const { data } = await apiClient.get<MeetingJob>(
+      `/workspaces/${id}/meetings/${jobId}`
+    );
     return data;
   },
 

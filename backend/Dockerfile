@@ -17,6 +17,9 @@ RUN apt-get update \
         libpq-dev \
         libglib2.0-0 \
         libgl1 \
+        # ffmpeg/ffprobe: the meeting-notes worker probes uploaded
+        # recordings and splits them into Whisper-sized Opus chunks.
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
