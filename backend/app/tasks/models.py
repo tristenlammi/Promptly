@@ -97,6 +97,16 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
 
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notify: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Overlap policy (A3). ``allow`` (default) keeps today's behaviour — a new
+    # scheduled fire starts even if the previous run is still going. ``skip``
+    # makes the scheduler pass on a fire while a run for this task is still
+    # pending/running, so a slow run can't stack up on the next tick. Manual
+    # "Run now" is always honoured (the user asked for it explicitly).
+    concurrency: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="allow", server_default="allow"
+    )
+    # Per-node retry lives on the graph nodes' ``data`` (retries: 0..5), not
+    # here — a task-level column would be meaningless for a multi-node flow.
     # Retention: keep at most this many runs; older ones are swept (T.4).
     retention_runs: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30
@@ -176,6 +186,29 @@ class AutomationNodeMemory(UUIDPKMixin, TimestampMixin, Base):
     entries: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+
+
+class FlowGraphVersion(UUIDPKMixin, CreatedAtMixin, Base):
+    """A saved snapshot of a task's Advanced flow graph (A3 — version history).
+
+    One row appended on each graph save, so an edit can be undone across saves
+    and the history browsed/restored (mirrors the note editor's precedent). Only
+    the newest N per task are kept (older ones swept on save). ``summary`` is a
+    cheap human label (node count + trigger) so the list reads without decoding
+    every blob.
+    """
+
+    __tablename__ = "flow_graph_versions"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    graph: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # Short "6 nodes · schedule" style label for the restore list.
+    summary: Mapped[str | None] = mapped_column(String(140), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<FlowGraphVersion id={self.id} task={self.task_id}>"
 
 
 class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):

@@ -41,6 +41,7 @@ import {
   GitMerge,
   Globe,
   HelpCircle,
+  History,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -1886,6 +1887,57 @@ export function TaskFlowEditor({
   const [explainText, setExplainText] = useState<string | null>(null);
   const [explainBusy, setExplainBusy] = useState(false);
 
+  // ---- Version history (A3): saved graph snapshots + restore ----
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<
+    import("@/api/tasks").FlowGraphVersion[] | null
+  >(null);
+  const [versionsBusy, setVersionsBusy] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  const openHistory = useCallback(async () => {
+    setHistoryOpen(true);
+    setVersionsBusy(true);
+    try {
+      setVersions(await tasksApi.listGraphVersions(taskId));
+    } catch {
+      setVersions([]);
+    } finally {
+      setVersionsBusy(false);
+    }
+  }, [taskId]);
+
+  const handleRestore = useCallback(
+    async (versionId: string) => {
+      if (restoringId) return;
+      if (dirty) {
+        const ok = window.confirm(
+          "Restore this saved version? Any unsaved edits on the canvas will be replaced."
+        );
+        if (!ok) return;
+      }
+      setRestoringId(versionId);
+      try {
+        const restored = await tasksApi.restoreGraphVersion(taskId, versionId);
+        const rf = toRF(restored);
+        setNodes(rf.nodes);
+        setEdges(rf.edges);
+        setDirty(false);
+        setHistoryOpen(false);
+        void qc.invalidateQueries({ queryKey: ["task-graph", taskId] });
+        window.setTimeout(
+          () => rfInstance.current?.fitView({ padding: 0.25, duration: 250 }),
+          60
+        );
+      } catch {
+        // leave the panel open; the graph is unchanged on failure
+      } finally {
+        setRestoringId(null);
+      }
+    },
+    [taskId, dirty, restoringId, setNodes, setEdges, qc]
+  );
+
   const handleDraft = useCallback(async () => {
     const desc = copilotPrompt.trim();
     if (!desc || copilotBusy) return;
@@ -2458,6 +2510,15 @@ export function TaskFlowEditor({
           </button>
           <button
             type="button"
+            onClick={() => void openHistory()}
+            title="Browse and restore saved versions of this flow"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+          >
+            <History className="h-3.5 w-3.5" />
+            History
+          </button>
+          <button
+            type="button"
             onClick={() => setDetailed((v) => !v)}
             title="Show each node's settings on its face"
             className={cn(
@@ -2603,6 +2664,68 @@ export function TaskFlowEditor({
             <p className="text-xs leading-relaxed text-[var(--text-muted)]">
               {explainText}
             </p>
+          </div>
+        )}
+
+        {historyOpen && (
+          <div className="absolute right-3 top-12 z-10 flex max-h-[70vh] w-80 flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] shadow-lg">
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
+                <History className="h-3.5 w-3.5 text-[var(--accent)]" />
+                Version history
+              </span>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                aria-label="Dismiss"
+                className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+              {versionsBusy ? (
+                <div className="flex items-center gap-2 px-2 py-4 text-xs text-[var(--text-muted)]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+                </div>
+              ) : !versions || versions.length === 0 ? (
+                <p className="px-2 py-4 text-xs text-[var(--text-muted)]">
+                  No saved versions yet. Each time you save the flow, a snapshot
+                  is added here so you can roll back.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-0.5">
+                  {versions.map((v, i) => (
+                    <li
+                      key={v.id}
+                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--surface-hover)]"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-xs text-[var(--text)]">
+                          {i === 0 ? "Latest save" : v.summary || "Saved flow"}
+                        </p>
+                        <p className="text-[11px] text-[var(--text-muted)]">
+                          {new Date(v.created_at).toLocaleString()}
+                          {i !== 0 && v.summary ? ` · ${v.summary}` : ""}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleRestore(v.id)}
+                        disabled={restoringId !== null}
+                        className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[11px] text-[var(--text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-50"
+                      >
+                        {restoringId === v.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          "Restore"
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         )}
 
@@ -4227,20 +4350,47 @@ function NodeInspector({
 
       {/* On-error behaviour — a run-robustness setting for any runnable node. */}
       {!(node.type ?? "").startsWith("trigger.") && (
-        <label className="mt-1 flex items-center justify-between border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
-          <span>If this step errors</span>
-          <select
-            value={
-              ((node.data as Record<string, unknown>).on_error as string) ??
-              "stop"
-            }
-            onChange={(e) => onPatch({ on_error: e.target.value })}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
-          >
-            <option value="stop">Stop the run</option>
-            <option value="continue">Continue (skip this step)</option>
-          </select>
-        </label>
+        <>
+          <label className="mt-1 flex items-center justify-between border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
+            <span>Retry on error</span>
+            <select
+              value={String(
+                ((node.data as Record<string, unknown>).retries as number) ?? 0,
+              )}
+              onChange={(e) =>
+                onPatch({ retries: Number(e.target.value) })
+              }
+              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="0">Don't retry</option>
+              <option value="1">Retry once</option>
+              <option value="2">Retry twice</option>
+              <option value="3">Retry 3×</option>
+              <option value="5">Retry 5×</option>
+            </select>
+          </label>
+          {Number(
+            ((node.data as Record<string, unknown>).retries as number) ?? 0,
+          ) > 0 && (
+            <p className="-mt-0.5 text-[11px] text-[var(--text-muted)]">
+              Waits 2s, then 4s, 8s… between attempts before giving up.
+            </p>
+          )}
+          <label className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+            <span>If it still errors</span>
+            <select
+              value={
+                ((node.data as Record<string, unknown>).on_error as string) ??
+                "stop"
+              }
+              onChange={(e) => onPatch({ on_error: e.target.value })}
+              className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="stop">Stop the run</option>
+              <option value="continue">Continue (skip this step)</option>
+            </select>
+          </label>
+        </>
       )}
 
       {canDelete && (

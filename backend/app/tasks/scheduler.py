@@ -74,12 +74,38 @@ async def _claim_due() -> list[uuid.UUID]:
                 )
                 task.enabled = False
                 continue
+            # Overlap policy (A3): with ``skip``, don't start a scheduled fire
+            # while a run for this task is still in flight — a slow run can't
+            # stack up on the next tick. (next_run_at is already advanced, so
+            # the task simply waits for its following slot.) Default ``allow``
+            # keeps the historical fire-anyway behaviour.
+            if task.concurrency == "skip" and await _has_active_run(db, task.id):
+                logger.info(
+                    "Task %s scheduled fire skipped (a run is still in flight)",
+                    task.id,
+                )
+                continue
             run = TaskRun(task_id=task.id, status="pending", trigger="schedule")
             db.add(run)
             await db.flush()
             run_ids.append(run.id)
         await db.commit()
     return run_ids
+
+
+async def _has_active_run(db, task_id: uuid.UUID) -> bool:
+    """True if a pending/running run already exists for this task."""
+    existing = (
+        await db.execute(
+            select(TaskRun.id)
+            .where(
+                TaskRun.task_id == task_id,
+                TaskRun.status.in_(("pending", "running")),
+            )
+            .limit(1)
+        )
+    ).first()
+    return existing is not None
 
 
 async def _loop() -> None:

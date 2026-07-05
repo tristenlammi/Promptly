@@ -95,6 +95,7 @@ export function TaskFormModal({
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [enabled, setEnabled] = useState(true);
+  const [concurrency, setConcurrency] = useState<"allow" | "skip">("allow");
   const [error, setError] = useState<string | null>(null);
 
   // Hydrate when opening (create = blank defaults; edit = task values).
@@ -117,6 +118,7 @@ export function TaskFormModal({
       setDayOfMonth(task.day_of_month ?? 1);
       setTimezone(task.timezone);
       setEnabled(task.enabled);
+      setConcurrency(task.concurrency === "skip" ? "skip" : "allow");
     } else {
       setTitle("");
       setPrompt("");
@@ -129,6 +131,7 @@ export function TaskFormModal({
       setDayOfMonth(1);
       setTimezone(defaultTimezone);
       setEnabled(true);
+      setConcurrency("allow");
     }
   }, [open, task, defaultTimezone]);
 
@@ -189,6 +192,7 @@ export function TaskFormModal({
       enabled,
       notify: true,
       retention_runs: 30,
+      concurrency,
     };
   };
 
@@ -452,6 +456,23 @@ export function TaskFormModal({
           />
           <span>Enabled — run on schedule</span>
         </label>
+
+        <div>
+          <label className={labelCls}>If a run is still going at the next fire</label>
+          <select
+            className={fieldCls}
+            value={concurrency}
+            onChange={(e) =>
+              setConcurrency(e.target.value === "skip" ? "skip" : "allow")
+            }
+          >
+            <option value="allow">Start it anyway (runs may overlap)</option>
+            <option value="skip">Skip this fire — wait for the next slot</option>
+          </select>
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+            Use “skip” for long automations so a slow run can’t stack up.
+          </p>
+        </div>
 
         {error && (
           <p className="text-sm text-red-500" role="alert">

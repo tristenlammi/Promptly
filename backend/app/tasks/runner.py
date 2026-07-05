@@ -554,9 +554,20 @@ async def execute_run(run_id: uuid.UUID) -> None:
             # the pre-graph path. Imported lazily to avoid an import cycle
             # (graph_runner reuses this module's helpers).
             from app.tasks.flow_service import load_or_derive_graph
-            from app.tasks.graph_runner import run_graph_flow
+            from app.tasks.graph_runner import (
+                estimate_flow_timeout,
+                run_graph_flow,
+            )
 
             graph = await load_or_derive_graph(db, task)
+            # Size-aware run budget (A3): a big flow (a 50-item loop over a slow
+            # model, deep research across pages) legitimately needs more than a
+            # tiny one. We compute a per-run ceiling from the graph and pass it
+            # in as a cooperative deadline the runner checks between nodes —
+            # rather than an asyncio.wait_for cancel, which could tear down the
+            # shared DB session mid-query. The worker's job_timeout stays a
+            # blunt backstop above this cap.
+            run_budget = estimate_flow_timeout(graph)
             text, sources, usage, node_runs = await run_graph_flow(
                 task=task,
                 graph=graph,
@@ -565,6 +576,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 # Webhook runs (0136) carry the inbound request body; the
                 # flow reads it as {{trigger.payload}} / {{trigger.json.*}}.
                 trigger_payload=run.trigger_payload,
+                time_budget=run_budget,
                 db=db,
             )
             run.output_markdown = text

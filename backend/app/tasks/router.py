@@ -31,9 +31,14 @@ from app.chat.pdf_render import PdfRenderError, render_markdown_to_pdf
 from app.database import get_db
 from app.mcp.models import McpConnector
 from app.mcp.service import connectors_for_turn
-from app.tasks.models import Task, TaskConnector, TaskRun
+from app.tasks.models import FlowGraphVersion, Task, TaskConnector, TaskRun
 from app.tasks.flow_graph import FlowGraph
-from app.tasks.flow_service import apply_graph, load_or_derive_graph, promote_task
+from app.tasks.flow_service import (
+    apply_graph,
+    load_or_derive_graph,
+    promote_task,
+    snapshot_flow_version,
+)
 from app.tasks.queue import enqueue_run
 from app.tasks.recurrence import compute_next_run, describe_schedule
 from app.tasks.schemas import (
@@ -179,6 +184,7 @@ def _serialize(
         enabled=task.enabled,
         notify=task.notify,
         retention_runs=task.retention_runs,
+        concurrency=task.concurrency,
         is_advanced=task.is_advanced,
         webhook_secret=task.webhook_secret,
         next_run_at=task.next_run_at,
@@ -375,6 +381,7 @@ async def create_task(
         enabled=payload.enabled,
         notify=payload.notify,
         retention_runs=payload.retention_runs,
+        concurrency=payload.concurrency,
     )
     task.next_run_at = _compute_next(task)
     db.add(task)
@@ -438,6 +445,7 @@ async def duplicate_task(
         enabled=False,
         notify=src.notify,
         retention_runs=src.retention_runs,
+        concurrency=src.concurrency,
         flow_graph=deepcopy(src.flow_graph) if src.flow_graph else None,
     )
     copy.next_run_at = None  # paused — the scheduler ignores it until enabled
@@ -588,6 +596,9 @@ async def put_task_graph(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         )
+    # Version history (A3): snapshot the saved graph so this edit can be undone
+    # across saves. Append-then-prune; never the reason a save fails.
+    await snapshot_flow_version(db, task, graph)
     # The schedule may have changed — recompute the next fire time. A flow
     # whose only trigger is a webhook (0136) must never fire on the clock:
     # the stale schedule columns are just a projection, so park next_run_at.
@@ -624,6 +635,77 @@ async def promote_task_to_advanced(
     await db.commit()
     _reindex_automations(background, task.workspace_id)
     return graph
+
+
+# ------------------------------------------------------------------
+# Flow version history (A3) — every graph save snapshots the graph so an
+# edit can be undone across saves. List them, or restore one (which saves
+# it as the current graph, itself becoming a new history entry).
+# ------------------------------------------------------------------
+class FlowVersionSummary(BaseModel):
+    id: uuid.UUID
+    summary: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/{task_id}/graph/versions", response_model=list[FlowVersionSummary])
+async def list_flow_versions(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[FlowVersionSummary]:
+    """Saved graph snapshots for this task, newest first."""
+    task = await _get_owned_task(task_id, user, db)
+    rows = (
+        await db.execute(
+            select(FlowGraphVersion)
+            .where(FlowGraphVersion.task_id == task.id)
+            .order_by(FlowGraphVersion.created_at.desc())
+        )
+    ).scalars().all()
+    return [FlowVersionSummary.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/{task_id}/graph/versions/{version_id}/restore", response_model=FlowGraph
+)
+async def restore_flow_version(
+    task_id: uuid.UUID,
+    version_id: uuid.UUID,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlowGraph:
+    """Restore a saved snapshot: it becomes the task's current graph (and is
+    re-snapshotted so the restore itself is undoable)."""
+    task = await _get_owned_task(task_id, user, db)
+    version = await db.get(FlowGraphVersion, version_id)
+    if version is None or version.task_id != task.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Version not found."
+        )
+    graph = FlowGraph.model_validate(version.graph)
+    try:
+        await apply_graph(db, task, graph)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
+    await snapshot_flow_version(db, task, graph)
+    # Keep the schedule projection coherent, same as a normal save.
+    from app.tasks.flow_graph import NodeType as _NT
+
+    stored = task.flow_graph
+    has_schedule_trigger = stored is None or any(
+        n.get("type") == _NT.TRIGGER_SCHEDULE for n in stored.get("nodes", [])
+    )
+    task.next_run_at = _compute_next(task) if has_schedule_trigger else None
+    task.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    _reindex_automations(background, task.workspace_id)
+    return await load_or_derive_graph(db, task)
 
 
 class GraphTestRequest(BaseModel):

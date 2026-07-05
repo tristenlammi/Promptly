@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timezone as _tz
 
@@ -1546,6 +1547,112 @@ _PASSTHROUGH_TYPES = frozenset(
 )
 
 
+# Readable names for a node kind, used in run diagnostics ("waiting on a web
+# search that didn't run"). Kept deliberately generic — the point is to orient
+# the user, not to reproduce their custom label.
+_NODE_KIND_NAMES = {
+    NodeType.TRIGGER_SCHEDULE: "the schedule trigger",
+    NodeType.TRIGGER_MANUAL: "the manual trigger",
+    NodeType.TRIGGER_WEBHOOK: "the webhook trigger",
+    NodeType.AI_PROMPT: "an AI step",
+    NodeType.SUMMARISE: "a summarise step",
+    NodeType.EXTRACT: "an extract step",
+    NodeType.SEARCH_WEB: "a web search",
+    NodeType.FETCH_PAGE: "a fetch-page step",
+    NodeType.HTTP_REQUEST: "an HTTP request",
+    NodeType.MCP_ACTION: "a tool action",
+    NodeType.DEEP_RESEARCH: "a deep-research step",
+    NodeType.LOOP: "a loop",
+    NodeType.MEMORY: "a memory step",
+    NodeType.MERGE: "a merge",
+    NodeType.DELAY: "a delay",
+    NodeType.CONDITION: "a condition",
+    NodeType.ROUTER: "a router",
+}
+
+
+def _friendly_node_name(node: FlowNode | None) -> str:
+    """A short human name for a node kind, for run diagnostics."""
+    if node is None:
+        return ""
+    return _NODE_KIND_NAMES.get(node.type, "a step")
+
+
+# Per-node retry (A3). Transient API/model failures are the norm for network
+# and LLM steps; re-running a whole flow to retry one step is the wrong answer.
+# A node's ``retries`` (0..5) is read generically off ``node.data`` — the typed
+# *Data models ignore the extra field, the freeform dict preserves it.
+_MAX_NODE_RETRIES = 5
+
+
+def _node_retries(node: FlowNode) -> int:
+    """How many times to retry this node on error (0..5), from ``node.data``."""
+    try:
+        n = int((node.data or {}).get("retries") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(_MAX_NODE_RETRIES, n))
+
+
+def _retry_backoff(attempt: int) -> float:
+    """Exponential backoff between retries: 2s, 4s, 8s, 16s, capped at 30s."""
+    return float(min(30, 2 ** max(1, attempt)))
+
+
+# Rough per-node wall-clock budgets (seconds) used to size a flow's overall run
+# timeout (A3). These are generous ceilings, not estimates of typical time — the
+# point is that a big flow (a 50-item loop over a slow model, or deep research
+# across several pages) shouldn't die at a fixed worker timeout while a tiny flow
+# doesn't reserve hours it never needs.
+_NODE_TIMEOUT_BUDGET = {
+    NodeType.AI_PROMPT: 120,
+    NodeType.SUMMARISE: 90,
+    NodeType.EXTRACT: 90,
+    NodeType.SEARCH_WEB: 45,
+    NodeType.FETCH_PAGE: 45,
+    NodeType.HTTP_REQUEST: 45,
+    NodeType.MCP_ACTION: 60,
+    NodeType.DEEP_RESEARCH: 420,  # search + fetch top-N + cited synthesis
+    NodeType.MEMORY: 5,
+    NodeType.MERGE: 2,
+    NodeType.CONDITION: 2,
+    NodeType.ROUTER: 30,  # a router runs a classifier model
+}
+# Floor and ceiling for the computed run timeout. The ceiling stays below the
+# worker's Arq job_timeout so the size-aware limit — with its clear message — is
+# what trips first, not the blunt worker kill.
+_RUN_TIMEOUT_FLOOR = 300
+_RUN_TIMEOUT_CEILING = 3000
+
+
+def estimate_flow_timeout(graph: FlowGraph) -> int:
+    """A size-aware wall-clock budget (seconds) for running ``graph``.
+
+    Sums a generous per-node budget, charging loop bodies for their per-item cap
+    and a delay for its full configured wait, then clamps to
+    ``[_RUN_TIMEOUT_FLOOR, _RUN_TIMEOUT_CEILING]``. Not every node runs on every
+    path (branches skip), so this is an upper bound — exactly what a timeout
+    wants to be."""
+    total = 60  # fixed overhead: session setup, graph load, final commit
+    for n in graph.nodes:
+        if n.type == NodeType.LOOP:
+            try:
+                d = LoopData.model_validate(n.data)
+                items = max(1, min(int(d.max_items or 1), 50))
+            except Exception:  # noqa: BLE001 — malformed → assume the cap
+                items = 50
+            total += 90 * items  # an AI body per item, capped
+        elif n.type == NodeType.DELAY:
+            try:
+                total += min(int(DelayData.model_validate(n.data).seconds), 600)
+            except Exception:  # noqa: BLE001
+                total += 600
+            total += _NODE_TIMEOUT_BUDGET.get(NodeType.DELAY, 2)
+        else:
+            total += _NODE_TIMEOUT_BUDGET.get(n.type, 30)
+    return max(_RUN_TIMEOUT_FLOOR, min(total, _RUN_TIMEOUT_CEILING))
+
+
 def _successor_types(graph: FlowGraph) -> dict[str, set[str]]:
     """node_id → the set of node types it eventually feeds into. Pass-through
     control nodes (Condition/Router/Merge/Delay) are traversed *through*, so a
@@ -1588,6 +1695,7 @@ async def run_graph_flow(
     stop_at: str | None = None,
     pinned: dict[str, str] | None = None,
     dry_run: bool = False,
+    time_budget: float | None = None,
 ) -> tuple[str, list[dict], dict, list[dict]]:
     """Execute a flow graph as a DAG → ``(report, sources, usage, node_runs)``.
 
@@ -1637,6 +1745,7 @@ async def run_graph_flow(
     node_runs: list[dict] = []
     ai_count = sum(1 for n in graph.nodes if n.type == NodeType.AI_PROMPT)
     ai_seen = 0
+    ai_counted: set[str] = set()  # nodes already numbered (retry-safe)
     # Credentials vault (A1) — loaded lazily on the first HTTP node so
     # flows without one never touch the table.
     secrets_cache: dict[str, str] | None = None
@@ -1659,12 +1768,25 @@ async def run_graph_flow(
         if u.get("cost_usd") is not None:
             usage["cost_usd"] = (usage["cost_usd"] or 0.0) + u["cost_usd"]
 
+    # Cooperative run deadline (A3): checked between nodes so a big flow's
+    # cumulative time is bounded without cancelling a node mid-DB-query. Node
+    # executors carry their own internal caps (hop limits, size caps), and the
+    # worker job_timeout is the ultimate backstop for a single hung node.
+    deadline = time.monotonic() + time_budget if time_budget else None
+
     for nid in order:
         node = by_id[nid]
 
         # "Run to here": ignore nodes that aren't the target or its ancestors.
         if run_set is not None and nid not in run_set:
             continue
+
+        if deadline is not None and time.monotonic() > deadline:
+            raise TaskRunError(
+                f"Run stopped: it exceeded its {int(time_budget // 60)}-minute "
+                "time budget. Split long loops or deep-research steps into "
+                "separate automations, or lower a loop's item cap."
+            )
 
         if node.type in (
             NodeType.TRIGGER_SCHEDULE,
@@ -1703,8 +1825,11 @@ async def run_graph_flow(
         # (and it stays inactive, so its own downstream skips too).
         node_in_edges = in_edges.get(nid, [])
         active_srcs = [e.source for e in node_in_edges if _edge_active(e)]
+        skip_reason = ""
         # A Merge in "wait for all" mode requires *every* incoming branch to be
-        # active — if any branch was skipped, the merge doesn't fire.
+        # active — if any branch was skipped, the merge doesn't fire. This is a
+        # classic footgun: everything downstream shows "Skipped" with no hint
+        # why. When it happens we name the missing branch and say how to fix it.
         if node.type == NodeType.MERGE:
             try:
                 _wait_all = MergeData.model_validate(node.data).mode == "all"
@@ -1713,6 +1838,18 @@ async def run_graph_flow(
             if _wait_all and (
                 not node_in_edges or len(active_srcs) != len(node_in_edges)
             ):
+                missing = [
+                    _friendly_node_name(by_id.get(e.source))
+                    for e in node_in_edges
+                    if not _edge_active(e)
+                ]
+                names = ", ".join(m for m in missing if m) or "an upstream branch"
+                skip_reason = (
+                    f"Waiting on {names}, which didn't run on this path. A "
+                    "'wait for all' merge only fires when every incoming branch "
+                    "is active — set this merge to 'any' if that branch is "
+                    "expected to be skipped sometimes."
+                )
                 active_srcs = []  # force skip until all branches arrive
         if not active_srcs:
             outputs[nid] = ""
@@ -1720,9 +1857,11 @@ async def run_graph_flow(
                 {
                     "node_id": nid,
                     "type": node.type,
-                    "label": "Skipped",
+                    "label": "Skipped (waiting on a branch)"
+                    if skip_reason
+                    else "Skipped",
                     "status": "skipped",
-                    "output": "",
+                    "output": skip_reason,
                 }
             )
             continue
@@ -1759,334 +1898,350 @@ async def run_graph_flow(
             )
             continue
 
-        try:
-            if node.type == NodeType.CONDITION:
-                data = ConditionData.model_validate(node.data)
-                # Test a specific value (e.g. {{json.status}}) or the whole upstream.
-                left = _interpolate(data.source, ctx) if data.source.strip() else upstream
-                result = _eval_condition(data, left, ctx)
-                selected[nid] = {"true" if result else "false"}
-                outputs[nid] = upstream  # pass the text through on the taken branch
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": NodeType.CONDITION,
-                        "label": "Condition",
-                        "status": "success",
-                        "output": f"{data.operator} → {'true' if result else 'false'}",
-                    }
-                )
-
-            elif node.type == NodeType.ROUTER:
-                picked, router_usage, record = await _run_router_node(
-                    node, db=db, user=user, upstream=upstream
-                )
-                _accum_usage(router_usage)
-                selected[nid] = {picked}
-                outputs[nid] = upstream
-                node_runs.append(record)
-
-            elif node.type == NodeType.MERGE:
-                data = MergeData.model_validate(node.data)
-                sep = {"blank": "\n\n", "newline": "\n", "space": " "}.get(
-                    data.separator, "\n\n"
-                )
-                merged = sep.join(outputs[s] for s in active_srcs if outputs.get(s))
-                outputs[nid] = merged
-                last_processing_output = merged
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": NodeType.MERGE,
-                        "label": f"Merge ({len(active_srcs)} branch"
-                        + ("es" if len(active_srcs) != 1 else "")
-                        + ")",
-                        "status": "success",
-                        "output": merged,
-                    }
-                )
-
-            elif node.type == NodeType.DELAY:
-                secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
-                if secs:
-                    await asyncio.sleep(secs)
-                outputs[nid] = upstream  # pass the text through unchanged
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": NodeType.DELAY,
-                        "label": f"Delay {secs}s",
-                        "status": "success",
-                        "output": f"Paused {secs}s.",
-                    }
-                )
-
-            elif node.type == NodeType.SEARCH_WEB:
-                text, node_sources, record = await _run_search_node(
-                    node, ctx, db=db, user=user
-                )
-                sources.extend(node_sources)
-                node_runs.append(record)
-                outputs[nid] = text
-                # Structured: the hits, so downstream can loop / read fields.
-                structured[nid] = node_sources
-                last_processing_output = text
-
-            elif node.type == NodeType.FETCH_PAGE:
-                text, node_sources, fetch_struct, record = await _run_fetch_node(
-                    node, ctx
-                )
-                sources.extend(node_sources)
-                node_runs.append(record)
-                outputs[nid] = text
-                structured[nid] = fetch_struct  # {url, text}
-                last_processing_output = text
-
-            elif node.type == NodeType.HTTP_REQUEST:
-                if secrets_cache is None:
-                    secrets_cache = await _load_secrets(db, task.user_id)
-                text, http_struct, record = await _run_http_node(
-                    node, ctx, secrets=secrets_cache
-                )
-                node_runs.append(record)
-                outputs[nid] = text
-                structured[nid] = http_struct  # parsed JSON body (or None)
-                last_processing_output = text
-
-            elif node.type == NodeType.MCP_ACTION:
-                text, mcp_struct, record = await _run_mcp_node(
-                    node, ctx, db=db, user=user, workspace_id=task.workspace_id
-                )
-                node_runs.append(record)
-                outputs[nid] = text
-                structured[nid] = mcp_struct
-                last_processing_output = text
-
-            elif node.type == NodeType.SUMMARISE:
-                text, node_sources, s_usage, record = await _run_summarise_node(
-                    node, ctx, db=db, user=user, tz=tz, now_local=now_local
-                )
-                sources.extend(node_sources)
-                _accum_usage(s_usage)
-                node_runs.append(record)
-                outputs[nid] = text
-                last_processing_output = text
-
-            elif node.type == NodeType.EXTRACT:
-                text, node_sources, e_usage, record = await _run_extract_node(
-                    node, ctx, db=db, user=user, tz=tz, now_local=now_local
-                )
-                sources.extend(node_sources)
-                _accum_usage(e_usage)
-                node_runs.append(record)
-                outputs[nid] = text
-                last_processing_output = text
-
-            elif node.type == NodeType.DEEP_RESEARCH:
-                text, node_sources, dr_usage, record = await _run_deep_research_node(
-                    node, ctx, db=db, user=user, tz=tz, now_local=now_local
-                )
-                sources.extend(node_sources)
-                _accum_usage(dr_usage)
-                node_runs.append(record)
-                outputs[nid] = text
-                structured[nid] = {"report": text, "sources": node_sources}
-                last_processing_output = text
-
-            elif node.type == NodeType.LOOP:
-                text, node_sources, loop_usage, record, loop_results = (
-                    await _run_loop_node(
-                        node,
-                        ctx,
-                        db=db,
-                        user=user,
-                        task=task,
-                        tz=tz,
-                        now_local=now_local,
-                        upstream_struct=upstream_struct,
+        _retry_max = _node_retries(node)
+        _retry_n = 0
+        while True:
+            try:
+                if node.type == NodeType.CONDITION:
+                    data = ConditionData.model_validate(node.data)
+                    # Test a specific value (e.g. {{json.status}}) or the whole upstream.
+                    left = _interpolate(data.source, ctx) if data.source.strip() else upstream
+                    result = _eval_condition(data, left, ctx)
+                    selected[nid] = {"true" if result else "false"}
+                    outputs[nid] = upstream  # pass the text through on the taken branch
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": NodeType.CONDITION,
+                            "label": "Condition",
+                            "status": "success",
+                            "output": f"{data.operator} → {'true' if result else 'false'}",
+                        }
                     )
-                )
-                sources.extend(node_sources)
-                _accum_usage(loop_usage)
-                node_runs.append(record)
-                outputs[nid] = text
-                # Structured: the per-item results, so a later step can act on them.
-                structured[nid] = loop_results
-                last_processing_output = text
 
-            elif node.type == NodeType.MEMORY:
-                text, record = await _run_memory_node(
-                    node, ctx, db=db, task=task, now_local=now_local, dry_run=dry_run
-                )
-                node_runs.append(record)
-                outputs[nid] = text
-                last_processing_output = text
+                elif node.type == NodeType.ROUTER:
+                    picked, router_usage, record = await _run_router_node(
+                        node, db=db, user=user, upstream=upstream
+                    )
+                    _accum_usage(router_usage)
+                    selected[nid] = {picked}
+                    outputs[nid] = upstream
+                    node_runs.append(record)
 
-            elif node.type == NodeType.AI_PROMPT:
-                ai_seen += 1
-                data = AIPromptData.model_validate(node.data)
-                provider, model_id = await _resolve_provider(
-                    uuid.UUID(data.provider_id) if data.provider_id else None,
-                    data.model_id,
-                    db,
-                )
-                schemas, dispatch, names = await _resolve_connectors_by_ids(
-                    db,
-                    user_id=task.user_id,
-                    workspace_id=task.workspace_id,
-                    connector_ids=[uuid.UUID(c) for c in data.connector_ids],
-                )
-                # Shape this step's output for what it feeds: a board card wants JSON,
-                # a report/note wants prose, anything else is an intermediate step.
-                downs = succ_types.get(nid, set())
-                if NodeType.OUTPUT_BOARD_CARD in downs:
-                    output_kind = "board_card"
-                elif downs & OUTPUT_TYPES:
-                    output_kind = "report"
-                else:
-                    output_kind = "step"
-                system = _build_system_prompt(
-                    timezone=tz,
-                    use_web_search=data.use_web_search,
-                    now_local_iso=now_local,
-                    connector_names=names,
-                    output_kind=output_kind,
-                )
-                # Blank prompt → default to consuming the upstream text, so an AI
-                # step dropped after a search/fetch "just works" without config.
-                prompt = _interpolate(data.prompt.strip() or "{{upstream_output}}", ctx)
-                text, node_sources, node_usage = await _generate(
-                    provider=provider,
-                    model_id=model_id,
-                    system=system,
-                    prompt=prompt,
-                    user=user,
-                    use_web_search=data.use_web_search,
-                    reasoning_effort=data.reasoning_effort,
-                    mcp_schemas=schemas,
-                    mcp_dispatch=dispatch,
-                    db=db,
-                )
-                sources.extend(node_sources)
-                _accum_usage(node_usage)
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": NodeType.AI_PROMPT,
-                        "label": f"AI step {ai_seen}" if ai_count > 1 else "AI step",
-                        "status": "success",
-                        "output": text,
-                        "prompt_tokens": node_usage.get("prompt_tokens") or None,
-                        "completion_tokens": node_usage.get("completion_tokens") or None,
-                    }
-                )
-                outputs[nid] = text
-                last_processing_output = text
+                elif node.type == NodeType.MERGE:
+                    data = MergeData.model_validate(node.data)
+                    sep = {"blank": "\n\n", "newline": "\n", "space": " "}.get(
+                        data.separator, "\n\n"
+                    )
+                    merged = sep.join(outputs[s] for s in active_srcs if outputs.get(s))
+                    outputs[nid] = merged
+                    last_processing_output = merged
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": NodeType.MERGE,
+                            "label": f"Merge ({len(active_srcs)} branch"
+                            + ("es" if len(active_srcs) != 1 else "")
+                            + ")",
+                            "status": "success",
+                            "output": merged,
+                        }
+                    )
 
-            elif node.type == NodeType.OUTPUT_BOARD_CARD:
-                note = await _file_board_card(
-                    db,
-                    task=task,
-                    data=BoardCardOutputData.model_validate(node.data),
-                    text=upstream,
+                elif node.type == NodeType.DELAY:
+                    secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
+                    if secs:
+                        await asyncio.sleep(secs)
+                    outputs[nid] = upstream  # pass the text through unchanged
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": NodeType.DELAY,
+                            "label": f"Delay {secs}s",
+                            "status": "success",
+                            "output": f"Paused {secs}s.",
+                        }
+                    )
+
+                elif node.type == NodeType.SEARCH_WEB:
+                    text, node_sources, record = await _run_search_node(
+                        node, ctx, db=db, user=user
+                    )
+                    sources.extend(node_sources)
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    # Structured: the hits, so downstream can loop / read fields.
+                    structured[nid] = node_sources
+                    last_processing_output = text
+
+                elif node.type == NodeType.FETCH_PAGE:
+                    text, node_sources, fetch_struct, record = await _run_fetch_node(
+                        node, ctx
+                    )
+                    sources.extend(node_sources)
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    structured[nid] = fetch_struct  # {url, text}
+                    last_processing_output = text
+
+                elif node.type == NodeType.HTTP_REQUEST:
+                    if secrets_cache is None:
+                        secrets_cache = await _load_secrets(db, task.user_id)
+                    text, http_struct, record = await _run_http_node(
+                        node, ctx, secrets=secrets_cache
+                    )
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    structured[nid] = http_struct  # parsed JSON body (or None)
+                    last_processing_output = text
+
+                elif node.type == NodeType.MCP_ACTION:
+                    text, mcp_struct, record = await _run_mcp_node(
+                        node, ctx, db=db, user=user, workspace_id=task.workspace_id
+                    )
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    structured[nid] = mcp_struct
+                    last_processing_output = text
+
+                elif node.type == NodeType.SUMMARISE:
+                    text, node_sources, s_usage, record = await _run_summarise_node(
+                        node, ctx, db=db, user=user, tz=tz, now_local=now_local
+                    )
+                    sources.extend(node_sources)
+                    _accum_usage(s_usage)
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    last_processing_output = text
+
+                elif node.type == NodeType.EXTRACT:
+                    text, node_sources, e_usage, record = await _run_extract_node(
+                        node, ctx, db=db, user=user, tz=tz, now_local=now_local
+                    )
+                    sources.extend(node_sources)
+                    _accum_usage(e_usage)
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    last_processing_output = text
+
+                elif node.type == NodeType.DEEP_RESEARCH:
+                    text, node_sources, dr_usage, record = await _run_deep_research_node(
+                        node, ctx, db=db, user=user, tz=tz, now_local=now_local
+                    )
+                    sources.extend(node_sources)
+                    _accum_usage(dr_usage)
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    structured[nid] = {"report": text, "sources": node_sources}
+                    last_processing_output = text
+
+                elif node.type == NodeType.LOOP:
+                    text, node_sources, loop_usage, record, loop_results = (
+                        await _run_loop_node(
+                            node,
+                            ctx,
+                            db=db,
+                            user=user,
+                            task=task,
+                            tz=tz,
+                            now_local=now_local,
+                            upstream_struct=upstream_struct,
+                        )
+                    )
+                    sources.extend(node_sources)
+                    _accum_usage(loop_usage)
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    # Structured: the per-item results, so a later step can act on them.
+                    structured[nid] = loop_results
+                    last_processing_output = text
+
+                elif node.type == NodeType.MEMORY:
+                    text, record = await _run_memory_node(
+                        node, ctx, db=db, task=task, now_local=now_local, dry_run=dry_run
+                    )
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    last_processing_output = text
+
+                elif node.type == NodeType.AI_PROMPT:
+                    if nid not in ai_counted:
+                        ai_counted.add(nid)
+                        ai_seen += 1
+                    data = AIPromptData.model_validate(node.data)
+                    provider, model_id = await _resolve_provider(
+                        uuid.UUID(data.provider_id) if data.provider_id else None,
+                        data.model_id,
+                        db,
+                    )
+                    schemas, dispatch, names = await _resolve_connectors_by_ids(
+                        db,
+                        user_id=task.user_id,
+                        workspace_id=task.workspace_id,
+                        connector_ids=[uuid.UUID(c) for c in data.connector_ids],
+                    )
+                    # Shape this step's output for what it feeds: a board card wants JSON,
+                    # a report/note wants prose, anything else is an intermediate step.
+                    downs = succ_types.get(nid, set())
+                    if NodeType.OUTPUT_BOARD_CARD in downs:
+                        output_kind = "board_card"
+                    elif downs & OUTPUT_TYPES:
+                        output_kind = "report"
+                    else:
+                        output_kind = "step"
+                    system = _build_system_prompt(
+                        timezone=tz,
+                        use_web_search=data.use_web_search,
+                        now_local_iso=now_local,
+                        connector_names=names,
+                        output_kind=output_kind,
+                    )
+                    # Blank prompt → default to consuming the upstream text, so an AI
+                    # step dropped after a search/fetch "just works" without config.
+                    prompt = _interpolate(data.prompt.strip() or "{{upstream_output}}", ctx)
+                    text, node_sources, node_usage = await _generate(
+                        provider=provider,
+                        model_id=model_id,
+                        system=system,
+                        prompt=prompt,
+                        user=user,
+                        use_web_search=data.use_web_search,
+                        reasoning_effort=data.reasoning_effort,
+                        mcp_schemas=schemas,
+                        mcp_dispatch=dispatch,
+                        db=db,
+                    )
+                    sources.extend(node_sources)
+                    _accum_usage(node_usage)
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": NodeType.AI_PROMPT,
+                            "label": f"AI step {ai_seen}" if ai_count > 1 else "AI step",
+                            "status": "success",
+                            "output": text,
+                            "prompt_tokens": node_usage.get("prompt_tokens") or None,
+                            "completion_tokens": node_usage.get("completion_tokens") or None,
+                        }
+                    )
+                    outputs[nid] = text
+                    last_processing_output = text
+
+                elif node.type == NodeType.OUTPUT_BOARD_CARD:
+                    note = await _file_board_card(
+                        db,
+                        task=task,
+                        data=BoardCardOutputData.model_validate(node.data),
+                        text=upstream,
+                    )
+                    action_notes.append(note)
+                    outputs[nid] = upstream
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": "Create card",
+                            "status": "success",
+                            "output": note,
+                        }
+                    )
+
+                elif node.type == NodeType.OUTPUT_CHAT_MESSAGE:
+                    note = await _post_chat_message(
+                        db,
+                        task=task,
+                        data=ChatMessageOutputData.model_validate(node.data),
+                        text=upstream,
+                    )
+                    action_notes.append(note)
+                    outputs[nid] = upstream
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": "Send message",
+                            "status": "success",
+                            "output": note,
+                        }
+                    )
+
+                elif node.type == NodeType.OUTPUT_NOTE:
+                    note = await _write_note(
+                        db,
+                        task=task,
+                        data=NoteOutputData.model_validate(node.data),
+                        text=upstream,
+                    )
+                    action_notes.append(note)
+                    outputs[nid] = upstream
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": "Create note",
+                            "status": "success",
+                            "output": note,
+                        }
+                    )
+
+                elif node.type == NodeType.OUTPUT_SHEET:
+                    note = await _write_sheet(
+                        db,
+                        task=task,
+                        data=SheetOutputData.model_validate(node.data),
+                        text=upstream,
+                    )
+                    action_notes.append(note)
+                    outputs[nid] = upstream
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": "Create sheet",
+                            "status": "success",
+                            "output": note,
+                        }
+                    )
+
+                else:  # NodeType.OUTPUT_REPORT
+                    report_from_output = upstream
+                    outputs[nid] = upstream
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": "Report",
+                            "status": "success",
+                            "output": "Saved as the run report.",
+                        }
+                    )
+            except Exception as _exc:  # noqa: BLE001 — retry / on_error
+                _retry_n += 1
+                if _retry_n <= _retry_max:
+                    await asyncio.sleep(_retry_backoff(_retry_n))
+                    structured.pop(nid, None)  # drop any partial state
+                    continue  # retry this node
+                if (node.data or {}).get("on_error") != "continue":
+                    raise
+                outputs[nid] = ""
+                structured[nid] = None
+                _tail = (
+                    f" after {_retry_max} "
+                    f"retr{'y' if _retry_max == 1 else 'ies'}"
+                    if _retry_max
+                    else ""
                 )
-                action_notes.append(note)
-                outputs[nid] = upstream
                 node_runs.append(
                     {
                         "node_id": nid,
                         "type": node.type,
-                        "label": "Create card",
-                        "status": "success",
-                        "output": note,
+                        "label": "Error (continued)",
+                        "status": "error",
+                        "input": upstream,
+                        "output": f"Failed{_tail}: {str(_exc)[:500]}",
                     }
                 )
-
-            elif node.type == NodeType.OUTPUT_CHAT_MESSAGE:
-                note = await _post_chat_message(
-                    db,
-                    task=task,
-                    data=ChatMessageOutputData.model_validate(node.data),
-                    text=upstream,
-                )
-                action_notes.append(note)
-                outputs[nid] = upstream
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": node.type,
-                        "label": "Send message",
-                        "status": "success",
-                        "output": note,
-                    }
-                )
-
-            elif node.type == NodeType.OUTPUT_NOTE:
-                note = await _write_note(
-                    db,
-                    task=task,
-                    data=NoteOutputData.model_validate(node.data),
-                    text=upstream,
-                )
-                action_notes.append(note)
-                outputs[nid] = upstream
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": node.type,
-                        "label": "Create note",
-                        "status": "success",
-                        "output": note,
-                    }
-                )
-
-            elif node.type == NodeType.OUTPUT_SHEET:
-                note = await _write_sheet(
-                    db,
-                    task=task,
-                    data=SheetOutputData.model_validate(node.data),
-                    text=upstream,
-                )
-                action_notes.append(note)
-                outputs[nid] = upstream
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": node.type,
-                        "label": "Create sheet",
-                        "status": "success",
-                        "output": note,
-                    }
-                )
-
-            else:  # NodeType.OUTPUT_REPORT
-                report_from_output = upstream
-                outputs[nid] = upstream
-                node_runs.append(
-                    {
-                        "node_id": nid,
-                        "type": node.type,
-                        "label": "Report",
-                        "status": "success",
-                        "output": "Saved as the run report.",
-                    }
-                )
-        except Exception as _exc:  # noqa: BLE001 — per-node error handling
-            if (node.data or {}).get("on_error") != "continue":
-                raise
-            outputs[nid] = ""
-            structured[nid] = None
-            node_runs.append(
-                {
-                    "node_id": nid,
-                    "type": node.type,
-                    "label": "Error (continued)",
-                    "status": "error",
-                    "input": upstream,
-                    "output": str(_exc)[:500],
-                }
-            )
-            continue
+            break
 
         # Expose this node's JSON (if it emitted any) for downstream field refs.
         # Nodes with explicit structure (search/fetch/deep/loop) set it above.

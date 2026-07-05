@@ -48,7 +48,12 @@ class WorkerSettings:
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)
     # A run can be long (LLM turns + tool hops + web search); give it room.
-    job_timeout = 900
+    # This is now a *backstop*, not the real limit — each run computes a
+    # size-aware budget (app.tasks.graph_runner.estimate_flow_timeout, capped
+    # at 3000s) and enforces it itself with a clear "exceeded time budget"
+    # message. The worker ceiling just sits above that cap so the blunt kill
+    # never fires before the friendly one (A3).
+    job_timeout = 3300
     max_jobs = 4
     # Results live on the TaskRun row, not in Redis — don't retain them.
     keep_result = 0

@@ -1,6 +1,8 @@
 import { apiClient } from "./client";
 
 export type TaskFrequency = "hourly" | "daily" | "weekly" | "monthly";
+/** Overlap policy for a task's scheduled fires (A3). */
+export type TaskConcurrency = "allow" | "skip";
 /** "warning" = the run completed but its output self-reports a dead end
  *  (empty searches, missing data) — surfaced amber, not green. */
 export type TaskRunStatus =
@@ -65,6 +67,9 @@ export interface Task {
   enabled: boolean;
   notify: boolean;
   retention_runs: number;
+  /** Overlap policy: "allow" fires even if the last run is still going;
+   *  "skip" holds a scheduled fire while a run is still in flight. */
+  concurrency: TaskConcurrency;
   /** True when the automation has a stored Advanced flow (opens the flow
    *  editor); false = a Simple single-prompt task. */
   is_advanced: boolean;
@@ -97,6 +102,7 @@ export interface TaskInput {
   enabled: boolean;
   notify: boolean;
   retention_runs: number;
+  concurrency?: TaskConcurrency;
 }
 
 export interface ConnectorTool {
@@ -237,6 +243,20 @@ export const tasksApi = {
     );
     return data.text;
   },
+  /** Version history (A3): saved graph snapshots, newest first. */
+  async listGraphVersions(id: string): Promise<FlowGraphVersion[]> {
+    const { data } = await apiClient.get<FlowGraphVersion[]>(
+      `/tasks/${id}/graph/versions`
+    );
+    return data;
+  },
+  /** Restore a saved snapshot as the current graph (itself re-snapshotted). */
+  async restoreGraphVersion(id: string, versionId: string): Promise<FlowGraph> {
+    const { data } = await apiClient.post<FlowGraph>(
+      `/tasks/${id}/graph/versions/${versionId}/restore`
+    );
+    return data;
+  },
   async getMemory(id: string): Promise<TaskMemory> {
     const { data } = await apiClient.get<TaskMemory>(`/tasks/${id}/memory`);
     return data;
@@ -293,6 +313,13 @@ export interface FlowGraph {
   mode: "simple" | "advanced";
   nodes: FlowNodeModel[];
   edges: FlowEdgeModel[];
+}
+
+/** A saved snapshot in a task's flow version history (A3). */
+export interface FlowGraphVersion {
+  id: string;
+  summary: string | null;
+  created_at: string;
 }
 
 export interface ScheduleTriggerData {

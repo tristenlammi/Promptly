@@ -24,7 +24,11 @@ from app.tasks.flow_graph import (
     output_nodes,
     task_to_graph,
 )
-from app.tasks.models import Task, TaskConnector
+from app.tasks.models import FlowGraphVersion, Task, TaskConnector
+
+# How many saved graph snapshots to keep per task (A3). Enough to undo a run of
+# edits without letting history grow unbounded.
+_VERSIONS_KEPT = 20
 
 
 async def _selected_connector_ids(
@@ -161,4 +165,52 @@ async def promote_task(db: AsyncSession, task: Task) -> FlowGraph:
     return graph
 
 
-__all__ = ["load_or_derive_graph", "apply_graph", "promote_task"]
+def _summarise_graph(graph: FlowGraph) -> str:
+    """A short "6 nodes · schedule" label for the version list."""
+    n = len(graph.nodes)
+    trig = next(
+        (
+            x.type.split(".", 1)[-1]
+            for x in graph.nodes
+            if x.type.startswith("trigger.")
+        ),
+        "flow",
+    )
+    return f"{n} node{'s' if n != 1 else ''} · {trig}"
+
+
+async def snapshot_flow_version(
+    db: AsyncSession, task: Task, graph: FlowGraph
+) -> None:
+    """Append a snapshot of ``graph`` to the task's version history (A3), then
+    prune to the newest ``_VERSIONS_KEPT``. Called on every graph save so an
+    edit can be undone across saves. Best-effort: never the reason a save fails.
+    """
+    db.add(
+        FlowGraphVersion(
+            task_id=task.id,
+            graph=graph.model_dump(mode="json"),
+            summary=_summarise_graph(graph),
+        )
+    )
+    await db.flush()
+    stale = (
+        await db.execute(
+            select(FlowGraphVersion.id)
+            .where(FlowGraphVersion.task_id == task.id)
+            .order_by(FlowGraphVersion.created_at.desc())
+            .offset(_VERSIONS_KEPT)
+        )
+    ).scalars().all()
+    if stale:
+        await db.execute(
+            delete(FlowGraphVersion).where(FlowGraphVersion.id.in_(stale))
+        )
+
+
+__all__ = [
+    "load_or_derive_graph",
+    "apply_graph",
+    "promote_task",
+    "snapshot_flow_version",
+]
