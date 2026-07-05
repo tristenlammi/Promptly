@@ -220,4 +220,254 @@ async def ask_workspace(
     )
 
 
+# ---------------------------------------------------------------------
+# Workspace search (Batch 4.3) — one box over titles, full text, and
+# semantic similarity. Complements ⌘K (fuzzy titles only) and Ask
+# (synthesised answer): search shows you *where things are said*.
+# ---------------------------------------------------------------------
+class SearchHit(BaseModel):
+    # 'title' | 'text' | 'semantic'
+    source: str
+    item_id: uuid.UUID | None
+    ref_id: uuid.UUID | None
+    kind: str
+    title: str
+    # For 'text' hits this is a ts_headline fragment containing <mark>
+    # tags (and nothing else); plain text for the other sources.
+    snippet: str = ""
+    score: float = 0.0
+
+
+class SearchResponse(BaseModel):
+    hits: list[SearchHit] = Field(default_factory=list)
+    semantic_available: bool = False
+
+
+async def _visible_item_file_map(
+    db: AsyncSession, workspace_id: uuid.UUID, user: User
+) -> dict[uuid.UUID, tuple[uuid.UUID | None, uuid.UUID | None, str, str]]:
+    """file_id → (item_id, open_ref_id, kind, title) for everything the
+    caller may see: item backing files (notes/boards on ``ref_id``,
+    canvases/sheets on ``text_file_id``) plus pinned Drive files. Other
+    people's private drafts (0134) are omitted, which downstream turns
+    into a hard filter for text + semantic hits."""
+    from sqlalchemy import or_ as sa_or
+
+    from app.chat.models import Spreadsheet, WorkspaceFile
+
+    out: dict[uuid.UUID, tuple[uuid.UUID | None, uuid.UUID | None, str, str]] = {}
+    visible = sa_or(
+        WorkspaceItem.visibility != "private",
+        WorkspaceItem.created_by == user.id,
+    )
+    items = (
+        (
+            await db.execute(
+                select(WorkspaceItem).where(
+                    WorkspaceItem.workspace_id == workspace_id,
+                    WorkspaceItem.archived_at.is_(None),
+                    visible,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    canvas_files = {
+        c.id: c.text_file_id
+        for c in (
+            await db.execute(
+                select(WorkspaceCanvas).where(
+                    WorkspaceCanvas.workspace_id == workspace_id
+                )
+            )
+        ).scalars()
+    }
+    sheet_files = {
+        s.id: s.text_file_id
+        for s in (
+            await db.execute(
+                select(Spreadsheet).where(
+                    Spreadsheet.workspace_id == workspace_id
+                )
+            )
+        ).scalars()
+    }
+    for it in items:
+        if it.kind in ("note", "board") and it.ref_id is not None:
+            out[it.ref_id] = (it.id, it.ref_id, it.kind, it.title)
+        elif it.kind == "canvas" and it.ref_id in canvas_files:
+            fid = canvas_files[it.ref_id]
+            if fid is not None:
+                out[fid] = (it.id, it.ref_id, "canvas", it.title)
+        elif it.kind == "sheet" and it.ref_id in sheet_files:
+            fid = sheet_files[it.ref_id]
+            if fid is not None:
+                out[fid] = (it.id, it.ref_id, "sheet", it.title)
+    from app.workspaces.knowledge import WORKSPACE_MEMORY_SOURCE_KIND
+
+    pins = (
+        await db.execute(
+            select(WorkspaceFile.file_id, UserFile.filename)
+            .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+            .where(
+                WorkspaceFile.workspace_id == workspace_id,
+                # The auto-maintained memory doc is hidden everywhere else
+                # (Drive, hub counts) — keep it out of search hits too.
+                sa_or(
+                    UserFile.source_kind.is_(None),
+                    UserFile.source_kind != WORKSPACE_MEMORY_SOURCE_KIND,
+                ),
+            )
+        )
+    ).all()
+    for file_id, filename in pins:
+        out.setdefault(file_id, (None, file_id, "file", filename))
+    return out
+
+
+@router.get("/{workspace_id}/search", response_model=SearchResponse)
+async def search_workspace(
+    workspace_id: uuid.UUID,
+    q: str,
+    limit: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SearchResponse:
+    """Three passes, merged: item-title matches, Postgres FTS over the
+    workspace's backing/pinned files (with ``<mark>`` headlines), and
+    embedding similarity (when configured). Deduped per item, titles
+    first, then FTS by rank, then any semantic-only stragglers."""
+    from sqlalchemy import desc, func as sa_func, literal_column, or_ as sa_or
+
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    q = (q or "").strip()
+    if len(q) < 2:
+        return SearchResponse(hits=[], semantic_available=False)
+    limit = max(1, min(60, limit))
+
+    hits: list[SearchHit] = []
+    seen_items: set[uuid.UUID] = set()
+    seen_files: set[uuid.UUID] = set()
+
+    # 1) Title matches (cheap, exact-feeling).
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    title_rows = (
+        (
+            await db.execute(
+                select(WorkspaceItem)
+                .where(
+                    WorkspaceItem.workspace_id == ws.id,
+                    WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.kind != "folder",
+                    WorkspaceItem.title.ilike(f"%{escaped}%", escape="\\"),
+                    sa_or(
+                        WorkspaceItem.visibility != "private",
+                        WorkspaceItem.created_by == user.id,
+                    ),
+                )
+                .order_by(WorkspaceItem.title.asc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for it in title_rows:
+        seen_items.add(it.id)
+        hits.append(
+            SearchHit(
+                source="title",
+                item_id=it.id,
+                ref_id=it.ref_id,
+                kind=it.kind,
+                title=it.title,
+                score=1.0,
+            )
+        )
+
+    file_map = await _visible_item_file_map(db, ws.id, user)
+
+    # 2) Full-text over backing + pinned files (GIN ``content_tsv``).
+    if file_map:
+        content_tsv = literal_column("content_tsv")
+        tsquery = sa_func.websearch_to_tsquery("english", q)
+        rank_expr = sa_func.ts_rank(content_tsv, tsquery)
+        headline_expr = sa_func.ts_headline(
+            "english",
+            sa_func.coalesce(UserFile.content_text, UserFile.filename),
+            tsquery,
+            "StartSel=<mark>, StopSel=</mark>, MaxWords=24, MinWords=8, MaxFragments=1",
+        )
+        fts_rows = (
+            await db.execute(
+                select(UserFile.id, rank_expr, headline_expr)
+                .where(
+                    UserFile.id.in_(list(file_map.keys())),
+                    UserFile.trashed_at.is_(None),
+                    content_tsv.op("@@")(tsquery),
+                )
+                .order_by(desc(rank_expr))
+                .limit(limit)
+            )
+        ).all()
+        for file_id, rank, snippet in fts_rows:
+            item_id, ref_id, kind, title = file_map[file_id]
+            if item_id is not None and item_id in seen_items:
+                continue
+            if item_id is not None:
+                seen_items.add(item_id)
+            seen_files.add(file_id)
+            hits.append(
+                SearchHit(
+                    source="text",
+                    item_id=item_id,
+                    ref_id=ref_id,
+                    kind=kind,
+                    title=title,
+                    snippet=str(snippet or "")[:400],
+                    score=float(rank or 0.0),
+                )
+            )
+
+    # 3) Semantic stragglers — meaning-matches that share no keywords.
+    semantic_available = False
+    try:
+        chunks = await retrieve_workspace_context(
+            db, workspace_id=ws.id, query=q, top_k=8
+        )
+        semantic_available = bool(chunks)
+        for chunk in chunks:
+            if chunk.score < 0.35:
+                continue  # below this it's noise, not a result
+            mapped = file_map.get(chunk.user_file_id)
+            if mapped is None:
+                continue  # private / archived / no longer visible
+            item_id, ref_id, kind, title = mapped
+            if (item_id is not None and item_id in seen_items) or (
+                chunk.user_file_id in seen_files
+            ):
+                continue
+            if item_id is not None:
+                seen_items.add(item_id)
+            seen_files.add(chunk.user_file_id)
+            hits.append(
+                SearchHit(
+                    source="semantic",
+                    item_id=item_id,
+                    ref_id=ref_id,
+                    kind=kind,
+                    title=title,
+                    snippet=chunk.text[:240],
+                    score=chunk.score,
+                )
+            )
+    except Exception:  # pragma: no cover — semantic is best-effort
+        pass
+
+    return SearchResponse(
+        hits=hits[:limit], semantic_available=semantic_available
+    )
+
+
 __all__ = ["router"]

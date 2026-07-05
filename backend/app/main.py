@@ -297,6 +297,7 @@ from app.mcp.router import router as mcp_admin_router  # noqa: E402
 from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E402
 from app.groups.router import router as groups_admin_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
+from app.chat.proposals_router import router as proposals_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
@@ -330,6 +331,11 @@ app.include_router(
     tags=["workspace-defaults"],
 )
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+# Workspace write-back proposals (Batch 4.1) — conversation-scoped, so
+# they live under the chat prefix.
+app.include_router(
+    proposals_router, prefix="/api/chat", tags=["workspace-proposals"]
+)
 app.include_router(
     saved_prompts_router, prefix="/api/saved-prompts", tags=["saved-prompts"]
 )

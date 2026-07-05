@@ -32,6 +32,7 @@ import { ResearchDialog } from "@/components/chat/ResearchDialog";
 import { RefineResearchDialog } from "@/components/chat/RefineResearchDialog";
 import { VoiceModeOverlay } from "@/components/chat/VoiceModeOverlay";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
+import { WorkspaceProposalsPanel } from "@/components/chat/WorkspaceProposalsPanel";
 import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
 import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
 import {
@@ -1238,6 +1239,16 @@ export function ChatPage({
             <ResearchProgressCard
               conversationId={id}
               onCancel={cancelResearch}
+            />
+          )}
+
+          {/* Batch 4.1 — the AI's pending workspace write-back proposals.
+              Preview + Apply/Dismiss cards; nothing is written until the
+              owner approves. */}
+          {id && isOwner && conversation?.workspace_id && (
+            <WorkspaceProposalsPanel
+              conversationId={id}
+              workspaceId={conversation.workspace_id}
             />
           )}
 

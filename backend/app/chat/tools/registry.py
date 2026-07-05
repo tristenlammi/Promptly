@@ -18,6 +18,10 @@ from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
 from app.chat.tools.web_search import WebSearchTool
+from app.chat.tools.workspace_write import (
+    ProposeBoardCardsTool,
+    ProposeWorkspaceNoteTool,
+)
 
 # NOTE: ``AttachDemoFileTool`` used to sit between ``EchoTool`` and
 # ``GeneratePdfTool``. It was the Phase A1 smoke-test for the
@@ -37,6 +41,10 @@ REGISTRY: list[Tool] = [
     CodeInterpreterTool(),
     WebSearchTool(),
     FetchUrlTool(),
+    # Workspace write-back proposals (Batch 4.1) — category "workspace",
+    # only advertised in workspace chats.
+    ProposeWorkspaceNoteTool(),
+    ProposeBoardCardsTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

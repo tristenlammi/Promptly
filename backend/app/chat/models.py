@@ -531,6 +531,46 @@ class WorkspaceItemComment(UUIDPKMixin, TimestampMixin, Base):
         return f"<WorkspaceItemComment id={self.id} item={self.item_id}>"
 
 
+class WorkspaceProposal(UUIDPKMixin, Base):
+    """A chat's *proposed* write into its workspace (Batch 4.1).
+
+    Workspace chats stay read-only by design — instead of writing, the
+    AI's workspace tools file one of these and the user applies or
+    dismisses it from a preview card in the chat. ``payload`` is
+    kind-specific JSON validated at propose time and re-validated at
+    apply time (the workspace may have changed in between)."""
+
+    __tablename__ = "workspace_proposals"
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    # The chat-turn owner — the only account allowed to apply/dismiss.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # create_note | add_cards
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # pending | applied | dismissed
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    # Where an applied change landed, for click-through.
+    applied_item_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+
+
 class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     """A first-class task on a workspace's shared task list.
 

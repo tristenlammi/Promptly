@@ -783,3 +783,12 @@ html.dark .promptly-doc mark {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* Workspace search (Batch 4.3): ts_headline fragments highlight matches
+   with <mark>; restyle from browser-yellow to a theme-aware accent tint. */
+.search-snippet mark {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 0 1px;
+}

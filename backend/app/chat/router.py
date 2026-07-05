@@ -4171,6 +4171,12 @@ async def _stream_generator(
             # Phase 4 — the code interpreter rides on the same Tools
             # toggle as the artefact generators.
             enabled_categories.add("code")
+            # Batch 4.1 — workspace write-back *proposals*. Only in
+            # workspace chats. The tools never write; they file a
+            # pending proposal the user applies from a preview card,
+            # so chats stay read-only until a human approves.
+            if conv.workspace_id is not None:
+                enabled_categories.add("workspace")
         if web_search_mode != "off":
             enabled_categories.add("search")
 

@@ -559,3 +559,53 @@ function extractFilename(header: unknown): string | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------
+// Workspace write-back proposals (Batch 4.1) — the AI files these from
+// workspace chats; the user applies/dismisses from a preview card.
+// ---------------------------------------------------------------------
+export interface WorkspaceProposalCard {
+  title: string;
+  description?: string;
+  priority?: "low" | "medium" | "high";
+  due_date?: string;
+}
+
+export interface WorkspaceProposal {
+  id: string;
+  conversation_id: string;
+  workspace_id: string;
+  kind: "create_note" | "add_cards";
+  payload: {
+    title?: string;
+    markdown?: string;
+    board_item_id?: string;
+    board_title?: string;
+    cards?: WorkspaceProposalCard[];
+  };
+  status: "pending" | "applied" | "dismissed";
+  applied_item_id: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export const proposalsApi = {
+  async list(conversationId: string): Promise<WorkspaceProposal[]> {
+    const { data } = await apiClient.get<WorkspaceProposal[]>(
+      `/chat/conversations/${conversationId}/proposals`
+    );
+    return data;
+  },
+  async apply(proposalId: string): Promise<WorkspaceProposal> {
+    const { data } = await apiClient.post<WorkspaceProposal>(
+      `/chat/proposals/${proposalId}/apply`
+    );
+    return data;
+  },
+  async dismiss(proposalId: string): Promise<WorkspaceProposal> {
+    const { data } = await apiClient.post<WorkspaceProposal>(
+      `/chat/proposals/${proposalId}/dismiss`
+    );
+    return data;
+  },
+};

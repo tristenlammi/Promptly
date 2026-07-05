@@ -82,6 +82,7 @@ import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi } from "@/api/tasks";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { WorkspaceDrivePane } from "@/components/workspaces/WorkspaceDrivePane";
+import { WorkspaceSearchPane } from "@/components/workspaces/WorkspaceSearchPane";
 import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
@@ -127,6 +128,7 @@ export function WorkspaceDetailPage() {
   const [secondary, setSecondary] = useState<WorkspaceItemNode | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [driveOpen, setDriveOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -383,23 +385,34 @@ export function WorkspaceDetailPage() {
                 onHome={() => {
                   setSettingsOpen(false);
                   setDriveOpen(false);
+                  setSearchOpen(false);
                   setSelected(null);
                   setSecondary(null);
                 }}
-                atHome={!selected && !settingsOpen && !driveOpen}
+                atHome={!selected && !settingsOpen && !driveOpen && !searchOpen}
                 onSettings={() => {
                   setSecondary(null);
                   setDriveOpen(false);
+                  setSearchOpen(false);
                   setSettingsOpen(true);
                 }}
                 atSettings={settingsOpen}
                 onDrive={() => {
                   setSecondary(null);
                   setSettingsOpen(false);
+                  setSearchOpen(false);
                   setSelected(null);
                   setDriveOpen(true);
                 }}
                 atDrive={driveOpen}
+                onSearch={() => {
+                  setSecondary(null);
+                  setSettingsOpen(false);
+                  setDriveOpen(false);
+                  setSelected(null);
+                  setSearchOpen(true);
+                }}
+                atSearch={searchOpen}
                 onNewTask={
                   canEdit && !isArchived
                     ? () => setTaskChooserOpen(true)
@@ -413,12 +426,20 @@ export function WorkspaceDetailPage() {
           <main
             className={
               "flex min-w-0 flex-1 flex-col " +
-              (secondary || settingsOpen || driveOpen
+              (secondary || settingsOpen || driveOpen || searchOpen
                 ? "overflow-hidden"
                 : "overflow-y-auto")
             }
           >
-            {driveOpen ? (
+            {searchOpen ? (
+              <WorkspaceSearchPane
+                workspaceId={id!}
+                onSelectNode={(node) => {
+                  setSearchOpen(false);
+                  handleSelect(node);
+                }}
+              />
+            ) : driveOpen ? (
               <WorkspaceDrivePane
                 workspaceId={id}
                 canEdit={canEdit && !isArchived}

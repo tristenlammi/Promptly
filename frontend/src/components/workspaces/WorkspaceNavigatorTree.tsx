@@ -33,6 +33,7 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
+  Search as SearchIcon,
   Home,
   Layers,
   Loader2,
@@ -100,6 +101,8 @@ export function WorkspaceNavigatorTree({
   atSettings,
   onDrive,
   atDrive,
+  onSearch,
+  atSearch,
   onNewTask,
 }: {
   workspaceId: string;
@@ -121,6 +124,10 @@ export function WorkspaceNavigatorTree({
   onDrive?: () => void;
   /** True when the drive is showing. */
   atDrive?: boolean;
+  /** Open workspace search (titles + full text + semantic) in the main pane. */
+  onSearch?: () => void;
+  /** True when the search pane is showing. */
+  atSearch?: boolean;
   /** Open the "new automation" task form (homed in this workspace). */
   onNewTask?: () => void;
 }) {
@@ -364,6 +371,22 @@ export function WorkspaceNavigatorTree({
               aria-label="Workspace drive"
             >
               <HardDrive className="h-4 w-4" />
+            </button>
+          )}
+          {onSearch && (
+            <button
+              type="button"
+              onClick={onSearch}
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-md border p-2 transition",
+                atSearch
+                  ? "border-[var(--border)] bg-[var(--hover)] text-[var(--text)]"
+                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              )}
+              title="Search this workspace — titles, content, and meaning"
+              aria-label="Search workspace"
+            >
+              <SearchIcon className="h-4 w-4" />
             </button>
           )}
         </div>

@@ -492,6 +492,23 @@ export interface WorkspaceItemComment {
   created_at: string;
 }
 
+/** One workspace search hit. ``snippet`` for 'text' hits is a Postgres
+ *  ts_headline fragment containing only ``<mark>`` markup. */
+export interface WorkspaceSearchHit {
+  source: "title" | "text" | "semantic";
+  item_id: string | null;
+  ref_id: string | null;
+  kind: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+export interface WorkspaceSearchResponse {
+  hits: WorkspaceSearchHit[];
+  semantic_available: boolean;
+}
+
 /** One workspace activity-feed row ("what changed since I was here"). */
 export interface WorkspaceActivityEvent {
   kind: "item_created" | "item_comment" | "card_activity" | "card_comment";
@@ -837,6 +854,15 @@ export const workspacesApi = {
     const { data } = await apiClient.post<WorkspaceItemComment>(
       `/workspaces/${id}/items/${itemId}/comments/${commentId}/resolve`,
       { resolved }
+    );
+    return data;
+  },
+
+  /** Workspace search — titles + full text (<mark> snippets) + semantic. */
+  async search(id: string, q: string): Promise<WorkspaceSearchResponse> {
+    const { data } = await apiClient.get<WorkspaceSearchResponse>(
+      `/workspaces/${id}/search`,
+      { params: { q } }
     );
     return data;
   },
