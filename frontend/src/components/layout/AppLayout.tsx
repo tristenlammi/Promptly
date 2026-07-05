@@ -50,6 +50,9 @@ export function AppLayout() {
       );
     };
     const handler = (e: KeyboardEvent) => {
+      // A more specific surface (e.g. the workspace command palette)
+      // may have claimed the shortcut in the capture phase — yield.
+      if (e.defaultPrevented) return;
       const mod = e.ctrlKey || e.metaKey;
       // Ctrl/Cmd+K — global search palette (works even while typing).
       if (mod && !e.shiftKey && !e.altKey) {

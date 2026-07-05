@@ -38,6 +38,7 @@ from fastapi import (
 from fastapi.concurrency import run_in_threadpool
 from jose import jwt
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user

@@ -248,15 +248,19 @@ export function WorkspaceDetailPage() {
   }, [selected, secondary, id, searchParams, setSearchParams]);
 
   // ⌘K / Ctrl+K opens the workspace command palette (jump / ask).
+  // Capture phase + stopPropagation so it wins over AppLayout's global
+  // chat-search binding — inside a workspace, ⌘K means "search *this*
+  // workspace", and without the claim both palettes opened stacked.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
+        e.stopPropagation();
         setPaletteOpen((o) => !o);
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   const archive = useArchiveWorkspace();
@@ -282,6 +286,9 @@ export function WorkspaceDetailPage() {
     if (secondary && secondary.id === node.id) setSecondary(null);
     setSettingsOpen(false);
     setDriveOpen(false);
+    // The search pane also masks the item pane — clear it too, or a tree
+    // click while searching updates the URL but visibly does nothing.
+    setSearchOpen(false);
     setSelected(node);
     if (id) recordRecentItem(id, node.id); // feeds the ⌘K "Recent" section
   };
