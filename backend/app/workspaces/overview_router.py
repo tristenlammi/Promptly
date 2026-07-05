@@ -65,6 +65,8 @@ class RecentItem(BaseModel):
     kind: str
     ref_id: uuid.UUID | None
     title: str
+    # Freshness for the home page's resume cards.
+    updated_at: datetime | None = None
 
 
 class HealthItem(BaseModel):
@@ -124,6 +126,7 @@ async def workspace_overview(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.kind == kind,
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 )
             )
             or 0
@@ -157,6 +160,7 @@ async def workspace_overview(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.kind == "note",
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 )
                 .order_by(WorkspaceItem.position.asc())
                 .limit(_MAX_NOTES_SCANNED)
@@ -198,16 +202,23 @@ async def workspace_overview(
                 select(WorkspaceItem)
                 .where(
                     WorkspaceItem.workspace_id == ws.id,
-                    WorkspaceItem.kind.in_(("note", "canvas")),
+                    WorkspaceItem.kind.in_(("note", "canvas", "board", "sheet")),
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 )
                 .order_by(WorkspaceItem.updated_at.desc())
-                .limit(5)
+                .limit(6)
             )
         ).scalars()
     )
     recent = [
-        RecentItem(id=it.id, kind=it.kind, ref_id=it.ref_id, title=it.title)
+        RecentItem(
+            id=it.id,
+            kind=it.kind,
+            ref_id=it.ref_id,
+            title=it.title,
+            updated_at=it.updated_at,
+        )
         for it in recent_items
     ]
     recent_chats = list(
@@ -226,7 +237,11 @@ async def workspace_overview(
     for c in recent_chats:
         recent.append(
             RecentItem(
-                id=c.id, kind="chat", ref_id=c.id, title=c.title or "New chat"
+                id=c.id,
+                kind="chat",
+                ref_id=c.id,
+                title=c.title or "New chat",
+                updated_at=c.updated_at,
             )
         )
 
@@ -252,6 +267,7 @@ async def workspace_overview(
                 .where(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                     WorkspaceItem.kind.in_(("note", "canvas", "sheet", "board")),
                     WorkspaceItem.context_enabled.is_(True),
                     WorkspaceItem.updated_at < stale_cutoff,
@@ -285,6 +301,7 @@ async def workspace_overview(
             .where(
                 WorkspaceItem.workspace_id == ws.id,
                 WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 WorkspaceItem.kind.in_(("note", "board")),
                 WorkspaceItem.context_enabled.is_(True),
                 UserFile.content_text.is_not(None),
@@ -299,6 +316,7 @@ async def workspace_overview(
             .where(
                 WorkspaceItem.workspace_id == ws.id,
                 WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 WorkspaceItem.kind == "canvas",
                 WorkspaceItem.context_enabled.is_(True),
                 WorkspaceCanvas.content_text.is_not(None),
@@ -313,6 +331,7 @@ async def workspace_overview(
             .where(
                 WorkspaceItem.workspace_id == ws.id,
                 WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 WorkspaceItem.kind == "sheet",
                 WorkspaceItem.context_enabled.is_(True),
                 Spreadsheet.content_text.is_not(None),

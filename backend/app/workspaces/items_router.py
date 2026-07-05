@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+from pydantic import BaseModel
 
 from fastapi import (
     APIRouter,
@@ -315,6 +317,7 @@ async def get_workspace_tree(
                 .where(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                     # Private drafts only show for their creator (0134).
                     or_(
                         WorkspaceItem.visibility != "private",
@@ -1408,6 +1411,7 @@ async def get_workspace_archive(
                 .where(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.archived_at.is_not(None),
+                    WorkspaceItem.trashed_at.is_(None),
                 )
                 .order_by(WorkspaceItem.archived_at.desc())
             )
@@ -1541,13 +1545,93 @@ async def delete_workspace_item(
     """Delete an item. Deleting a folder removes its whole subtree (the
     ``parent_id`` FK cascades the rows); every ``note`` in that subtree
     has its backing Drive Document moved to Trash first so the blob
-    isn't orphaned but is still recoverable from the Files page."""
+    isn't orphaned but is still recoverable from the Files page.
+
+    Since 0138 this is a *soft* delete: the item (and its subtree) is
+    stamped ``trashed_at`` and vanishes from the tree / AI map /
+    retrieval / search, but nothing is torn down until it's purged from
+    the Trash section (explicitly, or lazily after 30 days)."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     item = await _load_item(db, ws.id, item_id, user)
 
-    # Collect the item + every descendant so we can trash their note
-    # blobs before the cascade drops the rows.
+    now = datetime.now(timezone.utc)
+    for it in await _collect_subtree(db, ws.id, item):
+        it.trashed_at = now
+    ws.updated_at = now
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# Trash (0138) — list / restore / purge
+# ---------------------------------------------------------------------
+
+# Items sitting in the trash longer than this are purged the next time
+# anyone looks at the trash — no background sweeper needed.
+_TRASH_RETENTION_DAYS = 30
+
+
+class TrashEntry(BaseModel):
+    id: uuid.UUID
+    kind: str
+    title: str
+    trashed_at: datetime
+    # How many nested items ride along on restore/purge.
+    subtree_count: int = 0
+
+
+async def _trash_roots(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> list[tuple[WorkspaceItem, int]]:
+    """Trashed subtree roots + how many descendants each carries."""
+    trashed = list(
+        (
+            await db.execute(
+                select(WorkspaceItem)
+                .where(
+                    WorkspaceItem.workspace_id == workspace_id,
+                    WorkspaceItem.trashed_at.is_not(None),
+                )
+                .order_by(WorkspaceItem.trashed_at.desc())
+            )
+        ).scalars()
+    )
+    trashed_ids = {it.id for it in trashed}
+    by_parent: dict[uuid.UUID | None, list[WorkspaceItem]] = {}
+    for it in trashed:
+        by_parent.setdefault(it.parent_id, []).append(it)
+
+    def _count(root: WorkspaceItem) -> int:
+        n = 0
+        stack = list(by_parent.get(root.id, []))
+        while stack:
+            cur = stack.pop()
+            n += 1
+            stack.extend(by_parent.get(cur.id, []))
+        return n
+
+    return [
+        (it, _count(it))
+        for it in trashed
+        if it.parent_id is None or it.parent_id not in trashed_ids
+    ]
+
+
+async def _purge_item(
+    db: AsyncSession,
+    *,
+    request: Request,
+    ws,
+    user: User,
+    item: WorkspaceItem,
+) -> None:
+    """Permanently destroy an item + subtree (the pre-0138 delete body).
+
+    Trashes note blobs into the Drive trash, drops sheet/canvas/chat
+    backing rows, purges RAG chunks, writes the audit row, and deletes
+    the item rows (descendants cascade via the self-FK). Flushes; the
+    caller commits."""
     all_items = list(
         (
             await db.execute(
@@ -1625,8 +1709,6 @@ async def delete_workspace_item(
                 db, scope_kind="workspace", scope_id=ws.id, user_file_id=fid
             )
 
-    # Deleting the top row cascades the descendant item rows via the
-    # self-FK ON DELETE CASCADE.
     from app.auth.audit import record_event
     from app.auth.events import EVENT_WORKSPACE_ITEM_DELETED
 
@@ -1641,8 +1723,98 @@ async def delete_workspace_item(
         detail=f'{item.kind} "{item.title}"{subtree} in "{ws.title}" '
         f"(ws={ws.id})",
     )
+    # Deleting the top row cascades the descendant item rows via the
+    # self-FK ON DELETE CASCADE.
     await db.delete(item)
     ws.updated_at = now
+
+
+@router.get("/{workspace_id}/trash", response_model=list[TrashEntry])
+async def list_workspace_trash(
+    workspace_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[TrashEntry]:
+    """Trashed subtree roots, newest first. Anything past the retention
+    window is purged on the way through — the lazy sweeper."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    roots = await _trash_roots(db, ws.id)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=_TRASH_RETENTION_DAYS
+    )
+    expired = [it for it, _n in roots if it.trashed_at and it.trashed_at < cutoff]
+    if expired:
+        for it in expired:
+            await _purge_item(db, request=request, ws=ws, user=user, item=it)
+        await db.commit()
+        roots = await _trash_roots(db, ws.id)
+
+    return [
+        TrashEntry(
+            id=it.id,
+            kind=it.kind,
+            title=it.title,
+            trashed_at=it.trashed_at,  # type: ignore[arg-type]
+            subtree_count=n,
+        )
+        for it, n in roots
+    ]
+
+
+@router.post(
+    "/{workspace_id}/trash/{item_id}/restore",
+    response_model=WorkspaceItemResponse,
+)
+async def restore_trashed_item(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceItemResponse:
+    """Bring an item (+ its subtree) back from the trash. If its old
+    parent folder was itself trashed or purged, it lands at the root."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_item(db, ws.id, item_id, user)
+    now = datetime.now(timezone.utc)
+    for it in await _collect_subtree(db, ws.id, item):
+        it.trashed_at = None
+    # Re-root when the parent is gone or still in the trash — otherwise
+    # the restored item would be invisible (tree renders from live roots).
+    if item.parent_id is not None:
+        parent = await db.get(WorkspaceItem, item.parent_id)
+        if parent is None or parent.trashed_at is not None:
+            item.parent_id = None
+            item.position = await _next_position(db, ws.id, None)
+    ws.updated_at = now
+    await db.commit()
+    await db.refresh(item)
+    return WorkspaceItemResponse.model_validate(item)
+
+
+@router.delete(
+    "/{workspace_id}/trash/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def purge_trashed_item(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Permanently delete a trashed item — the point of no return."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    item = await _load_item(db, ws.id, item_id, user)
+    if item.trashed_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only trashed items can be permanently deleted.",
+        )
+    await _purge_item(db, request=request, ws=ws, user=user, item=item)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

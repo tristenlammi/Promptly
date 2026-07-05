@@ -1781,6 +1781,9 @@ async def context_disabled_file_ids(
         return or_(
             item.context_enabled.is_(False),
             item.visibility == "private",
+            # Trashed items (0138) leave the AI's view immediately; their
+            # chunks stay put so restore is instant.
+            item.trashed_at.is_not(None),
             and_(
                 Parent.kind == "container",
                 Parent.context_enabled.is_(False),
@@ -2001,6 +2004,7 @@ async def build_workspace_map(
                 .where(
                     WorkspaceItem.workspace_id == workspace_id,
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                     # The map is injected into every member's chats —
                     # private drafts (0134) stay off it entirely.
                     WorkspaceItem.visibility != "private",

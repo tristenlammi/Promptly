@@ -445,6 +445,16 @@ class WorkspaceItem(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Soft-delete staging (0138). "Delete" stamps the item (and its
+    # subtree) here instead of destroying it — invisible everywhere
+    # (tree, AI map, retrieval, search, overview) but fully restorable
+    # from the Trash section until purged (explicitly, or lazily after
+    # 30 days). Distinct from ``archived_at``: archive is deliberate
+    # put-away, trash is deletion staging.
+    trashed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     # "Use as workspace context" — when True (the default) this note/canvas
     # feeds the workspace's shared RAG pool so every chat can draw on it.
     # Flip it off to keep an item in the tree but out of the AI's context
@@ -627,6 +637,10 @@ class WorkspaceTask(UUIDPKMixin, TimestampMixin, Base):
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Custom-field values (0138) — ``{field_id: value}`` against the board
+    # item's ``config.fields`` registry (definitions live there, like
+    # labels, so they stay per-board and travel with duplication/export).
+    fields: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     done: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )

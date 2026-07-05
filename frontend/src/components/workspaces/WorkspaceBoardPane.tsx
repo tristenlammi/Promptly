@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useIsMutating } from "@tanstack/react-query";
 import {
   ArrowUpDown,
+  Bookmark,
   CalendarDays,
   Check,
   Clock,
@@ -9,6 +10,7 @@ import {
   Globe,
   LayoutGrid,
   Link2,
+  ListPlus,
   Loader2,
   Paperclip,
   Plus,
@@ -34,8 +36,10 @@ import { ItemPaneHeader } from "./ItemPaneHeader";
 import { filesApi } from "@/api/files";
 import type {
   BoardColumn,
+  BoardField,
   BoardLabel,
   BoardMember,
+  BoardView,
   TaskLink,
   TaskPriority,
   WorkspaceItemNode,
@@ -304,6 +308,34 @@ export function WorkspaceBoardPane({
   const onColumnsChange = (next: BoardColumn[]) =>
     setConfig.mutate({ ...(boardItem?.config ?? {}), columns: next });
 
+  // Custom fields + saved views (0138) — both live in the board config
+  // alongside labels/columns so they travel with duplicate/export.
+  const boardFields: BoardField[] = boardItem?.config?.fields ?? [];
+  const onFieldsChange = (next: BoardField[]) =>
+    setConfig.mutate({ ...(boardItem?.config ?? {}), fields: next });
+  const [managingFields, setManagingFields] = useState(false);
+  const boardViews: BoardView[] = boardItem?.config?.views ?? [];
+  const onViewsChange = (next: BoardView[]) =>
+    setConfig.mutate({ ...(boardItem?.config ?? {}), views: next });
+  const applyView = (v: BoardView) => {
+    setSearch(v.search ?? "");
+    setPriorityFilter((v.priority as TaskPriority | "all") ?? "all");
+    setDueFilter((v.due as "all" | "overdue" | "soon" | "has" | "none") ?? "all");
+    setLabelFilter(v.labels ?? []);
+    setAssigneeFilter(v.assignee ?? "all");
+    if (v.sort) setSortKey(v.sort as SortKey);
+  };
+  const snapshotView = (name: string): BoardView => ({
+    id: Math.random().toString(36).slice(2, 10),
+    name,
+    search: search.trim() || undefined,
+    priority: priorityFilter,
+    due: dueFilter,
+    labels: labelFilter.length ? labelFilter : undefined,
+    assignee: assigneeFilter,
+    sort: sortKey,
+  });
+
   const filtersActive =
     Boolean(search.trim()) ||
     priorityFilter !== "all" ||
@@ -517,6 +549,17 @@ export function WorkspaceBoardPane({
               Columns
             </button>
           )}
+          {view === "board" && canEdit && (
+            <button
+              type="button"
+              onClick={() => setManagingFields((m) => !m)}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+            >
+              <ListPlus className="h-3.5 w-3.5" />
+              Fields
+              {boardFields.length > 0 && ` (${boardFields.length})`}
+            </button>
+          )}
           {view === "board" && (
             <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
               <ArrowUpDown className="h-3.5 w-3.5" />
@@ -538,6 +581,18 @@ export function WorkspaceBoardPane({
 
       {/* Filter bar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        {(boardViews.length > 0 || filtersActive) && (
+          <ViewsMenu
+            views={boardViews}
+            canEdit={canEdit}
+            filtersActive={filtersActive}
+            onApply={applyView}
+            onSave={(name) => onViewsChange([...boardViews, snapshotView(name)])}
+            onDelete={(id) =>
+              onViewsChange(boardViews.filter((v) => v.id !== id))
+            }
+          />
+        )}
         <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1">
           <Search className="h-3.5 w-3.5 text-[var(--text-muted)]" />
           <input
@@ -640,6 +695,15 @@ export function WorkspaceBoardPane({
           columns={boardColumns}
           onChange={onColumnsChange}
           onClose={() => setManagingCols(false)}
+        />
+      )}
+
+      {/* Custom-fields manager (0138) */}
+      {view === "board" && managingFields && canEdit && (
+        <FieldsManager
+          fields={boardFields}
+          onChange={onFieldsChange}
+          onClose={() => setManagingFields(false)}
         />
       )}
 
@@ -758,6 +822,7 @@ export function WorkspaceBoardPane({
                           canEdit={canEdit}
                           density={density}
                           dragging={dragId === task.id}
+                          fieldDefs={boardFields}
                           onOpenItem={onOpenItem}
                           onToggleSubtask={(subId) => {
                             const next = (task.subtasks ?? []).map((s) =>
@@ -815,6 +880,7 @@ export function WorkspaceBoardPane({
           onLabelsChange={onLabelsChange}
           members={members}
           columns={boardColumns}
+          fieldDefs={boardFields}
           linkables={linkables}
           onOpenItem={onOpenItem}
           autoFocusTitle={openTask.id === justCreatedId}
@@ -948,6 +1014,309 @@ function ColumnsManager({
   );
 }
 
+/** Saved views (0138): apply a stored filter+sort combination in one
+ *  click; save the current combination under a name; delete stale ones. */
+function ViewsMenu({
+  views,
+  canEdit,
+  filtersActive,
+  onApply,
+  onSave,
+  onDelete,
+}: {
+  views: BoardView[];
+  canEdit: boolean;
+  filtersActive: boolean;
+  onApply: (v: BoardView) => void;
+  onSave: (name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+
+  const save = () => {
+    const n = name.trim();
+    if (!n) return;
+    onSave(n);
+    setName("");
+    setNaming(false);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition",
+          open
+            ? "border-[var(--accent)] text-[var(--text)]"
+            : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"
+        )}
+      >
+        <Bookmark className="h-3.5 w-3.5" />
+        Views
+        {views.length > 0 && ` (${views.length})`}
+      </button>
+      {open && (
+        <>
+          <button
+            aria-hidden
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-10 cursor-default"
+          />
+          <div
+            role="menu"
+            className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] py-1 shadow-lg"
+          >
+            {views.length === 0 && (
+              <p className="px-3 py-1.5 text-xs text-[var(--text-muted)]">
+                No saved views yet.
+              </p>
+            )}
+            {views.map((v) => (
+              <div
+                key={v.id}
+                className="group flex items-center gap-1 px-1.5"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    onApply(v);
+                    setOpen(false);
+                  }}
+                  className="min-w-0 flex-1 truncate rounded-md px-1.5 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                >
+                  {v.name}
+                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    title="Delete view"
+                    aria-label={`Delete view ${v.name}`}
+                    onClick={() => onDelete(v.id)}
+                    className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            ))}
+            {canEdit && filtersActive && (
+              <div className="mt-1 border-t border-[var(--border)] px-2 pt-1.5">
+                {naming ? (
+                  <div className="flex items-center gap-1 pb-1">
+                    <input
+                      autoFocus
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") save();
+                        if (e.key === "Escape") setNaming(false);
+                      }}
+                      placeholder="View name…"
+                      className="min-w-0 flex-1 rounded border border-[var(--accent)] bg-[var(--surface)] px-1.5 py-1 text-xs text-[var(--text)] outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={save}
+                      className="shrink-0 rounded bg-[var(--accent)] px-1.5 py-1 text-xs text-white"
+                    >
+                      Save
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setNaming(true)}
+                    className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Save current filters as view
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const FIELD_TYPES: { value: BoardField["type"]; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "select", label: "Select" },
+  { value: "date", label: "Date" },
+];
+
+/** Custom-field registry manager (0138) — mirrors ColumnsManager. Field
+ *  definitions live on the board; values live on each card. */
+function FieldsManager({
+  fields,
+  onChange,
+  onClose,
+}: {
+  fields: BoardField[];
+  onChange: (next: BoardField[]) => void;
+  onClose: () => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState<BoardField["type"]>("text");
+
+  const add = () => {
+    const name = newName.trim();
+    if (!name) return;
+    onChange([
+      ...fields,
+      {
+        id: Math.random().toString(36).slice(2, 10),
+        name,
+        type: newType,
+        ...(newType === "select" ? { options: [] } : {}),
+      },
+    ]);
+    setNewName("");
+  };
+  const patch = (id: string, p: Partial<BoardField>) =>
+    onChange(fields.map((f) => (f.id === id ? { ...f, ...p } : f)));
+  const remove = (id: string) => onChange(fields.filter((f) => f.id !== id));
+
+  return (
+    <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          Custom fields
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close field manager"
+          className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--text)]"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+        Fields appear on every card's detail panel (and in the CSV export).
+        Deleting a definition hides its values but doesn't erase them.
+      </p>
+      <div className="space-y-2">
+        {fields.map((f) => (
+          <div key={f.id} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <input
+                value={f.name}
+                onChange={(e) => patch(f.id, { name: e.target.value })}
+                className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
+              />
+              <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                {f.type}
+              </span>
+              <button
+                type="button"
+                onClick={() => remove(f.id)}
+                aria-label={`Delete field ${f.name}`}
+                className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--danger)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {f.type === "select" && (
+              <SelectOptionsEditor
+                options={f.options ?? []}
+                onChange={(options) => patch(f.id, { options })}
+              />
+            )}
+          </div>
+        ))}
+        <div className="flex items-center gap-2 pt-1">
+          <Plus className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="Add a field…"
+            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+          <select
+            value={newType}
+            onChange={(e) => setNewType(e.target.value as BoardField["type"])}
+            className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-xs text-[var(--text)] outline-none"
+          >
+            {FIELD_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Option list for a select-type field — comma-light inline editor. */
+function SelectOptionsEditor({
+  options,
+  onChange,
+}: {
+  options: NonNullable<BoardField["options"]>;
+  onChange: (next: NonNullable<BoardField["options"]>) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const label = draft.trim();
+    if (!label) return;
+    onChange([
+      ...options,
+      { id: Math.random().toString(36).slice(2, 10), label },
+    ]);
+    setDraft("");
+  };
+  return (
+    <div className="ml-2 flex flex-wrap items-center gap-1.5 border-l border-[var(--border)] pl-2">
+      {options.map((o) => (
+        <span
+          key={o.id}
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[11px] text-[var(--text)]"
+        >
+          {o.label}
+          <button
+            type="button"
+            aria-label={`Remove option ${o.label}`}
+            onClick={() => onChange(options.filter((x) => x.id !== o.id))}
+            className="text-[var(--text-muted)] hover:text-[var(--danger)]"
+          >
+            <X className="h-2.5 w-2.5" />
+          </button>
+        </span>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add();
+          }
+        }}
+        placeholder="Add option…"
+        className="w-24 bg-transparent text-[11px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+      />
+    </div>
+  );
+}
+
 /** Card-sized avatar — profile picture / chosen colour / palette hash,
  *  via the shared UserAvatar so chips match cursors everywhere. */
 export function MemberAvatar({
@@ -975,6 +1344,7 @@ function BoardCard({
   dragging,
   labels,
   assignee,
+  fieldDefs = [],
   onOpenItem,
   onToggleSubtask,
   onDragStart,
@@ -989,6 +1359,8 @@ function BoardCard({
   dragging: boolean;
   labels: BoardLabel[];
   assignee?: BoardMember;
+  /** Board custom-field definitions (0138) for the value chips. */
+  fieldDefs?: BoardField[];
   onOpenItem?: (node: WorkspaceItemNode) => void;
   onToggleSubtask: (subId: string) => void;
   onDragStart: (e: React.DragEvent) => void;
@@ -1112,6 +1484,42 @@ function BoardCard({
             {task.description}
           </p>
         )}
+
+        {/* Custom-field chips (0138; detailed + full) */}
+        {showDesc &&
+          (() => {
+            const chips = fieldDefs
+              .map((f) => {
+                const raw = task.fields?.[f.id];
+                if (raw === undefined || raw === null || raw === "")
+                  return null;
+                const value =
+                  f.type === "select"
+                    ? (f.options ?? []).find((o) => o.id === raw)?.label ??
+                      String(raw)
+                    : String(raw);
+                return { key: f.id, name: f.name, value };
+              })
+              .filter((c): c is NonNullable<typeof c> => c !== null)
+              .slice(0, full ? 6 : 3);
+            if (chips.length === 0) return null;
+            return (
+              <div className="mt-1.5 flex flex-wrap gap-1 pl-[18px]">
+                {chips.map((c) => (
+                  <span
+                    key={c.key}
+                    title={`${c.name}: ${c.value}`}
+                    className="inline-flex max-w-full items-center gap-1 truncate rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-px text-[10px] text-[var(--text-muted)]"
+                  >
+                    <span className="font-medium">{c.name}</span>
+                    <span className="truncate text-[var(--text)]">
+                      {c.value}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
 
         {/* Due date (all densities) */}
         {task.due_at && (

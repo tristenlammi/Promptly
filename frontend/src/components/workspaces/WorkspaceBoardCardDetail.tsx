@@ -27,6 +27,7 @@ import type {
   BoardColumn,
   BoardLabel,
   BoardMember,
+  BoardField,
   Subtask,
   TaskAttachment,
   TaskLink,
@@ -92,6 +93,7 @@ export function WorkspaceBoardCardDetail({
   onLabelsChange,
   members,
   columns,
+  fieldDefs = [],
   linkables,
   onOpenItem,
   autoFocusTitle,
@@ -106,6 +108,8 @@ export function WorkspaceBoardCardDetail({
   onLabelsChange: (labels: BoardLabel[]) => void;
   members: BoardMember[];
   columns: BoardColumn[];
+  /** The board's custom-field definitions (0138); values live on the card. */
+  fieldDefs?: BoardField[];
   /** Navigator items this card can link to (notes / canvases / chats /
    *  boards). Empty when the tree hasn't loaded. */
   linkables: WorkspaceItemNode[];
@@ -283,6 +287,68 @@ export function WorkspaceBoardCardDetail({
               className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
             />
           </div>
+
+          {/* Custom fields (0138) */}
+          {fieldDefs.length > 0 && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {fieldDefs.map((f) => {
+                const value = task.fields?.[f.id] ?? "";
+                const commit = (raw: string) => {
+                  const next: Record<string, string | number> = {
+                    ...(task.fields ?? {}),
+                  };
+                  if (raw === "") delete next[f.id];
+                  else if (f.type === "number") {
+                    const n = Number(raw);
+                    if (Number.isNaN(n)) return;
+                    next[f.id] = n;
+                  } else next[f.id] = raw;
+                  onUpdate({ fields: next });
+                };
+                return (
+                  <label
+                    key={f.id}
+                    className="flex flex-col gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)]"
+                  >
+                    {f.name}
+                    {f.type === "select" ? (
+                      <select
+                        disabled={!canEdit}
+                        value={String(value)}
+                        onChange={(e) => commit(e.target.value)}
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none"
+                      >
+                        <option value="">—</option>
+                        {(f.options ?? []).map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={
+                          f.type === "number"
+                            ? "number"
+                            : f.type === "date"
+                              ? "date"
+                              : "text"
+                        }
+                        disabled={!canEdit}
+                        defaultValue={String(value)}
+                        onBlur={(e) => commit(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter")
+                            (e.target as HTMLInputElement).blur();
+                        }}
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                      />
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
 
           {/* Labels */}
           <LabelsSection

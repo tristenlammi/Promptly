@@ -272,6 +272,7 @@ async def _visible_item_file_map(
                 select(WorkspaceItem).where(
                     WorkspaceItem.workspace_id == workspace_id,
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                     visible,
                 )
             )
@@ -365,6 +366,7 @@ async def search_workspace(
                 .where(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
                     WorkspaceItem.kind != "folder",
                     WorkspaceItem.title.ilike(f"%{escaped}%", escape="\\"),
                     sa_or(

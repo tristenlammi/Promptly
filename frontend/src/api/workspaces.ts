@@ -208,11 +208,36 @@ export interface BoardLabel {
   color: string;
 }
 
+/** A custom field definition on a board (0138). Definitions live in the
+ *  board item's config (like labels); per-card values live in
+ *  ``WorkspaceTask.fields`` keyed by ``id``. */
+export interface BoardField {
+  id: string;
+  name: string;
+  type: "text" | "number" | "select" | "date";
+  /** Select fields only. */
+  options?: { id: string; label: string; color?: string }[];
+}
+
+/** A saved combination of board filters + sort (0138). */
+export interface BoardView {
+  id: string;
+  name: string;
+  search?: string;
+  priority?: TaskPriority | "all";
+  due?: "all" | "overdue" | "soon" | "has" | "none";
+  labels?: string[];
+  assignee?: string;
+  sort?: string;
+}
+
 /** Kind-specific JSON config on a workspace item. Boards use it for the
- *  label registry (and, later, custom columns). */
+ *  label registry, custom columns, custom fields, and saved views. */
 export interface BoardConfig {
   labels?: BoardLabel[];
   columns?: BoardColumn[];
+  fields?: BoardField[];
+  views?: BoardView[];
 }
 
 /** Flat ``workspace_items`` row returned by the create / update / move
@@ -293,6 +318,7 @@ export interface WorkspaceOverview {
     kind: string;
     ref_id: string | null;
     title: string;
+    updated_at?: string | null;
   }[];
   /** Knowledge health (4.8): what's quietly degrading the AI's answers. */
   health?: {
@@ -391,6 +417,8 @@ export interface WorkspaceTask {
   due_at: string | null;
   position: number;
   completed_at: string | null;
+  /** Custom-field values keyed by the board's field-definition id (0138). */
+  fields?: Record<string, string | number> | null;
   created_at: string;
   updated_at: string;
 }
@@ -415,6 +443,8 @@ export interface WorkspaceTaskUpdatePayload {
   labels?: string[] | null;
   links?: TaskLink[] | null;
   assignee_user_id?: string | null;
+  /** Whole-map replace of the card's custom-field values; null clears. */
+  fields?: Record<string, string | number> | null;
 }
 
 
@@ -930,6 +960,30 @@ export const workspacesApi = {
       events: WorkspaceActivityEvent[];
     }>(`/workspaces/${id}/activity`);
     return data;
+  },
+
+  /** Trashed subtree roots, newest first (30-day retention). */
+  async trash(id: string): Promise<
+    {
+      id: string;
+      kind: string;
+      title: string;
+      trashed_at: string;
+      subtree_count: number;
+    }[]
+  > {
+    const { data } = await apiClient.get(`/workspaces/${id}/trash`);
+    return data;
+  },
+
+  /** Bring a trashed item (+ subtree) back into the tree. */
+  async restoreTrashed(id: string, itemId: string): Promise<void> {
+    await apiClient.post(`/workspaces/${id}/trash/${itemId}/restore`);
+  },
+
+  /** Permanently delete a trashed item — the point of no return. */
+  async purgeTrashed(id: string, itemId: string): Promise<void> {
+    await apiClient.delete(`/workspaces/${id}/trash/${itemId}`);
   },
 
   /** Download the full workspace bundle (zip). Owner only. */

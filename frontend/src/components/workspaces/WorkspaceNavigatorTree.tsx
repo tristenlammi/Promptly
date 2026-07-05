@@ -5,7 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   closestCenter,
   DndContext,
@@ -83,6 +83,7 @@ import {
 } from "@/hooks/useWorkspaces";
 import { useAuthStore } from "@/store/authStore";
 import { useModelStore } from "@/store/modelStore";
+import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 /**
@@ -620,8 +621,9 @@ export function WorkspaceNavigatorTree({
         </DragOverlay>
       </DndContext>
 
-      {/* Per-workspace Archive — pinned to the bottom of the rail. */}
+      {/* Per-workspace Archive + Trash — pinned to the bottom of the rail. */}
       <WorkspaceArchiveSection workspaceId={workspaceId} canEdit={canEdit} />
+      <WorkspaceTrashSection workspaceId={workspaceId} canEdit={canEdit} />
     </div>
   );
 }
@@ -831,25 +833,26 @@ function WorkspaceArchiveSection({
   };
 
   const del = async (node: WorkspaceItemNode) => {
-    const ok = await confirm({
-      title: "Delete",
-      message:
-        node.kind === "chat"
-          ? "Permanently delete this chat?"
-          : node.kind === "folder"
-            ? "Permanently delete this folder and everything inside it?"
-            : "Permanently delete this item?",
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
     if (node.kind === "chat") {
+      const ok = await confirm({
+        title: "Delete",
+        message: "Permanently delete this chat?",
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
       if (node.ref_id) {
         await chatApi.remove(node.ref_id);
         invalidate();
       }
     } else {
-      remove.mutate(node.id);
+      // Items move to the Trash (0138) — recoverable, no confirm needed.
+      remove.mutate(node.id, {
+        onSuccess: () =>
+          qc.invalidateQueries({
+            queryKey: ["workspaces", "trash", workspaceId],
+          }),
+      });
     }
   };
 
@@ -893,8 +896,16 @@ function WorkspaceArchiveSection({
                   </button>
                   <button
                     type="button"
-                    title="Delete permanently"
-                    aria-label="Delete permanently"
+                    title={
+                      node.kind === "chat"
+                        ? "Delete permanently"
+                        : "Move to Trash"
+                    }
+                    aria-label={
+                      node.kind === "chat"
+                        ? "Delete permanently"
+                        : "Move to Trash"
+                    }
                     onClick={() => void del(node)}
                     className="rounded p-1 text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                   >
@@ -905,6 +916,134 @@ function WorkspaceArchiveSection({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Collapsible Trash below the Archive (0138). Deleted items stage here
+ * for 30 days; each entry restores in one click or purges for real.
+ * Hidden entirely when the trash is empty.
+ */
+function WorkspaceTrashSection({
+  workspaceId,
+  canEdit,
+}: {
+  workspaceId: string;
+  canEdit: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const qc = useQueryClient();
+  const { data: entries = [] } = useQuery({
+    queryKey: ["workspaces", "trash", workspaceId],
+    queryFn: () => workspacesApi.trash(workspaceId),
+  });
+  const [busyId, setBusyId] = useState<string | null>(null);
+  if (entries.length === 0) return null;
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
+    qc.invalidateQueries({ queryKey: ["workspaces", "trash", workspaceId] });
+    qc.invalidateQueries({ queryKey: ["workspaces", "overview", workspaceId] });
+  };
+
+  const restore = async (id: string, title: string) => {
+    setBusyId(id);
+    try {
+      await workspacesApi.restoreTrashed(workspaceId, id);
+      invalidate();
+      toast.success(`Restored “${title || "Untitled"}”`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const purge = async (id: string, title: string, subtree: number) => {
+    const ok = await confirm({
+      title: "Delete forever",
+      message: `Permanently delete “${title || "Untitled"}”${
+        subtree > 0 ? ` and ${subtree} nested item(s)` : ""
+      }? This cannot be undone.`,
+      confirmLabel: "Delete forever",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusyId(id);
+    try {
+      await workspacesApi.purgeTrashed(workspaceId, id);
+      invalidate();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="shrink-0 border-t border-[var(--border)]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" />
+        )}
+        <Trash2 className="h-3.5 w-3.5" />
+        Trash
+        <span className="ml-1 font-normal normal-case">({entries.length})</span>
+      </button>
+      {open && (
+        <>
+          <p className="px-3 pb-1 text-[10px] leading-snug text-[var(--text-muted)]">
+            Deleted items stay here for 30 days, hidden from the AI.
+          </p>
+          <ul className="max-h-48 overflow-y-auto px-1.5 pb-2">
+            {entries.map((e) => (
+              <li
+                key={e.id}
+                className="group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]"
+              >
+                <span className="min-w-0 flex-1 truncate" title={e.title}>
+                  {e.title || "Untitled"}
+                  {e.subtree_count > 0 && (
+                    <span className="ml-1 text-[10px]">
+                      (+{e.subtree_count})
+                    </span>
+                  )}
+                </span>
+                {canEdit &&
+                  (busyId === e.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <span className="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100">
+                      <button
+                        type="button"
+                        title="Restore"
+                        aria-label="Restore"
+                        onClick={() => void restore(e.id, e.title)}
+                        className="rounded p-1 hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
+                      >
+                        <ArchiveRestore className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete forever"
+                        aria-label="Delete forever"
+                        onClick={() =>
+                          void purge(e.id, e.title, e.subtree_count)
+                        }
+                        className="rounded p-1 text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
@@ -1066,7 +1205,31 @@ function TreeRow({
         setChatBusy(false);
       }
     } else {
-      remove.mutate(node.id);
+      // Items go to the Trash (0138) — recoverable, so no scary confirm;
+      // the toast's Undo restores in one click.
+      remove.mutate(node.id, {
+        onSuccess: () => {
+          qc.invalidateQueries({
+            queryKey: ["workspaces", "trash", workspaceId],
+          });
+          toast.success(`Moved “${node.title || "Untitled"}” to Trash`, {
+            duration: 6000,
+            action: {
+              label: "Undo",
+              onClick: () => {
+                void workspacesApi
+                  .restoreTrashed(workspaceId, node.id)
+                  .then(() => {
+                    invalidateTreeAndArchive();
+                    qc.invalidateQueries({
+                      queryKey: ["workspaces", "trash", workspaceId],
+                    });
+                  });
+              },
+            },
+          });
+        },
+      });
     }
   };
 
@@ -1247,7 +1410,6 @@ function TreeRow({
 
         {editable && !renaming && !overlay && (
           <NodeActions
-            isFolder={isFolder}
             isChat={isChat}
             isTask={isTask}
             onRename={() => {
@@ -1374,7 +1536,6 @@ function isEmoji(s: string): boolean {
 }
 
 function NodeActions({
-  isFolder,
   isChat,
   isTask,
   onRename,
@@ -1394,7 +1555,6 @@ function NodeActions({
   onClearIcon,
   deleting,
 }: {
-  isFolder: boolean;
   isChat: boolean;
   isTask: boolean;
   onRename?: () => void;
@@ -1602,24 +1762,26 @@ function NodeActions({
               )}
               <MenuItem
                 icon={<Trash2 className="h-3.5 w-3.5" />}
-                label="Delete"
+                label={isChat || isTask ? "Delete" : "Move to Trash"}
                 destructive
                 disabled={deleting}
                 onClick={async () => {
                   setMenuOpen(false);
-                  const ok = await confirm({
-                    title: "Delete",
-                    message: isFolder
-                      ? "Permanently delete this folder and everything inside it?"
-                      : isChat
+                  // Items are recoverable from the Trash (0138) — no
+                  // confirm needed; the toast's Undo covers slips. Chats
+                  // and automations delete for real, so they still ask.
+                  if (isChat || isTask) {
+                    const ok = await confirm({
+                      title: "Delete",
+                      message: isChat
                         ? "Permanently delete this chat?"
-                        : isTask
-                          ? "Permanently delete this automation and its run history?"
-                          : "Permanently delete this item?",
-                    confirmLabel: "Delete",
-                    danger: true,
-                  });
-                  if (ok) onDelete();
+                        : "Permanently delete this automation and its run history?",
+                      confirmLabel: "Delete",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                  }
+                  onDelete();
                 }}
               />
             </div>

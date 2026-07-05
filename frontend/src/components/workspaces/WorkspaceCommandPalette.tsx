@@ -47,8 +47,8 @@ function linkifyCitations(
 
 /** The grounded answer, rendered as real markdown. Inline ``[n]``
  *  markers become clickable and jump to the cited item, matching the
- *  source pills underneath. */
-function AskAnswer({
+ *  source pills underneath. Exported for the workspace home's Ask hero. */
+export function AskAnswer({
   answer,
   onJump,
 }: {

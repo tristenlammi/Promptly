@@ -102,11 +102,12 @@ def _safe_name(title: str, used: set[str], ext: str) -> str:
 
 def _visible_items(items: list[WorkspaceItem], user_id) -> list[WorkspaceItem]:
     """Everything except *other people's* private drafts — those stay
-    creator-only even in the owner's bundle."""
+    creator-only even in the owner's bundle — and trashed items (0138)."""
     return [
         i
         for i in items
-        if i.visibility != "private" or i.created_by == user_id
+        if i.trashed_at is None
+        and (i.visibility != "private" or i.created_by == user_id)
     ]
 
 
@@ -117,13 +118,17 @@ def _board_csv(
     tasks: list[WorkspaceTask],
     label_names: dict[str, str],
     member_names: dict[uuid.UUID, str],
+    field_defs: list[dict[str, Any]] | None = None,
 ) -> str:
+    field_defs = field_defs or []
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(
         [
             "Title", "Column", "Priority", "Due", "Assignee", "Labels",
             "Checklist", "Description", "Created", "Completed",
+            # One trailing column per custom field (0138).
+            *[str(f.get("name") or f.get("id") or "") for f in field_defs],
         ]
     )
     for t in sorted(tasks, key=lambda x: (x.status, x.position)):
@@ -134,6 +139,19 @@ def _board_csv(
         labels = ", ".join(
             label_names.get(lid, lid) for lid in (t.labels or [])
         )
+        values = t.fields or {}
+
+        def _field_value(f: dict[str, Any]) -> str:
+            raw = values.get(str(f.get("id")))
+            if raw is None:
+                return ""
+            # Select fields store the option id; export the label.
+            if f.get("type") == "select":
+                for opt in f.get("options") or []:
+                    if isinstance(opt, dict) and opt.get("id") == raw:
+                        return str(opt.get("label") or raw)
+            return str(raw)
+
         w.writerow(
             [
                 t.title,
@@ -146,6 +164,7 @@ def _board_csv(
                 (t.description or "").strip(),
                 t.created_at.date().isoformat() if t.created_at else "",
                 t.completed_at.date().isoformat() if t.completed_at else "",
+                *[_field_value(f) for f in field_defs],
             ]
         )
     return buf.getvalue()
@@ -297,9 +316,14 @@ async def export_workspace(
                         for l in ((item.config or {}).get("labels") or [])
                         if isinstance(l, dict) and "id" in l
                     }
+                    field_defs = [
+                        f
+                        for f in ((item.config or {}).get("fields") or [])
+                        if isinstance(f, dict)
+                    ]
                     zf.writestr(
                         "boards/" + _safe_name(item.title, used["boards"], ".csv"),
-                        _board_csv(tasks, label_names, member_names),
+                        _board_csv(tasks, label_names, member_names, field_defs),
                     )
                     counts["boards"] += 1
                 elif item.kind == "sheet" and item.ref_id is not None:

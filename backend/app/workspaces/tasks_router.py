@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -151,6 +151,9 @@ class WorkspaceTaskResponse(BaseModel):
     due_at: datetime | None = None
     position: float
     completed_at: datetime | None = None
+    # Custom-field values (0138): ``{field_id: value}`` against the board
+    # item's ``config.fields`` registry.
+    fields: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -183,6 +186,9 @@ class WorkspaceTaskUpdate(BaseModel):
     labels: list[str] | None = None
     links: list[TaskLink] | None = None
     assignee_user_id: uuid.UUID | None = None
+    # Custom-field values — replaces the whole map when sent (the card
+    # detail drawer always sends the full dict); ``None`` clears it.
+    fields: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------
@@ -377,8 +383,17 @@ async def update_task(
         )
     if "assignee_user_id" in sent:
         task.assignee_user_id = payload.assignee_user_id  # None clears it
+    if "fields" in sent:
+        # Whole-map replace; drop empty values so cleared fields don't
+        # linger as "" keys, and cap size defensively.
+        cleaned = {
+            str(k)[:64]: v
+            for k, v in (payload.fields or {}).items()
+            if v is not None and v != ""
+        }
+        task.fields = dict(list(cleaned.items())[:50]) or None
 
-    # ``status`` (a column id) is the board's source of truth; ``done`` is
+    # ``status`` (a board column id) is the board's source of truth; ``done`` is
     # the legacy boolean kept in lockstep — derived from whether the target
     # column is flagged done in the board config.
     if payload.status is not None and payload.status != task.status:

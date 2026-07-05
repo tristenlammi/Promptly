@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   Brain,
-  CheckSquare,
+  CheckCircle2,
   ChevronRight,
+  Circle,
   Clock,
   Columns3,
+  CornerDownLeft,
   FileText,
-  Folder,
   Layers,
   Loader2,
   MessageSquare,
@@ -16,8 +18,6 @@ import {
   Settings2,
   Shapes,
   Sparkles,
-  Square,
-  StickyNote,
   Table2,
   X,
 } from "lucide-react";
@@ -32,10 +32,13 @@ import { useQuery } from "@tanstack/react-query";
 import {
   workspacesApi,
   type WorkspaceActivityEvent,
+  type WorkspaceAskResponse,
   type WorkspaceItemNode,
+  type WorkspaceTask,
 } from "@/api/workspaces";
 import {
   useRegenerateWorkspaceMemory,
+  useUpdateWorkspaceTask,
   useWorkspace,
   useWorkspaceMemory,
   useWorkspaceOverview,
@@ -47,13 +50,26 @@ import { relativeTime } from "@/components/tasks/RunStatusChip";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { AskAnswer } from "./WorkspaceCommandPalette";
+import { setPendingHighlight } from "./deepCitation";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 /**
- * Workspace overview "home" (Phase 4) — shown in the main pane when no
- * item is selected. At-a-glance counts, the workspace's first-class task
- * list, a secondary rollup of checkboxes found in notes, and a few
- * recently-touched items. Clicking a task or recent row opens the item.
+ * Workspace home (redesigned, Batch 8).
+ *
+ * The old home led with stat tiles and a catalog dump; this one is built
+ * around the four questions a project hub must answer the moment it
+ * opens:
+ *
+ *   1. *What is this?*      — identity header (accent, members, freshness)
+ *   2. *Ask me anything*    — grounded Q&A hero, answers inline with
+ *                             citations that jump to the exact passage
+ *   3. *What needs me?*     — due/overdue cards, completable in place
+ *   4. *Where was I?*       — resume cards + the activity feed
+ *
+ * Housekeeping (drive, memory, indexing health, counts) lives in a quiet
+ * side rail. The workspace map is gone from the page — it's AI plumbing,
+ * and the real tree is 20px to the left.
  */
 export function WorkspaceOverviewPane({
   workspaceId,
@@ -73,7 +89,7 @@ export function WorkspaceOverviewPane({
   onOpenDrive?: () => void;
 }) {
   const { data: overview } = useWorkspaceOverview(workspaceId);
-  const { data: workspaceTasks } = useWorkspaceTasks(workspaceId);
+  const { data: boardTasks } = useWorkspaceTasks(workspaceId);
   const { data: tree } = useWorkspaceTree(workspaceId);
   const { data: workspace } = useWorkspace(workspaceId);
   const [bannerDismissed, setBannerDismissed] = useState(
@@ -136,13 +152,29 @@ export function WorkspaceOverviewPane({
       children: [],
     });
 
+  // Deep-citation jump for the Ask hero: seed the highlight, then open.
+  const flatTree = useMemo(() => {
+    const out: WorkspaceItemNode[] = [];
+    const walk = (nodes: WorkspaceItemNode[]) => {
+      for (const n of nodes) {
+        out.push(n);
+        if (n.children.length) walk(n.children);
+      }
+    };
+    walk(tree ?? []);
+    return out;
+  }, [tree]);
+  const jumpToCitation = (itemId: string | null, snippet?: string | null) => {
+    if (!itemId) return;
+    const node = flatTree.find((n) => n.id === itemId);
+    if (!node) return;
+    if (snippet && node.ref_id) setPendingHighlight(node.ref_id, snippet);
+    onOpenItem(node);
+  };
+
   const counts = overview?.counts;
-  const tasks = overview?.tasks ?? [];
-  const openTasks = tasks.filter((t) => !t.checked);
-  const doneTasks = tasks.filter((t) => t.checked);
   const recent = overview?.recent ?? [];
-  // Headline "Open tasks" stat now reflects the first-class task list.
-  const openTaskCount = (workspaceTasks ?? []).filter((t) => !t.done).length;
+  const noteChecks = overview?.tasks ?? [];
   // A brand-new workspace gets a guided "get started" card instead of a
   // wall of empty sections.
   const isEmpty =
@@ -153,27 +185,62 @@ export function WorkspaceOverviewPane({
       (counts?.chats ?? 0) +
       (counts?.files ?? 0) ===
     0;
-  // Stat tiles cover every item kind that actually exists in this
-  // workspace — no misleading "0 Boards" on a workspace that has none,
-  // and nothing silently omitted on one that does. Open tasks is always
-  // shown as the headline action metric.
-  const contentStats = [
-    { one: "Note", many: "Notes", value: counts?.notes ?? 0 },
-    { one: "Canvas", many: "Canvases", value: counts?.canvases ?? 0 },
-    { one: "Board", many: "Boards", value: counts?.boards ?? 0 },
-    { one: "Sheet", many: "Sheets", value: counts?.sheets ?? 0 },
-    { one: "File", many: "Files", value: counts?.files ?? 0 },
-    { one: "Chat", many: "Chats", value: counts?.chats ?? 0 },
-  ]
-    .filter((s) => s.value > 0)
-    .map((s) => ({ label: s.value === 1 ? s.one : s.many, value: s.value }));
+
+  const members = workspace?.members ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-8">
-      <h1 className="text-xl font-semibold text-[var(--text)]">{title}</h1>
-      <p className="mt-0.5 text-sm text-[var(--text-muted)]">
-        Workspace overview
-      </p>
+    <div className="mx-auto w-full max-w-5xl px-6 py-8">
+      {/* ---- Identity header ------------------------------------------ */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">
+            {title}
+          </h1>
+          {workspace?.description ? (
+            <p className="mt-1 max-w-xl text-sm text-[var(--text-muted)]">
+              {workspace.description}
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              Everything here — notes, boards, files, chats — feeds one
+              project brain.
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          {members.length > 0 && (
+            <span
+              className="inline-flex items-center"
+              title={members.map((m) => m.username).join(", ")}
+            >
+              {members.slice(0, 5).map((m, i) => (
+                <UserAvatar
+                  key={m.user_id}
+                  name={m.username}
+                  userId={m.user_id}
+                  avatarUrl={m.avatar_url}
+                  color={m.avatar_color}
+                  size={26}
+                  className={cn(
+                    "border-2 border-[var(--bg)]",
+                    i > 0 && "-ml-2"
+                  )}
+                />
+              ))}
+              {members.length > 5 && (
+                <span className="ml-1.5 text-xs text-[var(--text-muted)]">
+                  +{members.length - 5}
+                </span>
+              )}
+            </span>
+          )}
+          {workspace?.updated_at && (
+            <span className="text-xs text-[var(--text-muted)]">
+              Updated {formatRelativeTime(workspace.updated_at)}
+            </span>
+          )}
+        </div>
+      </div>
 
       {isEmpty && canEdit ? (
         <GettingStarted />
@@ -197,241 +264,442 @@ export function WorkspaceOverviewPane({
         </div>
       ) : null}
 
-      {/* Counts — every kind that exists, plus the open-tasks headline */}
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {contentStats.map((s) => (
-          <StatCard key={s.label} label={s.label} value={s.value} />
-        ))}
-        <StatCard
-          label={openTaskCount === 1 ? "Open task" : "Open tasks"}
-          value={openTaskCount}
-          accent
-        />
-      </div>
-
-      {/* Indexing health — what the AI can currently see. */}
+      {/* ---- Ask hero — the project answers you ----------------------- */}
       {!isEmpty && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
-            {indexing.inContext} item{indexing.inContext === 1 ? "" : "s"} in
-            context
-          </span>
-          {indexing.pending > 0 && (
-            <span className="inline-flex items-center gap-1.5">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {indexing.pending} still indexing
-            </span>
+        <AskHero workspaceId={workspaceId} onJump={jumpToCitation} />
+      )}
+
+      {/* ---- Two-column body ------------------------------------------ */}
+      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-3">
+        {/* Main column */}
+        <div className="min-w-0 space-y-8 lg:col-span-2">
+          <NeedsAttention
+            workspaceId={workspaceId}
+            tasks={boardTasks ?? []}
+            tree={flatTree}
+            canEdit={canEdit}
+            onOpen={open}
+          />
+
+          {recent.length > 0 && (
+            <section>
+              <SectionTitle>Pick up where you left off</SectionTitle>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {recent.slice(0, 6).map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() =>
+                      open({
+                        id: r.id,
+                        kind: r.kind as WorkspaceItemNode["kind"],
+                        ref_id: r.ref_id,
+                        title: r.title,
+                      })
+                    }
+                    className="group flex flex-col gap-1.5 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-left transition hover:border-[var(--accent)]/40 hover:bg-[var(--hover)]"
+                  >
+                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+                      <KindIcon kind={r.kind} className="h-3.5 w-3.5" />
+                      {r.kind}
+                    </span>
+                    <span className="line-clamp-2 text-sm font-medium leading-snug text-[var(--text)]">
+                      {r.title || "Untitled"}
+                    </span>
+                    {r.updated_at && (
+                      <span className="mt-auto text-[11px] text-[var(--text-muted)]">
+                        {formatRelativeTime(r.updated_at)}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
-          {indexing.failedNames.length > 0 && (
-            <span
-              className="inline-flex items-center gap-1.5 text-[var(--danger)]"
-              title={`Failed to index: ${indexing.failedNames.join(", ")}`}
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--danger)]" />
-              {indexing.failedNames.length} failed to index
-            </span>
+
+          <ActivitySection workspaceId={workspaceId} onOpen={open} />
+
+          {/* Checkboxes living inside notes — secondary, collapsed. */}
+          {noteChecks.length > 0 && (
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]">
+                <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
+                Checklists in notes ({noteChecks.filter((t) => !t.checked).length}{" "}
+                open)
+              </summary>
+              <div className="mt-2 space-y-0.5">
+                {noteChecks.slice(0, 12).map((t, i) => (
+                  <button
+                    key={`${t.note_item_id}-${i}`}
+                    type="button"
+                    onClick={() =>
+                      open({
+                        id: t.note_item_id,
+                        kind: "note",
+                        ref_id: t.note_ref_id,
+                        title: t.note_title,
+                      })
+                    }
+                    className="flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-[var(--hover)]"
+                  >
+                    {t.checked ? (
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                    ) : (
+                      <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={
+                          t.checked
+                            ? "text-[var(--text-muted)] line-through"
+                            : "text-[var(--text)]"
+                        }
+                      >
+                        {t.text}
+                      </span>
+                      <span className="ml-2 text-[11px] text-[var(--text-muted)]">
+                        {t.note_title}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </details>
           )}
         </div>
-      )}
 
-      {/* Workspace drive — compact summary; the full browser (folders,
-          search, bulk actions) lives behind Open drive. Dropping files
-          here still works as the quick-add path. */}
-      <div className="mt-8">
-        <WorkspaceFilesPanel
-          workspaceId={workspaceId}
-          canEdit={canEdit}
-          compact
-          onOpenDrive={onOpenDrive}
-        />
-      </div>
-
-      {/* Workspace map — the catalog every chat sees, rendered as a real
-          clickable tree (icons per kind, click to open) instead of a raw
-          markdown dump. The model still receives the markdown version. */}
-      {(tree ?? []).length > 0 && (
-        <details open className="group mt-8">
-          <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]">
-            <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
-            Workspace map
-          </summary>
-          <p className="mb-2 ml-4 mt-1 text-[11px] text-[var(--text-muted)]">
-            The catalog every chat sees, so the AI knows what exists and where.
-            Updates automatically as you add, rename, or remove items — click
-            any entry to open it.
-          </p>
-          <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-            <MapTree nodes={tree ?? []} onOpen={onOpenItem} />
-          </div>
-        </details>
-      )}
-
-      {/* Workspace memory — surfaced here so freshness is never a mystery;
-          the full editor stays in Settings. */}
-      <MemoryCard
-        workspaceId={workspaceId}
-        canEdit={canEdit}
-        onOpenSettings={onOpenSettings}
-      />
-
-      {/* Secondary: checkboxes found inside notes (rollup) */}
-      {tasks.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-            From your notes
-          </h2>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Checklist items found inside this workspace's notes — separate from
-            the task list above. Click one to open its note.
-          </p>
-          <div className="space-y-1">
-            {[...openTasks, ...doneTasks].map((t, i) => (
-              <button
-                key={`${t.note_item_id}-${i}`}
-                type="button"
-                onClick={() =>
-                  open({
-                    id: t.note_item_id,
-                    kind: "note",
-                    ref_id: t.note_ref_id,
-                    title: t.note_title,
-                  })
-                }
-                className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--hover)]"
-              >
-                {t.checked ? (
-                  <CheckSquare className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-                ) : (
-                  <Square className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-                )}
-                <span className="min-w-0 flex-1">
-                  <span
-                    className={
-                      t.checked
-                        ? "text-[var(--text-muted)] line-through"
-                        : "text-[var(--text)]"
-                    }
-                  >
-                    {t.text}
-                  </span>
-                  <span className="ml-2 text-[11px] text-[var(--text-muted)]">
-                    {t.note_title}
-                  </span>
+        {/* Side rail — housekeeping */}
+        <div className="min-w-0 space-y-6">
+          {!isEmpty && (
+            <section className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--text-muted)]">
+                {(
+                  [
+                    ["note", counts?.notes ?? 0, FileText],
+                    ["board", counts?.boards ?? 0, Columns3],
+                    ["sheet", counts?.sheets ?? 0, Table2],
+                    ["canvas", counts?.canvases ?? 0, PenTool],
+                    ["chat", counts?.chats ?? 0, MessageSquare],
+                    ["file", counts?.files ?? 0, Layers],
+                  ] as const
+                )
+                  .filter(([, v]) => v > 0)
+                  .map(([label, v, Icon]) => (
+                    <span key={label} className="inline-flex items-center gap-1">
+                      <Icon className="h-3 w-3" />
+                      {v} {label}
+                      {v === 1 ? "" : "s"}
+                    </span>
+                  ))}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--border)] pt-2 text-[11px] text-[var(--text-muted)]">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+                  {indexing.inContext} in context
                 </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Recent */}
-      {recent.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-            Recent
-          </h2>
-          <div className="space-y-1">
-            {recent.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() =>
-                  open({
-                    id: r.id,
-                    kind: r.kind as WorkspaceItemNode["kind"],
-                    ref_id: r.ref_id,
-                    title: r.title,
-                  })
-                }
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]"
-              >
-                <RecentIcon kind={r.kind} />
-                <span className="min-w-0 flex-1 truncate">{r.title}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Knowledge health (4.8) — stale + oversized context items. */}
-      {overview?.health &&
-        (overview.health.stale.length > 0 ||
-          overview.health.heavy.length > 0) && (
-          <section className="mt-8 rounded-card border border-[var(--border)] bg-[var(--surface)] p-4">
-            <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-              <AlertTriangle className="h-3.5 w-3.5 text-[var(--warning)]" />
-              Knowledge health
-            </h2>
-            <p className="mb-3 text-xs text-[var(--text-muted)]">
-              The AI treats everything in context as current — these items
-              may be quietly skewing its answers.
-            </p>
-            {overview.health.stale.length > 0 && (
-              <div className="mb-3">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  Untouched for 60+ days
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {overview.health.stale.map((s) => (
-                    <button
-                      key={s.item_id}
-                      type="button"
-                      onClick={() =>
-                        open({
-                          id: s.item_id,
-                          kind: s.kind as WorkspaceItemNode["kind"],
-                          ref_id: null,
-                          title: s.title,
-                        })
-                      }
-                      className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-                      title={`Last touched ${s.updated_at ? formatRelativeTime(s.updated_at) : "long ago"} — refresh it or flip its ⚡ off`}
-                    >
-                      <Clock className="h-3 w-3 shrink-0 text-[var(--warning)]" />
-                      <span className="truncate">{s.title}</span>
-                    </button>
-                  ))}
-                </div>
+                {indexing.pending > 0 && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {indexing.pending} indexing
+                  </span>
+                )}
+                {indexing.failedNames.length > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1.5 text-[var(--danger)]"
+                    title={`Failed to index: ${indexing.failedNames.join(", ")}`}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--danger)]" />
+                    {indexing.failedNames.length} failed
+                  </span>
+                )}
               </div>
-            )}
-            {overview.health.heavy.length > 0 && (
-              <div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                  Biggest context consumers
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {overview.health.heavy.map((h) => (
-                    <button
-                      key={h.item_id}
-                      type="button"
-                      onClick={() =>
-                        open({
-                          id: h.item_id,
-                          kind: h.kind as WorkspaceItemNode["kind"],
-                          ref_id: null,
-                          title: h.title,
-                        })
-                      }
-                      className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-                      title="Large items crowd out retrieval budget — consider splitting or flipping ⚡ off"
-                    >
-                      <Layers className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
-                      <span className="truncate">{h.title}</span>
-                      <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
-                        ~{Math.round((h.chars ?? 0) / 4 / 1000)}k tok
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        )}
+            </section>
+          )}
 
-      {/* Activity — what changed since you were last here (Batch 3). */}
-      <ActivitySection workspaceId={workspaceId} onOpen={open} />
+          <WorkspaceFilesPanel
+            workspaceId={workspaceId}
+            canEdit={canEdit}
+            compact
+            onOpenDrive={onOpenDrive}
+          />
+
+          <MemoryCard
+            workspaceId={workspaceId}
+            canEdit={canEdit}
+            onOpenSettings={onOpenSettings}
+          />
+
+          {overview?.health &&
+            (overview.health.stale.length > 0 ||
+              overview.health.heavy.length > 0) && (
+              <KnowledgeHealthCard health={overview.health} onOpen={open} />
+            )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+      {children}
+    </h2>
+  );
+}
+
+// --------------------------------------------------------------------
+// Ask hero — grounded Q&A, inline on the hub
+// --------------------------------------------------------------------
+function AskHero({
+  workspaceId,
+  onJump,
+}: {
+  workspaceId: string;
+  onJump: (itemId: string | null, snippet?: string | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [answer, setAnswer] = useState<WorkspaceAskResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [askedQuery, setAskedQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const runAsk = async () => {
+    const q = query.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    setError(null);
+    setAnswer(null);
+    setAskedQuery(q);
+    try {
+      const res = await workspacesApi.ask(workspaceId, q);
+      setAnswer(res);
+    } catch {
+      setError("Couldn't get an answer — try again in a moment.");
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  return (
+    <section className="mt-6">
+      <div
+        className={cn(
+          "rounded-card border bg-[var(--surface)] transition",
+          asking || answer || error
+            ? "border-[var(--accent)]/40"
+            : "border-[var(--border)] focus-within:border-[var(--accent)]/60"
+        )}
+      >
+        <div className="flex items-center gap-2.5 px-4 py-3">
+          <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void runAsk();
+            }}
+            placeholder="Ask anything about this project — answers cite your notes, boards, and files…"
+            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+          {asking ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
+          ) : query.trim() ? (
+            <button
+              type="button"
+              onClick={() => void runAsk()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white transition hover:opacity-90"
+            >
+              Ask
+              <CornerDownLeft className="h-3 w-3" />
+            </button>
+          ) : null}
+        </div>
+        {(answer || error || asking) && (
+          <div className="border-t border-[var(--border)] px-4 py-3">
+            {asking && (
+              <p className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Reading the workspace…
+              </p>
+            )}
+            {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
+            {answer && (
+              <>
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                  {askedQuery}
+                </p>
+                <AskAnswer answer={answer} onJump={onJump} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAnswer(null);
+                    setError(null);
+                    setQuery("");
+                    inputRef.current?.focus();
+                  }}
+                  className="mt-2 text-xs text-[var(--text-muted)] underline-offset-2 transition hover:text-[var(--text)] hover:underline"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// --------------------------------------------------------------------
+// Needs attention — open cards, worst first, completable in place
+// --------------------------------------------------------------------
+function NeedsAttention({
+  workspaceId,
+  tasks,
+  tree,
+  canEdit,
+  onOpen,
+}: {
+  workspaceId: string;
+  tasks: WorkspaceTask[];
+  tree: WorkspaceItemNode[];
+  canEdit: boolean;
+  onOpen: (
+    node: Pick<WorkspaceItemNode, "id" | "kind" | "ref_id" | "title">
+  ) => void;
+}) {
+  const update = useUpdateWorkspaceTask(workspaceId);
+  const boardsById = useMemo(
+    () => new Map(tree.filter((n) => n.kind === "board").map((n) => [n.id, n])),
+    [tree]
+  );
+
+  const openTasks = useMemo(() => {
+    const now = Date.now();
+    const soonCutoff = now + 3 * 24 * 3600 * 1000;
+    const bucket = (t: WorkspaceTask) => {
+      if (!t.due_at) return 2;
+      const due = +new Date(t.due_at);
+      if (due < now) return 0; // overdue
+      if (due < soonCutoff) return 1; // due within 3 days
+      return 2;
+    };
+    return tasks
+      .filter((t) => t.status !== "done")
+      .sort((a, b) => {
+        const ba = bucket(a);
+        const bb = bucket(b);
+        if (ba !== bb) return ba - bb;
+        const da = a.due_at ? +new Date(a.due_at) : Infinity;
+        const dbb = b.due_at ? +new Date(b.due_at) : Infinity;
+        if (da !== dbb) return da - dbb;
+        const prio = { high: 0, medium: 1, low: 2 } as const;
+        return (prio[a.priority] ?? 1) - (prio[b.priority] ?? 1);
+      });
+  }, [tasks]);
+
+  if (openTasks.length === 0) return null;
+
+  const dueLabel = (t: WorkspaceTask): { text: string; cls: string } | null => {
+    if (!t.due_at) return null;
+    const due = +new Date(t.due_at);
+    const now = Date.now();
+    if (due < now)
+      return { text: `overdue — ${relativeTime(t.due_at)}`, cls: "text-[var(--danger)]" };
+    if (due < now + 3 * 24 * 3600 * 1000)
+      return {
+        text: `due ${new Date(t.due_at).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}`,
+        cls: "text-[var(--warning)]",
+      };
+    return {
+      text: `due ${new Date(t.due_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`,
+      cls: "text-[var(--text-muted)]",
+    };
+  };
+
+  return (
+    <section>
+      <SectionTitle>
+        Needs attention ({openTasks.length} open)
+      </SectionTitle>
+      <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+        {openTasks.slice(0, 6).map((t, i) => {
+          const board = t.board_item_id
+            ? boardsById.get(t.board_item_id)
+            : undefined;
+          const due = dueLabel(t);
+          return (
+            <div
+              key={t.id}
+              className={cn(
+                "group flex items-center gap-2.5 px-3 py-2",
+                i > 0 && "border-t border-[var(--border)]"
+              )}
+            >
+              <button
+                type="button"
+                disabled={!canEdit || update.isPending}
+                title={canEdit ? "Mark done" : undefined}
+                onClick={() =>
+                  update.mutate(
+                    { taskId: t.id, payload: { status: "done", done: true } },
+                    {
+                      onSuccess: () => toast.success(`Completed “${t.title}”`),
+                    }
+                  )
+                }
+                className="shrink-0 text-[var(--text-muted)] transition hover:text-[var(--success)] disabled:cursor-default"
+              >
+                <Circle className="h-4 w-4 group-hover:hidden" />
+                <CheckCircle2 className="hidden h-4 w-4 group-hover:block" />
+              </button>
+              <button
+                type="button"
+                disabled={!board}
+                onClick={() => board && onOpen(board)}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+                title={board ? `Open “${board.title}”` : undefined}
+              >
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    t.priority === "high"
+                      ? "bg-[var(--danger)]"
+                      : t.priority === "medium"
+                        ? "bg-[var(--warning)]"
+                        : "bg-[var(--text-muted)]/50"
+                  )}
+                  title={`${t.priority} priority`}
+                />
+                <span className="truncate text-sm text-[var(--text)]">
+                  {t.title}
+                </span>
+                {due && (
+                  <span className={cn("shrink-0 text-[11px]", due.cls)}>
+                    {due.text}
+                  </span>
+                )}
+                {board && (
+                  <span className="ml-auto hidden shrink-0 items-center gap-1 text-[11px] text-[var(--text-muted)] sm:inline-flex">
+                    {board.title}
+                    <ArrowRight className="h-3 w-3 opacity-0 transition group-hover:opacity-100" />
+                  </span>
+                )}
+              </button>
+            </div>
+          );
+        })}
+        {openTasks.length > 6 && (
+          <div className="border-t border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--text-muted)]">
+            +{openTasks.length - 6} more on the board
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -465,10 +733,8 @@ function ActivitySection({
   };
 
   return (
-    <section className="mt-8">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        Activity
-      </h2>
+    <section>
+      <SectionTitle>Activity</SectionTitle>
       <div className="space-y-0.5">
         {events.slice(0, 15).map((e, i) => (
           <button
@@ -521,6 +787,91 @@ function ActivitySection({
   );
 }
 
+/** Knowledge health (4.8) — stale + oversized context items (side rail). */
+function KnowledgeHealthCard({
+  health,
+  onOpen,
+}: {
+  health: NonNullable<
+    import("@/api/workspaces").WorkspaceOverview["health"]
+  >;
+  onOpen: (
+    node: Pick<WorkspaceItemNode, "id" | "kind" | "ref_id" | "title">
+  ) => void;
+}) {
+  return (
+    <section className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h2 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        <AlertTriangle className="h-3.5 w-3.5 text-[var(--warning)]" />
+        Knowledge health
+      </h2>
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        The AI treats everything in context as current — these items may be
+        quietly skewing its answers.
+      </p>
+      {health.stale.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Untouched for 60+ days
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {health.stale.map((s) => (
+              <button
+                key={s.item_id}
+                type="button"
+                onClick={() =>
+                  onOpen({
+                    id: s.item_id,
+                    kind: s.kind as WorkspaceItemNode["kind"],
+                    ref_id: null,
+                    title: s.title,
+                  })
+                }
+                className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                title={`Last touched ${s.updated_at ? formatRelativeTime(s.updated_at) : "long ago"} — refresh it or flip its ⚡ off`}
+              >
+                <Clock className="h-3 w-3 shrink-0 text-[var(--warning)]" />
+                <span className="truncate">{s.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {health.heavy.length > 0 && (
+        <div>
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Biggest context consumers
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {health.heavy.map((h) => (
+              <button
+                key={h.item_id}
+                type="button"
+                onClick={() =>
+                  onOpen({
+                    id: h.item_id,
+                    kind: h.kind as WorkspaceItemNode["kind"],
+                    ref_id: null,
+                    title: h.title,
+                  })
+                }
+                className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                title="Large items crowd out retrieval budget — consider splitting or flipping ⚡ off"
+              >
+                <Layers className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+                <span className="truncate">{h.title}</span>
+                <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
+                  ~{Math.round((h.chars ?? 0) / 4 / 1000)}k tok
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** First-run guidance shown on an empty workspace home. */
 function GettingStarted() {
   const steps: Array<{ icon: typeof FileText; title: string; body: string }> = [
@@ -569,108 +920,24 @@ function GettingStarted() {
   );
 }
 
-function StatCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number;
-  accent?: boolean;
-}) {
-  return (
-    <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
-      <div
-        className={
-          accent && value > 0
-            ? "text-2xl font-semibold text-[var(--accent)]"
-            : "text-2xl font-semibold text-[var(--text)]"
-        }
-      >
-        {value}
-      </div>
-      <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function RecentIcon({ kind }: { kind: string }) {
-  const cls = "h-4 w-4 shrink-0 text-[var(--text-muted)]";
-  if (kind === "canvas") return <Shapes className={cls} />;
-  if (kind === "chat") return <MessageSquare className={cls} />;
-  return <FileText className={cls} />;
+function KindIcon({ kind, className }: { kind: string; className?: string }) {
+  const cls = className ?? "h-4 w-4 shrink-0";
+  switch (kind) {
+    case "canvas":
+      return <Shapes className={cls} />;
+    case "chat":
+      return <MessageSquare className={cls} />;
+    case "board":
+      return <Columns3 className={cls} />;
+    case "sheet":
+      return <Table2 className={cls} />;
+    default:
+      return <FileText className={cls} />;
+  }
 }
 
 // --------------------------------------------------------------------
-// Workspace map — clickable tree
-// --------------------------------------------------------------------
-
-const KIND_ICONS: Record<string, typeof FileText> = {
-  folder: Folder,
-  note: StickyNote,
-  canvas: PenTool,
-  board: Columns3,
-  sheet: Table2,
-  chat: MessageSquare,
-  container: Layers,
-  task: Clock,
-};
-
-function MapTree({
-  nodes,
-  onOpen,
-  depth = 0,
-}: {
-  nodes: WorkspaceItemNode[];
-  onOpen: (node: WorkspaceItemNode) => void;
-  depth?: number;
-}) {
-  return (
-    <ul
-      className={cn(
-        "m-0 list-none p-0",
-        depth > 0 && "ml-3 border-l border-[var(--border)] pl-2"
-      )}
-    >
-      {nodes.map((n) => {
-        const Icon = KIND_ICONS[n.kind] ?? FileText;
-        const isFolder = n.kind === "folder";
-        return (
-          <li key={n.id} className="my-0.5">
-            {isFolder ? (
-              <span className="flex items-center gap-1.5 px-1.5 py-0.5 text-sm font-medium text-[var(--text)]">
-                <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-                <span className="truncate">{n.title || "Untitled"}</span>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onOpen(n)}
-                className="flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-                <span className="truncate">{n.title || "Untitled"}</span>
-                {n.context_enabled === false && (
-                  <span className="ml-auto shrink-0 text-[10px] text-[var(--text-muted)]">
-                    not in context
-                  </span>
-                )}
-              </button>
-            )}
-            {n.children.length > 0 && (
-              <MapTree nodes={n.children} onOpen={onOpen} depth={depth + 1} />
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-// --------------------------------------------------------------------
-// Workspace memory card
+// Workspace memory card (side rail)
 // --------------------------------------------------------------------
 
 const MEMORY_MODE_LABELS: Record<string, string> = {
@@ -696,87 +963,85 @@ function MemoryCard({
   const off = mode === "off";
 
   return (
-    <section className="mt-8">
+    <section className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
         <Brain className="h-3.5 w-3.5" />
         Workspace memory
       </h2>
-      <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 font-medium",
-              off
-                ? "bg-[var(--hover-strong)] text-[var(--text-muted)]"
-                : "bg-[var(--accent)]/10 text-[var(--accent)]"
-            )}
-          >
-            {MEMORY_MODE_LABELS[mode] ?? mode}
-          </span>
-          <span className="text-[var(--text-muted)]">
-            {off
-              ? "No memory is kept or used for this workspace."
-              : memory.exists && memory.updated_at
-                ? `Updated ${formatRelativeTime(memory.updated_at)}`
-                : "Not created yet — it builds from your chats and documents."}
-          </span>
-          <span className="ml-auto flex items-center gap-1.5">
-            {canEdit && !off && (
-              <button
-                type="button"
-                onClick={() =>
-                  regenerate.mutate(undefined, {
-                    onError: () =>
-                      toast.error(
-                        "Couldn't regenerate the memory. Check the memory model in Settings."
-                      ),
-                  })
-                }
-                disabled={regenerate.isPending}
-                className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)] disabled:opacity-50"
-              >
-                {regenerate.isPending ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3 w-3" />
-                )}
-                {regenerate.isPending ? "Updating…" : "Update now"}
-              </button>
-            )}
-            {onOpenSettings && (
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
-                title={
-                  off
-                    ? "Turn memory on in Settings"
-                    : "View or edit the memory in Settings"
-                }
-              >
-                <Settings2 className="h-3 w-3" />
-                {off ? "Turn on" : "View / edit"}
-              </button>
-            )}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span
+          className={cn(
+            "rounded-full px-2 py-0.5 font-medium",
+            off
+              ? "bg-[var(--hover-strong)] text-[var(--text-muted)]"
+              : "bg-[var(--accent)]/10 text-[var(--accent)]"
+          )}
+        >
+          {MEMORY_MODE_LABELS[mode] ?? mode}
+        </span>
+        <span className="text-[var(--text-muted)]">
+          {off
+            ? "No memory is kept or used."
+            : memory.exists && memory.updated_at
+              ? `Updated ${formatRelativeTime(memory.updated_at)}`
+              : "Builds from chats + documents."}
+        </span>
+      </div>
+      {!off && memory.exists && memory.markdown.trim() && (
+        <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-[var(--text-muted)]">
+          {memoryPreview(memory.markdown)}
+        </p>
+      )}
+      {!off && memory.last_status === "failed" && (
+        <div className="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-xs text-[var(--danger)]">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            Last refresh failed
+            {memory.last_attempt_at
+              ? ` ${formatRelativeTime(memory.last_attempt_at)}`
+              : ""}
+            {memory.last_error ? ` — ${memory.last_error}` : "."}
+            {canEdit ? " Check the memory model in Settings." : ""}
           </span>
         </div>
-        {!off && memory.last_status === "failed" && (
-          <div className="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-xs text-[var(--danger)]">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              Last refresh failed
-              {memory.last_attempt_at
-                ? ` ${formatRelativeTime(memory.last_attempt_at)}`
-                : ""}
-              {memory.last_error ? ` — ${memory.last_error}` : "."}
-              {canEdit ? " Check the memory model in Settings, then try again." : ""}
-            </span>
-          </div>
+      )}
+      <div className="mt-2.5 flex items-center gap-1.5">
+        {canEdit && !off && (
+          <button
+            type="button"
+            onClick={() =>
+              regenerate.mutate(undefined, {
+                onError: () =>
+                  toast.error(
+                    "Couldn't regenerate the memory. Check the memory model in Settings."
+                  ),
+              })
+            }
+            disabled={regenerate.isPending}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)] disabled:opacity-50"
+          >
+            {regenerate.isPending ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            {regenerate.isPending ? "Updating…" : "Update now"}
+          </button>
         )}
-        {!off && memory.exists && memory.markdown.trim() && (
-          <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-[var(--text-muted)]">
-            {memoryPreview(memory.markdown)}
-          </p>
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+            title={
+              off
+                ? "Turn memory on in Settings"
+                : "View or edit the memory in Settings"
+            }
+          >
+            <Settings2 className="h-3 w-3" />
+            {off ? "Turn on" : "View / edit"}
+          </button>
         )}
       </div>
     </section>
