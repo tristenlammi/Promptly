@@ -14,11 +14,17 @@ import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 const FREQUENCIES: { value: TaskFrequency; label: string }[] = [
+  { value: "minutes", label: "Every N minutes" },
   { value: "hourly", label: "Hourly" },
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
 ];
+
+// Every-N-minutes step options (backend clamps to 5–720).
+const INTERVAL_OPTIONS = [5, 10, 15, 30, 45, 60, 120, 240, 360, 720];
+const intervalLabel = (m: number) =>
+  m < 60 ? `Every ${m} minutes` : m === 60 ? "Every hour" : `Every ${m / 60} hours`;
 
 const WEEKDAYS = [
   { value: 0, label: "Monday" },
@@ -92,6 +98,9 @@ export function TaskFormModal({
   const [frequency, setFrequency] = useState<TaskFrequency>("daily");
   const [time, setTime] = useState("07:00");
   const [weekday, setWeekday] = useState(0);
+  // Weekly multi-day set (0=Mon…6=Sun); falls back to the single weekday.
+  const [weekdays, setWeekdays] = useState<number[]>([0]);
+  const [intervalMinutes, setIntervalMinutes] = useState(30);
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [enabled, setEnabled] = useState(true);
@@ -115,6 +124,12 @@ export function TaskFormModal({
       setFrequency(task.frequency);
       setTime(`${pad(task.hour ?? 7)}:${pad(task.minute ?? 0)}`);
       setWeekday(task.weekday ?? 0);
+      setWeekdays(
+        task.weekdays && task.weekdays.length
+          ? task.weekdays
+          : [task.weekday ?? 0]
+      );
+      setIntervalMinutes(task.interval_minutes ?? 30);
       setDayOfMonth(task.day_of_month ?? 1);
       setTimezone(task.timezone);
       setEnabled(task.enabled);
@@ -128,6 +143,8 @@ export function TaskFormModal({
       setFrequency("daily");
       setTime("07:00");
       setWeekday(0);
+      setWeekdays([0]);
+      setIntervalMinutes(30);
       setDayOfMonth(1);
       setTimezone(defaultTimezone);
       setEnabled(true);
@@ -184,9 +201,16 @@ export function TaskFormModal({
       workspace_id: effectiveWorkspaceId,
       connector_ids: [...connectorIds],
       frequency,
-      hour: frequency === "hourly" ? null : isNaN(hh) ? 0 : hh,
+      hour:
+        frequency === "hourly" || frequency === "minutes"
+          ? null
+          : isNaN(hh)
+            ? 0
+            : hh,
       minute: isNaN(mm) ? 0 : mm,
-      weekday: frequency === "weekly" ? weekday : null,
+      weekday: frequency === "weekly" ? (weekdays[0] ?? weekday) : null,
+      weekdays: frequency === "weekly" && weekdays.length ? weekdays : null,
+      interval_minutes: frequency === "minutes" ? intervalMinutes : null,
       day_of_month: frequency === "monthly" ? dayOfMonth : null,
       timezone,
       enabled,
@@ -369,7 +393,22 @@ export function TaskFormModal({
               </select>
             </div>
 
-            {frequency === "hourly" ? (
+            {frequency === "minutes" ? (
+              <div>
+                <label className={labelCls}>Run every</label>
+                <select
+                  className={fieldCls}
+                  value={intervalMinutes}
+                  onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+                >
+                  {INTERVAL_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {intervalLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : frequency === "hourly" ? (
               <div>
                 <label className={labelCls}>Minute past the hour</label>
                 <input
@@ -396,19 +435,36 @@ export function TaskFormModal({
             )}
 
             {frequency === "weekly" && (
-              <div>
-                <label className={labelCls}>Day of week</label>
-                <select
-                  className={fieldCls}
-                  value={weekday}
-                  onChange={(e) => setWeekday(Number(e.target.value))}
-                >
-                  {WEEKDAYS.map((d) => (
-                    <option key={d.value} value={d.value}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
+              <div className="col-span-2">
+                <label className={labelCls}>Days of week</label>
+                <div className="flex flex-wrap gap-1">
+                  {WEEKDAYS.map((d) => {
+                    const on = weekdays.includes(d.value);
+                    return (
+                      <button
+                        key={d.value}
+                        type="button"
+                        onClick={() => {
+                          const next = on
+                            ? weekdays.filter((x) => x !== d.value)
+                            : [...weekdays, d.value].sort((a, b) => a - b);
+                          // Never allow an empty set — keep at least one day.
+                          if (!next.length) return;
+                          setWeekdays(next);
+                          setWeekday(next[0]);
+                        }}
+                        className={cn(
+                          "rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
+                          on
+                            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                            : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                        )}
+                      >
+                        {d.label.slice(0, 3)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

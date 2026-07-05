@@ -437,6 +437,22 @@ async def upload_drive_file(
         await db.rollback()
 
     background.add_task(index_file_for_workspace, ws.id, row.id)
+
+    # Automations (E-batch): fire event-triggered flows. Best-effort,
+    # non-blocking — a flow hiccup can never fail an upload.
+    from app.tasks.events import EVENT_FILE_ADDED, emit_workspace_event
+
+    emit_workspace_event(
+        workspace_id=ws.id,
+        event=EVENT_FILE_ADDED,
+        payload={
+            "file_id": str(row.id),
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "size_bytes": row.size_bytes,
+            "uploaded_by": user.username,
+        },
+    )
     return _pin_to_drive_file(pin, row, in_subtree=True, root_id=root.id)
 
 

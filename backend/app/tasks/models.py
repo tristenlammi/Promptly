@@ -20,7 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from typing import Any
 from datetime import datetime
@@ -81,15 +81,24 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False
     )
 
-    # ---- Recurrence (structured; advanced cron deferred) ----
-    # frequency ∈ {hourly, daily, weekly, monthly}
+    # ---- Recurrence ----
+    # frequency ∈ {minutes, hourly, daily, weekly, monthly}
     frequency: Mapped[str] = mapped_column(String(10), nullable=False)
-    # Local wall-clock the run fires at. ``hour`` is unused for hourly.
+    # Local wall-clock the run fires at. ``hour`` is unused for hourly/minutes.
     hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     minute: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # weekly: 0=Mon … 6=Sun. monthly: 1..28.
     weekday: Mapped[int | None] = mapped_column(Integer, nullable=True)
     day_of_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # E-batch finer schedules:
+    #   * ``interval_minutes`` — the "every N minutes" step (5–720) when
+    #     frequency == "minutes"; boundary-aligned from local midnight.
+    #   * ``weekdays`` — the weekly multi-day set (0=Mon…6=Sun). Non-empty
+    #     supersedes the single ``weekday`` (kept for back-compat).
+    interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weekdays: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), nullable=True
+    )
     # IANA tz; AU-friendly default (Promptly is AU-only for now).
     timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, default="Australia/Sydney"

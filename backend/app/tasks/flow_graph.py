@@ -48,6 +48,11 @@ class NodeType:
     # starts a run; the request body reaches the flow as
     # ``{{trigger.payload}}``. Connects CI, forms, monitoring, Zapier…
     TRIGGER_WEBHOOK = "trigger.webhook"
+    # Internal event trigger (E-batch): the flow fires when something
+    # happens in the task's home workspace — a file lands in the drive, a
+    # board card moves, an item is created. The event details reach the
+    # flow as ``{{trigger.json.*}}``. Workspace-homed tasks only.
+    TRIGGER_EVENT = "trigger.event"
     AI_PROMPT = "ai.prompt"
     # AI presets — specialised prompts that "just work" on the upstream text.
     SUMMARISE = "ai.summarise"
@@ -183,12 +188,34 @@ class FlowGraph(BaseModel):
 class ScheduleTriggerData(BaseModel):
     """A Task's recurrence — the structured schedule the scheduler fires on."""
 
-    frequency: str  # hourly | daily | weekly | monthly
+    frequency: str  # minutes | hourly | daily | weekly | monthly
     hour: int | None = None
     minute: int = 0
     weekday: int | None = None  # weekly: 0=Mon … 6=Sun
     day_of_month: int | None = None  # monthly: 1..28
+    # E-batch: every-N-minutes step + weekly multi-day set (supersedes
+    # ``weekday`` when non-empty).
+    interval_minutes: int | None = None
+    weekdays: list[int] | None = None
     timezone: str = "Australia/Sydney"
+
+
+class EventTriggerData(BaseModel):
+    """An internal workspace-event trigger (E-batch).
+
+    ``event`` selects what fires the flow; the optional filters narrow it:
+
+    * ``file_added``   — a file was uploaded/pinned to the workspace drive.
+    * ``card_moved``   — a board card changed column. ``column`` (optional)
+      fires only when the card lands in that column (matched
+      case-insensitively against the column key/name).
+    * ``item_created`` — a workspace item was created. ``item_kind``
+      (optional) narrows to one kind (note / canvas / board / sheet …).
+    """
+
+    event: str = "file_added"
+    column: str | None = None
+    item_kind: str | None = None
 
 
 class AIPromptData(BaseModel):
@@ -479,6 +506,8 @@ class SimpleTaskFields:
     minute: int
     weekday: int | None
     day_of_month: int | None
+    interval_minutes: int | None
+    weekdays: list[int] | None
     timezone: str
     # ai
     prompt: str
@@ -499,6 +528,8 @@ def _row_fields(task: Task, connector_ids: list[uuid.UUID]) -> SimpleTaskFields:
         minute=task.minute,
         weekday=task.weekday,
         day_of_month=task.day_of_month,
+        interval_minutes=getattr(task, "interval_minutes", None),
+        weekdays=list(task.weekdays) if getattr(task, "weekdays", None) else None,
         timezone=task.timezone,
         prompt=task.prompt,
         provider_id=task.provider_id,
@@ -532,6 +563,10 @@ def task_to_graph(
             minute=task.minute,
             weekday=task.weekday,
             day_of_month=task.day_of_month,
+            interval_minutes=getattr(task, "interval_minutes", None),
+            weekdays=list(task.weekdays)
+            if getattr(task, "weekdays", None)
+            else None,
             timezone=task.timezone,
         ).model_dump(),
     )
@@ -613,7 +648,13 @@ def is_linear_flow(graph: FlowGraph) -> bool:
     triggers = [
         n
         for n in graph.nodes
-        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK)
+        if n.type
+        in (
+            NodeType.TRIGGER_SCHEDULE,
+            NodeType.TRIGGER_MANUAL,
+            NodeType.TRIGGER_WEBHOOK,
+            NodeType.TRIGGER_EVENT,
+        )
     ]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
@@ -698,7 +739,13 @@ def is_executable_graph(graph: FlowGraph, *, require_output: bool = True) -> boo
     triggers = [
         n
         for n in graph.nodes
-        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK)
+        if n.type
+        in (
+            NodeType.TRIGGER_SCHEDULE,
+            NodeType.TRIGGER_MANUAL,
+            NodeType.TRIGGER_WEBHOOK,
+            NodeType.TRIGGER_EVENT,
+        )
     ]
     outs = [n for n in graph.nodes if n.type in OUTPUT_TYPES]
     procs = [n for n in graph.nodes if n.type in PROCESSING_TYPES]
@@ -822,6 +869,8 @@ def graph_to_task_fields(graph: FlowGraph) -> SimpleTaskFields:
         minute=trig.minute,
         weekday=trig.weekday,
         day_of_month=trig.day_of_month,
+        interval_minutes=trig.interval_minutes,
+        weekdays=trig.weekdays,
         timezone=trig.timezone,
         prompt=ai.prompt,
         provider_id=uuid.UUID(ai.provider_id) if ai.provider_id else None,

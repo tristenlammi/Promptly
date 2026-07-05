@@ -67,6 +67,8 @@ async def _claim_due() -> list[uuid.UUID]:
                     weekday=task.weekday,
                     day_of_month=task.day_of_month,
                     tz_name=task.timezone,
+                    interval_minutes=getattr(task, "interval_minutes", None),
+                    weekdays=getattr(task, "weekdays", None),
                 )
             except ValueError:
                 logger.warning(

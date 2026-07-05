@@ -1554,6 +1554,7 @@ _NODE_KIND_NAMES = {
     NodeType.TRIGGER_SCHEDULE: "the schedule trigger",
     NodeType.TRIGGER_MANUAL: "the manual trigger",
     NodeType.TRIGGER_WEBHOOK: "the webhook trigger",
+    NodeType.TRIGGER_EVENT: "the event trigger",
     NodeType.AI_PROMPT: "an AI step",
     NodeType.SUMMARISE: "a summarise step",
     NodeType.EXTRACT: "an extract step",
@@ -1792,6 +1793,7 @@ async def run_graph_flow(
             NodeType.TRIGGER_SCHEDULE,
             NodeType.TRIGGER_MANUAL,
             NodeType.TRIGGER_WEBHOOK,
+            NodeType.TRIGGER_EVENT,
         ):
             active.add(nid)
             outputs[nid] = trigger_payload or ""

@@ -9,6 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.tasks.recurrence import VALID_FREQUENCIES
 
 REASONING_EFFORTS = {"off", "low", "medium", "high"}
+
+def _clean_weekdays(v: list[int] | None) -> list[int] | None:
+    """Dedupe + clamp the weekly multi-day set; empty → None."""
+    if v is None:
+        return None
+    cleaned = sorted({int(d) for d in v if 0 <= int(d) <= 6})
+    return cleaned or None
+
 # Overlap policy (A3): fire even if the last run is still going, or skip.
 CONCURRENCY_POLICIES = {"allow", "skip"}
 
@@ -29,6 +37,9 @@ class TaskCreate(BaseModel):
     minute: int = Field(default=0, ge=0, le=59)
     weekday: int | None = Field(default=None, ge=0, le=6)
     day_of_month: int | None = Field(default=None, ge=1, le=28)
+    # E-batch finer schedules: every-N-minutes step + weekly multi-day set.
+    interval_minutes: int | None = Field(default=None, ge=5, le=720)
+    weekdays: list[int] | None = None
     # Omit to inherit the creator's own timezone (their profile setting),
     # falling back to the AU default if they haven't set one.
     timezone: str | None = Field(default=None, max_length=64)
@@ -44,6 +55,11 @@ class TaskCreate(BaseModel):
         if v not in VALID_FREQUENCIES:
             raise ValueError(f"frequency must be one of {sorted(VALID_FREQUENCIES)}")
         return v
+
+    @field_validator("weekdays")
+    @classmethod
+    def _wd(cls, v: list[int] | None) -> list[int] | None:
+        return _clean_weekdays(v)
 
     @field_validator("reasoning_effort")
     @classmethod
@@ -79,6 +95,8 @@ class TaskUpdate(BaseModel):
     minute: int | None = Field(default=None, ge=0, le=59)
     weekday: int | None = Field(default=None, ge=0, le=6)
     day_of_month: int | None = Field(default=None, ge=1, le=28)
+    interval_minutes: int | None = Field(default=None, ge=5, le=720)
+    weekdays: list[int] | None = None
     timezone: str | None = Field(default=None, max_length=64)
 
     enabled: bool | None = None
@@ -92,6 +110,11 @@ class TaskUpdate(BaseModel):
         if v is not None and v not in VALID_FREQUENCIES:
             raise ValueError(f"frequency must be one of {sorted(VALID_FREQUENCIES)}")
         return v
+
+    @field_validator("weekdays")
+    @classmethod
+    def _wd(cls, v: list[int] | None) -> list[int] | None:
+        return _clean_weekdays(v)
 
     @field_validator("concurrency")
     @classmethod
@@ -156,6 +179,8 @@ class TaskResponse(BaseModel):
     minute: int
     weekday: int | None
     day_of_month: int | None
+    interval_minutes: int | None = None
+    weekdays: list[int] | None = None
     timezone: str
     schedule_label: str
 

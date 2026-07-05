@@ -1,6 +1,6 @@
 import { apiClient } from "./client";
 
-export type TaskFrequency = "hourly" | "daily" | "weekly" | "monthly";
+export type TaskFrequency = "minutes" | "hourly" | "daily" | "weekly" | "monthly";
 /** Overlap policy for a task's scheduled fires (A3). */
 export type TaskConcurrency = "allow" | "skip";
 /** "warning" = the run completed but its output self-reports a dead end
@@ -62,6 +62,8 @@ export interface Task {
   minute: number;
   weekday: number | null;
   day_of_month: number | null;
+  interval_minutes: number | null;
+  weekdays: number[] | null;
   timezone: string;
   schedule_label: string;
   enabled: boolean;
@@ -98,6 +100,8 @@ export interface TaskInput {
   minute: number;
   weekday: number | null;
   day_of_month: number | null;
+  interval_minutes?: number | null;
+  weekdays?: number[] | null;
   timezone: string;
   enabled: boolean;
   notify: boolean;
@@ -274,6 +278,7 @@ export type FlowNodeType =
   | "trigger.schedule"
   | "trigger.manual"
   | "trigger.webhook"
+  | "trigger.event"
   | "ai.prompt"
   | "ai.summarise"
   | "ai.extract"
@@ -328,7 +333,21 @@ export interface ScheduleTriggerData {
   minute: number;
   weekday: number | null;
   day_of_month: number | null;
+  /** "minutes" frequency: fire every N minutes (5–720, midnight-aligned). */
+  interval_minutes?: number | null;
+  /** Weekly multi-day set (0=Mon…6=Sun) — supersedes ``weekday`` when set. */
+  weekdays?: number[] | null;
   timezone: string;
+}
+
+/** Internal workspace-event trigger (E-batch). */
+export interface EventTriggerData {
+  /** file_added | card_moved | item_created */
+  event: string;
+  /** card_moved filter: only fire when the card lands in this column. */
+  column?: string | null;
+  /** item_created filter: only fire for this item kind. */
+  item_kind?: string | null;
 }
 
 export interface AIPromptData {

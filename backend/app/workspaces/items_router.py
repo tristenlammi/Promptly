@@ -598,6 +598,21 @@ async def create_workspace_item(
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
+
+    # Automations (E-batch): item creation fires event-triggered flows.
+    # Post-commit + fire-and-forget so a flow can never fail the create.
+    from app.tasks.events import EVENT_ITEM_CREATED, emit_workspace_event
+
+    emit_workspace_event(
+        workspace_id=ws.id,
+        event=EVENT_ITEM_CREATED,
+        payload={
+            "item_id": str(item.id),
+            "kind": item.kind,
+            "title": item.title,
+            "created_by": user.username,
+        },
+    )
     return WorkspaceItemResponse.model_validate(item)
 
 

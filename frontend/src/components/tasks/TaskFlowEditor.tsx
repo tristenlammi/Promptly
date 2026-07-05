@@ -80,6 +80,7 @@ import {
   type ConditionData,
   type DeepResearchData,
   type DelayData,
+  type EventTriggerData,
   type ExtractData,
   type FetchPageData,
   type HttpHeader,
@@ -394,6 +395,7 @@ function nodeModalTitle(type?: string): string {
   )
     return "Output";
   if (type === "trigger.webhook") return "Webhook";
+  if (type === "trigger.event") return "Workspace event";
   if (type?.startsWith("trigger.")) return "Schedule";
   return "Node";
 }
@@ -423,16 +425,27 @@ interface BoardOption {
 // ---------------------------------------------------------------------
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const FREQUENCIES = ["hourly", "daily", "weekly", "monthly"] as const;
-const WEEKDAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
+const FREQUENCIES = ["minutes", "hourly", "daily", "weekly", "monthly"] as const;
+const FREQUENCY_LABELS: Record<string, string> = {
+  minutes: "Every N minutes",
+  hourly: "Hourly",
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+};
+// Every-N-minutes step options (backend clamps to 5–720).
+const INTERVAL_OPTIONS = [5, 10, 15, 30, 45, 60, 120, 240, 360, 720];
+const intervalLabel = (m: number) =>
+  m < 60 ? `Every ${m} minutes` : m === 60 ? "Every hour" : `Every ${m / 60} hours`;
+
+// Workspace events an event trigger can fire on (E-batch). Mirrors
+// backend/app/tasks/events.py EVENT_* constants.
+const WORKSPACE_EVENTS: { value: string; label: string }[] = [
+  { value: "file_added", label: "A file is uploaded" },
+  { value: "card_moved", label: "A board card moves column" },
+  { value: "item_created", label: "An item is created" },
 ];
+const ITEM_KINDS = ["note", "canvas", "board", "sheet", "chat"];
 // AU-only for now (matches the Simple form), plus whatever the task already has.
 const TIMEZONES = [
   "Australia/Sydney",
@@ -455,17 +468,32 @@ function saveErrorMessage(err: unknown): string {
 function scheduleSummary(d: ScheduleTriggerData): string {
   const t = `${String(d.hour ?? 0).padStart(2, "0")}:${String(d.minute).padStart(2, "0")}`;
   switch (d.frequency) {
+    case "minutes":
+      return `Every ${d.interval_minutes ?? 30} min`;
     case "hourly":
       return `Hourly at :${String(d.minute).padStart(2, "0")}`;
     case "daily":
       return `Daily at ${t}`;
-    case "weekly":
-      return `Weekly · ${DAYS[d.weekday ?? 0]} ${t}`;
+    case "weekly": {
+      const days =
+        d.weekdays && d.weekdays.length
+          ? d.weekdays.map((i) => DAYS[i]).join("/")
+          : DAYS[d.weekday ?? 0];
+      return `Weekly · ${days} ${t}`;
+    }
     case "monthly":
       return `Monthly · day ${d.day_of_month ?? 1} ${t}`;
     default:
       return d.frequency;
   }
+}
+
+function eventSummary(d: EventTriggerData): string {
+  const base =
+    WORKSPACE_EVENTS.find((e) => e.value === d.event)?.label ?? d.event;
+  if (d.event === "card_moved" && d.column) return `${base} → ${d.column}`;
+  if (d.event === "item_created" && d.item_kind) return `${base} (${d.item_kind})`;
+  return base;
 }
 
 // --- custom node renderers ------------------------------------------
@@ -544,6 +572,25 @@ function TriggerNode({ id, type, data, selected }: NodeProps) {
           <>
             <div className="truncate text-[var(--text)]">POST to fire</div>
             <div className="mt-0.5 truncate">URL in the trigger settings</div>
+          </>
+        )}
+      </NodeShell>
+    );
+  }
+  if (type === "trigger.event") {
+    const ev = data as unknown as EventTriggerData;
+    return (
+      <NodeShell
+        icon={<Zap className="h-3.5 w-3.5" />}
+        label="Workspace event"
+        accent="var(--success)"
+        selected={selected}
+        hasOut
+      >
+        {detail ?? (
+          <>
+            <div className="truncate text-[var(--text)]">{eventSummary(ev)}</div>
+            <div className="mt-0.5 truncate">Fires on workspace activity</div>
           </>
         )}
       </NodeShell>
@@ -1672,6 +1719,7 @@ const nodeTypes = {
   "trigger.schedule": TriggerNode,
   "trigger.manual": TriggerNode,
   "trigger.webhook": TriggerNode,
+  "trigger.event": TriggerNode,
   "ai.prompt": AINode,
   "ai.summarise": SummariseNode,
   "ai.extract": ExtractNode,
@@ -2585,6 +2633,13 @@ export function TaskFlowEditor({
           if (n.id !== selectedId) return n;
           if (type === "trigger.webhook") {
             return { ...n, type, data: {} };
+          }
+          if (type === "trigger.event") {
+            return {
+              ...n,
+              type,
+              data: { event: "file_added", column: null, item_kind: null },
+            };
           }
           return {
             ...n,
@@ -4604,19 +4659,103 @@ function NodeInspector({
             new Set([...TIMEZONES, s.timezone].filter(Boolean))
           );
           const isWebhook = node.type === "trigger.webhook";
+          const isEvent = node.type === "trigger.event";
           const firesOn = (
             <label className="text-xs font-medium text-[var(--text-muted)]">
               Fires on
               <select
-                value={isWebhook ? "trigger.webhook" : "trigger.schedule"}
+                value={
+                  isWebhook
+                    ? "trigger.webhook"
+                    : isEvent
+                      ? "trigger.event"
+                      : "trigger.schedule"
+                }
                 className={selCls}
                 onChange={(e) => onSetTriggerType?.(e.target.value)}
               >
                 <option value="trigger.schedule">A schedule</option>
                 <option value="trigger.webhook">An inbound webhook</option>
+                {(inWorkspace || isEvent) && (
+                  <option value="trigger.event">A workspace event</option>
+                )}
               </select>
             </label>
           );
+          if (isEvent) {
+            const ev = node.data as unknown as EventTriggerData;
+            return (
+              <>
+                {firesOn}
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Event
+                  <select
+                    value={ev.event}
+                    className={selCls}
+                    onChange={(e) =>
+                      onPatch({
+                        event: e.target.value,
+                        column: null,
+                        item_kind: null,
+                      })
+                    }
+                  >
+                    {WORKSPACE_EVENTS.map((w) => (
+                      <option key={w.value} value={w.value}>
+                        {w.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {ev.event === "card_moved" && (
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Only when moved into column
+                    <input
+                      type="text"
+                      value={ev.column ?? ""}
+                      placeholder="Any column — e.g. Done"
+                      onChange={(e) =>
+                        onPatch({ column: e.target.value || null })
+                      }
+                      className={selCls}
+                    />
+                  </label>
+                )}
+                {ev.event === "item_created" && (
+                  <label className="text-xs font-medium text-[var(--text-muted)]">
+                    Item kind
+                    <select
+                      value={ev.item_kind ?? ""}
+                      className={selCls}
+                      onChange={(e) =>
+                        onPatch({ item_kind: e.target.value || null })
+                      }
+                    >
+                      <option value="">Any kind</option>
+                      {ITEM_KINDS.map((k) => (
+                        <option key={k} value={k}>
+                          {k[0].toUpperCase() + k.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <p className="text-[10px] leading-snug text-[var(--text-muted)]">
+                  Fires when this happens in the automation's home workspace.
+                  The event's details reach the flow as{" "}
+                  <code>{"{{trigger.json.<field>}}"}</code> — e.g.{" "}
+                  <code>{"{{trigger.json.filename}}"}</code> or{" "}
+                  <code>{"{{trigger.json.card_title}}"}</code>.
+                </p>
+                {!inWorkspace && (
+                  <p className="text-[11px] text-[var(--warning)]">
+                    This automation has no home workspace, so this trigger will
+                    never fire. Move it into a workspace first.
+                  </p>
+                )}
+              </>
+            );
+          }
           if (isWebhook) {
             return (
               <>
@@ -4668,6 +4807,8 @@ function NodeInspector({
                     const f = e.target.value;
                     const patch: Record<string, unknown> = { frequency: f };
                     if (f !== "hourly" && s.hour == null) patch.hour = 9;
+                    if (f === "minutes" && s.interval_minutes == null)
+                      patch.interval_minutes = 30;
                     if (f === "weekly" && s.weekday == null) patch.weekday = 0;
                     if (f === "monthly" && s.day_of_month == null)
                       patch.day_of_month = 1;
@@ -4676,13 +4817,30 @@ function NodeInspector({
                 >
                   {FREQUENCIES.map((f) => (
                     <option key={f} value={f}>
-                      {f[0].toUpperCase() + f.slice(1)}
+                      {FREQUENCY_LABELS[f] ?? f}
                     </option>
                   ))}
                 </select>
               </label>
 
-              {s.frequency === "hourly" ? (
+              {s.frequency === "minutes" ? (
+                <label className="text-xs font-medium text-[var(--text-muted)]">
+                  Run every
+                  <select
+                    value={s.interval_minutes ?? 30}
+                    className={selCls}
+                    onChange={(e) =>
+                      onPatch({ interval_minutes: Number(e.target.value) })
+                    }
+                  >
+                    {INTERVAL_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {intervalLabel(m)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : s.frequency === "hourly" ? (
                 <label className="text-xs font-medium text-[var(--text-muted)]">
                   Minute past the hour
                   <input
@@ -4717,20 +4875,41 @@ function NodeInspector({
               )}
 
               {s.frequency === "weekly" && (
-                <label className="text-xs font-medium text-[var(--text-muted)]">
-                  Day of week
-                  <select
-                    value={s.weekday ?? 0}
-                    className={selCls}
-                    onChange={(e) => onPatch({ weekday: Number(e.target.value) })}
-                  >
-                    {WEEKDAYS.map((d, i) => (
-                      <option key={d} value={i}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div>
+                  <div className="text-xs font-medium text-[var(--text-muted)]">
+                    Days of week
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {DAYS.map((d, i) => {
+                      const sel =
+                        s.weekdays && s.weekdays.length
+                          ? s.weekdays
+                          : [s.weekday ?? 0];
+                      const on = sel.includes(i);
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => {
+                            const next = on
+                              ? sel.filter((x) => x !== i)
+                              : [...sel, i].sort((a, b) => a - b);
+                            // Never allow an empty set — keep at least one day.
+                            if (!next.length) return;
+                            onPatch({ weekdays: next, weekday: next[0] });
+                          }}
+                          className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                            on
+                              ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                              : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
 
               {s.frequency === "monthly" && (

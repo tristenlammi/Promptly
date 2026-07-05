@@ -13,7 +13,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-VALID_FREQUENCIES = {"hourly", "daily", "weekly", "monthly"}
+VALID_FREQUENCIES = {"minutes", "hourly", "daily", "weekly", "monthly"}
+# "minutes" interval bounds — floor keeps a runaway config from hammering
+# the model budget; ceiling of 12h because beyond that "hourly/daily" fits.
+MIN_INTERVAL_MINUTES = 5
+MAX_INTERVAL_MINUTES = 720
 DEFAULT_TZ = "Australia/Sydney"
 
 
@@ -50,8 +54,15 @@ def compute_next_run(
     weekday: int | None = None,
     day_of_month: int | None = None,
     tz_name: str | None = None,
+    interval_minutes: int | None = None,
+    weekdays: list[int] | None = None,
 ) -> datetime:
     """Next fire time strictly after ``after`` (a tz-aware UTC instant).
+
+    ``interval_minutes`` drives the ``minutes`` frequency (every N minutes,
+    aligned to boundaries from local midnight so :00/:15/:30/:45 for 15).
+    ``weekdays`` (E-batch) is the weekly multi-day set — when non-empty it
+    supersedes the single ``weekday``.
 
     Returns a tz-aware UTC ``datetime``.
     """
@@ -62,7 +73,18 @@ def compute_next_run(
     minute = max(0, min(59, int(minute or 0)))
     hh = 0 if hour is None else max(0, min(23, int(hour)))
 
-    if frequency == "hourly":
+    if frequency == "minutes":
+        step = max(
+            MIN_INTERVAL_MINUTES,
+            min(MAX_INTERVAL_MINUTES, int(interval_minutes or 15)),
+        )
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elapsed = (now - midnight).total_seconds() / 60
+        # Next boundary strictly after "now".
+        ticks = int(elapsed // step) + 1
+        cand = midnight + timedelta(minutes=ticks * step)
+
+    elif frequency == "hourly":
         cand = now.replace(minute=minute, second=0, microsecond=0)
         if cand <= now:
             cand += timedelta(hours=1)
@@ -73,12 +95,20 @@ def compute_next_run(
             cand += timedelta(days=1)
 
     elif frequency == "weekly":
-        target = 0 if weekday is None else max(0, min(6, int(weekday)))
-        cand = now.replace(hour=hh, minute=minute, second=0, microsecond=0)
-        days_ahead = (target - now.weekday()) % 7
-        if days_ahead == 0 and cand <= now:
-            days_ahead = 7
-        cand += timedelta(days=days_ahead)
+        # Multi-day set (E-batch) supersedes the single weekday when set.
+        day_set = sorted(
+            {max(0, min(6, int(d))) for d in (weekdays or [])}
+        ) or [0 if weekday is None else max(0, min(6, int(weekday)))]
+        base = now.replace(hour=hh, minute=minute, second=0, microsecond=0)
+        best: datetime | None = None
+        for target in day_set:
+            days_ahead = (target - now.weekday()) % 7
+            cand_d = base + timedelta(days=days_ahead)
+            if cand_d <= now:
+                cand_d += timedelta(days=7)
+            if best is None or cand_d < best:
+                best = cand_d
+        cand = best
 
     elif frequency == "monthly":
         dom = 1 if day_of_month is None else max(1, min(28, int(day_of_month)))
@@ -103,16 +133,24 @@ def describe_schedule(
     weekday: int | None = None,
     day_of_month: int | None = None,
     tz_name: str | None = None,
+    interval_minutes: int | None = None,
+    weekdays: list[int] | None = None,
 ) -> str:
     """Human-readable one-liner, e.g. 'Daily · 07:00 (Australia/Sydney)'."""
     hhmm = f"{(hour or 0):02d}:{(minute or 0):02d}"
     days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     tz = tz_name or DEFAULT_TZ
+    if frequency == "minutes":
+        return f"Every {int(interval_minutes or 15)} min ({tz})"
     if frequency == "hourly":
         return f"Hourly · at :{(minute or 0):02d} ({tz})"
     if frequency == "daily":
         return f"Daily · {hhmm} ({tz})"
     if frequency == "weekly":
+        day_set = sorted({d for d in (weekdays or []) if 0 <= int(d) <= 6})
+        if day_set:
+            names = "/".join(days[int(d)] for d in day_set)
+            return f"Weekly · {names} {hhmm} ({tz})"
         d = days[weekday] if weekday is not None and 0 <= weekday <= 6 else "Mon"
         return f"Weekly · {d} {hhmm} ({tz})"
     if frequency == "monthly":

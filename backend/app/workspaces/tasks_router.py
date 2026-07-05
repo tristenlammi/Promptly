@@ -412,9 +412,11 @@ async def update_task(
         )
 
     # Log meaningful changes to the activity thread.
+    card_moved_label: str | None = None
     if task.status != old_status:
         label = await _column_label(db, task.board_item_id, task.status)
         _log_activity(db, task.id, user.id, f"moved to {label}")
+        card_moved_label = label
     if "due_at" in sent and task.due_at != old_due:
         _log_activity(
             db,
@@ -451,6 +453,26 @@ async def update_task(
     await db.commit()
     await db.refresh(task)
     _reindex_board(background, ws.id, task.board_item_id)
+    # Automations (E-batch): a column change fires event-triggered flows.
+    # Post-commit + fire-and-forget so it can never fail the move itself.
+    if card_moved_label is not None:
+        from app.tasks.events import EVENT_CARD_MOVED, emit_workspace_event
+
+        emit_workspace_event(
+            workspace_id=ws.id,
+            event=EVENT_CARD_MOVED,
+            payload={
+                "card_id": str(task.id),
+                "card_title": task.title,
+                "board_item_id": str(task.board_item_id)
+                if task.board_item_id
+                else None,
+                "column": task.status,
+                "column_name": card_moved_label,
+                "done": bool(task.done),
+                "moved_by": user.username,
+            },
+        )
     # A card landing on someone's plate deserves a nudge (not self-assigns).
     if (
         "assignee_user_id" in sent

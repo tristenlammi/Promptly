@@ -92,6 +92,8 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
         task.minute = f.minute
         task.weekday = f.weekday
         task.day_of_month = f.day_of_month
+        task.interval_minutes = f.interval_minutes
+        task.weekdays = f.weekdays
         task.timezone = f.timezone
         task.prompt = f.prompt
         task.provider_id = f.provider_id
@@ -122,6 +124,8 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
         task.minute = s.minute
         task.weekday = s.weekday
         task.day_of_month = s.day_of_month
+        task.interval_minutes = s.interval_minutes
+        task.weekdays = s.weekdays
         task.timezone = s.timezone
 
     # Project a report node's notify flag onto the column (if the graph has
