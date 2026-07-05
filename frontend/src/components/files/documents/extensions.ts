@@ -23,6 +23,7 @@ import type { Doc as YDoc } from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 
 import { AudioExtension } from "./AudioExtension";
+import { SlashCommandExtension } from "./SlashCommandExtension";
 import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 
 /**
@@ -184,6 +185,12 @@ export function buildExtensions({
     }),
     DetailsSummary,
     DetailsContent,
+    // The "/" block menu the Placeholder text promises. Commands reuse
+    // the toolbar's chains; image/audio delegate to the toolbar's picker
+    // via a CustomEvent (see SlashCommandExtension for why).
+    SlashCommandExtension.configure({
+      hasWikiLink: Boolean(wikiLink),
+    }),
   ];
 
   // Workspace notes opt into the ``[[`` wiki-link autocomplete. The

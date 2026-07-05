@@ -33,6 +33,7 @@ import { cn } from "@/utils/cn";
 import { documentsApi } from "@/api/documents";
 
 import { EmojiPicker } from "./EmojiPicker";
+import { INSERT_ASSET_EVENT } from "./SlashCommandExtension";
 
 /**
  * Document editor toolbar.
@@ -93,6 +94,21 @@ export function DocumentToolbar({
       document.removeEventListener("keydown", handleKey);
     };
   }, [overflowOpen]);
+
+  // The "/" menu's Image/Audio rows delegate here — the upload plumbing
+  // (hidden inputs + documentId) lives on the toolbar, so the slash
+  // extension just asks us to open the right picker.
+  useEffect(() => {
+    const handleInsertAsset = (e: Event) => {
+      if (disabled) return;
+      const kind = (e as CustomEvent<{ kind?: string }>).detail?.kind;
+      if (kind === "image") imageInputRef.current?.click();
+      else if (kind === "audio") audioInputRef.current?.click();
+    };
+    document.addEventListener(INSERT_ASSET_EVENT, handleInsertAsset);
+    return () =>
+      document.removeEventListener(INSERT_ASSET_EVENT, handleInsertAsset);
+  }, [disabled]);
 
   const uploadAsset = useCallback(
     async (file: File, kind: "image" | "audio") => {
