@@ -97,6 +97,111 @@ async def pick_search_provider(
     return any_enabled.scalars().first()
 
 
+async def run_search_with_failover(
+    db: AsyncSession,
+    user: User,
+    query: str,
+    *,
+    count: int | None = None,
+    primary: SearchProvider | None = None,
+) -> tuple[list[SearchResult], SearchProvider | None]:
+    """Search with automatic failover across the user's enabled providers.
+
+    Self-hosted scraping providers (SearXNG) fail in two distinct ways:
+    a transport/auth error (``SearchError``) — or, more insidiously,
+    HTTP 200 with an EMPTY result list because every upstream engine has
+    CAPTCHA/429-suspended the instance. Both leave the model flying
+    blind. This helper treats *both* as "try the next provider":
+
+    1. Candidates: ``primary`` (or :func:`pick_search_provider`'s
+       choice) first, then every other enabled provider visible to the
+       user — deduped by *type*, since a second row of the same type
+       (e.g. another SearXNG URL on the same box) almost certainly
+       shares the primary's blocks.
+    2. First candidate that returns non-empty results wins.
+    3. If every candidate errors or comes back empty, return
+       ``([], first_reachable_provider)`` so the caller can render the
+       ordinary no-results path.
+
+    Returns ``(results, provider_used)``; ``provider_used`` is ``None``
+    only when no provider is configured at all. Failovers are logged so
+    a persistently-blocked primary is visible in ops logs rather than
+    silently masked by its fallback.
+    """
+    first = primary or await pick_search_provider(db, user)
+    if first is None:
+        return ([], None)
+
+    rows = (
+        (
+            await db.execute(
+                select(SearchProvider).where(
+                    (
+                        (SearchProvider.user_id == user.id)
+                        | (SearchProvider.user_id.is_(None))
+                    )
+                    & (SearchProvider.enabled.is_(True))
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    candidates: list[SearchProvider] = [first]
+    seen_types = {first.type}
+    # User-owned defaults first among the fallbacks, then the rest, so
+    # a deliberately-configured personal fallback outranks a system row.
+    for sp in sorted(
+        rows, key=lambda r: (r.user_id is None, not r.is_default)
+    ):
+        if sp.id == first.id or sp.type in seen_types:
+            continue
+        seen_types.add(sp.type)
+        candidates.append(sp)
+
+    # Imported here (not module top) to keep this module's import-time
+    # dependency on providers.py limited to the existing names.
+    from app.search.providers import SearchError, run_search
+
+    first_reachable: SearchProvider | None = None
+    last_error: SearchError | None = None
+    for i, sp in enumerate(candidates):
+        try:
+            results = await run_search(sp, query, count=count)
+        except SearchError as e:
+            last_error = e
+            logger.warning(
+                "search failover: provider=%s errored (%s); %d candidate(s) left",
+                sp.type,
+                e,
+                len(candidates) - i - 1,
+            )
+            continue
+        if first_reachable is None:
+            first_reachable = sp
+        if results:
+            if i > 0:
+                logger.info(
+                    "search failover: %s answered after %s returned nothing",
+                    sp.type,
+                    candidates[0].type,
+                )
+            return (results, sp)
+        logger.info(
+            "search failover: provider=%s returned 0 results for %r; "
+            "%d candidate(s) left",
+            sp.type,
+            query[:80],
+            len(candidates) - i - 1,
+        )
+
+    if first_reachable is None and last_error is not None:
+        # Every candidate errored — surface the last transport error so
+        # callers keep their existing SearchError handling.
+        raise last_error
+    return ([], first_reachable)
+
+
 # --------------------------------------------------------------------
 # Query distillation
 # --------------------------------------------------------------------

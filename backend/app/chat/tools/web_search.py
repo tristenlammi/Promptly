@@ -36,8 +36,8 @@ from typing import Any
 
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 from app.chat.tools.validation import clean_model_text
-from app.search.providers import SearchError, run_search
-from app.search.service import pick_search_provider
+from app.search.providers import SearchError
+from app.search.service import pick_search_provider, run_search_with_failover
 
 logger = logging.getLogger("promptly.tools.web_search")
 
@@ -122,31 +122,40 @@ class WebSearchTool(Tool):
                     f"`count` must be between 1 and {_MAX_RESULTS}"
                 )
 
-        provider = await pick_search_provider(ctx.db, ctx.user)
-        if provider is None:
+        primary = await pick_search_provider(ctx.db, ctx.user)
+        if primary is None:
             raise ToolError(
                 "No web-search provider is configured for this account. "
                 "Ask an admin to enable SearXNG / Brave / Tavily / Google "
                 "PSE in Search settings."
             )
 
+        # Failover-aware: if the primary errors OR returns an empty set
+        # (a blocked self-hosted SearXNG's signature failure), every
+        # other enabled provider gets a shot before we give up.
         try:
-            results = await run_search(provider, query, count=count)
+            results, provider = await run_search_with_failover(
+                ctx.db, ctx.user, query, count=count, primary=primary
+            )
         except SearchError as e:
             logger.warning(
                 "web_search tool failure user=%s provider=%s err=%s",
                 ctx.user.id,
-                provider.type,
+                primary.type,
                 e,
             )
             raise ToolError(f"Search failed: {e}") from e
+        if provider is None:
+            provider = primary
 
         if not results:
             return ToolResult(
                 content=(
-                    f"No results for {query!r} via {provider.type}. "
-                    "Tell the user the search came back empty and ask "
-                    "them to refine the query."
+                    f"No results for {query!r} (every configured search "
+                    "provider was tried). The provider may be "
+                    "rate-limited right now — do NOT retry the same "
+                    "query this turn; answer from what you know and "
+                    "tell the user the live search came back empty."
                 ),
                 sources=[],
                 meta={
@@ -218,15 +227,17 @@ class WebSearchTool(Tool):
             query[:80],
         )
 
-        return ToolResult(
-            content=content,
-            sources=sources,
-            meta={
-                "provider": provider.type,
-                "query": query,
-                "result_count": len(results),
-            },
-        )
+        meta: dict[str, Any] = {
+            "provider": provider.type,
+            "query": query,
+            "result_count": len(results),
+        }
+        if provider.id != primary.id:
+            # Surfaced on the activity card so a silently-failing
+            # primary is visible to the user, not just the logs.
+            meta["failover"] = True
+
+        return ToolResult(content=content, sources=sources, meta=meta)
 
 
 __all__ = ["WebSearchTool"]

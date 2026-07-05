@@ -30,8 +30,7 @@ from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.generated_kinds import GeneratedKind
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, TextDelta, UsageEvent, model_router
-from app.search.providers import run_search
-from app.search.service import pick_search_provider
+from app.search.service import pick_search_provider, run_search_with_failover
 
 logger = logging.getLogger("promptly.research")
 
@@ -436,10 +435,12 @@ async def run_research(
 
                 try:
                     if search_provider is not None:
-                        results = await run_search(
-                            search_provider,
+                        results, _used = await run_search_with_failover(
+                            db,
+                            user,
                             sq["search_query"],
                             count=_SEARCH_RESULTS_PER_SQ,
+                            primary=search_provider,
                         )
                     else:
                         results = []
@@ -520,8 +521,12 @@ async def run_research(
             for gap in gap_queries[:2]:
                 try:
                     if search_provider is not None:
-                        gap_results = await run_search(
-                            search_provider, gap["search_query"], count=4
+                        gap_results, _gused = await run_search_with_failover(
+                            db,
+                            user,
+                            gap["search_query"],
+                            count=4,
+                            primary=search_provider,
                         )
                     else:
                         gap_results = []

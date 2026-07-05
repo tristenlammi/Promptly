@@ -195,8 +195,11 @@ async def _run_search_node(
     """Execute a ``search.web`` node → (text, sources, record). Queries the
     configured search provider (SearXNG et al.) and renders numbered hits the
     next node can read."""
-    from app.search.providers import SearchError, run_search
-    from app.search.service import pick_search_provider
+    from app.search.providers import SearchError
+    from app.search.service import (
+        pick_search_provider,
+        run_search_with_failover,
+    )
 
     data = WebSearchData.model_validate(node.data)
     query = (
@@ -216,7 +219,9 @@ async def _run_search_node(
         )
     count = max(1, min(20, data.count or 5))
     try:
-        results = await run_search(provider, query, count)
+        results, _used = await run_search_with_failover(
+            db, user, query, count=count, primary=provider
+        )
     except SearchError as e:
         raise TaskRunError(f"Web search failed: {e}") from e
 
@@ -1338,8 +1343,11 @@ async def _run_deep_research_node(
     import trafilatura
 
     from app.net.safe_fetch import UnsafeURLError, safe_fetch
-    from app.search.providers import SearchError, run_search
-    from app.search.service import pick_search_provider
+    from app.search.providers import SearchError
+    from app.search.service import (
+        pick_search_provider,
+        run_search_with_failover,
+    )
 
     data = DeepResearchData.model_validate(node.data)
     query = (
@@ -1359,7 +1367,9 @@ async def _run_deep_research_node(
             "No web-search provider is configured — add one in Search settings."
         )
     try:
-        results = await run_search(provider, query, n)
+        results, _used = await run_search_with_failover(
+            db, user, query, count=n, primary=provider
+        )
     except SearchError as e:
         raise TaskRunError(f"Deep research search failed: {e}") from e
     if not results:

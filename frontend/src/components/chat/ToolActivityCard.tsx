@@ -132,6 +132,12 @@ function stepDetail(step: ActivityStep): string | null {
     } else if (typeof meta.result_count === "number" && meta.result_count > 0) {
       bits.push(`${meta.result_count} result${meta.result_count === 1 ? "" : "s"}`);
     }
+    // The primary search provider came back empty/erroring and a
+    // fallback answered — worth a quiet flag so a dying primary is
+    // visible in the UI, not just the server logs.
+    if (meta.failover === true && typeof meta.provider === "string") {
+      bits.push(`via ${meta.provider} (fallback)`);
+    }
     if (typeof meta.chart_count === "number" && meta.chart_count > 0) {
       bits.push(`${meta.chart_count} chart${meta.chart_count === 1 ? "" : "s"}`);
     } else if (typeof meta.file_count === "number" && meta.file_count > 0) {
