@@ -74,7 +74,12 @@ async def create_memory(
                 "adding more."
             ),
         )
-    if _is_duplicate(content, [_normalise(m.content) for m in existing]):
+    # Exact-match dedupe only (normalised). The substring-containment rule
+    # used for auto-capture is too aggressive for deliberate manual adds —
+    # it 409'd legitimate refinements like extending "User likes Python"
+    # to "User likes Python and Rust".
+    key = _normalise(content)
+    if any(key == _normalise(m.content) for m in existing):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="That's already in your memory.",

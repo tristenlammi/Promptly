@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Final
 
 from sqlalchemy import func, select, text
@@ -70,7 +71,13 @@ async def embed_memory_row(
         return False
     try:
         vectors = await embed_texts(
-            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+            provider=cfg.provider,
+            model_id=cfg.model_id,
+            texts=[cleaned],
+            # Matryoshka truncation — models whose native output exceeds the
+            # vector(cfg.dim) column (e.g. qwen3-embedding-8b at 4096) must
+            # be shortened here or the CAST below rejects every write.
+            dimensions=cfg.dim,
         )
     except Exception as exc:  # noqa: BLE001 — never break the caller
         logger.warning("memory embed failed id=%s: %s", memory.id, exc)
@@ -82,24 +89,32 @@ async def embed_memory_row(
     # leaves a single source of truth.
     col = f"embedding_{cfg.dim}"
     other = f"embedding_{1536 if cfg.dim == 768 else 768}"
-    await db.execute(
-        text(
-            f"""
-            UPDATE user_memories
-               SET {col} = CAST(:vec AS vector({cfg.dim})),
-                   {other} = NULL,
-                   embed_dim = :dim,
-                   content_hash = :chash
-             WHERE id = :mid
-            """
-        ),
-        {
-            "vec": vector_literal(vectors[0]),
-            "dim": cfg.dim,
-            "chash": _content_hash(memory.content or ""),
-            "mid": memory.id,
-        },
-    )
+    try:
+        # Savepoint so a bad vector (wrong dims, provider quirk) rolls back
+        # only this write and never poisons the caller's transaction —
+        # this function is documented best-effort.
+        async with db.begin_nested():
+            await db.execute(
+                text(
+                    f"""
+                    UPDATE user_memories
+                       SET {col} = CAST(:vec AS vector({cfg.dim})),
+                           {other} = NULL,
+                           embed_dim = :dim,
+                           content_hash = :chash
+                     WHERE id = :mid
+                    """
+                ),
+                {
+                    "vec": vector_literal(vectors[0]),
+                    "dim": cfg.dim,
+                    "chash": _content_hash(memory.content or ""),
+                    "mid": memory.id,
+                },
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("memory embed write failed id=%s: %s", memory.id, exc)
+        return False
     return True
 
 
@@ -187,14 +202,18 @@ def build_memory_prompt(memories: list[UserMemory]) -> str | None:
     """Render saved facts into a system-prompt block, or ``None`` when the
     user has no memories. Phrased as background knowledge with an explicit
     "don't recite it" instruction, matching the personal-context block."""
-    facts = [m.content.strip() for m in memories if m.content and m.content.strip()]
-    if not facts:
+    kept = [m for m in memories if m.content and m.content.strip()]
+    if not kept:
         return None
     lines = [
         "Saved memory about the user (durable facts learned from past "
-        "conversations — treat as background you already know):",
+        "conversations — treat as background you already know; each notes "
+        "when it was learned, so prefer newer facts if any conflict):",
     ]
-    lines.extend(f"- {f}" for f in facts)
+    for m in kept:
+        learned = m.updated_at or m.created_at
+        stamp = f" (noted {learned.strftime('%b %Y')})" if learned else ""
+        lines.append(f"- {m.content.strip()}{stamp}")
     lines.append("")
     lines.append(
         "Apply these when relevant, but do NOT recite them back, list "
@@ -303,14 +322,18 @@ async def retrieve_relevant_memories(
         return [m for m in rows if m.id not in _excl][:k]
 
     col = f"embedding_{cfg.dim}"
-    # Fetch k + buffer to account for excluded ids without a second query.
-    fetch_k = k + len(_excl) + 5
+    # Over-fetch so the usage-aware re-rank below has candidates to promote
+    # and excluded ids don't starve the result.
+    fetch_k = max(k * 2, k + len(_excl) + 5)
     sql = text(
         f"""
-        SELECT id
+        SELECT id,
+               {col} <=> CAST(:qvec AS vector({cfg.dim})) AS dist,
+               times_used,
+               last_used_at
         FROM user_memories
         WHERE user_id = :uid AND {col} IS NOT NULL
-        ORDER BY {col} <=> CAST(:qvec AS vector({cfg.dim}))
+        ORDER BY dist
         LIMIT :k
         """
     )
@@ -332,7 +355,25 @@ async def retrieve_relevant_memories(
         rows = await load_memories(db, user_id, limit=k + len(_excl))
         return [m for m in rows if m.id not in _excl][:k]
 
-    ids = [r[0] for r in rows_raw if r[0] not in _excl][:k]
+    # Usage-aware re-rank (Dynamics batch): cosine relevance dominates, but
+    # facts that keep proving useful get a small, bounded boost — enough to
+    # win near-ties, never enough to beat a genuinely on-topic fact.
+    now = datetime.now(timezone.utc)
+
+    def _rank(row) -> float:
+        _rid, dist, times_used, last_used_at = row
+        score = 1.0 - float(dist)
+        score += 0.004 * min(int(times_used or 0), 20)  # ≤ +0.08 lifetime
+        if last_used_at is not None:
+            if last_used_at.tzinfo is None:
+                last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+            if (now - last_used_at).days <= 14:
+                score += 0.03  # recently useful
+        return score
+
+    candidates = [r for r in rows_raw if r[0] not in _excl]
+    candidates.sort(key=_rank, reverse=True)
+    ids = [r[0] for r in candidates][:k]
     if not ids:
         rows = await load_memories(db, user_id, limit=k + len(_excl))
         return [m for m in rows if m.id not in _excl][:k]
@@ -512,7 +553,10 @@ async def _nearest_similarity(
         return 0.0
     try:
         vectors = await embed_texts(
-            provider=cfg.provider, model_id=cfg.model_id, texts=[cleaned]
+            provider=cfg.provider,
+            model_id=cfg.model_id,
+            texts=[cleaned],
+            dimensions=cfg.dim,
         )
     except Exception:  # noqa: BLE001
         return 0.0
@@ -537,6 +581,44 @@ async def _nearest_similarity(
     except Exception:  # noqa: BLE001
         return 0.0
     return float(row[0]) if row and row[0] is not None else 0.0
+
+
+async def _evict_for_capture(
+    db: AsyncSession, user_id, *, protect_ids: list | None = None
+) -> bool:
+    """Free one slot at the per-user fact cap by deleting the least
+    valuable *auto-captured* fact: fewest injections first, then longest
+    idle (never-used rows fall back to creation age). Pinned and manual
+    facts are never evicted — the cap only recycles what the model
+    captured on its own, so user-stated facts are safe. Returns ``True``
+    when a row was deleted.
+
+    ``protect_ids`` — rows added or updated earlier in this same capture
+    pass; without it, a brand-new fact (times_used=0) could be evicted to
+    make room for the next one.
+    """
+    stmt = select(UserMemory).where(
+        UserMemory.user_id == user_id,
+        UserMemory.source == "auto",
+        UserMemory.pinned.is_(False),
+    )
+    if protect_ids:
+        stmt = stmt.where(UserMemory.id.not_in(protect_ids))
+    stmt = stmt.order_by(
+        UserMemory.times_used.asc(),
+        func.coalesce(UserMemory.last_used_at, UserMemory.created_at).asc(),
+    ).limit(1)
+    row = (await db.execute(stmt)).scalars().first()
+    if row is None:
+        return False
+    logger.info(
+        "memory cap: evicting auto fact id=%s uses=%d user=%s",
+        row.id,
+        row.times_used,
+        user_id,
+    )
+    await db.delete(row)
+    return True
 
 
 async def capture_memories(
@@ -618,7 +700,6 @@ async def capture_memories(
     saved_updates: list[dict] = []
     new_rows: list[UserMemory] = []
     updated_rows: list[UserMemory] = []
-    room = MAX_MEMORIES - total
 
     for op in ops:
         kind = op["op"]
@@ -642,7 +723,7 @@ async def capture_memories(
             saved_updates.append({"id": str(row.id), "content": new_text})
             continue
         # add
-        if len(new_rows) >= MAX_NEW_PER_TURN or len(new_rows) >= room:
+        if len(new_rows) >= MAX_NEW_PER_TURN:
             continue
         fact = op["text"]
         if _is_duplicate(fact, list(existing_keys)):
@@ -655,6 +736,20 @@ async def capture_memories(
             >= SEMANTIC_DUP_THRESHOLD
         ):
             continue
+        # At the fact cap, evict the least-valuable auto fact instead of
+        # dropping the new one — memory keeps renewing rather than freezing
+        # at its oldest facts. Runs after the dup checks so a skipped
+        # candidate never costs an eviction. Skips the add when nothing is
+        # evictable (all pinned/manual).
+        if total + len(new_rows) >= MAX_MEMORIES:
+            if new_rows:
+                await db.flush()  # assign ids so eviction can protect them
+            protect = [
+                r.id for r in (*new_rows, *updated_rows) if r.id is not None
+            ]
+            if not await _evict_for_capture(db, user_id, protect_ids=protect):
+                continue
+            total -= 1
         row = UserMemory(
             user_id=user_id,
             content=fact,

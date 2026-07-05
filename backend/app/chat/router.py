@@ -4792,13 +4792,23 @@ async def _stream_generator(
         # a ``memory_used`` SSE event for in-chat transparency (Phase 3.2).
         memories_used = []
         if memory_enabled:
+            # Retrieval query: the last few user turns, not just the trigger
+            # — a short follow-up ("yes, do that") embeds to noise on its
+            # own, so anchoring it to the preceding user messages keeps the
+            # top-K on-topic. Tail-capped so the query embed stays cheap.
+            _recent_user_texts = [
+                (m.content or "").strip()
+                for m in history_rows
+                if m.role == "user" and (m.content or "").strip()
+            ][-3:]
+            _mem_query = "\n".join(_recent_user_texts)[-1500:] or None
             # Inject only the facts relevant to this turn (semantic top-K);
             # falls back to most-recent when embeddings aren't configured.
             # Returns (rendered_block | None, list[UserMemory]) (Phase 3.2).
             memory_block, memories_used = await build_memory_system_prompt(
                 db,
                 user.id,
-                query=(trig_row.content if trig_row is not None else None),
+                query=_mem_query,
                 k=MEMORY_RETRIEVAL_K,
             )
             if memory_block:

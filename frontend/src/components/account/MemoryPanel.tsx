@@ -812,6 +812,14 @@ function MemoryRow({
               <span className="text-[10px] text-[var(--text-muted)]">
                 {formatRelativeTime(m.created_at)}
               </span>
+              {m.times_used > 0 && (
+                <span
+                  className="text-[10px] text-[var(--text-muted)]"
+                  title="How many chat turns this fact has been applied to"
+                >
+                  · Used {m.times_used}×
+                </span>
+              )}
               {m.source === "auto" && m.source_conversation_id && (
                 <a
                   href={`/chat/${m.source_conversation_id}`}
