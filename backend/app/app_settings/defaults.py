@@ -40,6 +40,8 @@ class EffectiveDefaults:
     study_model_id: str | None = None
     study_assessor_provider_id: uuid.UUID | None = None
     study_assessor_model_id: str | None = None
+    memory_provider_id: uuid.UUID | None = None
+    memory_model_id: str | None = None
 
     @property
     def default_chat_configured(self) -> bool:
@@ -63,6 +65,10 @@ class EffectiveDefaults:
             self.study_assessor_provider_id and self.study_assessor_model_id
         )
 
+    @property
+    def memory_configured(self) -> bool:
+        return bool(self.memory_provider_id and self.memory_model_id)
+
 
 _PAIR_FIELDS = (
     ("default_chat_provider_id", "default_chat_model_id"),
@@ -70,11 +76,12 @@ _PAIR_FIELDS = (
     ("research_provider_id", "research_model_id"),
     ("study_provider_id", "study_model_id"),
     ("study_assessor_provider_id", "study_assessor_model_id"),
+    ("memory_provider_id", "memory_model_id"),
 )
 
 
 def _from_source(src) -> EffectiveDefaults:
-    """Copy the 10 default columns off an ``AppSettings`` row."""
+    """Copy the model-role default columns off an ``AppSettings`` row."""
     values: dict[str, object] = {}
     for pid, mid in _PAIR_FIELDS:
         values[pid] = getattr(src, pid, None)

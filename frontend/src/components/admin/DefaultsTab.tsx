@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, BookOpen, CheckCircle2, Eye, FlaskConical, GraduationCap } from "lucide-react";
+import { Bot, BookOpen, Brain, CheckCircle2, Eye, FlaskConical, GraduationCap } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -90,6 +90,11 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <StudyAssessorModelCard
+        settings={data}
+        onSubmit={submit}
+        busy={update.isPending}
+      />
+      <MemoryModelCard
         settings={data}
         onSubmit={submit}
         busy={update.isPending}
@@ -908,6 +913,140 @@ function StudyAssessorModelCard({ settings, onSubmit, busy }: CardProps) {
           )}
         >
           <option value={OFF}>Off — use the teaching model for grading</option>
+          {grouped.map(([providerName, entries]) => (
+            <optgroup key={providerName} label={providerName}>
+              {entries.map((m) => (
+                <option key={`${m.provider_id}::${m.model_id}`} value={`${m.provider_id}::${m.model_id}`}>
+                  {m.display_name || m.model_id}{m.is_custom ? " (custom)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        {modelsLoading && (
+          <span className="text-xs text-[var(--text-muted)]">Loading models…</span>
+        )}
+      </label>
+    </SettingsCard>
+  );
+}
+
+// --------------------------------------------------------------------
+// Memory model (optional cheap extractor for capture + consolidation)
+// --------------------------------------------------------------------
+
+function MemoryModelCard({ settings, onSubmit, busy }: CardProps) {
+  const OFF = "";
+
+  const initialKey =
+    settings.memory_configured &&
+    settings.memory_provider_id &&
+    settings.memory_model_id
+      ? `${settings.memory_provider_id}::${settings.memory_model_id}`
+      : OFF;
+
+  const [value, setValue] = useState(initialKey);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const { data: models, isLoading: modelsLoading } = useAvailableModels();
+
+  useEffect(() => { setValue(initialKey); }, [initialKey]);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const eligible: AvailableModel[] = models ?? [];
+
+  const grouped = useMemo(() => {
+    const byProvider = new Map<string, AvailableModel[]>();
+    for (const m of eligible) {
+      const existing = byProvider.get(m.provider_name) ?? [];
+      existing.push(m);
+      byProvider.set(m.provider_name, existing);
+    }
+    return Array.from(byProvider.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [eligible]);
+
+  const dirty = value !== initialKey;
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      if (value === OFF) {
+        await onSubmit({ memory_provider_id: null, memory_model_id: null });
+      } else {
+        const [provider_id, ...rest] = value.split("::");
+        const model_id = rest.join("::");
+        if (!provider_id || !model_id) {
+          setError("Pick a model from the list, or choose Off.");
+          return;
+        }
+        await onSubmit({ memory_provider_id: provider_id, memory_model_id: model_id });
+      }
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Memory model"
+      icon={<Brain className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">{error}</span>
+          )}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button variant="ghost" size="sm" onClick={() => { setValue(initialKey); setError(null); }} disabled={busy}>
+              Discard
+            </Button>
+          )}
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={busy || !dirty} loading={busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Optional dedicated model for cross-chat memory work: the post-turn
+        capture pass that lifts durable facts out of conversations, and the
+        "Tidy up" consolidation pass on the Account → Memory panel. Both
+        are small strict-JSON extraction jobs.{" "}
+        <span className="font-medium">Off</span> = capture rides whatever
+        model each conversation uses (cost varies; small local models may
+        extract poorly).
+      </p>
+      <ul className="mb-4 space-y-1 text-xs text-[var(--text-muted)]">
+        <li>
+          <strong>Recommended:</strong> fast/cheap tier — Claude Haiku 4.5,
+          Gemini Flash, GPT-5-mini class. Predictable cost per captured
+          turn, reliable JSON output.
+        </li>
+      </ul>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-xs font-medium text-[var(--text-muted)]">Memory model</span>
+        <select
+          value={value}
+          onChange={(e) => { setValue(e.target.value); setError(null); setSavedAt(null); }}
+          disabled={busy || modelsLoading}
+          className={cn(
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <option value={OFF}>Off — use each conversation's own model</option>
           {grouped.map(([providerName, entries]) => (
             <optgroup key={providerName} label={providerName}>
               {entries.map((m) => (

@@ -7,6 +7,7 @@ else 404s (never 403s) so its existence isn't probeable.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -24,9 +25,12 @@ from app.memory.schemas import MemoryCreate, MemoryResponse, MemoryUpdate
 from app.memory.service import (
     _is_duplicate,
     _normalise,
+    consolidate_memories,
     embed_memory_row,
     load_memories,
 )
+
+logger = logging.getLogger("promptly.memory")
 
 router = APIRouter()
 
@@ -167,6 +171,51 @@ async def clear_memories(
     await db.execute(delete(UserMemory).where(UserMemory.user_id == user.id))
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Consolidation (Memory follow-ups)
+# ──────────────────────────────────────────────────────────────────────────
+
+class MemoryConsolidateChange(BaseModel):
+    kept_id: str
+    text: str
+    merged: list[str]
+
+
+class MemoryConsolidateResponse(BaseModel):
+    merged_groups: int
+    removed: int
+    changes: list[MemoryConsolidateChange]
+
+
+@router.post("/consolidate", response_model=MemoryConsolidateResponse)
+async def consolidate(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoryConsolidateResponse:
+    """Tidy the caller's memory store: one model pass proposes groups of
+    near-duplicate facts, which are merged conservatively (merge-only —
+    nothing is deleted except rows absorbed into a merge). User-triggered
+    from the Memory panel, so failures surface as errors rather than being
+    swallowed like the capture path."""
+    try:
+        result = await consolidate_memories(db, user_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+    except Exception:
+        logger.exception("Memory consolidation failed user=%s", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Consolidation didn't complete — the model call failed. "
+                "Nothing was changed; try again in a moment."
+            ),
+        )
+    await db.commit()
+    return MemoryConsolidateResponse(**result)
 
 
 # ──────────────────────────────────────────────────────────────────────────

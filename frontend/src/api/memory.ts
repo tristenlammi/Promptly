@@ -24,6 +24,12 @@ export interface MemoryImportResult {
   errors: number;
 }
 
+export interface MemoryConsolidateResult {
+  merged_groups: number;
+  removed: number;
+  changes: { kept_id: string; text: string; merged: string[] }[];
+}
+
 export interface MemoryPatch {
   content?: string;
   category?: string | null;
@@ -70,6 +76,13 @@ export const memoryApi = {
   /** Import memories from a parsed JSON array (Phase 3.5). */
   async import(items: unknown[]): Promise<MemoryImportResult> {
     const { data } = await apiClient.post<MemoryImportResult>("/memory/import", items);
+    return data;
+  },
+  /** One model pass that merges near-duplicate facts (merge-only). */
+  async consolidate(): Promise<MemoryConsolidateResult> {
+    const { data } = await apiClient.post<MemoryConsolidateResult>(
+      "/memory/consolidate"
+    );
     return data;
   },
 };

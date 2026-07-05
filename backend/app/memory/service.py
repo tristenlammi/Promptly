@@ -22,6 +22,7 @@ from typing import Final
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.app_settings.defaults import load_effective_defaults
 from app.chat.titler import _strip_think_blocks
 from app.custom_models.embedding import (
     embed_texts,
@@ -164,6 +165,60 @@ _CAPTURE_HINT_RE: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Multilingual capture hints (Memory follow-ups). The English pattern
+# above carries the fine-grained coverage; this companion covers explicit
+# save requests and first-person identity/preference statements in the
+# other major languages so non-English users get auto-capture at all.
+# Same philosophy: a cheap hint, not a parser — implicit phrasings in
+# these languages may still miss, but "remember…" / "my name is…" fire.
+# NOTE: no \b anchors — word boundaries don't exist for CJK scripts.
+_CAPTURE_HINT_INTL_RE: Final[re.Pattern[str]] = re.compile(
+    r"""
+    (
+        # Spanish
+        recu[eé]rda | acu[eé]rdate | no\s+olvides | me\s+llamo
+      | soy\s+(un|una)\s | prefiero\s | trabajo\s+(en|como)\s
+        # French
+      | souviens[- ]toi | rappelle[- ]toi | n'oublie\s+pas
+      | je\s+m'appelle | je\s+suis\s+(un|une)\s | je\s+pr[eé]f[eè]re\s
+      | je\s+travaille\s
+        # German
+      | merk\s+dir | vergiss\s+nicht | denk\s+daran | ich\s+hei[ßs]e
+      | ich\s+bin\s+(ein|eine)\s | ich\s+bevorzuge\s | ich\s+arbeite\s
+        # Portuguese
+      | lembre[- ]se | n[aã]o\s+esque[cç]a | me\s+chamo | eu\s+sou\s
+      | eu\s+prefiro\s | eu\s+trabalho\s
+        # Italian
+      | ricordati? | non\s+dimenticare | mi\s+chiamo | io\s+sono\s
+      | preferisco\s | lavoro\s+(in|come)\s
+        # Dutch
+      | onthoud\s | vergeet\s+niet | ik\s+heet\s | ik\s+ben\s+een\s
+        # Russian / Ukrainian
+      | запомни | не\s+забудь | меня\s+зовут | я\s+работаю | я\s+предпочитаю
+      | запам['’]?ятай | мене\s+звати | я\s+працюю
+        # Polish
+      | zapami[eę]taj | nie\s+zapomnij | mam\s+na\s+imi[eę] | pracuj[eę]\s+jako
+        # Turkish
+      | hat[iı]rla | unutma | benim\s+ad[iı]m | olarak\s+[cç]al[iı][sş][iı]yorum
+        # Arabic
+      | تذكر | لا\s+تنس | اسمي | أعمل
+        # Hindi
+      | याद\s+रख | मेरा\s+नाम | मैं\s+काम
+        # Chinese (simplified + traditional)
+      | 记住 | 記住 | 别忘 | 別忘 | 我叫 | 我是 | 我喜欢 | 我喜歡 | 我在.{0,6}工作
+        # Japanese
+      | 覚えて | 忘れないで | 私の名前 | 私は
+        # Korean
+      | 기억해 | 잊지\s*마 | 제\s*이름은 | 저는
+        # Vietnamese
+      | nhớ\s+r[aằ]ng | tên\s+tôi\s+là | tôi\s+là\s | tôi\s+thích\s
+        # Indonesian / Malay
+      | ingatlah\s | jangan\s+lupa | nama\s+saya | saya\s+(suka|bekerja)\s
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 _MAX_USER_CHARS: Final[int] = 4000
 _MAX_ASSISTANT_CHARS: Final[int] = 2000
 _MAX_EXTRACT_TOKENS: Final[int] = 500
@@ -174,7 +229,10 @@ def should_attempt_capture(user_text: str | None) -> bool:
     contains a durable fact. Keeps cost at zero for normal Q&A turns."""
     if not user_text:
         return False
-    return bool(_CAPTURE_HINT_RE.search(user_text))
+    return bool(
+        _CAPTURE_HINT_RE.search(user_text)
+        or _CAPTURE_HINT_INTL_RE.search(user_text)
+    )
 
 
 def _normalise(text: str) -> str:
@@ -621,6 +679,37 @@ async def _evict_for_capture(
     return True
 
 
+async def resolve_memory_model(
+    db: AsyncSession,
+    *,
+    fallback_provider: ModelProvider | None = None,
+    fallback_model_id: str | None = None,
+) -> tuple[ModelProvider, str] | None:
+    """The model that runs memory extraction / consolidation.
+
+    1. The dedicated memory model (admin-configured — ideally a fast/cheap
+       one, since these are small strict-JSON extraction jobs).
+    2. The caller-supplied fallback (capture passes the conversation's
+       model — the historical behaviour).
+    3. The instance default chat model (consolidation has no conversation
+       to inherit from).
+
+    Returns ``None`` when nothing resolves — callers skip the pass.
+    """
+    settings = await load_effective_defaults(db)
+    if settings.memory_configured:
+        provider = await db.get(ModelProvider, settings.memory_provider_id)
+        if provider is not None and provider.enabled:
+            return provider, settings.memory_model_id
+    if fallback_provider is not None and fallback_model_id:
+        return fallback_provider, fallback_model_id
+    if settings.default_chat_configured:
+        provider = await db.get(ModelProvider, settings.default_chat_provider_id)
+        if provider is not None and provider.enabled:
+            return provider, settings.default_chat_model_id
+    return None
+
+
 async def capture_memories(
     db: AsyncSession,
     *,
@@ -646,6 +735,16 @@ async def capture_memories(
         return []
 
     assistant_text = (assistant_text or "").strip()[:_MAX_ASSISTANT_CHARS]
+
+    # Prefer the dedicated memory model when the admin has set one —
+    # predictable cost and JSON-op quality regardless of what the
+    # conversation runs on. Falls back to the conversation's model.
+    resolved = await resolve_memory_model(
+        db, fallback_provider=provider, fallback_model_id=model_id
+    )
+    if resolved is None:
+        return []
+    provider, model_id = resolved
 
     cfg = await get_embedding_config(db)
     total = await count_memories(db, user_id)
@@ -783,3 +882,174 @@ async def capture_memories(
         saved_new = []
 
     return saved_updates + saved_new
+
+
+# ----------------------------------------------------------------------
+# Consolidation (Memory follow-ups)
+# ----------------------------------------------------------------------
+# User-triggered tidy-up pass: one model call sees the whole store and
+# proposes merge groups; we apply them conservatively (merge-only — the
+# model can never delete or invent facts through this path).
+
+_MAX_MERGE_OPS: Final[int] = 20
+_MAX_CONSOLIDATE_TOKENS: Final[int] = 1200
+
+_CONSOLIDATE_SYSTEM_PROMPT: Final[str] = (
+    "You tidy a user's long-term memory store for an AI assistant. You are "
+    "given every saved fact, each with an id. Find groups of facts that "
+    "state the same or overlapping information — restatements, stale "
+    "versions of the same fact, fragments that clearly belong together — "
+    "and merge each group into ONE clear fact.\n\n"
+    "Output ONLY a JSON array of merge operations:\n"
+    '  {"op": "merge", "ids": ["<id>", "<id>", ...], "text": "<the single '
+    'combined fact>", "category": "<cat>"}\n\n'
+    f"Categories (exactly one per merge): {_CATEGORY_LIST}\n\n"
+    "Rules:\n"
+    "- Only merge facts that genuinely overlap or supersede each other. "
+    "Facts that are merely about the same topic stay separate.\n"
+    "- The combined text may ONLY contain information present in the "
+    "merged facts — never add, infer, or embellish anything.\n"
+    "- When two facts conflict, keep the newer information (facts are "
+    "listed oldest first).\n"
+    "- Write the combined fact as one concise third-person statement "
+    "starting with 'User '.\n"
+    "- Each id may appear in at most one operation, and every id must come "
+    "from the list. If nothing should merge, output []."
+)
+
+
+def _parse_merge_ops(raw: str, valid_ids: set[str]) -> list[dict]:
+    """Parse the consolidation model's JSON array. Each op needs ≥2 known
+    ids (no id reused across ops) and non-empty text; anything else is
+    dropped rather than guessed at."""
+    cleaned = _strip_think_blocks(raw).strip()
+    start = cleaned.find("[")
+    end = cleaned.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        parsed = json.loads(cleaned[start : end + 1])
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    ops: list[dict] = []
+    used: set[str] = set()
+    for item in parsed:
+        if not isinstance(item, dict) or item.get("op") != "merge":
+            continue
+        raw_ids = item.get("ids")
+        if not isinstance(raw_ids, list):
+            continue
+        ids = [str(i) for i in raw_ids if str(i) in valid_ids]
+        ids = [i for i in dict.fromkeys(ids) if i not in used]  # dedupe, no reuse
+        txt = (item.get("text") or "").strip()
+        if len(ids) < 2 or not txt:
+            continue
+        raw_cat = (item.get("category") or "").strip().lower()
+        ops.append(
+            {
+                "ids": ids,
+                "text": txt[:MAX_CONTENT_CHARS],
+                "category": raw_cat if raw_cat in _VALID_CATEGORIES else None,
+            }
+        )
+        used.update(ids)
+        if len(ops) >= _MAX_MERGE_OPS:
+            break
+    return ops
+
+
+async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
+    """Merge near-duplicate facts across the user's whole store.
+
+    Returns ``{"merged_groups": int, "removed": int, "changes": [...]}``
+    where each change is ``{"kept_id", "text", "merged": [old texts]}``.
+    Merge-only by design: for each group the most valuable row survives
+    (pinned > most-used > oldest), takes the combined text, inherits any
+    pin, and is re-embedded; the rest are deleted. Raises ``ValueError``
+    when no model is resolvable; other failures propagate to the caller
+    (this is a user-triggered action — errors should be visible).
+    Flushes but does not commit.
+    """
+    rows = await load_memories(db, user_id)
+    if len(rows) < 2:
+        return {"merged_groups": 0, "removed": 0, "changes": []}
+
+    resolved = await resolve_memory_model(db)
+    if resolved is None:
+        raise ValueError(
+            "No model available — set a Memory model (or a default chat "
+            "model) under Admin → Defaults first."
+        )
+    provider, model_id = resolved
+
+    # tz-aware sentinel — created_at is always set in practice, but a naive
+    # datetime.min would TypeError against the tz-aware column values.
+    _epoch = datetime.min.replace(tzinfo=timezone.utc)
+    ordered = sorted(rows, key=lambda m: m.created_at or _epoch)
+    listing = "\n".join(
+        f"- id={m.id} [{m.category or 'other'}{', pinned' if m.pinned else ''}]: "
+        f"{m.content}"
+        for m in ordered
+    )
+    chunks: list[str] = []
+    async for token in model_router.stream_chat(
+        provider=provider,
+        model_id=model_id,
+        messages=[
+            ChatMessage(
+                role="user", content=f"SAVED FACTS ({len(ordered)}):\n{listing}"
+            )
+        ],
+        system=_CONSOLIDATE_SYSTEM_PROMPT,
+        temperature=0.0,
+        max_tokens=_MAX_CONSOLIDATE_TOKENS,
+        reasoning_effort="off",
+    ):
+        chunks.append(token)
+
+    by_id = {str(m.id): m for m in rows}
+    ops = _parse_merge_ops("".join(chunks), set(by_id))
+    if not ops:
+        return {"merged_groups": 0, "removed": 0, "changes": []}
+
+    cfg = await get_embedding_config(db)
+    changes: list[dict] = []
+    kept_rows: list[UserMemory] = []
+    removed = 0
+    for op in ops:
+        group = [by_id[i] for i in op["ids"]]
+        # Survivor: a pinned row if any, else the most-used, else the oldest
+        # (stable provenance — its id and source conversation live on).
+        keep = sorted(
+            group,
+            key=lambda m: (not m.pinned, -m.times_used, m.created_at or _epoch),
+        )[0]
+        merged_texts = [m.content for m in group]
+        keep.content = op["text"]
+        if op["category"]:
+            keep.category = op["category"]
+        keep.pinned = keep.pinned or any(m.pinned for m in group)
+        keep.times_used = max(m.times_used for m in group)
+        for m in group:
+            if m.id != keep.id:
+                await db.delete(m)
+                removed += 1
+        kept_rows.append(keep)
+        changes.append(
+            {"kept_id": str(keep.id), "text": keep.content, "merged": merged_texts}
+        )
+
+    await db.flush()
+    if cfg is not None:
+        for row in kept_rows:
+            await embed_memory_row(db, row, cfg)  # best-effort
+
+    logger.info(
+        "memory consolidation user=%s: %d group(s) merged, %d row(s) removed",
+        user_id,
+        len(changes),
+        removed,
+    )
+    return {"merged_groups": len(changes), "removed": removed, "changes": changes}

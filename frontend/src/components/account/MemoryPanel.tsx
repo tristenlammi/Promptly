@@ -10,13 +10,20 @@ import {
   Pencil,
   Pin,
   Plus,
+  Sparkles,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
-import { memoryApi, type Memory, type MemoryImportResult, MEMORY_CATEGORIES } from "@/api/memory";
+import {
+  memoryApi,
+  type Memory,
+  type MemoryConsolidateResult,
+  type MemoryImportResult,
+  MEMORY_CATEGORIES,
+} from "@/api/memory";
 import { useToastStore } from "@/store/toastStore";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -50,6 +57,17 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_ORDER = ["identity", "preferences", "projects", "context"];
+
+/** A fact looks stale when it hasn't been applied to any chat in ~3 months
+ *  (or was never used and is past that age). Purely advisory — the badge
+ *  nudges a review, nothing is auto-deleted. */
+const STALE_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
+
+function isStale(m: Memory): boolean {
+  const lastActivity = m.last_used_at ?? m.created_at;
+  if (!lastActivity) return false;
+  return Date.now() - new Date(lastActivity).getTime() > STALE_AFTER_MS;
+}
 
 /** Sort + group memories by the chosen mode. */
 function groupMemories(
@@ -197,6 +215,23 @@ export function MemoryPanel() {
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
       memoryApi.update(id, { pinned }),
     onSuccess: () => void invalidate(),
+    onError: (err) =>
+      setActionError(err instanceof Error ? err.message : String(err)),
+  });
+
+  const consolidateMut = useMutation({
+    mutationFn: () => memoryApi.consolidate(),
+    onSuccess: (result: MemoryConsolidateResult) => {
+      void invalidate();
+      pushToast({
+        message: result.merged_groups
+          ? `Tidied up: merged ${result.merged_groups} ${
+              result.merged_groups === 1 ? "group" : "groups"
+            } of overlapping facts (${result.removed} removed).`
+          : "Nothing to tidy — no overlapping facts found.",
+        type: "success",
+      });
+    },
     onError: (err) =>
       setActionError(err instanceof Error ? err.message : String(err)),
   });
@@ -589,8 +624,33 @@ export function MemoryPanel() {
             {/* ── Footer: Export / Import / Forget ─────────────────────── */}
             {!selectMode && (
               <div className="flex flex-wrap items-center justify-between gap-2">
-                {/* Export + Import */}
+                {/* Tidy up + Export + Import */}
                 <div className="flex items-center gap-1.5">
+                  {memories.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={consolidateMut.isPending}
+                      title="One AI pass that merges overlapping or duplicate facts. Nothing is deleted except facts absorbed into a merge."
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Tidy up memories?",
+                          message:
+                            "An AI pass will look over your saved facts and merge ones that say the same thing. Facts are only combined, never dropped or rewritten beyond the merge.",
+                          confirmLabel: "Tidy up",
+                        });
+                        if (ok) consolidateMut.mutate();
+                      }}
+                      className="border border-[var(--border)] text-[var(--text-muted)]"
+                    >
+                      {consolidateMut.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5" />
+                      )}
+                      Tidy up
+                    </Button>
+                  )}
                   <a
                     href={memoryApi.exportUrl()}
                     download="promptly-memories.json"
@@ -818,6 +878,14 @@ function MemoryRow({
                   title="How many chat turns this fact has been applied to"
                 >
                   · Used {m.times_used}×
+                </span>
+              )}
+              {isStale(m) && (
+                <span
+                  className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium uppercase tracking-wide text-amber-700 bg-amber-500/10 dark:text-amber-300"
+                  title="Hasn't been applied to a chat in over 3 months — worth a quick check that it's still true"
+                >
+                  Stale
                 </span>
               )}
               {m.source === "auto" && m.source_conversation_id && (

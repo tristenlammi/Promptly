@@ -124,6 +124,9 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         study_assessor_provider_id=row.study_assessor_provider_id,
         study_assessor_model_id=row.study_assessor_model_id,
         study_assessor_configured=row.study_assessor_configured,
+        memory_provider_id=row.memory_provider_id,
+        memory_model_id=row.memory_model_id,
+        memory_configured=row.memory_configured,
         updated_at=row.updated_at,
     )
 
@@ -410,6 +413,35 @@ async def update_app_settings(
             diff["study_assessor_model_id"] = new_mid
         row.study_assessor_provider_id = new_pid
         row.study_assessor_model_id = new_mid
+
+    # ----- Memory extraction model -----
+    mpid_set = "memory_provider_id" in fields
+    mmid_set = "memory_model_id" in fields
+    if mpid_set != mmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "memory_provider_id and memory_model_id must be sent together — "
+                "pass both to set a memory model, or both as null to clear."
+            ),
+        )
+    if mpid_set and mmid_set:
+        new_pid = payload.memory_provider_id
+        new_mid = payload.memory_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "memory_provider_id and memory_model_id must both be set "
+                    "or both be null."
+                ),
+            )
+        if row.memory_provider_id != new_pid:
+            diff["memory_provider_id"] = str(new_pid) if new_pid else None
+        if row.memory_model_id != new_mid:
+            diff["memory_model_id"] = new_mid
+        row.memory_provider_id = new_pid
+        row.memory_model_id = new_mid
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

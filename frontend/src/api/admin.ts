@@ -148,6 +148,13 @@ export interface AppSettingsPatch {
    */
   study_assessor_provider_id?: string | null;
   study_assessor_model_id?: string | null;
+  /**
+   * Memory extraction/consolidation model. Optional cheap model for the
+   * post-turn capture pass and the tidy-up pass. Send both halves
+   * together; null+null to clear.
+   */
+  memory_provider_id?: string | null;
+  memory_model_id?: string | null;
 }
 
 export interface OriginPreview {

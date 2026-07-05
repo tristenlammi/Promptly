@@ -302,6 +302,14 @@ export interface AppSettings {
   study_assessor_provider_id: string | null;
   study_assessor_model_id: string | null;
   study_assessor_configured: boolean;
+  /**
+   * Optional dedicated model for memory capture + consolidation.
+   * Small strict-JSON extraction jobs — favor the fast/cheap tier.
+   * Both fields NULL = capture rides the conversation's model.
+   */
+  memory_provider_id: string | null;
+  memory_model_id: string | null;
+  memory_configured: boolean;
   updated_at: string;
 }
 

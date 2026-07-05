@@ -197,6 +197,11 @@ class AppSettingsResponse(BaseModel):
     study_assessor_model_id: str | None = None
     study_assessor_configured: bool
 
+    # ----- Memory extraction model -----
+    memory_provider_id: uuid.UUID | None = None
+    memory_model_id: str | None = None
+    memory_configured: bool
+
     updated_at: datetime
 
 
@@ -279,6 +284,12 @@ class AppSettingsUpdate(BaseModel):
     study_model_id: str | None = Field(default=None, max_length=255)
     study_assessor_provider_id: uuid.UUID | None = None
     study_assessor_model_id: str | None = Field(default=None, max_length=255)
+
+    # ----- Memory extraction model -----
+    # Same paired semantics. Favor the fast/cheap tier — capture and
+    # consolidation are small strict-JSON extraction jobs.
+    memory_provider_id: uuid.UUID | None = None
+    memory_model_id: str | None = Field(default=None, max_length=255)
 
 
 class AdminUserCreate(BaseModel):
