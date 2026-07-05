@@ -35,6 +35,7 @@ import {
   ChevronUp,
   Clock,
   Columns3,
+  Copy,
   Download,
   FileText,
   GitBranch,
@@ -63,6 +64,8 @@ import {
   Timer,
   Trash2,
   TextQuote,
+  Redo2,
+  Undo2,
   Webhook,
   X,
   Zap,
@@ -1698,6 +1701,8 @@ const PROCESSING_NODE_TYPES = new Set([
   "ai.extract",
   "search.web",
   "fetch.page",
+  "http.request",
+  "mcp.action",
   "research.deep",
   "loop.foreach",
   "memory.store",
@@ -1706,6 +1711,273 @@ const PROCESSING_NODE_TYPES = new Set([
   "control.condition",
   "control.router",
 ]);
+
+// ---------------------------------------------------------------------
+// Node palette (A4). One catalog drives both the right-click "add node"
+// palette and the drag-off-a-handle insertion, replacing the old flat
+// context-menu list: searchable, grouped, with one-line descriptions.
+// ---------------------------------------------------------------------
+type AddableNodeType =
+  | "ai.prompt"
+  | "ai.summarise"
+  | "ai.extract"
+  | "search.web"
+  | "fetch.page"
+  | "http.request"
+  | "mcp.action"
+  | "research.deep"
+  | "loop.foreach"
+  | "memory.store"
+  | "flow.merge"
+  | "flow.delay"
+  | "control.condition"
+  | "control.router"
+  | "output.report";
+
+const NODE_CATALOG: {
+  type: AddableNodeType;
+  label: string;
+  desc: string;
+  icon: typeof Brain;
+  color: string;
+  group: "AI" | "Data & web" | "Control & flow" | "Output";
+  keywords: string;
+}[] = [
+  {
+    type: "ai.prompt",
+    label: "AI step",
+    desc: "Run a prompt with a model — the core building block.",
+    icon: Brain,
+    color: "var(--accent)",
+    group: "AI",
+    keywords: "llm model prompt generate",
+  },
+  {
+    type: "ai.summarise",
+    label: "Summarise",
+    desc: "Condense the upstream text to a chosen length.",
+    icon: TextQuote,
+    color: "var(--accent)",
+    group: "AI",
+    keywords: "tldr shorten digest",
+  },
+  {
+    type: "ai.extract",
+    label: "Extract data",
+    desc: "Pull structured JSON out of the upstream text.",
+    icon: ScanText,
+    color: "var(--accent)",
+    group: "AI",
+    keywords: "json parse fields structure",
+  },
+  {
+    type: "research.deep",
+    label: "Deep research",
+    desc: "Search, read the top pages, write a cited report.",
+    icon: Telescope,
+    color: "#0ea5e9",
+    group: "AI",
+    keywords: "investigate sources citations",
+  },
+  {
+    type: "search.web",
+    label: "Web search",
+    desc: "Search the web; hits flow downstream as JSON.",
+    icon: Search,
+    color: "#3b82f6",
+    group: "Data & web",
+    keywords: "google find results",
+  },
+  {
+    type: "fetch.page",
+    label: "Fetch page",
+    desc: "Download a page and extract its readable text.",
+    icon: Download,
+    color: "#3b82f6",
+    group: "Data & web",
+    keywords: "url scrape read article",
+  },
+  {
+    type: "http.request",
+    label: "HTTP request",
+    desc: "Call any API — method, headers, body, secrets.",
+    icon: Globe,
+    color: "#3b82f6",
+    group: "Data & web",
+    keywords: "api rest post get webhook curl",
+  },
+  {
+    type: "mcp.action",
+    label: "Tool action",
+    desc: "Call one connector tool with exact arguments.",
+    icon: Plug,
+    color: "#0ea5e9",
+    group: "Data & web",
+    keywords: "mcp connector deterministic",
+  },
+  {
+    type: "control.condition",
+    label: "Condition",
+    desc: "Branch true/false on the upstream text or a value.",
+    icon: GitBranch,
+    color: "#a855f7",
+    group: "Control & flow",
+    keywords: "if else branch filter",
+  },
+  {
+    type: "control.router",
+    label: "Router",
+    desc: "AI sorts into named branches; one path runs.",
+    icon: Split,
+    color: "#a855f7",
+    group: "Control & flow",
+    keywords: "classify switch categories",
+  },
+  {
+    type: "loop.foreach",
+    label: "Loop",
+    desc: "Split into items and run an AI body per item.",
+    icon: Repeat2,
+    color: "#f97316",
+    group: "Control & flow",
+    keywords: "foreach map iterate batch",
+  },
+  {
+    type: "flow.merge",
+    label: "Merge",
+    desc: "Join branches back into one text.",
+    icon: GitMerge,
+    color: "#f97316",
+    group: "Control & flow",
+    keywords: "join combine fan-in",
+  },
+  {
+    type: "flow.delay",
+    label: "Delay",
+    desc: "Pause the run briefly before continuing.",
+    icon: Timer,
+    color: "#f97316",
+    group: "Control & flow",
+    keywords: "wait sleep pause",
+  },
+  {
+    type: "memory.store",
+    label: "Memory",
+    desc: "Remember values across runs — compare with last time.",
+    icon: StickyNote,
+    color: "#eab308",
+    group: "Control & flow",
+    keywords: "state persist previous diff",
+  },
+  {
+    type: "output.report",
+    label: "Output",
+    desc: "End the flow: a report (switchable to card, chat, note…).",
+    icon: FileText,
+    color: "var(--warning)",
+    group: "Output",
+    keywords: "report result sink save",
+  },
+];
+
+const PALETTE_GROUPS = ["AI", "Data & web", "Control & flow", "Output"] as const;
+
+function NodePalette({
+  x,
+  y,
+  connecting,
+  onPick,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  /** True when opened by dragging off a handle — the pick will be wired in. */
+  connecting: boolean;
+  onPick: (type: AddableNodeType) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => inputRef.current?.focus(), []);
+  const needle = q.trim().toLowerCase();
+  const hits = NODE_CATALOG.filter(
+    (e) =>
+      !needle ||
+      `${e.label} ${e.desc} ${e.keywords}`.toLowerCase().includes(needle)
+  );
+  // Keep the palette on-screen when opened near a viewport edge.
+  const left = Math.max(8, Math.min(x, window.innerWidth - 296));
+  const top = Math.max(8, Math.min(y, window.innerHeight - 420));
+  return (
+    <>
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+      <div className="fixed inset-0 z-20" onClick={onClose} />
+      <div
+        role="menu"
+        className="fixed z-30 flex w-72 flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl"
+        style={{ left, top }}
+      >
+        <div className="border-b border-[var(--border)] p-1.5">
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") onClose();
+              if (e.key === "Enter" && hits.length > 0) onPick(hits[0].type);
+            }}
+            placeholder="Search nodes…"
+            className="w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          />
+        </div>
+        {connecting && (
+          <p className="border-b border-[var(--border)] bg-[var(--accent)]/5 px-2.5 py-1 text-[10px] text-[var(--text-muted)]">
+            The new step will be wired to the one you dragged from.
+          </p>
+        )}
+        <div className="max-h-80 overflow-y-auto py-1">
+          {hits.length === 0 && (
+            <p className="px-3 py-3 text-center text-xs text-[var(--text-muted)]">
+              No matching nodes.
+            </p>
+          )}
+          {PALETTE_GROUPS.map((g) => {
+            const group = hits.filter((e) => e.group === g);
+            if (group.length === 0) return null;
+            return (
+              <div key={g}>
+                <p className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  {g}
+                </p>
+                {group.map((e) => (
+                  <button
+                    key={e.type}
+                    type="button"
+                    onClick={() => onPick(e.type)}
+                    className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left transition hover:bg-[var(--hover)]"
+                  >
+                    <e.icon
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                      style={{ color: e.color }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium text-[var(--text)]">
+                        {e.label}
+                      </span>
+                      <span className="block text-[11px] leading-tight text-[var(--text-muted)]">
+                        {e.desc}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
 
 // --- graph ⇄ react-flow ---------------------------------------------
 function toRF(graph: FlowGraph): { nodes: Node[]; edges: Edge[] } {
@@ -1852,12 +2124,124 @@ export function TaskFlowEditor({
   );
 
   const rfInstance = useRef<ReactFlowInstance<Node, Edge> | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // The add-node palette. ``from`` is set when it was opened by dragging off
+  // a node handle — the picked node is then wired to that handle (A4).
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    from?: { nodeId: string; handleId: string | null; handleType: string };
+  } | null>(null);
+  // Live during a handle drag; consumed by onConnectEnd when the drag ends
+  // on empty canvas (vs. a valid connection, which onConnect handles).
+  const connectStart = useRef<{
+    nodeId: string;
+    handleId: string | null;
+    handleType: string;
+  } | null>(null);
+  // Right-click menu on a node: duplicate / remove (A4).
+  const [nodeMenu, setNodeMenu] = useState<{
+    x: number;
+    y: number;
+    id: string;
+    type: string;
+  } | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  // ---- Canvas undo/redo (A4) ----
+  // Snapshot-based: each structural edit pushes the *prior* {nodes, edges}
+  // onto the past stack. Refs keep the latest state reachable from stable
+  // callbacks; typing bursts in the inspector coalesce via ``reason``.
+  const nodesRef = useRef<Node[]>(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef<Edge[]>(edges);
+  edgesRef.current = edges;
+  const history = useRef<{
+    past: { nodes: Node[]; edges: Edge[] }[];
+    future: { nodes: Node[]; edges: Edge[] }[];
+  }>({ past: [], future: [] });
+  const lastSnap = useRef<{ reason: string; t: number }>({ reason: "", t: 0 });
+  // Bumped after every history mutation so the Undo/Redo buttons re-render.
+  const [, setHistVersion] = useState(0);
+  const takeSnapshot = useCallback((reason = "") => {
+    const now = Date.now();
+    // Consecutive edits with the same reason (e.g. typing in one field)
+    // collapse into a single undo step while they're close together.
+    if (
+      reason &&
+      reason === lastSnap.current.reason &&
+      now - lastSnap.current.t < 1500
+    ) {
+      lastSnap.current.t = now;
+      return;
+    }
+    lastSnap.current = { reason, t: now };
+    history.current.past.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+    });
+    if (history.current.past.length > 100) history.current.past.shift();
+    history.current.future = [];
+    setHistVersion((v) => v + 1);
+  }, []);
+  const undo = useCallback(() => {
+    const prev = history.current.past.pop();
+    if (!prev) return;
+    history.current.future.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+    });
+    lastSnap.current = { reason: "", t: 0 };
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setDirty(true);
+    setHistVersion((v) => v + 1);
+  }, [setNodes, setEdges]);
+  const redo = useCallback(() => {
+    const next = history.current.future.pop();
+    if (!next) return;
+    history.current.past.push({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+    });
+    lastSnap.current = { reason: "", t: 0 };
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setDirty(true);
+    setHistVersion((v) => v + 1);
+  }, [setNodes, setEdges]);
+  const canUndo = history.current.past.length > 0;
+  const canRedo = history.current.future.length > 0;
+
+  // Ctrl/⌘+Z undo, Ctrl/⌘+Shift+Z / Ctrl+Y redo — skipped while typing in a
+  // field so text-input undo keeps working.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+        return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
   // "Detailed" view: each node shows its settings inline (no click-to-open).
   const [detailed, setDetailed] = useState(false);
   // Individually expanded nodes (header caret) — inline even when Detailed is off.
@@ -1919,6 +2303,7 @@ export function TaskFlowEditor({
       setRestoringId(versionId);
       try {
         const restored = await tasksApi.restoreGraphVersion(taskId, versionId);
+        takeSnapshot();
         const rf = toRF(restored);
         setNodes(rf.nodes);
         setEdges(rf.edges);
@@ -1935,7 +2320,7 @@ export function TaskFlowEditor({
         setRestoringId(null);
       }
     },
-    [taskId, dirty, restoringId, setNodes, setEdges, qc]
+    [taskId, dirty, restoringId, setNodes, setEdges, qc, takeSnapshot]
   );
 
   const handleDraft = useCallback(async () => {
@@ -1952,6 +2337,7 @@ export function TaskFlowEditor({
     setCopilotError(null);
     try {
       const drafted = await tasksApi.draftGraph(taskId, desc);
+      takeSnapshot();
       const rf = toRF(drafted);
       setNodes(rf.nodes);
       setEdges(rf.edges);
@@ -1969,7 +2355,7 @@ export function TaskFlowEditor({
     } finally {
       setCopilotBusy(false);
     }
-  }, [copilotPrompt, copilotBusy, nodes.length, taskId, setNodes, setEdges]);
+  }, [copilotPrompt, copilotBusy, nodes.length, taskId, setNodes, setEdges, takeSnapshot]);
 
   const handleExplain = useCallback(async () => {
     if (!graph || explainBusy) return;
@@ -2139,12 +2525,14 @@ export function TaskFlowEditor({
   // inline Detailed-mode editors.
   const updateNodeData = useCallback(
     (id: string, patch: Record<string, unknown>) => {
+      // Coalesced per node: a typing burst in one field is one undo step.
+      takeSnapshot(`data:${id}`);
       setNodes((ns) =>
         ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))
       );
       setDirty(true);
     },
-    [setNodes]
+    [setNodes, takeSnapshot]
   );
   const patchSelected = useCallback(
     (patch: Record<string, unknown>) => {
@@ -2168,6 +2556,7 @@ export function TaskFlowEditor({
         "output.sheet": { title: "", folder_item_id: null },
         "output.report": { notify: true },
       };
+      takeSnapshot();
       setNodes((ns) =>
         ns.map((n) =>
           n.id === id ? { ...n, type, data: defaults[type] ?? { notify: true } } : n
@@ -2175,7 +2564,7 @@ export function TaskFlowEditor({
       );
       setDirty(true);
     },
-    [setNodes]
+    [setNodes, takeSnapshot]
   );
   const setOutputType = useCallback(
     (type: string) => {
@@ -2190,6 +2579,7 @@ export function TaskFlowEditor({
   const setTriggerType = useCallback(
     (type: string) => {
       if (!selectedId) return;
+      takeSnapshot();
       setNodes((ns) =>
         ns.map((n) => {
           if (n.id !== selectedId) return n;
@@ -2214,7 +2604,7 @@ export function TaskFlowEditor({
       );
       setDirty(true);
     },
-    [selectedId, setNodes]
+    [selectedId, setNodes, takeSnapshot]
   );
 
   const aiNodes = nodes.filter((n) => n.type === "ai.prompt");
@@ -2222,6 +2612,10 @@ export function TaskFlowEditor({
   // Free-form wiring: drag from one node's handle to another to connect them.
   const onConnect = useCallback(
     (c: Connection) => {
+      takeSnapshot();
+      // A completed connection means the drag didn't end on empty canvas —
+      // don't let onConnectEnd open the palette for it.
+      connectStart.current = null;
       setEdges((eds) =>
         addEdge(
           { ...c, id: `${c.source}:${c.sourceHandle ?? ""}->${c.target}` },
@@ -2230,7 +2624,7 @@ export function TaskFlowEditor({
       );
       setDirty(true);
     },
-    [setEdges]
+    [setEdges, takeSnapshot]
   );
 
   // Add a *disconnected* processing node — the user wires it in themselves.
@@ -2238,25 +2632,8 @@ export function TaskFlowEditor({
   // connected. Search/fetch nodes default to consuming the upstream text.
   const nodeCount = nodes.length;
   const addNode = useCallback(
-    (
-      type:
-        | "ai.prompt"
-        | "ai.summarise"
-        | "ai.extract"
-        | "search.web"
-        | "fetch.page"
-        | "http.request"
-        | "mcp.action"
-        | "research.deep"
-        | "loop.foreach"
-        | "memory.store"
-        | "flow.merge"
-        | "flow.delay"
-        | "control.condition"
-        | "control.router"
-        | "output.report",
-      pos?: { x: number; y: number }
-    ) => {
+    (type: AddableNodeType, pos?: { x: number; y: number }): string => {
+      takeSnapshot();
       const model =
         (aiNodes[aiNodes.length - 1]?.data as unknown as
           | AIPromptData
@@ -2337,47 +2714,53 @@ export function TaskFlowEditor({
       setNodes((ns) => ns.concat(newNode));
       setSelectedId(id);
       setDirty(true);
+      return id;
     },
-    [aiNodes, nodeCount, setNodes]
+    [aiNodes, nodeCount, setNodes, takeSnapshot]
   );
 
-  // Right-click pane menu → add a node at the clicked position.
+  // Palette pick → add a node at the palette's canvas position. When the
+  // palette was opened by dragging off a handle (A4), also wire the new node
+  // to that handle — source-handle drags connect existing → new; a drag off
+  // a *target* handle connects new → existing.
   const addNodeAtMenu = useCallback(
-    (
-      type:
-        | "ai.prompt"
-        | "ai.summarise"
-        | "ai.extract"
-        | "search.web"
-        | "fetch.page"
-        | "http.request"
-        | "mcp.action"
-        | "research.deep"
-        | "loop.foreach"
-        | "memory.store"
-        | "flow.merge"
-        | "flow.delay"
-        | "control.condition"
-        | "control.router"
-        | "output.report"
-    ) => {
-      if (menu && rfInstance.current) {
-        addNode(
-          type,
-          rfInstance.current.screenToFlowPosition({ x: menu.x, y: menu.y })
-        );
-      } else {
-        addNode(type);
+    (type: AddableNodeType) => {
+      const from = menu?.from;
+      const id =
+        menu && rfInstance.current
+          ? addNode(
+              type,
+              rfInstance.current.screenToFlowPosition({ x: menu.x, y: menu.y })
+            )
+          : addNode(type);
+      if (from) {
+        setEdges((eds) => {
+          const edge: Edge =
+            from.handleType === "target"
+              ? {
+                  id: `${id}:->${from.nodeId}`,
+                  source: id,
+                  target: from.nodeId,
+                }
+              : {
+                  id: `${from.nodeId}:${from.handleId ?? ""}->${id}`,
+                  source: from.nodeId,
+                  sourceHandle: from.handleId ?? undefined,
+                  target: id,
+                };
+          return addEdge(edge, eds);
+        });
       }
       setMenu(null);
     },
-    [menu, addNode]
+    [menu, addNode, setEdges]
   );
 
   // Remove a node + its edges; if it sat mid-chain (one in, one out), heal the
   // gap so the surrounding chain stays connected.
   const removeNode = useCallback(
     (id: string) => {
+      takeSnapshot();
       const incoming = edges.find((e) => e.target === id);
       const outgoing = edges.find((e) => e.source === id);
       setNodes((ns) => ns.filter((n) => n.id !== id));
@@ -2395,7 +2778,34 @@ export function TaskFlowEditor({
       if (selectedId === id) setSelectedId(null);
       setDirty(true);
     },
-    [edges, setNodes, setEdges, selectedId]
+    [edges, setNodes, setEdges, selectedId, takeSnapshot]
+  );
+
+  // Duplicate a configured node (A4) — same type + deep-copied config, offset
+  // below the source, selected so it's ready to reposition/rewire. The trigger
+  // is a singleton and can't be duplicated.
+  const duplicateNode = useCallback(
+    (id: string): void => {
+      const src = nodesRef.current.find((n) => n.id === id);
+      if (!src || (src.type ?? "").startsWith("trigger.")) return;
+      takeSnapshot();
+      const prefix = (src.type ?? "node").split(".")[0];
+      const nid = `${prefix}_${Date.now().toString(36)}`;
+      const copy: Node = {
+        id: nid,
+        type: src.type,
+        position: { x: src.position.x + 48, y: src.position.y + 64 },
+        deletable: true,
+        data: JSON.parse(JSON.stringify(src.data ?? {})) as Record<
+          string,
+          unknown
+        >,
+      };
+      setNodes((ns) => ns.concat(copy));
+      setSelectedId(nid);
+      setDirty(true);
+    },
+    [setNodes, takeSnapshot]
   );
 
   const onSave = useCallback(() => {
@@ -2480,7 +2890,7 @@ export function TaskFlowEditor({
             {graph.mode === "advanced" ? "Advanced flow" : "Simple task"}
           </span>
           <span className="hidden text-[11px] text-[var(--text-muted)] lg:inline">
-            Right-click the canvas to add nodes
+            Right-click to add nodes · drag off a handle to chain
           </span>
           <button
             type="button"
@@ -2517,6 +2927,28 @@ export function TaskFlowEditor({
             <History className="h-3.5 w-3.5" />
             History
           </button>
+          <span className="inline-flex overflow-hidden rounded-md border border-[var(--border)]">
+            <button
+              type="button"
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+              className="inline-flex items-center bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-40"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+              className="inline-flex items-center border-l border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-40"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </span>
           <button
             type="button"
             onClick={() => setDetailed((v) => !v)}
@@ -2735,21 +3167,65 @@ export function TaskFlowEditor({
           edges={displayEdges}
           nodeTypes={nodeTypes}
           onInit={(inst) => (rfInstance.current = inst)}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          onNodesChange={(changes) => {
+            // Keyboard Delete/Backspace arrives as 'remove' changes — snapshot
+            // the pre-delete state so it's undoable.
+            if (changes.some((c) => c.type === "remove")) takeSnapshot();
+            onNodesChange(changes);
+          }}
+          onEdgesChange={(changes) => {
+            if (changes.some((c) => c.type === "remove")) takeSnapshot();
+            onEdgesChange(changes);
+          }}
           onConnect={onConnect}
+          onConnectStart={(_e, params) => {
+            connectStart.current = params.nodeId
+              ? {
+                  nodeId: params.nodeId,
+                  handleId: params.handleId ?? null,
+                  handleType: params.handleType ?? "source",
+                }
+              : null;
+          }}
+          onConnectEnd={(event) => {
+            // Drag released on empty canvas (not a handle) → open the palette
+            // there and wire whatever gets picked (A4). A completed connection
+            // clears connectStart in onConnect before this fires.
+            const from = connectStart.current;
+            connectStart.current = null;
+            if (!from) return;
+            const target = event.target as HTMLElement | null;
+            if (!target?.classList?.contains("react-flow__pane")) return;
+            const pt =
+              "changedTouches" in event
+                ? event.changedTouches[0]
+                : (event as MouseEvent);
+            setMenu({ x: pt.clientX, y: pt.clientY, from });
+          }}
           onNodesDelete={() => setDirty(true)}
           onEdgesDelete={() => setDirty(true)}
           onNodeClick={(_e, n) => setSelectedId(n.id)}
+          onNodeContextMenu={(e, n) => {
+            e.preventDefault();
+            setNodeMenu({
+              x: e.clientX,
+              y: e.clientY,
+              id: n.id,
+              type: (n.type as string) ?? "",
+            });
+          }}
           onPaneClick={() => {
             setSelectedId(null);
             setMenu(null);
+            setNodeMenu(null);
           }}
           onPaneContextMenu={(e) => {
             e.preventDefault();
             const me = e as React.MouseEvent;
+            setNodeMenu(null);
             setMenu({ x: me.clientX, y: me.clientY });
           }}
+          onNodeDragStart={() => takeSnapshot()}
           onNodeDragStop={() => setDirty(true)}
           deleteKeyCode={["Backspace", "Delete"]}
           fitView
@@ -2761,139 +3237,122 @@ export function TaskFlowEditor({
         </ReactFlow>
 
         {menu && (
+          <NodePalette
+            x={menu.x}
+            y={menu.y}
+            connecting={!!menu.from}
+            onPick={addNodeAtMenu}
+            onClose={() => setMenu(null)}
+          />
+        )}
+
+        {nodeMenu && (
           <>
             {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
-            <div className="fixed inset-0 z-20" onClick={() => setMenu(null)} />
+            <div className="fixed inset-0 z-20" onClick={() => setNodeMenu(null)} />
             <div
               role="menu"
-              className="fixed z-30 min-w-[9rem] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
-              style={{ left: menu.x, top: menu.y }}
+              className="fixed z-30 min-w-[10rem] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+              style={{ left: nodeMenu.x, top: nodeMenu.y }}
             >
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("ai.prompt")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Brain className="h-3.5 w-3.5 text-[var(--accent)]" /> Add AI step
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("ai.summarise")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <TextQuote className="h-3.5 w-3.5 text-[var(--accent)]" /> Add
-                summarise
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("ai.extract")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <ScanText className="h-3.5 w-3.5 text-[var(--accent)]" /> Add
-                extract data
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("search.web")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Search className="h-3.5 w-3.5 text-[#3b82f6]" /> Add web search
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("fetch.page")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Download className="h-3.5 w-3.5 text-[#3b82f6]" /> Add fetch page
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("http.request")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Globe className="h-3.5 w-3.5 text-[#3b82f6]" /> Add HTTP request
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("mcp.action")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Plug className="h-3.5 w-3.5 text-[#0ea5e9]" /> Add tool action
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("research.deep")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Telescope className="h-3.5 w-3.5 text-[#0ea5e9]" /> Add deep
-                research
-              </button>
-              <div className="my-1 h-px bg-[var(--border)]" />
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("control.condition")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <GitBranch className="h-3.5 w-3.5 text-[#a855f7]" /> Add condition
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("control.router")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Split className="h-3.5 w-3.5 text-[#a855f7]" /> Add router
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("loop.foreach")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Repeat2 className="h-3.5 w-3.5 text-[#f97316]" /> Add loop
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("memory.store")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <StickyNote className="h-3.5 w-3.5 text-[#eab308]" /> Add memory
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("flow.merge")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <GitMerge className="h-3.5 w-3.5 text-[#f97316]" /> Add merge
-              </button>
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("flow.delay")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <Timer className="h-3.5 w-3.5 text-[#f97316]" /> Add delay
-              </button>
-              <div className="my-1 h-px bg-[var(--border)]" />
-              <button
-                type="button"
-                onClick={() => addNodeAtMenu("output.report")}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
-              >
-                <FileText className="h-3.5 w-3.5 text-[var(--warning)]" /> Add output
-              </button>
+              {!nodeMenu.type.startsWith("trigger.") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    duplicateNode(nodeMenu.id);
+                    setNodeMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Duplicate
+                </button>
+              )}
+              {(PROCESSING_NODE_TYPES.has(nodeMenu.type) ||
+                (nodeMenu.type.startsWith("output.") &&
+                  nodes.filter((n) => (n.type ?? "").startsWith("output."))
+                    .length > 1)) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    removeNode(nodeMenu.id);
+                    setNodeMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--danger)] transition hover:bg-[var(--danger-bg)]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remove
+                </button>
+              )}
+              {nodeMenu.type.startsWith("trigger.") && (
+                <p className="px-3 py-1.5 text-[11px] text-[var(--text-muted)]">
+                  The trigger is part of every flow.
+                </p>
+              )}
             </div>
           </>
         )}
       </div>
 
-      {/* Node editor — a modal with its own Save so it's right where you edit.
-          Suppressed when the node's settings already live on its face (global
-          Detailed mode, or this node individually expanded). */}
-      <Modal
-        open={!!selected && !detailed && !(selected && expandedIds.has(selected.id))}
-        onClose={() => setSelectedId(null)}
-        title={selected ? nodeModalTitle(selected.type) : ""}
-        widthClass="max-w-md"
-        footer={
-          <div className="flex items-center justify-end gap-2">
+      {/* Node editor — a right-side panel (A4), so the graph (and what feeds
+          this node) stays visible while configuring it. Suppressed when the
+          node's settings already live on its face (global Detailed mode, or
+          this node individually expanded). */}
+      {selected && !detailed && !expandedIds.has(selected.id) && (
+        <div className="flex w-[380px] max-w-[45%] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--bg)]">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
+            <span className="text-sm font-semibold text-[var(--text)]">
+              {nodeModalTitle(selected.type)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedId(null)}
+              aria-label="Close inspector"
+              className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <NodeInspector
+              node={selected}
+              boards={boards}
+              chats={chats}
+              folders={folders}
+              memory={memoryQuery.data?.[selected.id]?.entries ?? []}
+              onClearMemory={() => clearMemory(selected.id)}
+              nodeData={mergedNodeData[selected.id]}
+              pinned={selected.id in pins}
+              running={runningNode === selected.id}
+              onRunToHere={() => runToHere(selected.id)}
+              onTogglePin={() => togglePin(selected.id)}
+              inWorkspace={!!task?.workspace_id}
+              connectors={connectors ?? []}
+              canDelete={
+                PROCESSING_NODE_TYPES.has(selected.type ?? "") ||
+                // An output is removable only while another output remains.
+                (((selected.type ?? "").startsWith("output.")) &&
+                  nodes.filter((n) => (n.type ?? "").startsWith("output."))
+                    .length > 1)
+              }
+              onPatch={patchSelected}
+              onSetOutputType={setOutputType}
+              onSetTriggerType={setTriggerType}
+              webhookUrl={
+                task?.webhook_secret
+                  ? `${window.location.origin}/api/hooks/${task.id}/${task.webhook_secret}`
+                  : null
+              }
+              onDelete={() => {
+                removeNode(selected.id);
+                setSelectedId(null);
+              }}
+              onDuplicate={
+                (selected.type ?? "").startsWith("trigger.")
+                  ? undefined
+                  : () => duplicateNode(selected.id)
+              }
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-[var(--border)] px-3 py-2">
             <button
               type="button"
               onClick={() => setSelectedId(null)}
@@ -2918,45 +3377,8 @@ export function TaskFlowEditor({
               Save
             </button>
           </div>
-        }
-      >
-        {selected && (
-          <NodeInspector
-            node={selected}
-            boards={boards}
-            chats={chats}
-            folders={folders}
-            memory={memoryQuery.data?.[selected.id]?.entries ?? []}
-            onClearMemory={() => clearMemory(selected.id)}
-            nodeData={mergedNodeData[selected.id]}
-            pinned={selected.id in pins}
-            running={runningNode === selected.id}
-            onRunToHere={() => runToHere(selected.id)}
-            onTogglePin={() => togglePin(selected.id)}
-            inWorkspace={!!task?.workspace_id}
-            connectors={connectors ?? []}
-            canDelete={
-              PROCESSING_NODE_TYPES.has(selected.type ?? "") ||
-              // An output is removable only while another output remains.
-              (((selected.type ?? "").startsWith("output.")) &&
-                nodes.filter((n) => (n.type ?? "").startsWith("output.")).length >
-                  1)
-            }
-            onPatch={patchSelected}
-            onSetOutputType={setOutputType}
-            onSetTriggerType={setTriggerType}
-            webhookUrl={
-              task?.webhook_secret
-                ? `${window.location.origin}/api/hooks/${task.id}/${task.webhook_secret}`
-                : null
-            }
-            onDelete={() => {
-              removeNode(selected.id);
-              setSelectedId(null);
-            }}
-          />
-        )}
-      </Modal>
+        </div>
+      )}
     </div>
     </FlowEditContext.Provider>
   );
@@ -2982,6 +3404,7 @@ function NodeInspector({
   onSetTriggerType,
   webhookUrl,
   onDelete,
+  onDuplicate,
   inline,
 }: {
   node: Node;
@@ -3005,6 +3428,8 @@ function NodeInspector({
   /** Full inbound-hook URL once the secret is minted (after first save). */
   webhookUrl?: string | null;
   onDelete: () => void;
+  /** Duplicate this node (A4) — absent for the singleton trigger. */
+  onDuplicate?: () => void;
   inline?: boolean;
 }) {
   const isOutput = (node.type ?? "").startsWith("output.");
@@ -3016,8 +3441,9 @@ function NodeInspector({
     <div
       className={cn(
         "flex flex-col gap-3",
-        // Inline on a node: grow with content. In the modal: bounded + scroll.
-        inline ? "text-left" : "max-h-[60vh] overflow-y-auto"
+        // Inline on a node: grow with content. In the side panel the parent
+        // scrolls, so no inner height cap is needed (A4).
+        inline && "text-left"
       )}
     >
       {/* Build-time test loop: run up to here + see the data in/out, pin it. */}
@@ -4393,14 +4819,27 @@ function NodeInspector({
         </>
       )}
 
-      {canDelete && (
-        <button
-          type="button"
-          onClick={onDelete}
-          className="mt-1 inline-flex items-center gap-1.5 self-start rounded-md px-2 py-1 text-xs text-[var(--danger)] transition hover:bg-[var(--danger-bg)]"
-        >
-          <Trash2 className="h-3.5 w-3.5" /> Remove step
-        </button>
+      {(canDelete || onDuplicate) && (
+        <div className="mt-1 flex items-center gap-2">
+          {onDuplicate && (
+            <button
+              type="button"
+              onClick={onDuplicate}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            >
+              <Copy className="h-3.5 w-3.5" /> Duplicate
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--danger)] transition hover:bg-[var(--danger-bg)]"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remove step
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
