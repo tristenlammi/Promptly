@@ -88,7 +88,11 @@ export const authApi = {
   async uploadAvatar(file: File): Promise<User> {
     const form = new FormData();
     form.append("file", file);
-    const { data } = await apiClient.post<User>("/auth/me/avatar", form);
+    // The client pins a JSON Content-Type globally — override it so axios
+    // emits real multipart with a boundary (same as every other upload).
+    const { data } = await apiClient.post<User>("/auth/me/avatar", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
     return data;
   },
   async deleteAvatar(): Promise<User> {
