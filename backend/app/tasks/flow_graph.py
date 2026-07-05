@@ -59,6 +59,10 @@ class NodeType:
     # The universal API adapter (A1): any method, templated URL / headers /
     # body, ``{{secret.NAME}}`` credentials, JSON response → ``{{json.*}}``.
     HTTP_REQUEST = "http.request"
+    # Deterministic MCP tool call (A2): pick a connector + tool + fill its
+    # arguments — no model in the loop (unlike attaching a connector to an
+    # AI step). The result flows downstream as text / ``{{json.*}}``.
+    MCP_ACTION = "mcp.action"
     # Compound node: search → fetch top-N pages → synthesise a cited report.
     DEEP_RESEARCH = "research.deep"
     # Map node: split the upstream into items, run an AI body per item, aggregate.
@@ -111,6 +115,7 @@ PROCESSING_TYPES = frozenset(
         NodeType.SEARCH_WEB,
         NodeType.FETCH_PAGE,
         NodeType.HTTP_REQUEST,
+        NodeType.MCP_ACTION,
         NodeType.DEEP_RESEARCH,
         NodeType.LOOP,
         NodeType.MEMORY,
@@ -281,6 +286,18 @@ class HttpRequestData(BaseModel):
     timeout_s: int = 30  # 1..120
     fail_on_error_status: bool = True
     allow_private_network: bool = False
+
+
+class McpActionData(BaseModel):
+    """A deterministic MCP tool call (A2). ``connector_id`` + ``tool_name``
+    identify the tool; ``arguments`` is a template that must render to a JSON
+    object (fields can reference ``{{upstream_output}}`` / ``{{json.*}}`` /
+    ``{{trigger.*}}``). No model decides whether to call it — it always runs.
+    The tool's result flows downstream as text and, if JSON, ``{{json.*}}``."""
+
+    connector_id: str | None = None
+    tool_name: str = ""
+    arguments: str = "{}"
 
 
 class LoopData(BaseModel):

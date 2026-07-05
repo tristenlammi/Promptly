@@ -46,6 +46,7 @@ from app.tasks.flow_graph import (
     FlowNode,
     HttpRequestData,
     LoopData,
+    McpActionData,
     MemoryData,
     MergeData,
     DelayData,
@@ -474,6 +475,75 @@ async def _run_http_node(
         "output": body_text,
     }
     return body_text, structured, record
+
+
+async def _run_mcp_node(
+    node: FlowNode,
+    ctx: dict[str, str],
+    *,
+    db,
+    user: User,
+    workspace_id,
+) -> tuple[str, object, dict]:
+    """Execute an ``mcp.action`` node → (text, structured, record).
+
+    Deterministic: resolve the chosen connector (re-checking the owner can
+    still reach it, exactly like the AI-node path), interpolate + parse the
+    arguments to JSON, and call the tool. The result is the node output;
+    JSON results feed ``{{json.*}}`` downstream."""
+    import json as _json
+
+    from app.mcp.service import McpError, call_connector_tool, connectors_for_turn
+
+    data = McpActionData.model_validate(node.data)
+    if not data.connector_id or not data.tool_name:
+        raise TaskRunError("The MCP step has no connector or tool selected.")
+
+    try:
+        connector_id = uuid.UUID(data.connector_id)
+    except ValueError as exc:
+        raise TaskRunError("The MCP step's connector id is invalid.") from exc
+
+    # Gate: the connector must still be reachable for this owner/workspace.
+    reachable = await connectors_for_turn(
+        db, user_id=user.id, workspace_id=workspace_id
+    )
+    if not any(c.id == connector_id for c in reachable):
+        raise TaskRunError(
+            "This automation can no longer reach the selected connector."
+        )
+
+    raw_args = _interpolate(data.arguments or "{}", ctx).strip() or "{}"
+    try:
+        arguments = _json.loads(raw_args)
+        if not isinstance(arguments, dict):
+            raise ValueError("arguments must be a JSON object")
+    except (ValueError, TypeError) as exc:
+        raise TaskRunError(
+            f"The MCP step's arguments aren't valid JSON: {exc}"
+        ) from exc
+
+    try:
+        result = await call_connector_tool(
+            db,
+            connector_id=connector_id,
+            real_tool=data.tool_name,
+            arguments=arguments,
+        )
+    except McpError as exc:
+        raise TaskRunError(f"MCP tool {data.tool_name!r} failed: {exc}") from exc
+
+    text = result if isinstance(result, str) else _json_dumps(result)
+    structured = _try_json(text)
+    record = {
+        "node_id": node.id,
+        "type": NodeType.MCP_ACTION,
+        "label": f"MCP · {data.tool_name}",
+        "status": "success",
+        "input": _json.dumps(arguments, ensure_ascii=False)[:2000],
+        "output": text,
+    }
+    return text, structured, record
 
 
 def _first_line_title(text: str) -> str:
@@ -1781,6 +1851,15 @@ async def run_graph_flow(
                 node_runs.append(record)
                 outputs[nid] = text
                 structured[nid] = http_struct  # parsed JSON body (or None)
+                last_processing_output = text
+
+            elif node.type == NodeType.MCP_ACTION:
+                text, mcp_struct, record = await _run_mcp_node(
+                    node, ctx, db=db, user=user, workspace_id=task.workspace_id
+                )
+                node_runs.append(record)
+                outputs[nid] = text
+                structured[nid] = mcp_struct
                 last_processing_output = text
 
             elif node.type == NodeType.SUMMARISE:

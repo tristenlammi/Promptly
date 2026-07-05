@@ -99,12 +99,19 @@ export interface TaskInput {
   retention_runs: number;
 }
 
+export interface ConnectorTool {
+  name: string;
+  description: string;
+}
+
 export interface AvailableTaskConnector {
   id: string;
   name: string;
   slug: string;
   kind: string;
   tool_count: number;
+  /** The connector's callable tools (A2 MCP-action picker). */
+  tools: ConnectorTool[];
 }
 
 export const tasksApi = {
@@ -202,6 +209,34 @@ export const tasksApi = {
     );
     return data;
   },
+  /** Copilot (A2): draft a flow from a plain-language description. Returns
+   *  the graph for review — does NOT persist. */
+  async draftGraph(id: string, description: string): Promise<FlowGraph> {
+    const { data } = await apiClient.post<FlowGraph>(
+      `/tasks/${id}/graph/draft`,
+      { description },
+      { timeout: 120_000 }
+    );
+    return data;
+  },
+  /** Copilot: plain-language walkthrough of a (possibly unsaved) flow. */
+  async explainGraph(id: string, graph: FlowGraph): Promise<string> {
+    const { data } = await apiClient.post<{ text: string }>(
+      `/tasks/${id}/graph/explain`,
+      { graph },
+      { timeout: 60_000 }
+    );
+    return data.text;
+  },
+  /** Copilot: why a failed run failed and how to fix it. */
+  async diagnoseRun(id: string, runId: string): Promise<string> {
+    const { data } = await apiClient.post<{ text: string }>(
+      `/tasks/${id}/runs/${runId}/diagnose`,
+      undefined,
+      { timeout: 60_000 }
+    );
+    return data.text;
+  },
   async getMemory(id: string): Promise<TaskMemory> {
     const { data } = await apiClient.get<TaskMemory>(`/tasks/${id}/memory`);
     return data;
@@ -225,6 +260,7 @@ export type FlowNodeType =
   | "search.web"
   | "fetch.page"
   | "http.request"
+  | "mcp.action"
   | "research.deep"
   | "loop.foreach"
   | "memory.store"
@@ -409,6 +445,14 @@ export interface HttpRequestData {
   timeout_s: number;
   fail_on_error_status: boolean;
   allow_private_network: boolean;
+}
+
+/** A deterministic MCP tool call (A2) — connector + tool + templated
+ *  JSON arguments, no model in the loop. */
+export interface McpActionData {
+  connector_id: string | null;
+  tool_name: string;
+  arguments: string;
 }
 
 export interface ReportOutputData {

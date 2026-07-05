@@ -40,6 +40,7 @@ import {
   GitBranch,
   GitMerge,
   Globe,
+  HelpCircle,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -47,12 +48,14 @@ import {
   NotebookPen,
   Pin,
   Play,
+  Plug,
   Plus,
   Repeat2,
   ScanText,
   Save,
   Search,
   Sheet,
+  Sparkles,
   Split,
   StickyNote,
   Telescope,
@@ -77,6 +80,7 @@ import {
   type FetchPageData,
   type HttpHeader,
   type HttpRequestData,
+  type McpActionData,
   type LoopData,
   type MemoryData,
   type MergeData,
@@ -754,6 +758,31 @@ function HttpNode({ id, type, data, selected }: NodeProps) {
   );
 }
 
+function McpNode({ id, type, data, selected }: NodeProps) {
+  const d = data as unknown as McpActionData;
+  const detail = useDetailed(id, type ?? "mcp.action", data);
+  return (
+    <NodeShell
+      icon={<Plug className="h-3.5 w-3.5" />}
+      label="Tool action"
+      accent="#0ea5e9"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      {detail ?? (
+        <div className="truncate text-[var(--text)]">
+          {d.tool_name || (
+            <span className="italic text-[var(--text-muted)]">
+              Pick a connector tool
+            </span>
+          )}
+        </div>
+      )}
+    </NodeShell>
+  );
+}
+
 function DeepResearchNode({ id, type, data, selected }: NodeProps) {
   const d = data as unknown as DeepResearchData;
   const detail = useDetailed(id, type ?? "research.deep", data);
@@ -1313,6 +1342,104 @@ function JsonTree({
   );
 }
 
+/** MCP action node config (A2) — connector → tool → templated JSON args.
+ *  Deterministic tool call, no model involved. */
+function McpActionConfig({
+  node,
+  onPatch,
+  connectors,
+}: {
+  node: { data: unknown };
+  onPatch: (patch: Record<string, unknown>) => void;
+  connectors: AvailableTaskConnector[];
+}) {
+  const d = node.data as unknown as McpActionData;
+  const selected = connectors.find((c) => c.id === d.connector_id) ?? null;
+  const tools = selected?.tools ?? [];
+  const inputCls =
+    "mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]";
+
+  if (connectors.length === 0) {
+    return (
+      <p className="text-[11px] text-[var(--text-muted)]">
+        No connectors are available. An admin adds MCP servers under
+        Admin ▸ Connectors; this step then calls one of their tools directly.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <p className="text-[11px] text-[var(--text-muted)]">
+        Calls a connector tool directly — no model decides whether to run it
+        (that's the AI step's job). The result flows downstream as text and,
+        if it's JSON, as {"{{json.*}}"}.
+      </p>
+      <label className="text-xs font-medium text-[var(--text-muted)]">
+        Connector
+        <select
+          value={d.connector_id ?? ""}
+          onChange={(e) =>
+            onPatch({ connector_id: e.target.value || null, tool_name: "" })
+          }
+          className={inputCls}
+        >
+          <option value="">Select a connector…</option>
+          {connectors.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selected && (
+        <label className="text-xs font-medium text-[var(--text-muted)]">
+          Tool
+          <select
+            value={d.tool_name}
+            onChange={(e) => onPatch({ tool_name: e.target.value })}
+            className={inputCls}
+          >
+            <option value="">Select a tool…</option>
+            {tools.map((t) => (
+              <option key={t.name} value={t.name}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          {d.tool_name &&
+            tools.find((t) => t.name === d.tool_name)?.description && (
+              <span className="mt-1 block text-[10px] leading-snug text-[var(--text-muted)]">
+                {tools.find((t) => t.name === d.tool_name)?.description}
+              </span>
+            )}
+        </label>
+      )}
+      <label className="text-xs font-medium text-[var(--text-muted)]">
+        Arguments (JSON)
+        <div className="mt-1">
+          <VariableField
+            value={d.arguments}
+            onChange={(v) => onPatch({ arguments: v })}
+            variables={DEFAULT_VARS}
+            multiline
+            rows={4}
+            placeholder={'{"site_id": "{{json.id}}"}'}
+          />
+        </div>
+        <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+          Must render to a JSON object. Reference upstream data with{" "}
+          <code className="rounded bg-[var(--surface-2)] px-1">
+            {"{{json.field}}"}
+          </code>{" "}
+          etc. Use <code className="rounded bg-[var(--surface-2)] px-1">{"{}"}</code>{" "}
+          for a no-argument tool.
+        </span>
+      </label>
+    </>
+  );
+}
+
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 /** HTTP-request node config (A1) — method, templated URL, headers with a
@@ -1547,6 +1674,7 @@ const nodeTypes = {
   "search.web": SearchNode,
   "fetch.page": FetchNode,
   "http.request": HttpNode,
+  "mcp.action": McpNode,
   "research.deep": DeepResearchNode,
   "loop.foreach": LoopNode,
   "memory.store": MemoryNode,
@@ -1749,6 +1877,65 @@ export function TaskFlowEditor({
   >({});
   const [runningNode, setRunningNode] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+
+  // ---- Copilot (A2): draft a flow from a description; explain a flow ----
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotPrompt, setCopilotPrompt] = useState("");
+  const [copilotBusy, setCopilotBusy] = useState(false);
+  const [copilotError, setCopilotError] = useState<string | null>(null);
+  const [explainText, setExplainText] = useState<string | null>(null);
+  const [explainBusy, setExplainBusy] = useState(false);
+
+  const handleDraft = useCallback(async () => {
+    const desc = copilotPrompt.trim();
+    if (!desc || copilotBusy) return;
+    // Replacing a non-trivial graph is destructive — confirm first.
+    if (nodes.length > 3) {
+      const ok = window.confirm(
+        "Replace the current flow with an AI-drafted one? Your current steps will be discarded (unless you've saved them)."
+      );
+      if (!ok) return;
+    }
+    setCopilotBusy(true);
+    setCopilotError(null);
+    try {
+      const drafted = await tasksApi.draftGraph(taskId, desc);
+      const rf = toRF(drafted);
+      setNodes(rf.nodes);
+      setEdges(rf.edges);
+      setDirty(true);
+      setCopilotOpen(false);
+      setCopilotPrompt("");
+      window.setTimeout(
+        () => rfInstance.current?.fitView({ padding: 0.25, duration: 250 }),
+        60
+      );
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })
+        .response?.data?.detail;
+      setCopilotError(detail || "Couldn't draft a flow. Try rephrasing.");
+    } finally {
+      setCopilotBusy(false);
+    }
+  }, [copilotPrompt, copilotBusy, nodes.length, taskId, setNodes, setEdges]);
+
+  const handleExplain = useCallback(async () => {
+    if (!graph || explainBusy) return;
+    setExplainBusy(true);
+    setExplainText(null);
+    try {
+      const text = await tasksApi.explainGraph(
+        taskId,
+        fromRF(graph, nodes, edges)
+      );
+      setExplainText(text);
+    } catch {
+      setExplainText("Couldn't explain this flow right now.");
+    } finally {
+      setExplainBusy(false);
+    }
+  }, [graph, nodes, edges, taskId, explainBusy]);
+
   const runToHere = useCallback(
     async (nodeId: string) => {
       if (!graph) return;
@@ -2007,6 +2194,7 @@ export function TaskFlowEditor({
         | "search.web"
         | "fetch.page"
         | "http.request"
+        | "mcp.action"
         | "research.deep"
         | "loop.foreach"
         | "memory.store"
@@ -2045,6 +2233,8 @@ export function TaskFlowEditor({
           fail_on_error_status: true,
           allow_private_network: false,
         };
+      else if (type === "mcp.action")
+        data = { connector_id: null, tool_name: "", arguments: "{}" };
       else if (type === "research.deep")
         data = {
           query: "",
@@ -2109,6 +2299,7 @@ export function TaskFlowEditor({
         | "search.web"
         | "fetch.page"
         | "http.request"
+        | "mcp.action"
         | "research.deep"
         | "loop.foreach"
         | "memory.store"
@@ -2241,6 +2432,32 @@ export function TaskFlowEditor({
           </span>
           <button
             type="button"
+            onClick={() => {
+              setCopilotError(null);
+              setCopilotOpen(true);
+            }}
+            title="Describe an automation and let AI draft the flow"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--accent)]/15"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Draft with AI
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExplain()}
+            disabled={explainBusy || nodes.length < 2}
+            title="Explain what this flow does in plain language"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-50"
+          >
+            {explainBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <HelpCircle className="h-3.5 w-3.5" />
+            )}
+            Explain
+          </button>
+          <button
+            type="button"
             onClick={() => setDetailed((v) => !v)}
             title="Show each node's settings on its face"
             className={cn(
@@ -2302,6 +2519,90 @@ export function TaskFlowEditor({
         {save.isError && (
           <div className="absolute left-3 top-12 z-10 max-w-md rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-[11px] text-[var(--danger)]">
             {saveErrorMessage(save.error)}
+          </div>
+        )}
+
+        {/* Copilot draft modal (A2) */}
+        <Modal
+          open={copilotOpen}
+          onClose={() => setCopilotOpen(false)}
+          title="Draft with AI"
+          description="Describe the automation in plain language — AI builds the flow, then you review and tweak it."
+          widthClass="max-w-lg"
+        >
+          <div className="space-y-2">
+            <textarea
+              autoFocus
+              value={copilotPrompt}
+              onChange={(e) => setCopilotPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter")
+                  void handleDraft();
+              }}
+              rows={4}
+              placeholder="e.g. Every morning at 8, fetch open GitHub issues from my repo, summarise them, and post the summary to my team chat."
+              className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                "Daily at 9am, search the web for AI news and email me a summary.",
+                "When my webhook fires, extract the order id and create a board card for it.",
+                "Every hour, check my site's health endpoint; if it's down, alert my chat.",
+              ].map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => setCopilotPrompt(ex)}
+                  className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--text-muted)] transition hover:border-[var(--accent)]/50 hover:text-[var(--text)]"
+                >
+                  {ex.length > 46 ? ex.slice(0, 46) + "…" : ex}
+                </button>
+              ))}
+            </div>
+            {copilotError && (
+              <p className="text-xs text-[var(--danger)]">{copilotError}</p>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-[var(--text-muted)]">
+                ⌘/Ctrl + Enter to draft
+              </span>
+              <button
+                type="button"
+                disabled={copilotBusy || !copilotPrompt.trim()}
+                onClick={() => void handleDraft()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {copilotBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {copilotBusy ? "Drafting…" : "Draft flow"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Explain result card */}
+        {explainText && (
+          <div className="absolute right-3 top-12 z-10 max-w-sm rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 shadow-lg">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
+                <HelpCircle className="h-3.5 w-3.5 text-[var(--accent)]" />
+                What this flow does
+              </span>
+              <button
+                type="button"
+                onClick={() => setExplainText(null)}
+                aria-label="Dismiss"
+                className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text)]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+              {explainText}
+            </p>
           </div>
         )}
 
@@ -2388,6 +2689,13 @@ export function TaskFlowEditor({
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
               >
                 <Globe className="h-3.5 w-3.5 text-[#3b82f6]" /> Add HTTP request
+              </button>
+              <button
+                type="button"
+                onClick={() => addNodeAtMenu("mcp.action")}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--text)] transition hover:bg-[var(--hover)]"
+              >
+                <Plug className="h-3.5 w-3.5 text-[#0ea5e9]" /> Add tool action
               </button>
               <button
                 type="button"
@@ -2900,6 +3208,14 @@ function NodeInspector({
 
       {node.type === "http.request" && (
         <HttpRequestConfig node={node} onPatch={onPatch} />
+      )}
+
+      {node.type === "mcp.action" && (
+        <McpActionConfig
+          node={node}
+          onPatch={onPatch}
+          connectors={connectors}
+        />
       )}
 
       {node.type === "research.deep" && (

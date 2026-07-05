@@ -257,12 +257,21 @@ async def _validate_workspace(
         ) from e
 
 
+class ConnectorTool(BaseModel):
+    name: str
+    description: str = ""
+
+
 class AvailableConnector(BaseModel):
     id: uuid.UUID
     name: str
     slug: str
     kind: str
     tool_count: int
+    # The connector's callable tools (A2 MCP-action picker) — honours the
+    # allow-list + drops blocked destructive tools, mirroring what the AI
+    # path can invoke.
+    tools: list[ConnectorTool] = []
 
 
 @router.get("/connectors/available", response_model=list[AvailableConnector])
@@ -282,16 +291,38 @@ async def available_connectors(
     conns = await connectors_for_turn(
         db, user_id=user.id, workspace_id=workspace_id
     )
-    return [
-        AvailableConnector(
-            id=c.id,
-            name=c.name,
-            slug=c.slug,
-            kind=c.kind,
-            tool_count=len(c.tool_catalog or []),
+    from app.mcp.service import build_tools_from_connectors
+
+    out: list[AvailableConnector] = []
+    for c in conns:
+        # Build the same invocable tool set the AI path would get, so the
+        # MCP-action picker never offers a tool that can't actually run.
+        _schemas, dispatch = build_tools_from_connectors([c])
+        tools = [
+            ConnectorTool(
+                name=real,
+                description=next(
+                    (
+                        (t.get("description") or "")
+                        for t in (c.tool_catalog or [])
+                        if t.get("name") == real
+                    ),
+                    "",
+                )[:200],
+            )
+            for (_cid, real) in dispatch.values()
+        ]
+        out.append(
+            AvailableConnector(
+                id=c.id,
+                name=c.name,
+                slug=c.slug,
+                kind=c.kind,
+                tool_count=len(c.tool_catalog or []),
+                tools=tools,
+            )
         )
-        for c in conns
-    ]
+    return out
 
 
 @router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -634,6 +665,98 @@ async def test_task_graph(
     except Exception as exc:  # noqa: BLE001 — surface build errors, don't 500
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "nodes": []}
     return {"ok": True, "nodes": node_runs}
+
+
+class GraphDraftRequest(BaseModel):
+    """Copilot (A2): draft a flow from a plain-language description."""
+
+    description: str
+
+
+class GraphExplainRequest(BaseModel):
+    graph: FlowGraph
+
+
+class CopilotTextResponse(BaseModel):
+    text: str
+
+
+@router.post("/{task_id}/graph/draft", response_model=FlowGraph)
+async def draft_task_graph(
+    task_id: uuid.UUID,
+    body: GraphDraftRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlowGraph:
+    """AI copilot: turn a description into a runnable flow graph. Does NOT
+    persist — the editor renders it for review, the user tweaks + saves."""
+    from app.tasks.copilot import CopilotError, draft_graph
+
+    task = await _get_owned_task(task_id, user, db)
+    try:
+        return await draft_graph(
+            db,
+            user=user,
+            description=body.description,
+            in_workspace=task.workspace_id is not None,
+        )
+    except CopilotError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
+
+
+@router.post("/{task_id}/graph/explain", response_model=CopilotTextResponse)
+async def explain_task_graph(
+    task_id: uuid.UUID,
+    body: GraphExplainRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CopilotTextResponse:
+    """Plain-language walkthrough of what the (possibly unsaved) flow does."""
+    from app.tasks.copilot import CopilotError, explain_graph
+
+    await _get_owned_task(task_id, user, db)
+    try:
+        text = await explain_graph(db, user=user, graph=body.graph)
+    except CopilotError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
+    return CopilotTextResponse(text=text)
+
+
+@router.post(
+    "/{task_id}/runs/{run_id}/diagnose", response_model=CopilotTextResponse
+)
+async def diagnose_task_run(
+    task_id: uuid.UUID,
+    run_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CopilotTextResponse:
+    """Explain why a failed run failed and how to fix it."""
+    from app.tasks.copilot import CopilotError, diagnose_run
+    from app.tasks.models import TaskRun
+
+    task = await _get_owned_task(task_id, user, db)
+    run = await db.get(TaskRun, run_id)
+    if run is None or run.task_id != task.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    graph = await load_or_derive_graph(db, task)
+    try:
+        text = await diagnose_run(
+            db,
+            user=user,
+            graph=graph,
+            node_runs=run.node_runs or [],
+            error=run.error,
+        )
+    except CopilotError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
+    return CopilotTextResponse(text=text)
 
 
 @router.get("/{task_id}/memory")
