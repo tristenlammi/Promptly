@@ -31,10 +31,12 @@ it to come up healthy. Open **http://localhost:8087** and the first-run wizard
 takes it from there — admin account, optional public URL, embeddings, MFA.
 
 | Install option | Effect |
-| --- | --- |
-| `--no-ollama` / `-NoOllama` | Skip bundled Ollama (using a host install? set `OLLAMA_URL` in `.env`) |
-| `--no-search` / `-NoSearch` | Skip bundled SearXNG web search (add Brave/Tavily keys later in Admin) |
-| `--minimal` / `-Minimal` | Both of the above |
+| :-- | :-- |
+| `--no-ollama` | Skip bundled Ollama — using a host install? set `OLLAMA_URL` in `.env` |
+| `--no-search` | Skip bundled SearXNG web search — add Brave/Tavily keys later in Admin |
+| `--minimal` | Both of the above |
+
+PowerShell spelling: `-NoOllama`, `-NoSearch`, `-Minimal`.
 
 The choice persists via `COMPOSE_PROFILES` in `.env`; re-run the script with a
 different flag to change it. **NVIDIA GPU?** Swap the `ollama` token for `gpu`
