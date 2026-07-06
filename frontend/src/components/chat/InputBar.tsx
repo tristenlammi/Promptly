@@ -848,6 +848,25 @@ export function InputBar({
     </button>
   );
 
+  // Mobile: when the input is empty the send slot is dead weight (send is
+  // disabled without text) — surface voice mode there instead, ChatGPT-
+  // style. Typing swaps it back to send; streaming still shows stop.
+  const talkOrb = onVoiceMode ? (
+    <button
+      type="button"
+      onClick={onVoiceMode}
+      disabled={disabled || streaming}
+      className={cn(
+        "promptly-voice-orb inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white",
+        "transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+      )}
+      aria-label="Voice mode — talk hands-free"
+      title="Voice mode — talk hands-free"
+    >
+      <AudioLines className="h-4 w-4" />
+    </button>
+  ) : null;
+
   const dictateButton = dictation.supported ? (
     <button
       type="button"
@@ -1226,7 +1245,10 @@ export function InputBar({
               )}
             />
             {isMobile && dictateButton}
-            {isMobile && sendOrStop}
+            {isMobile &&
+              (talkOrb && !streaming && value.trim().length === 0
+                ? talkOrb
+                : sendOrStop)}
           </div>
           {(!isMobile || mobileActionsOpen) && (
           <div className="flex items-center justify-between gap-2">
@@ -1288,7 +1310,9 @@ export function InputBar({
               </button>}
               {/* On mobile the dictate mic lives in the input row above. */}
               {!isMobile && dictateButton}
-              {onVoiceMode && (
+              {/* Mobile surfaces voice mode as the orb in the input row —
+                  only desktop needs the labelled Talk button here. */}
+              {onVoiceMode && !isMobile && (
                 <button
                   type="button"
                   onClick={onVoiceMode}
@@ -1298,17 +1322,13 @@ export function InputBar({
                     "disabled:cursor-not-allowed disabled:opacity-50",
                     "border-[var(--border)] text-[var(--text-muted)]",
                     "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
-                    isMobile
-                      ? "h-9 w-9 justify-center"
-                      : "h-8 gap-1.5 px-2.5 text-xs"
+                    "h-8 gap-1.5 px-2.5 text-xs"
                   )}
                   aria-label="Voice mode — talk hands-free"
                   title="Voice mode — talk hands-free"
                 >
-                  <AudioLines
-                    className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"}
-                  />
-                  {!isMobile && <span className="font-medium">Talk</span>}
+                  <AudioLines className="h-3.5 w-3.5" />
+                  <span className="font-medium">Talk</span>
                 </button>
               )}
               {onSubchat && (
