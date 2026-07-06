@@ -26,6 +26,7 @@ from app.chat.pdf_render import PdfRenderError, render_markdown_to_pdf
 from app.chat.schemas import MessageResponse
 from app.chat.tools.base import ToolContext
 from app.chat.tools.fetch_url import FetchUrlTool
+from app.database import SessionLocal
 from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.generated_kinds import GeneratedKind
 from app.models_config.models import ModelProvider
@@ -410,106 +411,136 @@ async def run_research(
             # Step 2: Search + Read
             # ------------------------------------------------------------------
             search_provider = await pick_search_provider(db, user)
-
-            # Reuse a single fake ToolContext (fetch_url doesn't hit the DB, but
-            # the signature requires it; web_search picks the provider via db+user).
             placeholder_msg_id = uuid.uuid4()
-            tool_ctx = ToolContext(
-                db=db,
-                user=user,
-                conversation_id=conv.id,
-                user_message_id=placeholder_msg_id,
-            )
-            fetch_tool = FetchUrlTool()
 
-            evidence: list[dict[str, Any]] = []
-            source_index = 1
+            # Every sub-question is an independent research angle, so run
+            # them as PARALLEL agents — one task per sub-question, each on
+            # its own DB session (concurrent tasks must never share one),
+            # searching + reading its top URLs at the same time as the
+            # others. The frontend already keys progress by sub-question
+            # ``index``, so the interleaved events render as every angle
+            # advancing at once. Events are pushed to a queue the
+            # generator drains; source-citation numbers are assigned in a
+            # deterministic post-pass so they don't depend on which task
+            # finished first.
+            event_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
             all_seen_urls: set[str] = set()
 
-            for idx, sq in enumerate(subquestions):
-                yield _sse({
-                    "event": "research_searching",
-                    "index": idx,
-                    "question": sq["question"],
-                })
-
-                try:
-                    if search_provider is not None:
+            async def _investigate(idx: int, sq: dict[str, Any]) -> dict[str, Any]:
+                # Small stagger so five searches don't hit the provider in
+                # the same instant (the burst signature that trips search
+                # rate limits).
+                if idx:
+                    await asyncio.sleep(idx * 0.3)
+                items: list[dict[str, Any]] = []
+                async with SessionLocal() as tdb:
+                    tuser = await tdb.get(User, user.id)
+                    if tuser is None:
+                        return {"subquestion": sq["question"], "items": items}
+                    tctx = ToolContext(
+                        db=tdb,
+                        user=tuser,
+                        conversation_id=conv.id,
+                        user_message_id=placeholder_msg_id,
+                    )
+                    tfetch = FetchUrlTool()
+                    event_q.put_nowait({
+                        "event": "research_searching",
+                        "index": idx,
+                        "question": sq["question"],
+                    })
+                    try:
                         results, _used = await run_search_with_failover(
-                            db,
-                            user,
-                            sq["search_query"],
+                            tdb, tuser, sq["search_query"],
                             count=_SEARCH_RESULTS_PER_SQ,
-                            primary=search_provider,
                         )
-                    else:
+                    except Exception:
                         results = []
-                except Exception:
-                    results = []
+                    event_q.put_nowait({
+                        "event": "research_searched",
+                        "index": idx,
+                        "sources_found": len(results),
+                    })
 
-                yield _sse({
-                    "event": "research_searched",
-                    "index": idx,
-                    "sources_found": len(results),
-                })
-
-                sq_items: list[dict[str, Any]] = []
-                reads = 0
-
-                for result in results[:_SEARCH_RESULTS_PER_SQ]:
-                    url = (result.url or "").strip()
-                    if not url:
-                        continue
-
-                    already_seen = url in all_seen_urls
-                    can_read = reads < _READS_PER_SQ and not already_seen and url.startswith("http")
-
-                    if can_read:
-                        all_seen_urls.add(url)
-                        yield _sse({
-                            "event": "research_reading",
-                            "index": idx,
-                            "url": url,
-                        })
-                        try:
-                            fetch_result = await fetch_tool.run(tool_ctx, {"url": url})
-                            content = fetch_result.content[:_MAX_CONTENT_CHARS]
-                            sq_items.append({
-                                "index": source_index,
-                                "title": result.title or url,
+                    reads = 0
+                    for result in results[:_SEARCH_RESULTS_PER_SQ]:
+                        url = (result.url or "").strip()
+                        if not url:
+                            continue
+                        can_read = (
+                            reads < _READS_PER_SQ
+                            and url not in all_seen_urls
+                            and url.startswith("http")
+                        )
+                        if can_read:
+                            all_seen_urls.add(url)
+                            event_q.put_nowait({
+                                "event": "research_reading",
+                                "index": idx,
                                 "url": url,
-                                "content": content,
-                                "is_full": True,
                             })
-                            reads += 1
-                        except Exception:
-                            # Fall back to snippet
-                            sq_items.append({
-                                "index": source_index,
+                            try:
+                                fr = await tfetch.run(tctx, {"url": url})
+                                items.append({
+                                    "index": 0,  # assigned post-gather
+                                    "title": result.title or url,
+                                    "url": url,
+                                    "content": fr.content[:_MAX_CONTENT_CHARS],
+                                    "is_full": True,
+                                })
+                                reads += 1
+                            except Exception:
+                                items.append({
+                                    "index": 0,
+                                    "title": result.title or url,
+                                    "url": url,
+                                    "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
+                                    "is_full": False,
+                                })
+                        else:
+                            items.append({
+                                "index": 0,
                                 "title": result.title or url,
                                 "url": url,
                                 "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
                                 "is_full": False,
                             })
-                    else:
-                        sq_items.append({
-                            "index": source_index,
-                            "title": result.title or url,
-                            "url": url,
-                            "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
-                            "is_full": False,
-                        })
+                        if len(items) >= _READS_PER_SQ + 2:
+                            break
+                event_q.put_nowait({"event": "research_question_done", "index": idx})
+                return {"subquestion": sq["question"], "items": items}
 
-                    source_index += 1
-                    if len(sq_items) >= _READS_PER_SQ + 2:
-                        # Keep a reasonable number of sources per angle
+            tasks = [
+                asyncio.ensure_future(_investigate(i, sq))
+                for i, sq in enumerate(subquestions)
+            ]
+
+            async def _sentinel() -> None:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                event_q.put_nowait(None)
+
+            sentinel = asyncio.ensure_future(_sentinel())
+            try:
+                while True:
+                    ev = await event_q.get()
+                    if ev is None:
                         break
+                    yield _sse(ev)
+            finally:
+                sentinel.cancel()
 
-                evidence.append({
-                    "subquestion": sq["question"],
-                    "items": sq_items,
-                })
-                yield _sse({"event": "research_question_done", "index": idx})
+            # Collect evidence in sub-question order and assign stable
+            # citation numbers, regardless of which task finished first.
+            evidence: list[dict[str, Any]] = []
+            source_index = 1
+            for t in tasks:
+                if t.cancelled() or t.exception() is not None:
+                    continue
+                angle = t.result()
+                for it in angle["items"]:
+                    it["index"] = source_index
+                    source_index += 1
+                evidence.append(angle)
 
             # ------------------------------------------------------------------
             # Step 3: Gap check + follow-up searches
