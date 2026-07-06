@@ -927,7 +927,16 @@ export function InputBar({
         onKeyRegister={registerSlashKeys}
       />
 
-      <div className="mx-auto w-full max-w-3xl">
+      <div
+        className={cn(
+          "mx-auto w-full",
+          // The single-row mobile composer stretched edge-to-edge looks
+          // ridiculous in the 580-768px zone (landscape phones, split
+          // screen) — cap it so it centres as a pill instead. Desktop
+          // keeps the wider column that matches the message list.
+          isMobile ? "max-w-xl" : "max-w-3xl"
+        )}
+      >
         <div
           className={cn(
             "flex flex-col gap-2 rounded-card border px-3 py-2 shadow-sm transition",
