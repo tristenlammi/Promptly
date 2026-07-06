@@ -38,9 +38,13 @@ takes it from there — admin account, optional public URL, embeddings, MFA.
 
 PowerShell spelling: `-NoOllama`, `-NoSearch`, `-Minimal`.
 
-The choice persists via `COMPOSE_PROFILES` in `.env`; re-run the script with a
-different flag to change it. **NVIDIA GPU?** Swap the `ollama` token for `gpu`
-in that line (needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)).
+**Hardware acceleration is auto-detected**: NVIDIA GPUs get the CUDA build
+(via the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+on Linux, or Docker Desktop's WSL2 backend on Windows), AMD GPUs get the ROCm
+build, and on Apple Silicon the installer wires the stack to a host-native
+Ollama (Docker has no Metal passthrough — `brew install ollama` first).
+Everything else runs the universal CPU build. The choice persists via
+`COMPOSE_PROFILES` in `.env`; re-run the script any time to re-detect.
 
 ## Highlights
 

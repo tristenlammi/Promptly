@@ -124,12 +124,57 @@ set_env_line() {
   fi
 }
 
+# ---------- Ollama hardware auto-detection ----------
+# Picks the best Ollama variant for this machine so acceleration works
+# out of the box. Overridable any time by editing COMPOSE_PROFILES in
+# .env (tokens: ollama = CPU, gpu = NVIDIA CUDA, rocm = AMD).
+#   gpu    NVIDIA GPU + Docker GPU support
+#   rocm   AMD GPU (/dev/kfd via the amdgpu driver)
+#   host   macOS: Docker has no Metal passthrough, so if a native
+#          Ollama is on the host we point the stack at it instead
+#   ollama CPU container (universal fallback; Intel GPUs land here —
+#          upstream Ollama has no Intel acceleration yet)
+OLLAMA_VARIANT="ollama"
+OLLAMA_VARIANT_LABEL="CPU (universal fallback)"
+OLLAMA_VARIANT_NOTE=""
+detect_ollama_variant() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if command -v ollama >/dev/null 2>&1 \
+       || curl -fsS --max-time 1 http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+      OLLAMA_VARIANT="host"
+      OLLAMA_VARIANT_LABEL="native host Ollama (Metal acceleration)"
+    else
+      OLLAMA_VARIANT="ollama"
+      OLLAMA_VARIANT_LABEL="CPU container"
+      OLLAMA_VARIANT_NOTE="macOS: Docker can't reach the GPU. For Metal acceleration: 'brew install ollama', start it, re-run ./install.sh"
+    fi
+    return
+  fi
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    # Docker must be able to hand the GPU to containers: the NVIDIA
+    # Container Toolkit on Linux, or Docker Desktop's WSL2 backend.
+    if docker info 2>/dev/null | grep -qi nvidia || uname -r | grep -qi microsoft; then
+      OLLAMA_VARIANT="gpu"
+      OLLAMA_VARIANT_LABEL="NVIDIA GPU (CUDA)"
+    else
+      OLLAMA_VARIANT_NOTE="NVIDIA GPU found, but Docker can't use it - install the NVIDIA Container Toolkit and re-run ./install.sh for GPU acceleration"
+    fi
+    return
+  fi
+  if [[ -e /dev/kfd && -e /dev/dri ]]; then
+    OLLAMA_VARIANT="rocm"
+    OLLAMA_VARIANT_LABEL="AMD GPU (ROCm)"
+  fi
+}
+
 profiles=()
-$NO_OLLAMA || profiles+=("ollama")
-$NO_SEARCH || profiles+=("search")
-if grep -qE '^COMPOSE_PROFILES=.*gpu' .env 2>/dev/null; then
-  profiles+=("gpu")
+if ! $NO_OLLAMA; then
+  detect_ollama_variant
+  if [[ "$OLLAMA_VARIANT" != "host" ]]; then
+    profiles+=("$OLLAMA_VARIANT")
+  fi
 fi
+$NO_SEARCH || profiles+=("search")
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
 
 if $PROFILE_FLAGS_GIVEN || ! grep -qE '^COMPOSE_PROFILES=' .env; then
@@ -137,6 +182,16 @@ if $PROFILE_FLAGS_GIVEN || ! grep -qE '^COMPOSE_PROFILES=' .env; then
   set_env_line COMPOSE_PROFILES "$profiles_csv"
   # The backend health probe + search provisioning key off this flag.
   set_env_line SEARXNG_ENABLED "$($NO_SEARCH && echo false || echo true)"
+  if ! $NO_OLLAMA; then
+    green "  Ollama: ${OLLAMA_VARIANT_LABEL}"
+    [[ -n "$OLLAMA_VARIANT_NOTE" ]] && yellow "  ${OLLAMA_VARIANT_NOTE}"
+    if [[ "$OLLAMA_VARIANT" == "host" ]]; then
+      # Point the backend at the host's native Ollama. Respect an
+      # operator-set URL; only seed when the line is missing.
+      grep -qE '^OLLAMA_URL=' .env \
+        || printf 'OLLAMA_URL=http://host.docker.internal:11434\n' >> .env
+    fi
+  fi
   $NO_OLLAMA && yellow "  --no-ollama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)"
   $NO_SEARCH && yellow "  --no-search: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)"
   green "  COMPOSE_PROFILES=${profiles_csv}"

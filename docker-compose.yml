@@ -403,9 +403,12 @@ services:
   #   - NVIDIA Container Toolkit installed + configured
   #     (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
   #
-  # Non-NVIDIA hardware (AMD ROCm, Apple Silicon) is currently
-  # CPU-only via the default service; upstream Ollama's ROCm
-  # support isn't stable enough to enable by default here.
+  # AMD GPUs get the ``ollama-rocm`` variant below (profile "rocm",
+  # auto-detected by install.sh via /dev/kfd). Apple Silicon can't be
+  # accelerated from inside Docker at all — no Metal passthrough —
+  # so install.sh wires OLLAMA_URL at a host-native Ollama instead.
+  # Intel GPUs aren't supported by upstream Ollama; they run the CPU
+  # service.
   # ------------------------------------------------------------
   ollama-gpu:
     profiles: ["gpu"]
@@ -444,6 +447,43 @@ services:
         # Share an alias with the CPU service so the backend's
         # ``OLLAMA_URL=http://ollama:11434`` resolves to whichever
         # variant is up.
+        aliases:
+          - ollama
+
+  ollama-rocm:
+    # AMD GPU variant — Ollama's ROCm build. Auto-selected by
+    # install.sh when /dev/kfd exists (Linux + amdgpu driver).
+    # Same volume/env/alias contract as the other two variants, so
+    # exactly one of ollama / ollama-gpu / ollama-rocm runs at a time.
+    profiles: ["rocm"]
+    image: ollama/ollama:rocm
+    container_name: Promptly-Ollama-ROCm
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+    devices:
+      # ROCm reaches the GPU through the kernel fusion driver + DRM
+      # nodes rather than a container-toolkit runtime.
+      - /dev/kfd
+      - /dev/dri
+    ports:
+      # SECURITY: loopback-only by default (see the CPU ollama service).
+      - "${OLLAMA_BIND_ADDR:-127.0.0.1}:${OLLAMA_HOST_PORT:-11435}:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+      - ./scripts/ollama-bootstrap.sh:/usr/local/bin/ollama-bootstrap.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/ollama-bootstrap.sh"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      promptly:
         aliases:
           - ollama
 

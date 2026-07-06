@@ -106,16 +106,34 @@ function Set-EnvLine([ref]$Text, [string]$Key, [string]$Value) {
     }
 }
 
+# Ollama hardware auto-detection. On Windows/Docker Desktop, NVIDIA
+# (via the WSL2 backend) is the only in-container acceleration Ollama
+# supports — AMD and Intel GPUs run the CPU container. Overridable by
+# editing COMPOSE_PROFILES in .env (tokens: ollama = CPU, gpu = NVIDIA).
+$OllamaVariant = "ollama"
+$OllamaLabel   = "CPU (universal fallback)"
+if (-not $NoOllama) {
+    if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+        try {
+            nvidia-smi -L *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $OllamaVariant = "gpu"
+                $OllamaLabel   = "NVIDIA GPU (CUDA via WSL2)"
+            }
+        } catch {}
+    }
+}
+
 $profiles = @()
-if (-not $NoOllama) { $profiles += "ollama" }
+if (-not $NoOllama) { $profiles += $OllamaVariant }
 if (-not $NoSearch) { $profiles += "search" }
-if ($envText -match "(?m)^COMPOSE_PROFILES=.*gpu") { $profiles += "gpu" }
 $profilesCsv = $profiles -join ","
 
 if ($ProfileFlagsGiven -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
     Write-Section "Configuring optional services"
     Set-EnvLine ([ref]$envText) "COMPOSE_PROFILES" $profilesCsv
     Set-EnvLine ([ref]$envText) "SEARXNG_ENABLED" $(if ($NoSearch) { "false" } else { "true" })
+    if (-not $NoOllama) { Write-Ok "Ollama: $OllamaLabel" }
     if ($NoOllama) { Write-Skip "-NoOllama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)" }
     if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
     Write-Ok "COMPOSE_PROFILES=$profilesCsv"
