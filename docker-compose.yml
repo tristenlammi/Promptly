@@ -463,6 +463,15 @@ services:
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+      # Consumer Radeons often report a GFX version ROCm doesn't officially
+      # list, so Ollama silently falls back to CPU. If `ollama ps` shows
+      # 100% CPU on a GPU box, uncomment ONE matching line below (leaving it
+      # blank/empty would itself break ROCm, which is why it's not templated):
+      #   RDNA3  RX 7000        - HSA_OVERRIDE_GFX_VERSION=11.0.0
+      #   RDNA2  RX 6000        - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      #   RDNA1  RX 5000        - HSA_OVERRIDE_GFX_VERSION=10.1.0
+      #   Vega / Radeon VII     - HSA_OVERRIDE_GFX_VERSION=9.0.0
+      # - HSA_OVERRIDE_GFX_VERSION=11.0.0
     devices:
       # ROCm reaches the GPU through the kernel fusion driver + DRM
       # nodes rather than a container-toolkit runtime.
