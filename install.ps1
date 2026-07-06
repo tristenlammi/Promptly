@@ -7,9 +7,19 @@
 # this completes.
 #
 # Usage from the repo root:
-#   .\install.ps1              # full stack
-#   .\install.ps1 -Minimal     # core only - skips SearXNG and the
-#                              # bundled Ollama container
+#   .\install.ps1              # full stack (chat, web search, local Ollama)
+#   .\install.ps1 -NoOllama    # skip the bundled Ollama container - for
+#                              # hosts that already run Ollama (set
+#                              # OLLAMA_URL in .env), or that don't want
+#                              # local models at all.
+#   .\install.ps1 -NoSearch    # skip the bundled SearXNG container -
+#                              # web search stays off until you add
+#                              # Brave/Tavily keys in the admin panel.
+#   .\install.ps1 -Minimal     # both of the above.
+#
+# The choice persists: it's written to COMPOSE_PROFILES in .env, so a
+# plain `docker compose up -d` keeps honouring it. Re-run with a flag
+# to change your mind later.
 #
 # If PowerShell refuses to run the script with an
 # "execution policy" error, do this once in the same window:
@@ -21,8 +31,13 @@
 # ============================================================
 [CmdletBinding()]
 param(
-    [switch]$Minimal
+    [switch]$Minimal,
+    [switch]$NoOllama,
+    [switch]$NoSearch
 )
+
+if ($Minimal) { $NoOllama = $true; $NoSearch = $true }
+$ProfileFlagsGiven = $Minimal -or $NoOllama -or $NoSearch
 
 $ErrorActionPreference = "Stop"
 
@@ -76,25 +91,52 @@ Set-IfPlaceholder ([ref]$envText) "SECRET_KEY"        (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "SEARXNG_SECRET"    (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "POSTGRES_PASSWORD" (New-HexSecret 24)
 
+# ---------- 3. optional services (compose profiles) ----------
+# COMPOSE_PROFILES in .env is the persistent source of truth: docker
+# compose reads it on every invocation, so a plain `docker compose up -d`
+# keeps honouring the install-time choice. Managed tokens: ollama, search.
+# An operator-added "gpu" token is always preserved.
+function Set-EnvLine([ref]$Text, [string]$Key, [string]$Value) {
+    $pattern = "(?m)^$Key=.*$"
+    if ($Text.Value -match $pattern) {
+        $Text.Value = [regex]::Replace($Text.Value, $pattern, "$Key=$Value")
+    } else {
+        if (-not $Text.Value.EndsWith("`n")) { $Text.Value += "`n" }
+        $Text.Value += "$Key=$Value`n"
+    }
+}
+
+$profiles = @()
+if (-not $NoOllama) { $profiles += "ollama" }
+if (-not $NoSearch) { $profiles += "search" }
+if ($envText -match "(?m)^COMPOSE_PROFILES=.*gpu") { $profiles += "gpu" }
+$profilesCsv = $profiles -join ","
+
+if ($ProfileFlagsGiven -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
+    Write-Section "Configuring optional services"
+    Set-EnvLine ([ref]$envText) "COMPOSE_PROFILES" $profilesCsv
+    Set-EnvLine ([ref]$envText) "SEARXNG_ENABLED" $(if ($NoSearch) { "false" } else { "true" })
+    if ($NoOllama) { Write-Skip "-NoOllama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)" }
+    if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
+    Write-Ok "COMPOSE_PROFILES=$profilesCsv"
+} else {
+    Write-Skip "COMPOSE_PROFILES already set, leaving untouched (re-run with -NoOllama/-NoSearch/-Minimal to change)"
+}
+
 # Persist .env in LF mode (the Linux containers parse it).
 $envText = $envText -replace "`r`n", "`n"
 [System.IO.File]::WriteAllText((Join-Path $ScriptDir ".env"), $envText)
 
-# ---------- 3. build + start ----------
+# ---------- 4. build + start ----------
 Write-Section "Building images (first run can take 3-5 minutes)"
 docker compose build
 if ($LASTEXITCODE -ne 0) { throw "docker compose build failed" }
 
 Write-Section "Starting the stack"
-if ($Minimal) {
-    Write-Skip "--minimal: skipping searxng and ollama"
-    docker compose up -d nginx frontend backend collab postgres redis
-} else {
-    docker compose up -d
-}
+docker compose up -d
 if ($LASTEXITCODE -ne 0) { throw "docker compose up failed" }
 
-# ---------- 4. wait for backend health ----------
+# ---------- 5. wait for backend health ----------
 Write-Section "Waiting for the backend to become healthy"
 $healthy = $false
 for ($i = 1; $i -le 90; $i++) {
@@ -127,7 +169,7 @@ if (-not $healthy) {
     exit 1
 }
 
-# ---------- 5. final report ----------
+# ---------- 6. final report ----------
 $portLine = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
 $usePort  = if ($portLine) { $portLine.Substring(16) } else { "8087" }
 
@@ -144,6 +186,15 @@ Write-Host "  The first visit will launch the setup wizard:"
 Write-Host "    1. Create the bootstrap admin account."
 Write-Host "    2. (Optional) Set the public URL people will reach Promptly on."
 Write-Host "    3. (Optional) Pick how knowledge libraries get embedded."
+Write-Host "    4. (Optional) Protect the admin account with two-step verification."
+if ($NoOllama) {
+    Write-Host ""
+    Write-Skip "Bundled Ollama is disabled. For local models/embeddings, set OLLAMA_URL in .env (e.g. http://host.docker.internal:11434) or re-run without -NoOllama."
+}
+if ($NoSearch) {
+    Write-Host ""
+    Write-Skip "Bundled web search (SearXNG) is disabled. Add a Brave or Tavily API key under Admin -> Settings to enable web search."
+}
 Write-Host ""
 Write-Host "  Useful commands:"
 Write-Host "    docker compose logs -f backend     # tail backend logs"

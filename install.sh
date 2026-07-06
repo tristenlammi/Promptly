@@ -8,14 +8,21 @@
 # this completes.
 #
 # Usage (from the repo root):
-#   ./install.sh              # full stack (chat, search, local Ollama)
-#   ./install.sh --minimal    # core only â€” skips SearXNG and the
-#                             # bundled Ollama container. Useful if
-#                             # you've already got Ollama running on
-#                             # the host and don't need built-in web
-#                             # search.
+#   ./install.sh              # full stack (chat, web search, local Ollama)
+#   ./install.sh --no-ollama  # skip the bundled Ollama container - for
+#                             # hosts that already run Ollama (set
+#                             # OLLAMA_URL in .env to point at it), or
+#                             # that don't want local models at all.
+#   ./install.sh --no-search  # skip the bundled SearXNG container -
+#                             # web search stays off until you add
+#                             # Brave/Tavily keys in the admin panel.
+#   ./install.sh --minimal    # both of the above.
 #
-# Re-running is safe â€” already-set values in .env are preserved
+# The choice persists: it's written to COMPOSE_PROFILES in .env, so a
+# plain `docker compose up -d` keeps honouring it. Re-run with a flag
+# to change your mind later.
+#
+# Re-running is safe - already-set values in .env are preserved
 # untouched. Only placeholders that still say "change-me" get
 # replaced.
 # ============================================================
@@ -30,12 +37,16 @@ yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 
 # ---------- argument parsing ----------
-MINIMAL=false
+NO_OLLAMA=false
+NO_SEARCH=false
+PROFILE_FLAGS_GIVEN=false
 for arg in "$@"; do
   case "$arg" in
-    --minimal) MINIMAL=true ;;
+    --no-ollama) NO_OLLAMA=true;  PROFILE_FLAGS_GIVEN=true ;;
+    --no-search) NO_SEARCH=true;  PROFILE_FLAGS_GIVEN=true ;;
+    --minimal)   NO_OLLAMA=true;  NO_SEARCH=true; PROFILE_FLAGS_GIVEN=true ;;
     -h|--help)
-      sed -n '2,18p' "$0" | sed 's/^# //; s/^#//'
+      sed -n '2,27p' "$0" | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
@@ -53,6 +64,14 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 if ! docker compose version >/dev/null 2>&1; then
   red "docker compose v2 is not available. Update Docker Engine to a recent version."
+  exit 1
+fi
+# The compose file uses optional depends_on (``required: false``), which
+# needs compose >= 2.20 (mid-2023). Fail early with a clear message
+# instead of a cryptic error at `up` time.
+compose_ver=$(docker compose version --short 2>/dev/null | sed 's/^v//')
+if [[ -n "$compose_ver" ]] && ! printf '2.20.0\n%s\n' "$compose_ver" | sort -V -C; then
+  red "docker compose ${compose_ver} is too old (need >= 2.20). Update Docker Engine / Compose."
   exit 1
 fi
 if ! docker info >/dev/null 2>&1; then
@@ -91,22 +110,48 @@ seed_secret SECRET_KEY        "$(openssl rand -hex 32)"
 seed_secret SEARXNG_SECRET    "$(openssl rand -hex 32)"
 seed_secret POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 
-# ---------- 3. build + start ----------
+# ---------- 3. optional services (compose profiles) ----------
+# COMPOSE_PROFILES in .env is the persistent source of truth: docker
+# compose reads it on every invocation, so a plain `docker compose up -d`
+# keeps honouring the install-time choice. Managed tokens: ollama, search.
+# An operator-added "gpu" token is always preserved.
+set_env_line() {
+  local key="$1" value="$2"
+  if grep -qE "^${key}=" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env && rm -f .env.bak
+  else
+    printf '%s=%s\n' "$key" "$value" >> .env
+  fi
+}
+
+profiles=()
+$NO_OLLAMA || profiles+=("ollama")
+$NO_SEARCH || profiles+=("search")
+if grep -qE '^COMPOSE_PROFILES=.*gpu' .env 2>/dev/null; then
+  profiles+=("gpu")
+fi
+profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
+
+if $PROFILE_FLAGS_GIVEN || ! grep -qE '^COMPOSE_PROFILES=' .env; then
+  bold "Configuring optional services"
+  set_env_line COMPOSE_PROFILES "$profiles_csv"
+  # The backend health probe + search provisioning key off this flag.
+  set_env_line SEARXNG_ENABLED "$($NO_SEARCH && echo false || echo true)"
+  $NO_OLLAMA && yellow "  --no-ollama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)"
+  $NO_SEARCH && yellow "  --no-search: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)"
+  green "  COMPOSE_PROFILES=${profiles_csv}"
+else
+  yellow "  COMPOSE_PROFILES already set, leaving untouched (re-run with --no-ollama/--no-search/--minimal to change)"
+fi
+
+# ---------- 4. build + start ----------
 bold "Building images (first run can take 3-5 minutes)"
 docker compose build
 
 bold "Starting the stack"
-if $MINIMAL; then
-  # Core services only â€” same nginx front-door, but no SearXNG and
-  # no bundled Ollama. Web search and local Custom-Models embeddings
-  # will be unavailable until the operator adds them later.
-  yellow "  --minimal: skipping searxng and ollama"
-  docker compose up -d nginx frontend backend collab postgres redis
-else
-  docker compose up -d
-fi
+docker compose up -d
 
-# ---------- 4. wait for the backend to come up ----------
+# ---------- 5. wait for the backend to come up ----------
 bold "Waiting for the backend to become healthy"
 healthy=false
 for i in $(seq 1 90); do
@@ -140,7 +185,7 @@ if ! $healthy; then
   exit 1
 fi
 
-# ---------- 5. final report ----------
+# ---------- 6. final report ----------
 http_port=$(grep -E '^NGINX_HTTP_PORT=' .env | cut -d= -f2- || echo "8087")
 http_port=${http_port:-8087}
 
@@ -160,6 +205,18 @@ echo "  The first visit will launch the setup wizard:"
 echo "    1. Create the bootstrap admin account."
 echo "    2. (Optional) Set the public URL people will reach Promptly on."
 echo "    3. (Optional) Pick how knowledge libraries get embedded."
+echo "    4. (Optional) Protect the admin account with two-step verification."
+if $NO_OLLAMA; then
+  echo
+  yellow "  Note: bundled Ollama is disabled. For local models/embeddings,"
+  yellow "  set OLLAMA_URL in .env (e.g. http://host.docker.internal:11434)"
+  yellow "  or re-run ./install.sh without --no-ollama / --minimal."
+fi
+if $NO_SEARCH; then
+  echo
+  yellow "  Note: bundled web search (SearXNG) is disabled. Add a Brave or"
+  yellow "  Tavily API key under Admin -> Settings to enable web search."
+fi
 echo
 echo "  Useful commands:"
 echo "    docker compose logs -f backend     # tail backend logs"

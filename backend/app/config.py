@@ -242,6 +242,11 @@ class Settings(BaseSettings):
 
     # ---- Search ----
     SEARXNG_URL: str = "http://searxng:8080"
+    # False when the operator installed without the bundled SearXNG
+    # container (install.sh --no-search / --minimal). Gates the health
+    # probe's SearXNG component so a search-less stack can report 200,
+    # and skips provisioning the system SearXNG search provider.
+    SEARXNG_ENABLED: bool = True
     DEFAULT_SEARCH_PROVIDER: str = "searxng"
     SEARCH_RESULT_COUNT: int = 5
     SEARCH_CONCURRENT_REQUESTS: int = 3

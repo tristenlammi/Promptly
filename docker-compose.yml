@@ -100,6 +100,11 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - SINGLE_USER_MODE=${SINGLE_USER_MODE:-false}
       - SEARXNG_URL=http://searxng:8080
+      # False when the stack runs without the bundled SearXNG container
+      # (install.sh --no-search / --minimal drops the "search" compose
+      # profile and flips this). Gates the /api/health SearXNG probe and
+      # the system search-provider provisioning.
+      - SEARXNG_ENABLED=${SEARXNG_ENABLED:-true}
       # CORS allow-list and provider/search API keys are now configured
       # through the first-run wizard and Admin → Settings — not via
       # ``.env``. The legacy ``ALLOWED_ORIGINS`` / provider env vars are
@@ -113,7 +118,9 @@ services:
       # Used by the Custom Models RAG pipeline for local embeddings
       # and, in Phase 2, for chat completions against locally-pulled
       # models.
-      - OLLAMA_URL=http://ollama:11434
+      # Overridable so --no-ollama installs can point at an Ollama that
+      # already runs on the host (e.g. http://host.docker.internal:11434).
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
       # Embedding model auto-pulled on Ollama first start. Small
       # (~270 MB), fast, 768-dim — plenty for knowledge-base RAG
       # without making first-run downloads painful.
@@ -159,8 +166,11 @@ services:
       # state in the UI rather than crashing the whole chat path).
       # ``service_started`` is enough; we don't wait on a healthcheck
       # because the model pull can take a minute on a cold install.
+      # ``required: false`` (compose >= 2.20) lets the backend start
+      # when the "ollama" profile is inactive (--no-ollama installs).
       ollama:
         condition: service_started
+        required: false
       # Soft dependency — dictation degrades to a friendly "transcription
       # unavailable" error if Whisper is still loading its model, rather
       # than blocking the whole backend boot on the weight download.
@@ -217,6 +227,7 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+        required: false
     restart: unless-stopped
     networks:
       - promptly
@@ -314,6 +325,11 @@ services:
     # the unmapped 11434, which is unaffected.
     image: ollama/ollama:latest
     container_name: Promptly-Ollama
+    # Optional: only runs when the "ollama" profile is active.
+    # ``COMPOSE_PROFILES`` in .env is the source of truth — install.sh
+    # writes ``ollama,search`` for a full install and drops entries for
+    # ``--no-ollama`` / ``--no-search`` / ``--minimal``.
+    profiles: ["ollama"]
     # ``OLLAMA_HOST`` defaults to 127.0.0.1 inside the container,
     # which means the docker network can't reach the API. Bind to
     # all interfaces so the backend can hit it. ``OLLAMA_KEEP_ALIVE``
@@ -438,6 +454,9 @@ services:
     # Tag list: https://hub.docker.com/r/searxng/searxng/tags
     image: searxng/searxng:2026.4.17-e8299a4c3
     container_name: Promptly-SearXNG
+    # Optional: only runs when the "search" profile is active (see the
+    # ollama service note — COMPOSE_PROFILES in .env drives both).
+    profiles: ["search"]
     mem_limit: ${SEARXNG_MEM_LIMIT:-512m}
     volumes:
       - ./searxng:/etc/searxng:rw

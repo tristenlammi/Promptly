@@ -260,12 +260,16 @@ async def health() -> JSONResponse:
     per-component status so the operator can see at a glance which
     dependency is broken without tailing logs.
     """
-    pg, rd, sx = await asyncio.gather(
-        _check_postgres(),
-        _check_redis(),
-        _check_searxng(),
-    )
-    components = {"postgres": pg, "redis": rd, "searxng": sx}
+    checks = [_check_postgres(), _check_redis()]
+    # Search is optional (install.sh --no-search / --minimal skips the
+    # SearXNG container entirely) — only gate health on it when the
+    # deployment actually ships it.
+    if settings.SEARXNG_ENABLED:
+        checks.append(_check_searxng())
+    results = await asyncio.gather(*checks)
+    components = {"postgres": results[0], "redis": results[1]}
+    if settings.SEARXNG_ENABLED:
+        components["searxng"] = results[2]
     overall_ok = all(c["ok"] for c in components.values())
     # This endpoint is PUBLIC (unauthenticated — docker/orchestrators probe
     # it). Expose only the up/down boolean per component; the raw ``error``

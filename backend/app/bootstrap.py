@@ -99,6 +99,12 @@ async def provision_default_search_provider() -> None:
     SearXNG sidecar without any user action.
     """
     settings = get_settings()
+    if not settings.SEARXNG_ENABLED:
+        # Installed without the bundled SearXNG container — don't provision
+        # a default provider that points at a host which will never exist.
+        # Operators can still add Brave/Tavily (or an external SearXNG)
+        # from the admin panel.
+        return
     async with SessionLocal() as db:
         existing = await db.execute(
             select(SearchProvider).where(
