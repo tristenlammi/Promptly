@@ -411,23 +411,15 @@ export function ToolActivityCard({
     );
   }
 
-  // ---- Finished run_agents: the full per-agent card + green summary
-  // footer (matches the fan-out mock), not the collapsed one-liner. A
-  // parallel-agent run is a headline operation worth showing in full. ----
+  // A finished run_agents turn collapses to the one-liner like every
+  // other tool, but its EXPANDED body is the full per-agent fan-out +
+  // green summary footer (matching the mock) rather than plain rows.
   const finishedAgentStep = steps.find(
     (s) =>
       (s.status === "ok" || s.status === "error") &&
       s.name === "run_agents" &&
       Array.isArray(s.meta?.agents),
   );
-  if (finishedAgentStep) {
-    return (
-      <FinishedFanout
-        agents={finishedAgentStep.meta!.agents as FinishedAgent[]}
-        sourceCount={sourceCount}
-      />
-    );
-  }
 
   // ---- Finished: collapsed one-line summary, expandable ----
   // The card reads as a failure ONLY when nothing succeeded. A turn
@@ -468,13 +460,19 @@ export function ToolActivityCard({
           </span>
         )}
       </button>
-      {open && (
-        <div className="flex flex-col gap-1.5 border-t border-[var(--border)] px-3 py-2">
-          {steps.map((s) => (
-            <StepRow key={s.id} step={s} />
-          ))}
-        </div>
-      )}
+      {open &&
+        (finishedAgentStep ? (
+          <AgentsExpanded
+            agents={finishedAgentStep.meta!.agents as FinishedAgent[]}
+            sourceCount={sourceCount}
+          />
+        ) : (
+          <div className="flex flex-col gap-1.5 border-t border-[var(--border)] px-3 py-2">
+            {steps.map((s) => (
+              <StepRow key={s.id} step={s} />
+            ))}
+          </div>
+        ))}
     </div>
   );
 }
@@ -486,10 +484,11 @@ interface FinishedAgent {
   sources?: number;
 }
 
-/** Finished run_agents card — the full per-agent view (matching the
- *  fan-out mock) plus the green summary footer, reusing the same
- *  terracotta AgentRow as the live view in its settled state. */
-function FinishedFanout({
+/** The expanded body of a finished run_agents card — the full per-agent
+ *  fan-out (reusing the settled AgentRow) plus the green summary footer,
+ *  matching the mock. Container-less: it slots inside the collapsible
+ *  card, so the collapsed one-liner stays the default. */
+function AgentsExpanded({
   agents,
   sourceCount,
 }: {
@@ -505,15 +504,7 @@ function FinishedFanout({
     activity: 0,
   }));
   return (
-    <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
-        <span className="shrink-0 rounded-md bg-[var(--accent)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--accent)]">
-          run_agents
-        </span>
-        <span className="text-[13px] text-[var(--text-muted)]">
-          {agents.length} agent{agents.length === 1 ? "" : "s"} finished
-        </span>
-      </div>
+    <div className="border-t border-[var(--border)]">
       <div className="flex flex-col gap-2 p-3">
         {rows.map((a) => (
           <AgentRow key={a.label} agent={a} />
