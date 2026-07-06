@@ -16,8 +16,6 @@ all on hardware you control.
 
 ---
 
-![Promptly chat interface](docs/screenshots/chatinterface.png)
-
 ## Install
 
 One command. Any machine that runs Docker (Compose v2 ≥ 2.20).
