@@ -106,26 +106,47 @@ function Set-EnvLine([ref]$Text, [string]$Key, [string]$Value) {
     }
 }
 
-# Ollama hardware auto-detection. On Windows/Docker Desktop, NVIDIA
-# (via the WSL2 backend) is the only in-container acceleration Ollama
-# supports — AMD and Intel GPUs run the CPU container. Overridable by
-# editing COMPOSE_PROFILES in .env (tokens: ollama = CPU, gpu = NVIDIA).
+# Ollama hardware auto-detection. On Windows/Docker Desktop:
+#   NVIDIA — accelerated inside the container via the WSL2 backend.
+#   AMD    — Docker can't pass Radeon GPUs into Linux containers, but
+#            Ollama's native WINDOWS build supports them: if a host
+#            Ollama is present we wire the stack to it; otherwise CPU
+#            with a hint.
+#   else   — CPU container.
+# Overridable by editing COMPOSE_PROFILES in .env
+# (tokens: ollama = CPU, gpu = NVIDIA).
 $OllamaVariant = "ollama"
 $OllamaLabel   = "CPU (universal fallback)"
+$OllamaNote    = $null
+function Test-HostOllama {
+    if (Get-Command ollama -ErrorAction SilentlyContinue) { return $true }
+    try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:11434/api/version" -TimeoutSec 2 -UseBasicParsing | Out-Null
+        return $true
+    } catch { return $false }
+}
 if (-not $NoOllama) {
+    $hasNvidia = $false
     if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-        try {
-            nvidia-smi -L *> $null
-            if ($LASTEXITCODE -eq 0) {
-                $OllamaVariant = "gpu"
-                $OllamaLabel   = "NVIDIA GPU (CUDA via WSL2)"
-            }
-        } catch {}
+        try { nvidia-smi -L *> $null; $hasNvidia = ($LASTEXITCODE -eq 0) } catch {}
+    }
+    if ($hasNvidia) {
+        $OllamaVariant = "gpu"
+        $OllamaLabel   = "NVIDIA GPU (CUDA via WSL2)"
+    } else {
+        $hasAmd = [bool](Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match "AMD|Radeon" })
+        if ($hasAmd -and (Test-HostOllama)) {
+            $OllamaVariant = "host"
+            $OllamaLabel   = "native host Ollama (Radeon acceleration)"
+        } elseif ($hasAmd) {
+            $OllamaNote = "AMD GPU detected. Docker can't accelerate it, but Ollama's Windows build can: install it from ollama.com, then re-run .\install.ps1 to wire it up."
+        }
     }
 }
 
 $profiles = @()
-if (-not $NoOllama) { $profiles += $OllamaVariant }
+if (-not $NoOllama -and $OllamaVariant -ne "host") { $profiles += $OllamaVariant }
 if (-not $NoSearch) { $profiles += "search" }
 $profilesCsv = $profiles -join ","
 
@@ -133,7 +154,13 @@ if ($ProfileFlagsGiven -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
     Write-Section "Configuring optional services"
     Set-EnvLine ([ref]$envText) "COMPOSE_PROFILES" $profilesCsv
     Set-EnvLine ([ref]$envText) "SEARXNG_ENABLED" $(if ($NoSearch) { "false" } else { "true" })
-    if (-not $NoOllama) { Write-Ok "Ollama: $OllamaLabel" }
+    if (-not $NoOllama) {
+        Write-Ok "Ollama: $OllamaLabel"
+        if ($OllamaNote) { Write-Skip $OllamaNote }
+        if ($OllamaVariant -eq "host" -and $envText -notmatch "(?m)^OLLAMA_URL=") {
+            Set-EnvLine ([ref]$envText) "OLLAMA_URL" "http://host.docker.internal:11434"
+        }
+    }
     if ($NoOllama) { Write-Skip "-NoOllama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)" }
     if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
     Write-Ok "COMPOSE_PROFILES=$profilesCsv"

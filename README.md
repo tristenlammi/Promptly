@@ -40,11 +40,13 @@ PowerShell spelling: `-NoOllama`, `-NoSearch`, `-Minimal`.
 
 **Hardware acceleration is auto-detected**: NVIDIA GPUs get the CUDA build
 (via the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-on Linux, or Docker Desktop's WSL2 backend on Windows), AMD GPUs get the ROCm
-build, and on Apple Silicon the installer wires the stack to a host-native
-Ollama (Docker has no Metal passthrough — `brew install ollama` first).
-Everything else runs the universal CPU build. The choice persists via
-`COMPOSE_PROFILES` in `.env`; re-run the script any time to re-detect.
+on Linux, or Docker Desktop's WSL2 backend on Windows). AMD GPUs get the ROCm
+build on Linux; on Windows and on Apple Silicon — where Docker can't reach
+the GPU — the installer wires the stack to a host-native Ollama instead
+(Radeon-accelerated on Windows, Metal on macOS; install it from
+[ollama.com](https://ollama.com) first). Everything else runs the universal
+CPU build. The choice persists via `COMPOSE_PROFILES` in `.env`; re-run the
+script any time to re-detect.
 
 ## Highlights
 
