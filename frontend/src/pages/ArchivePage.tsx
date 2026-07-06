@@ -176,15 +176,18 @@ function ArchiveRow({
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
+        {/* Icon-only below md — the text labels ate most of a phone row's
+            width and crushed titles down to a few characters. */}
         <button
           type="button"
           onClick={onRestore}
           disabled={busy}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
           title="Restore to sidebar"
+          aria-label="Restore to sidebar"
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          Restore
+          <span className="hidden md:inline">Restore</span>
         </button>
         <button
           type="button"
@@ -192,9 +195,10 @@ function ArchiveRow({
           disabled={busy}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-[var(--danger)] transition hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-50"
           title="Delete forever"
+          aria-label="Delete forever"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          Delete
+          <span className="hidden md:inline">Delete</span>
         </button>
       </div>
     </li>
