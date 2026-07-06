@@ -88,8 +88,15 @@ docker compose stop ollama && docker compose up -d
 
 ```bash
 git pull
-docker compose up -d --build
+./install.sh        # or .\install.ps1 — re-running is always safe
 ```
+
+The install script rebuilds images, restarts the stack, and — important
+when updating across versions — adds any newly-introduced `.env` settings
+(like `COMPOSE_PROFILES`) that an older install won't have yet. A bare
+`docker compose up -d --build` works too, but only if your `.env` already
+has a `COMPOSE_PROFILES` line; without it the optional Ollama/SearXNG
+containers won't start.
 
 ---
 

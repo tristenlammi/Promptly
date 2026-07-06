@@ -1273,7 +1273,11 @@ export function ChatPage({
               workspaceId={conversation?.workspace_id ?? null}
               placeholder={
                 selectedModel
-                  ? "Message Promptly... (@ to reference a chat)"
+                  ? // The @-hint wraps the single-row mobile composer onto
+                    // two lines — keep it desktop-only.
+                    isMobile
+                    ? "Message Promptly..."
+                    : "Message Promptly... (@ to reference a chat)"
                   : "Configure a model in the Models tab first"
               }
             />
