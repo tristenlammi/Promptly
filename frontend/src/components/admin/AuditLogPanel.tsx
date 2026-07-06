@@ -150,6 +150,7 @@ export function AuditLogPanel() {
             Loading audit log…
           </div>
         ) : events && events.length > 0 ? (
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] bg-black/[0.02] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)] dark:bg-white/[0.03]">
@@ -170,6 +171,7 @@ export function AuditLogPanel() {
               ))}
             </tbody>
           </table>
+          </div>
         ) : (
           <div className="px-4 py-12 text-center text-sm text-[var(--text-muted)]">
             No events match the current filters.

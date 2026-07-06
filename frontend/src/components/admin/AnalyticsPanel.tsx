@@ -253,6 +253,7 @@ export function AnalyticsPanel() {
             ) : (byModel.data ?? []).length === 0 ? (
               <EmptyState message="No assistant turns recorded." />
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="text-left uppercase tracking-wider text-[10px] text-[var(--text-muted)]">
                   <tr>
@@ -291,6 +292,7 @@ export function AnalyticsPanel() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </Card>
@@ -489,6 +491,7 @@ function UserTable({
           {filtered.length} {filtered.length === 1 ? "user" : "users"}
         </div>
       </div>
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse text-xs">
         <thead>
           <tr className="border-b border-[var(--border)] bg-black/[0.02] text-left text-[10px] uppercase tracking-wider text-[var(--text-muted)] dark:bg-white/[0.03]">
@@ -565,6 +568,7 @@ function UserTable({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

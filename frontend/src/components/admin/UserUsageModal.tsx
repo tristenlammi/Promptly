@@ -205,7 +205,7 @@ function HistoryTable({ history }: { history: AdminUserUsageDay[] }) {
           {formatNumber(totals.messages)} messages
         </span>
       </header>
-      <div className="max-h-64 overflow-y-auto">
+      <div className="max-h-64 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--text-muted)]">

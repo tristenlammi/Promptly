@@ -24,6 +24,7 @@ import {
   Loader2,
   Mic,
   Paperclip,
+  Plus,
   RotateCw,
   SlidersHorizontal,
   Sparkles,
@@ -286,6 +287,10 @@ export function InputBar({
   );
   const invalidateFiles = useInvalidateFiles();
   const isMobile = useIsMobile();
+  // Mobile-only: the secondary composer actions (attach, enhance, voice
+  // mode, subchat, more-menu) collapse behind a "+" so the composer is a
+  // single row by default instead of eating a third of the screen.
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const selectedModel = useModelStore((s) =>
     s.available.find(
       (m) =>
@@ -805,6 +810,101 @@ export function InputBar({
     value.trim().length === 0 ||
     uploadingCount > 0;
 
+  // Shared between the mobile input row and the desktop action row, so
+  // the two layouts can't drift apart.
+  const sendOrStop = streaming ? (
+    <button
+      onClick={onCancel}
+      className={cn(
+        "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+        "bg-[var(--text)] text-[var(--bg)] transition hover:opacity-90"
+      )}
+      aria-label="Stop generating"
+      title="Stop generating"
+    >
+      <Square className="h-4 w-4 fill-current" />
+    </button>
+  ) : (
+    <button
+      onClick={() => {
+        setMobileActionsOpen(false);
+        submit();
+      }}
+      disabled={sendDisabled}
+      className={cn(
+        "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition",
+        "bg-[var(--accent)] text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+      )}
+      aria-label="Send message"
+      title={
+        uploadingCount > 0
+          ? "Waiting for uploads to finish..."
+          : newlineOnEnter
+          ? "Send"
+          : "Send (Enter)"
+      }
+    >
+      <ArrowUp className="h-4 w-4" />
+    </button>
+  );
+
+  const dictateButton = dictation.supported ? (
+    <button
+      type="button"
+      onClick={() => dictation.toggle()}
+      // Disabled while sending or mid-transcription (nothing to
+      // toggle then). Recording stays tappable so the user can
+      // stop it.
+      disabled={disabled || streaming || dictation.status === "transcribing"}
+      className={cn(
+        "inline-flex items-center rounded-full border transition",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        dictation.isRecording
+          ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent)]"
+          : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
+        isMobile ? "h-9 w-9 shrink-0 justify-center" : "h-8 gap-1.5 px-2.5 text-xs"
+      )}
+      aria-label={dictation.isRecording ? "Stop dictation" : "Dictate message"}
+      aria-pressed={dictation.isRecording}
+      title={
+        dictation.isRecording
+          ? "Stop & transcribe"
+          : dictation.status === "transcribing"
+            ? "Transcribing…"
+            : "Dictate — speak to type"
+      }
+    >
+      {dictation.status === "transcribing" ? (
+        <Loader2
+          className={cn(isMobile ? "h-4 w-4" : "h-3.5 w-3.5", "animate-spin")}
+        />
+      ) : dictation.isRecording ? (
+        // Live mini-waveform — "it can hear you" beats a blinking mic icon.
+        <VoiceWaveform
+          mode="live"
+          levelRef={dictationLevelRef}
+          bars={3}
+          className={cn(isMobile ? "h-4 w-4" : "h-3.5 w-3.5", "gap-[2px]")}
+          barClassName="w-[2.5px] rounded-full bg-current"
+        />
+      ) : (
+        <Mic className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+      )}
+      {!isMobile && (
+        <span className="font-medium">
+          {/* "Dictate", not "Voice" — sitting next to the voice-mode
+              "Talk" button, two voice-ish labels were a coin flip for
+              new users. */}
+          {dictation.isRecording
+            ? "Stop"
+            : dictation.status === "transcribing"
+              ? "Transcribing…"
+              : "Dictate"}
+        </span>
+      )}
+    </button>
+  ) : null;
+
   return (
     <div className="relative border-t border-[var(--border)] bg-[var(--bg)] px-4 py-4 pb-safe-toolbar pl-safe pr-safe">
       {dropAllowed && isDragging && <DropOverlay />}
@@ -1063,29 +1163,63 @@ export function InputBar({
               </div>
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              // Caret moves implicitly after typing; read it from
-              // the DOM after React flushes the new value.
-              requestAnimationFrame(syncCaret);
-            }}
-            onKeyDown={handleKey}
-            onKeyUp={syncCaret}
-            onSelect={syncCaret}
-            onClick={syncCaret}
-            onPaste={handlePaste}
-            placeholder={placeholder}
-            rows={1}
-            disabled={disabled}
-            className={cn(
-              "promptly-scroll max-h-[220px] min-h-[28px] w-full resize-none bg-transparent px-1 py-1",
-              "text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]",
-              "focus:outline-none disabled:opacity-60"
+          {/* Mobile: single WhatsApp-style row — [+] [input] [mic] [send].
+              Desktop: full-width textarea with the action row below. */}
+          <div className={cn(isMobile && "flex items-end gap-1.5")}>
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setMobileActionsOpen((o) => !o)}
+                className={cn(
+                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition",
+                  mobileActionsOpen
+                    ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "border-[var(--border)] text-[var(--text-muted)]"
+                )}
+                aria-label={
+                  mobileActionsOpen
+                    ? "Hide composer actions"
+                    : "More composer actions"
+                }
+                aria-expanded={mobileActionsOpen}
+              >
+                <Plus
+                  className={cn(
+                    "h-4 w-4 transition-transform duration-200",
+                    mobileActionsOpen && "rotate-45"
+                  )}
+                />
+              </button>
             )}
-          />
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                // Caret moves implicitly after typing; read it from
+                // the DOM after React flushes the new value.
+                requestAnimationFrame(syncCaret);
+              }}
+              onKeyDown={handleKey}
+              onKeyUp={syncCaret}
+              onSelect={syncCaret}
+              onClick={syncCaret}
+              onPaste={handlePaste}
+              placeholder={placeholder}
+              rows={1}
+              disabled={disabled}
+              className={cn(
+                "promptly-scroll max-h-[220px] min-h-[28px] w-full resize-none bg-transparent px-1 py-1",
+                "text-sm text-[var(--text)] placeholder:text-[var(--text-muted)]",
+                "focus:outline-none disabled:opacity-60",
+                // Centre single-line text against the 36px buttons.
+                isMobile && "min-h-[36px] min-w-0 flex-1 py-[8px]"
+              )}
+            />
+            {isMobile && dictateButton}
+            {isMobile && sendOrStop}
+          </div>
+          {(!isMobile || mobileActionsOpen) && (
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {allowAttachments && (
@@ -1143,75 +1277,8 @@ export function InputBar({
                 )}
                 {!isMobile && <span className="font-medium">Enhance</span>}
               </button>}
-              {dictation.supported && (
-                <button
-                  type="button"
-                  onClick={() => dictation.toggle()}
-                  // Disabled while sending or mid-transcription (nothing to
-                  // toggle then). Recording stays tappable so the user can
-                  // stop it.
-                  disabled={
-                    disabled || streaming || dictation.status === "transcribing"
-                  }
-                  className={cn(
-                    "inline-flex items-center rounded-full border transition",
-                    "disabled:cursor-not-allowed disabled:opacity-50",
-                    dictation.isRecording
-                      ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent)]"
-                      : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
-                    isMobile
-                      ? "h-9 w-9 justify-center"
-                      : "h-8 gap-1.5 px-2.5 text-xs"
-                  )}
-                  aria-label={
-                    dictation.isRecording ? "Stop dictation" : "Dictate message"
-                  }
-                  aria-pressed={dictation.isRecording}
-                  title={
-                    dictation.isRecording
-                      ? "Stop & transcribe"
-                      : dictation.status === "transcribing"
-                        ? "Transcribing…"
-                        : "Dictate — speak to type"
-                  }
-                >
-                  {dictation.status === "transcribing" ? (
-                    <Loader2
-                      className={cn(
-                        isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
-                        "animate-spin"
-                      )}
-                    />
-                  ) : dictation.isRecording ? (
-                    // Live mini-waveform — "it can hear you" beats a
-                    // blinking mic icon.
-                    <VoiceWaveform
-                      mode="live"
-                      levelRef={dictationLevelRef}
-                      bars={3}
-                      className={cn(
-                        isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
-                        "gap-[2px]"
-                      )}
-                      barClassName="w-[2.5px] rounded-full bg-current"
-                    />
-                  ) : (
-                    <Mic className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
-                  )}
-                  {!isMobile && (
-                    <span className="font-medium">
-                      {/* "Dictate", not "Voice" — sitting next to the
-                          voice-mode "Talk" button, two voice-ish labels
-                          were a coin flip for new users. */}
-                      {dictation.isRecording
-                        ? "Stop"
-                        : dictation.status === "transcribing"
-                          ? "Transcribing…"
-                          : "Dictate"}
-                    </span>
-                  )}
-                </button>
-              )}
+              {/* On mobile the dictate mic lives in the input row above. */}
+              {!isMobile && dictateButton}
               {onVoiceMode && (
                 <button
                   type="button"
@@ -1270,39 +1337,10 @@ export function InputBar({
                 disabled={disabled || streaming}
               />
             </div>
-            {streaming ? (
-              <button
-                onClick={onCancel}
-                className={cn(
-                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
-                  "bg-[var(--text)] text-[var(--bg)] transition hover:opacity-90"
-                )}
-                aria-label="Stop generating"
-                title="Stop generating"
-              >
-                <Square className="h-4 w-4 fill-current" />
-              </button>
-            ) : (
-              <button
-                onClick={submit}
-                disabled={sendDisabled}
-                className={cn(
-                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition",
-                  "bg-[var(--accent)] text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                )}
-                aria-label="Send message"
-                title={
-                  uploadingCount > 0
-                    ? "Waiting for uploads to finish..."
-                    : newlineOnEnter
-                    ? "Send"
-                    : "Send (Enter)"
-                }
-              >
-                <ArrowUp className="h-4 w-4" />
-              </button>
-            )}
+            {/* On mobile the send button lives in the input row above. */}
+            {!isMobile && sendOrStop}
           </div>
+          )}
         </div>
         {/* Footer row is desktop-only. On mobile we hide it entirely so
             the composer hugs the bottom safe-area inset and the

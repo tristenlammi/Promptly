@@ -305,7 +305,7 @@ export function UsersPanel() {
       )}
 
       {users && users.length > 0 && (
-        <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+        <div className="overflow-x-auto rounded-card border border-[var(--border)] bg-[var(--surface)]">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] bg-black/[0.02] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)] dark:bg-white/[0.03]">
@@ -554,7 +554,7 @@ function ImportResultModal({
                 Copy all
               </button>
             </div>
-            <div className="max-h-60 overflow-y-auto rounded-md border border-[var(--border)]">
+            <div className="max-h-60 overflow-auto rounded-md border border-[var(--border)]">
               <table className="w-full text-xs">
                 <tbody>
                   {result.created.map((c) => (

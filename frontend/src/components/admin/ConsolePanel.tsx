@@ -533,6 +533,7 @@ function ErrorsView() {
             No {status === "open" ? "open" : status} issues — nice.
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse text-xs">
             <thead>
               <tr className="border-b border-[var(--border)] bg-black/[0.02] text-left text-[10px] uppercase tracking-wider text-[var(--text-muted)] dark:bg-white/[0.03]">
@@ -606,6 +607,7 @@ function ErrorsView() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
