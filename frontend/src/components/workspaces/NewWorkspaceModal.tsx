@@ -15,6 +15,7 @@ import { Modal } from "@/components/shared/Modal";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { useCreateWorkspace } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /** Starter templates (4.6) — mirrors backend/app/workspaces/templates.py.
  *  Kept as a static list client-side: templates are content, and the
@@ -90,9 +91,9 @@ export function NewWorkspaceModal({
       onCreated?.(result.id);
       onClose();
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } })
-        .response?.data?.detail;
-      setImportError(detail || "Import failed — is it a zip of .md files?");
+      setImportError(
+        apiErrorMessage(e, "Import failed — is it a zip of .md files?")
+      );
     } finally {
       setImporting(false);
     }

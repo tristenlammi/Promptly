@@ -5,7 +5,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { AtSign, FileText, FolderKanban, MessagesSquare, Plug } from "lucide-react";
+import { AtSign, FileText, LayoutGrid, MessagesSquare, Plug } from "lucide-react";
 
 import {
   chatApi,
@@ -422,7 +422,7 @@ function CandidateGroup({
               </span>
               {c.workspace_title && (
                 <span className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                  <FolderKanban className="h-2.5 w-2.5" />
+                  <LayoutGrid className="h-2.5 w-2.5" />
                   {c.workspace_title}
                 </span>
               )}

@@ -6,6 +6,7 @@
  */
 import { apiClient } from "@/api/client";
 import { filesApi, type FileItem } from "@/api/files";
+import { apiErrorMessage } from "@/utils/apiError";
 
 export function humanSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -65,13 +66,7 @@ export function displayFileName(file: FileItem): string {
 }
 
 export function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
+  return apiErrorMessage(e);
 }
 
 /** Authenticated download helper — Axios adds the Bearer token, we

@@ -7,6 +7,7 @@ import "@fortune-sheet/react/dist/index.css";
 import "@/styles/fortune-sheet.css";
 
 import { workspacesApi, type WorkspaceItemNode } from "@/api/workspaces";
+import { apiErrorMessage } from "@/utils/apiError";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/Callout";
 import { ItemPaneHeader } from "./ItemPaneHeader";
@@ -272,10 +273,7 @@ export function WorkspaceSheetPane({
       })
       .catch((err) => {
         if (cancelled) return;
-        const detail =
-          (err as { response?: { data?: { detail?: string } } })?.response?.data
-            ?.detail ?? "Couldn't open this spreadsheet.";
-        setError(detail);
+        setError(apiErrorMessage(err, "Couldn't open this spreadsheet."));
       });
     return () => {
       cancelled = true;

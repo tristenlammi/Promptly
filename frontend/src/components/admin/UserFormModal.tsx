@@ -7,11 +7,10 @@ import {
   User as UserIcon,
   Users2,
 } from "lucide-react";
-import axios from "axios";
-
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 import type { AdminModelOption, AdminUser, UserRole } from "@/api/types";
 import type { UserGroup } from "@/api/groups";
 
@@ -204,15 +203,7 @@ export function UserFormModal({
       });
       onClose();
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(
-          (err.response?.data as { detail?: string })?.detail ??
-            err.message ??
-            "Request failed"
-        );
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(apiErrorMessage(err, "Request failed"));
     } finally {
       setBusy(false);
     }

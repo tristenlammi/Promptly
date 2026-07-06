@@ -4,7 +4,7 @@ import {
   Clock,
   Columns3,
   FileText,
-  FolderKanban,
+  LayoutGrid,
   MessageSquare,
   PenTool,
   StickyNote,
@@ -84,7 +84,7 @@ export function WorkspaceCard({
             className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
             style={{ backgroundColor: accentSoft, color: accent }}
           >
-            <FolderKanban className="h-4 w-4" />
+            <LayoutGrid className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">

@@ -10,6 +10,7 @@ import {
 import { filesApi, type FileScope, type FolderItem } from "@/api/files";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 type Kind = "file" | "folder";
@@ -331,11 +332,5 @@ function mutateNode(node: TreeNode, fn: (n: TreeNode) => void) {
 }
 
 function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
+  return apiErrorMessage(e);
 }

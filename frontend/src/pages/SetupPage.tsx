@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import {
   Cloud,
   Globe,
@@ -12,9 +11,12 @@ import {
 
 import { adminApi, type OriginPreview } from "@/api/admin";
 import { authApi } from "@/api/auth";
+import { apiErrorMessage } from "@/utils/apiError";
 import { customModelsApi } from "@/api/customModels";
+import { mfaApi } from "@/api/mfa";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
+import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
 
 /**
  * First-run wizard shown when ``GET /auth/setup-status`` returns
@@ -28,14 +30,16 @@ import { Button } from "@/components/shared/Button";
  *          this on localhost".
  * Step 3 — pick how Custom-Model knowledge gets embedded (local
  *          Ollama vs API model). Persists to ``app_settings``.
+ * Step 4 — offer two-step verification for the freshly-created admin
+ *          account (embeds the self-service ``EnrollmentWizard``).
  *
- * The user can skip steps 2 and 3 entirely; CORS will continue to
- * accept localhost requests, and Custom Models just won't be usable
- * until an embedding provider is configured from the admin panel
- * later.
+ * The user can skip steps 2–4 entirely; CORS will continue to accept
+ * localhost requests, Custom Models just won't be usable until an
+ * embedding provider is configured from the admin panel later, and
+ * MFA stays available under Account → Security.
  */
-type Step = 1 | 2 | 3;
-const TOTAL_STEPS: Step = 3;
+type Step = 1 | 2 | 3 | 4;
+const TOTAL_STEPS: Step = 4;
 
 export function SetupPage() {
   const [step, setStep] = useState<Step>(1);
@@ -55,8 +59,25 @@ export function SetupPage() {
     e.preventDefault();
     setError(null);
 
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
+    // Mirror the backend's validation (auth/schemas.py + password_policy.py)
+    // so the common mistakes never round-trip as a 422.
+    const name = username.trim();
+    if (name.length < 3 || !/^[A-Za-z0-9_.-]+$/.test(name)) {
+      setError(
+        "Username must be at least 3 characters using only letters, numbers, dots, dashes or underscores (no spaces)."
+      );
+      return;
+    }
+    if (password.length < 10) {
+      setError("Password must be at least 10 characters.");
+      return;
+    }
+    if (!/\d/.test(password)) {
+      setError("Password must include at least one number.");
+      return;
+    }
+    if (!/[^A-Za-z0-9]/.test(password)) {
+      setError("Password must include at least one symbol (like ! @ # or -).");
       return;
     }
     if (password !== confirm) {
@@ -99,7 +120,9 @@ export function SetupPage() {
                 ? "Create the first administrator account to get started."
                 : step === 2
                   ? "Where will people reach Promptly?"
-                  : "One last thing — how should knowledge libraries be embedded?"}
+                  : step === 3
+                    ? "How should knowledge libraries be embedded?"
+                    : "One last thing — protect your admin account."}
             </p>
           </div>
         </div>
@@ -124,7 +147,9 @@ export function SetupPage() {
 
         {step === 2 && <PublicUrlStep onContinue={() => setStep(3)} />}
 
-        {step === 3 && <EmbeddingStep onDone={finish} />}
+        {step === 3 && <EmbeddingStep onDone={() => setStep(4)} />}
+
+        {step === 4 && <MfaStep email={email} onFinish={finish} />}
       </div>
     </div>
   );
@@ -197,16 +222,19 @@ function AccountStep({
           value={password}
           onChange={onPassword}
           required
-          minLength={8}
+          minLength={10}
           autoComplete="new-password"
         />
+        <p className="text-[11px] text-[var(--text-muted)]">
+          At least 10 characters, including a number and a symbol.
+        </p>
         <LabeledInput
           label="Confirm password"
           type="password"
           value={confirm}
           onChange={onConfirm}
           required
-          minLength={8}
+          minLength={10}
           autoComplete="new-password"
         />
 
@@ -556,6 +584,56 @@ function StepDots({ current, total }: { current: number; total: number }) {
   );
 }
 
+/** Step 4 — offer MFA for the freshly-created admin account. Embeds the
+ *  same self-service ``EnrollmentWizard`` the settings panel uses (we're
+ *  authenticated by now, so the regular session endpoints apply). */
+function MfaStep({ email, onFinish }: { email: string; onFinish: () => void }) {
+  const [enrolling, setEnrolling] = useState(false);
+
+  if (enrolling) {
+    return (
+      <EnrollmentWizard
+        api={{
+          beginTotp: mfaApi.beginTotp,
+          verifyTotp: mfaApi.verifyTotp,
+          beginEmail: mfaApi.beginEmail,
+          verifyEmail: mfaApi.verifyEmail,
+        }}
+        defaultEmail={email}
+        heading="Choose your second factor"
+        subheading="Pick a method to verify it's you on every sign-in."
+        onComplete={onFinish}
+        onCancel={() => setEnrolling(false)}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3 rounded-card border border-[var(--border)] bg-[var(--bg)] p-4">
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent)]" />
+        <div>
+          <p className="text-sm font-medium">Two-step verification</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            This is the administrator account for your whole install — with
+            MFA, a stolen password alone can't get in. Takes about a minute
+            with an authenticator app or email codes. You can also set it up
+            any time under Account → Security.
+          </p>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <Button className="flex-1" onClick={() => setEnrolling(true)}>
+          Set up MFA
+        </Button>
+        <Button variant="secondary" className="flex-1" onClick={onFinish}>
+          Skip for now
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function LabeledInput({
   label,
   value,
@@ -582,12 +660,8 @@ function LabeledInput({
 }
 
 function extractError(err: unknown, fallback: string): string {
-  if (axios.isAxiosError(err)) {
-    return (
-      (err.response?.data as { detail?: string })?.detail ??
-      err.message ??
-      fallback
-    );
-  }
-  return err instanceof Error ? err.message : String(err);
+  // 422 validation errors carry an *array* of Pydantic items in
+  // ``detail`` — apiErrorMessage flattens every shape to a string so
+  // the wizard can never feed an object into JSX (React error #31).
+  return apiErrorMessage(err, fallback);
 }

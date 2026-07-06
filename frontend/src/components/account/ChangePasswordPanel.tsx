@@ -5,6 +5,7 @@ import { authApi } from "@/api/auth";
 import { toast } from "@/store/toastStore";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /** Self-service "change your password" card (Security section).
  *
@@ -41,10 +42,7 @@ export function ChangePasswordPanel() {
       setConfirm("");
       toast.success("Password changed. Other sessions were signed out.");
     } catch (e: unknown) {
-      const detail =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't change your password.";
-      toast.error(detail);
+      toast.error(apiErrorMessage(e, "Couldn't change your password."));
     } finally {
       setSaving(false);
     }

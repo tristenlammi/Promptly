@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import axios from "axios";
 import { Sparkles } from "lucide-react";
 
 import { authApi } from "@/api/auth";
+import { apiErrorMessage } from "@/utils/apiError";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
 
@@ -56,15 +56,7 @@ export function LoginPage() {
           break;
       }
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(
-          (err.response?.data as { detail?: string })?.detail ??
-            err.message ??
-            "Request failed"
-        );
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(apiErrorMessage(err, "Request failed"));
     } finally {
       setLoading(false);
     }

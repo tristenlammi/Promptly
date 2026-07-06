@@ -4,6 +4,7 @@ import { ScrollText } from "lucide-react";
 import { chatApi } from "@/api/chat";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 const MAX_LEN = 8000;
 
@@ -54,10 +55,7 @@ export function ConversationInstructionsButton({
       onSaved(next || null);
       setOpen(false);
     } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't save instructions. Try again.";
-      setError(detail);
+      setError(apiErrorMessage(err, "Couldn't save instructions. Try again."));
     } finally {
       setSaving(false);
     }

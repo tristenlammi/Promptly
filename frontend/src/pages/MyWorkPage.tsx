@@ -5,7 +5,7 @@ import {
   CalendarClock,
   CircleDot,
   Clock,
-  FolderKanban,
+  LayoutGrid,
   Inbox as InboxIcon,
 } from "lucide-react";
 
@@ -138,7 +138,7 @@ export function MyWorkPage() {
                               {c.title}
                             </span>
                             <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-                              <FolderKanban className="h-3 w-3" />
+                              <LayoutGrid className="h-3 w-3" />
                               {c.workspace_title}
                               {c.board_title && <> · {c.board_title}</>}
                               {c.status === "doing" && <> · In progress</>}

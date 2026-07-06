@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { voiceApi } from "@/api/voice";
 import { useAuthStore } from "@/store/authStore";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Server-side text-to-speech playback via Kokoro (``/api/voice/tts``).
@@ -175,10 +176,7 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
           if (run !== runRef.current) return null;
           // Aborts are expected on stop() — don't surface them.
           if ((err as { code?: string })?.code === "ERR_CANCELED") return null;
-          const detail =
-            (err as { response?: { data?: { detail?: string } } })?.response
-              ?.data?.detail ?? "Couldn't play that. Try again.";
-          setError(detail);
+          setError(apiErrorMessage(err, "Couldn't play that. Try again."));
           return null;
         }
       };

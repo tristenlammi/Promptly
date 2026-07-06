@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Mic, Square, X } from "lucide-react";
 
+import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
 import { useDictation } from "@/hooks/useDictation";
 import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 import { useChatStore } from "@/store/chatStore";
@@ -69,14 +70,23 @@ export function VoiceModeOverlay({
   const closingRef = useRef(false);
 
   const tts = useTextToSpeech();
-  // Live mic level → drive the orb ring directly via a ref (no React
-  // re-render per frame).
+  // Live mic level → drive the orb halo + waveform directly via refs (no
+  // React re-render per frame). The halo follows a fast-attack /
+  // slow-release envelope of the raw RMS, so it swells with speech and
+  // glides back down instead of flickering frame-to-frame.
   const levelRingRef = useRef<HTMLDivElement>(null);
+  const rawLevelRef = useRef(0);
+  const levelEnvRef = useRef(0);
   const handleLevel = useCallback((level: number) => {
+    const raw = Math.min(1, level);
+    rawLevelRef.current = raw;
+    const env = levelEnvRef.current;
+    const next = env + (raw - env) * (raw > env ? 0.3 : 0.06);
+    levelEnvRef.current = next;
     const el = levelRingRef.current;
     if (el) {
-      el.style.transform = `scale(${1 + Math.min(1, level) * 0.5})`;
-      el.style.opacity = `${0.25 + Math.min(1, level) * 0.45}`;
+      el.style.transform = `scale(${1 + next * 0.32})`;
+      el.style.opacity = `${0.18 + next * 0.4}`;
     }
   }, []);
   // ``onFinal`` runs inside the dictation hook's closure; route it through
@@ -105,6 +115,9 @@ export function VoiceModeOverlay({
   const startListening = useCallback(() => {
     if (closingRef.current || !modelReady) return;
     setErrorMsg(null);
+    // Fresh turn — don't let a stale envelope make the halo jump.
+    rawLevelRef.current = 0;
+    levelEnvRef.current = 0;
     void startDictation();
   }, [startDictation, modelReady]);
 
@@ -289,48 +302,64 @@ export function VoiceModeOverlay({
           )}
         </div>
 
-        {/* The orb */}
+        {/* The orb — warm gradient like the marketing site's voice demo.
+            State reads through the halo/rings/waveform rather than harsh
+            colour swaps: a level-following halo while listening, soft
+            expanding rings while either side is talking. */}
         <button
           type="button"
           onClick={handleOrbTap}
           disabled={phase === "transcribing"}
           className={cn(
-            "relative flex h-40 w-40 items-center justify-center rounded-full transition",
+            "promptly-voice-orb relative flex h-36 w-36 items-center justify-center rounded-full text-white",
+            "transition-[transform,opacity,box-shadow] duration-300 hover:scale-[1.03]",
             "disabled:cursor-default",
-            phase === "listening"
-              ? "bg-red-500/15 text-red-500"
-              : phase === "speaking"
-                ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-                : phase === "error"
-                  ? "bg-red-500/15 text-red-500"
-                  : "bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/15"
+            busy && "opacity-80",
+            phase === "idle" && "opacity-90",
+            phase === "error" && "ring-4 ring-red-500/30"
           )}
           aria-label={STATUS[phase]}
         >
-          {/* Live mic-level ring — scales with the user's voice while
-              listening (driven directly via the ref, no React churn). */}
+          {/* Live mic-level halo — swells with the (envelope-smoothed)
+              voice while listening; driven via the ref, no React churn. */}
           {phase === "listening" && (
             <div
               ref={levelRingRef}
-              className="absolute inset-0 rounded-full bg-red-500/30"
-              style={{ transform: "scale(1)", opacity: 0.25 }}
+              className="absolute -inset-1.5 rounded-full bg-[var(--accent)]/25"
+              style={{ transform: "scale(1)", opacity: 0.18 }}
             />
           )}
-          {/* Soft pulsing ring while speaking */}
-          {phase === "speaking" && (
+          {/* Soft expanding halo rings while either side is talking. */}
+          {active && (
             <>
-              <span className="absolute inset-0 animate-ping rounded-full bg-[var(--accent)]/20 opacity-60" />
-              <span className="absolute inset-4 rounded-full bg-[var(--accent)]/10" />
+              <span className="promptly-orb-ring" />
+              <span className="promptly-orb-ring promptly-orb-ring--late" />
             </>
           )}
           {busy ? (
-            <Loader2 className="h-14 w-14 animate-spin" />
+            <Loader2 className="relative h-12 w-12 animate-spin" />
           ) : phase === "speaking" ? (
-            <Square className="h-12 w-12 fill-current" />
+            <Square className="relative h-10 w-10 fill-current" />
           ) : (
-            <Mic className="relative h-14 w-14" />
+            <Mic className="relative h-12 w-12" />
           )}
         </button>
+
+        {/* Live waveform — mic-driven while listening, a gentle synthetic
+            swell while the reply is being read aloud, settled otherwise. */}
+        <VoiceWaveform
+          mode={
+            phase === "listening"
+              ? "live"
+              : phase === "speaking"
+                ? "ambient"
+                : "idle"
+          }
+          levelRef={rawLevelRef}
+          bars={26}
+          className="h-10 w-56"
+          barClassName="w-[4px] rounded-full bg-[var(--accent)] opacity-90"
+        />
 
         {/* Status line */}
         <p

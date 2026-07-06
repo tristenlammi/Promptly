@@ -70,6 +70,9 @@ logs/
 .cache/
 .turbo/
 
+# ---- Marketing / showcase website (local-only, not part of the app) ----
+/website/
+
 # ---- TypeScript incremental build outputs ----
 # `tsc -b` (used by `npm run build`) compiles the Vite/Tailwind config
 # files in tsconfig.node.json with composite=true, which emits .js/.d.ts

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import axios from "axios";
 import { Eye, EyeOff, KeyRound, Loader2, ShieldAlert } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 interface ResetPasswordModalProps {
   open: boolean;
@@ -63,15 +63,7 @@ export function ResetPasswordModal({
       await onConfirm(password);
       onClose();
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(
-          (err.response?.data as { detail?: string })?.detail ??
-            err.message ??
-            "Reset failed"
-        );
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(apiErrorMessage(err, "Reset failed"));
       setBusy(false);
     }
   };

@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { apiClient } from "@/api/client";
 import type { FileItem, FileScope } from "@/api/files";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Upload store — persistent Drive upload queue.
@@ -134,27 +135,11 @@ function countActive(tasks: UploadTask[]): number {
   return tasks.filter((t) => t.status === "uploading").length;
 }
 
-/** Friendly error extraction — mirrors ``extractError`` from
- *  ``components/files/helpers`` but inlined here so the store has
- *  zero React imports (keeps it tree-shakable). */
+/** Friendly error extraction — delegates to the shared helper.
+ *  (``utils/apiError`` has zero React imports, so the store stays
+ *  tree-shakable.) */
 function toMessage(err: unknown): string {
-  if (err && typeof err === "object") {
-    const anyErr = err as {
-      response?: { data?: { detail?: unknown } };
-      message?: string;
-    };
-    const detail = anyErr.response?.data?.detail;
-    if (typeof detail === "string") return detail;
-    if (Array.isArray(detail) && detail.length > 0) {
-      const first = detail[0];
-      if (typeof first === "string") return first;
-      if (first && typeof first === "object" && "msg" in first) {
-        return String((first as { msg: unknown }).msg);
-      }
-    }
-    if (typeof anyErr.message === "string") return anyErr.message;
-  }
-  return "Upload failed";
+  return apiErrorMessage(err, "Upload failed");
 }
 
 export const useUploadStore = create<UploadStoreState>((set, get) => ({

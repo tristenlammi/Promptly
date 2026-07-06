@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from "react";
-import axios from "axios";
 
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/shared/Button";
 import { useCreateProvider } from "@/hooks/useProviders";
 import type { ProviderType } from "@/api/types";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Per-type metadata driving the add-provider form. ``defaultName`` /
@@ -153,15 +153,7 @@ export function AddProviderModal({ open, onClose }: AddProviderModalProps) {
       });
       handleClose();
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(
-          (err.response?.data as { detail?: string })?.detail ??
-            err.message ??
-            "Failed to create provider"
-        );
-      } else {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(apiErrorMessage(err, "Failed to create provider"));
     }
   };
 

@@ -38,9 +38,11 @@ import { filesApi } from "@/api/files";
 import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
 import { useDictation } from "@/hooks/useDictation";
 import { useComposerStore } from "@/store/composerStore";
 import { useModelStore } from "@/store/modelStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import {
@@ -707,6 +709,9 @@ export function InputBar({
   // keeps audio on the user's own server (unlike the old Web Speech API).
   // The hook delivers the full transcript via ``onFinal``; we append it
   // to the composer with sensible spacing.
+  // ``onLevel`` feeds the live waveform in the recording chip via a ref —
+  // no React state per frame.
+  const dictationLevelRef = useRef(0);
   const dictation = useDictation({
     onFinal: (chunk) => {
       const piece = chunk.trim();
@@ -716,6 +721,9 @@ export function InputBar({
           prev.length > 0 && !/\s$/.test(prev);
         return `${prev}${needsSpace ? " " : ""}${piece}`;
       });
+    },
+    onLevel: (level) => {
+      dictationLevelRef.current = level;
     },
   });
 
@@ -952,12 +960,18 @@ export function InputBar({
           {dictation.isRecording && (
             <div
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
-                "bg-red-500/10 text-red-600 dark:text-red-400"
+                "flex items-center gap-2 rounded-md px-2 py-1 text-[11px]",
+                "bg-[var(--accent)]/10 text-[var(--accent)]"
               )}
               role="status"
             >
-              <Mic className="h-3 w-3 shrink-0 animate-pulse" />
+              <VoiceWaveform
+                mode="live"
+                levelRef={dictationLevelRef}
+                bars={5}
+                className="h-3.5 w-6 shrink-0"
+                barClassName="w-[2.5px] rounded-full bg-current"
+              />
               <span className="leading-snug">
                 Recording… tap the mic to finish.
               </span>
@@ -1143,7 +1157,7 @@ export function InputBar({
                     "inline-flex items-center rounded-full border transition",
                     "disabled:cursor-not-allowed disabled:opacity-50",
                     dictation.isRecording
-                      ? "border-red-500/60 bg-red-500/10 text-red-600 dark:text-red-400"
+                      ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent)]"
                       : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
                     isMobile
                       ? "h-9 w-9 justify-center"
@@ -1168,13 +1182,21 @@ export function InputBar({
                         "animate-spin"
                       )}
                     />
-                  ) : (
-                    <Mic
+                  ) : dictation.isRecording ? (
+                    // Live mini-waveform — "it can hear you" beats a
+                    // blinking mic icon.
+                    <VoiceWaveform
+                      mode="live"
+                      levelRef={dictationLevelRef}
+                      bars={3}
                       className={cn(
                         isMobile ? "h-4 w-4" : "h-3.5 w-3.5",
-                        dictation.isRecording && "animate-pulse"
+                        "gap-[2px]"
                       )}
+                      barClassName="w-[2.5px] rounded-full bg-current"
                     />
+                  ) : (
+                    <Mic className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
                   )}
                   {!isMobile && (
                     <span className="font-medium">
@@ -1812,11 +1834,5 @@ function humanSize(n: number): string {
 }
 
 function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
+  return apiErrorMessage(e);
 }

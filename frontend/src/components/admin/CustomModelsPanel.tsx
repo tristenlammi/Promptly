@@ -40,7 +40,7 @@ import type {
   EmbeddingConfigTestResult,
 } from "@/api/customModels";
 import type { Provider } from "@/api/types";
-import axios from "axios";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /** Ollama implicitly tags untagged pulls as ``:latest``; the installed
  * list echoes that tag back. Normalise both sides so a config value of
@@ -868,14 +868,7 @@ function ProviderOptionCard({
 }
 
 function extractError(err: unknown, fallback: string): string {
-  if (axios.isAxiosError(err)) {
-    return (
-      (err.response?.data as { detail?: string })?.detail ??
-      err.message ??
-      fallback
-    );
-  }
-  return err instanceof Error ? err.message : fallback;
+  return apiErrorMessage(err, fallback);
 }
 
 // --------------------------------------------------------------------

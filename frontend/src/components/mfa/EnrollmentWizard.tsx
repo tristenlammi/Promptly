@@ -1,5 +1,4 @@
 import { useState } from "react";
-import axios from "axios";
 import { Mail, ShieldCheck, Smartphone } from "lucide-react";
 
 import type {
@@ -9,6 +8,7 @@ import type {
   MfaTotpEnrollPayload,
 } from "@/api/types";
 import { Button } from "@/components/shared/Button";
+import { apiErrorMessage } from "@/utils/apiError";
 
 import { BackupCodesPanel } from "./BackupCodesPanel";
 
@@ -80,13 +80,8 @@ export function EnrollmentWizard({
     setFinal(null);
   };
 
-  const explainError = (err: unknown): string => {
-    if (axios.isAxiosError(err)) {
-      const detail = (err.response?.data as { detail?: string })?.detail;
-      return detail || err.message || "Something went wrong.";
-    }
-    return err instanceof Error ? err.message : "Something went wrong.";
-  };
+  const explainError = (err: unknown): string =>
+    apiErrorMessage(err, "Something went wrong.");
 
   // -------------------- Step: choose --------------------
   if (step === "choose") {

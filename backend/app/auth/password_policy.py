@@ -5,20 +5,23 @@ create-user, admin reset, and the self-service change endpoint. Login and
 share-link password fields are deliberately NOT gated by this (they check an
 existing secret / a different trust model).
 
-Deliberately dependency-free: a length floor, a variety check, and a small
-common-password blocklist. This is a floor, not a scorer — for a stronger
+Deliberately dependency-free: a length floor, number + symbol composition
+checks, a variety check, and a small common-password blocklist. This is a
+floor, not a scorer — for a stronger
 gate wire an optional Have-I-Been-Pwned k-anonymity range check at set time
 (it needs an outbound call, so it's left as an opt-in follow-up).
 """
 from __future__ import annotations
 
-# 12 is the NIST-aligned floor for a human-chosen password with no forced
-# composition rules. Long-but-simple passphrases beat short-but-complex ones.
-MIN_PASSWORD_LENGTH = 12
+# Operator-chosen policy: a 10-character floor combined with the
+# composition checks below (at least one number and one symbol). The
+# composition requirement is what lets the floor sit below the bare
+# NIST no-composition recommendation of 12.
+MIN_PASSWORD_LENGTH = 10
 MAX_PASSWORD_LENGTH = 128
 
-# A tiny blocklist of common/predictable 12+ char passwords (shorter ones are
-# already excluded by the length floor). Compared case-insensitively.
+# A tiny blocklist of common/predictable passwords that would otherwise
+# clear the length + composition gates. Compared case-insensitively.
 _COMMON_PASSWORDS = frozenset(
     {
         "password1234",
@@ -34,6 +37,14 @@ _COMMON_PASSWORDS = frozenset(
         "welcome12345",
         "changeme1234",
         "promptly1234",
+        "password12!",
+        "password123!",
+        "p@ssword123",
+        "p@ssw0rd123",
+        "qwerty1234!",
+        "welcome123!",
+        "changeme12!",
+        "promptly123!",
     }
 )
 
@@ -52,6 +63,12 @@ def validate_password_strength(password: str) -> None:
     if len(pw) > MAX_PASSWORD_LENGTH:
         raise ValueError(
             f"Password must be at most {MAX_PASSWORD_LENGTH} characters."
+        )
+    if not any(c.isdigit() for c in pw):
+        raise ValueError("Password must include at least one number.")
+    if not any(not c.isalnum() for c in pw):
+        raise ValueError(
+            "Password must include at least one symbol (like ! @ # or -)."
         )
     # Reject near-uniform strings ("aaaaaaaaaaaa", "ababababab…") which pass
     # the length floor but carry almost no entropy.

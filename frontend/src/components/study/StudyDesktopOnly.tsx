@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { BookOpen, MessagesSquare } from "lucide-react";
+import { GraduationCap, MessagesSquare } from "lucide-react";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -24,7 +24,7 @@ export function StudyDesktopOnly({ children }: StudyDesktopOnlyProps) {
     <div className="flex h-full flex-1 items-center justify-center px-6 py-10">
       <div className="flex max-w-sm flex-col items-center gap-5 text-center">
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent)]/10 text-[var(--accent)]">
-          <BookOpen className="h-7 w-7" />
+          <GraduationCap className="h-7 w-7" />
         </div>
         <div className="space-y-2">
           <h1 className="text-lg font-semibold text-[var(--text)]">
@@ -42,7 +42,7 @@ export function StudyDesktopOnly({ children }: StudyDesktopOnlyProps) {
             to="/study"
             className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
           >
-            <BookOpen className="h-4 w-4" />
+            <GraduationCap className="h-4 w-4" />
             Go to Study home
           </Link>
           <Link

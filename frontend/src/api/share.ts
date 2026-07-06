@@ -10,6 +10,7 @@
  * frontend ceremony.
  */
 import { apiClient, authHeader } from "./client";
+import { normalizeApiDetail } from "@/utils/apiError";
 
 import type {
   ShareFolderBrowseResponse,
@@ -89,8 +90,9 @@ export const shareApi = {
 
 async function extractError(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { detail?: string };
-    if (body && typeof body.detail === "string") return body.detail;
+    const body = (await res.json()) as { detail?: unknown };
+    const detail = normalizeApiDetail(body?.detail);
+    if (detail) return detail;
   } catch {
     /* not JSON */
   }

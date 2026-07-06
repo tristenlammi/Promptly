@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileUp, FolderKanban, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileUp, LayoutGrid, Loader2, Upload } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { chatApi, type ImportConversationsResponse } from "@/api/chat";
@@ -7,6 +7,7 @@ import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 interface ImportConversationsModalProps {
   open: boolean;
@@ -68,12 +69,7 @@ export function ImportConversationsModal({
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["workspaces"] });
     } catch (e) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } }; message?: string })
-          ?.response?.data?.detail ??
-        (e as { message?: string })?.message ??
-        "Import failed.";
-      setError(String(msg));
+      setError(apiErrorMessage(e, "Import failed."));
     } finally {
       setBusy(false);
     }
@@ -174,7 +170,7 @@ export function ImportConversationsModal({
 
           <div>
             <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
-              <FolderKanban className="h-3.5 w-3.5" />
+              <LayoutGrid className="h-3.5 w-3.5" />
               Put imported chats into a workspace{" "}
               <span className="text-[var(--text-muted)]/70">(optional)</span>
             </label>

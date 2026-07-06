@@ -48,6 +48,7 @@ import {
 import { ContextBudgetBar } from "./WorkspaceSettingsDrawer";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 const ACCEPT =
   "image/*,.pdf,.txt,.md,.markdown,.csv,.json,.docx,.doc,.rtf,.html";
@@ -138,10 +139,7 @@ export function WorkspaceDrivePane({
       try {
         await upload.mutateAsync({ file, folderId });
       } catch (err) {
-        const detail =
-          (err as { response?: { data?: { detail?: string } } })?.response
-            ?.data?.detail ?? `Couldn't add "${file.name}".`;
-        toast.error(detail);
+        toast.error(apiErrorMessage(err, `Couldn't add "${file.name}".`));
       } finally {
         setUploading((u) => {
           const i = u.indexOf(file.name);

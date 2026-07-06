@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
 import {
   CheckCircle2,
   KeyRound,
@@ -18,6 +17,7 @@ import type {
 } from "@/api/types";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
+import { apiErrorMessage } from "@/utils/apiError";
 
 import { BackupCodesPanel } from "./BackupCodesPanel";
 import { EnrollmentWizard } from "./EnrollmentWizard";
@@ -541,14 +541,7 @@ function prettyUserAgent(ua: string): string {
 }
 
 function explainError(err: unknown): string {
-  if (axios.isAxiosError(err)) {
-    return (
-      (err.response?.data as { detail?: string })?.detail ||
-      err.message ||
-      "Something went wrong."
-    );
-  }
-  return err instanceof Error ? err.message : "Something went wrong.";
+  return apiErrorMessage(err, "Something went wrong.");
 }
 
 // Make linter happy about unused icon imports kept for future copy.

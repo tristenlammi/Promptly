@@ -12,6 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { chatApi, type SummariseToWorkspaceResult } from "@/api/chat";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 interface SummariseToWorkspaceButtonProps {
   conversationId: string;
@@ -122,10 +123,13 @@ function SummariseToWorkspaceModal({
       ]);
       setStatus({ kind: "success", result: res });
     } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't save the summary. Try again in a moment.";
-      setStatus({ kind: "error", message: detail });
+      setStatus({
+        kind: "error",
+        message: apiErrorMessage(
+          err,
+          "Couldn't save the summary. Try again in a moment."
+        ),
+      });
     }
   };
 

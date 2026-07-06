@@ -21,6 +21,7 @@ import {
 import { workspacesApi, type MeetingJob } from "@/api/workspaces";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 const POLL_MS = 2500;
 const ACTIVE = new Set(["pending", "transcribing", "summarising"]);
@@ -130,9 +131,7 @@ export function MeetingNotesModal({
       setJob(created);
       setFile(null);
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } })
-        .response?.data?.detail;
-      setError(detail || "Upload failed — try again.");
+      setError(apiErrorMessage(e, "Upload failed — try again."));
     } finally {
       setUploading(false);
     }

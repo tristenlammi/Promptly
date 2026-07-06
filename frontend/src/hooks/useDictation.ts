@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { voiceApi } from "@/api/voice";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Server-side dictation via ``MediaRecorder`` + Whisper.
@@ -37,9 +38,10 @@ interface UseDictationOptions {
    *  user has actually started speaking. Used by voice mode for a
    *  hands-free loop; the composer mic leaves it off (tap to finish). */
   autoStop?: boolean;
-  /** Called ~per animation frame while recording with a 0–1 mic level
-   *  (only when ``autoStop`` is on). Lets the UI animate a live level
-   *  meter without the hook owning any React state for it. */
+  /** Called ~per animation frame while recording with a 0–1 mic level.
+   *  Lets the UI animate a live level meter without the hook owning any
+   *  React state for it. Works with or without ``autoStop`` — providing
+   *  it starts the analyser even when auto turn-taking is off. */
   onLevel?: (level: number) => void;
 }
 
@@ -146,11 +148,12 @@ export function useDictation(
     onLevelRef.current?.(0);
   }, []);
 
-  // Watch the live mic level; auto-stop after a pause once the user has
-  // spoken. ``triggerStop`` stops the recorder the same way a manual tap
-  // would (cancelled stays false → the clip is transcribed).
+  // Watch the live mic level. With ``triggerStop`` set, auto-stop after a
+  // pause once the user has spoken — it stops the recorder the same way a
+  // manual tap would (cancelled stays false → the clip is transcribed).
+  // With ``triggerStop`` null this is a pure level meter for ``onLevel``.
   const startVad = useCallback(
-    (stream: MediaStream, triggerStop: () => void) => {
+    (stream: MediaStream, triggerStop: (() => void) | null) => {
       const Ctx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext?: typeof AudioContext })
@@ -191,8 +194,9 @@ export function useDictation(
           lastVoiceAt = now;
         }
         if (
-          (hasSpoken && now - lastVoiceAt > VAD_SILENCE_HOLD_MS) ||
-          now - startedAt > VAD_MAX_MS
+          triggerStop &&
+          ((hasSpoken && now - lastVoiceAt > VAD_SILENCE_HOLD_MS) ||
+            now - startedAt > VAD_MAX_MS)
         ) {
           rafRef.current = null;
           triggerStop();
@@ -228,10 +232,7 @@ export function useDictation(
         setStatus("idle");
       } catch (err) {
         if (!mountedRef.current) return;
-        const detail =
-          (err as { response?: { data?: { detail?: string } } })?.response?.data
-            ?.detail ?? "Couldn't transcribe that. Try again.";
-        setError(detail);
+        setError(apiErrorMessage(err, "Couldn't transcribe that. Try again."));
         setStatus("idle");
       }
     },
@@ -326,15 +327,20 @@ export function useDictation(
     try {
       recorder.start();
       setStatus("recording");
-      if (autoStop) {
-        startVad(stream, () => {
-          // Same path as a manual finish — transcribe what was recorded.
-          try {
-            recorder.stop();
-          } catch {
-            /* already stopping */
-          }
-        });
+      if (autoStop || onLevelRef.current) {
+        startVad(
+          stream,
+          autoStop
+            ? () => {
+                // Same path as a manual finish — transcribe the recording.
+                try {
+                  recorder.stop();
+                } catch {
+                  /* already stopping */
+                }
+              }
+            : null
+        );
       }
     } catch {
       stopVad();

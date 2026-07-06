@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import axios from "axios";
 import { Mail, ShieldCheck, Smartphone } from "lucide-react";
 
 import { mfaApi } from "@/api/mfa";
+import { apiErrorMessage } from "@/utils/apiError";
 import { Button } from "@/components/shared/Button";
 import { useAuthStore } from "@/store/authStore";
 
@@ -74,10 +74,7 @@ export function MfaVerifyPage() {
       loginSuccess(res.user, res.access_token);
       navigate("/chat", { replace: true });
     } catch (err) {
-      const detail =
-        axios.isAxiosError(err) &&
-        (err.response?.data as { detail?: string })?.detail;
-      setError(detail || "Verification failed. Please try again.");
+      setError(apiErrorMessage(err, "Verification failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -92,10 +89,7 @@ export function MfaVerifyPage() {
       const res = await mfaApi.sendEmailOtpForChallenge(pendingMfa.token);
       setResendInfo(`Code sent to ${res.email_hint}.`);
     } catch (err) {
-      const detail =
-        axios.isAxiosError(err) &&
-        (err.response?.data as { detail?: string })?.detail;
-      setError(detail || "Could not resend code.");
+      setError(apiErrorMessage(err, "Could not resend code."));
     } finally {
       setResending(false);
     }

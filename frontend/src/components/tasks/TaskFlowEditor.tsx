@@ -115,6 +115,7 @@ import { useThemeStore } from "@/store/themeStore";
 import { Modal } from "@/components/shared/Modal";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 // Shared by the custom node renderers so "Detailed" mode can show each node's
 // full settings on its face (the same inspector, rendered inline). Provided by
@@ -465,10 +466,7 @@ const TIMEZONES = [
 const pad = (n: number) => String(n).padStart(2, "0");
 
 function saveErrorMessage(err: unknown): string {
-  const detail = (
-    err as { response?: { data?: { detail?: string } } } | undefined
-  )?.response?.data?.detail;
-  return detail || "Couldn't save the flow.";
+  return apiErrorMessage(err, "Couldn't save the flow.");
 }
 
 function scheduleSummary(d: ScheduleTriggerData): string {
@@ -2434,9 +2432,7 @@ export function TaskFlowEditor({
         60
       );
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } })
-        .response?.data?.detail;
-      setCopilotError(detail || "Couldn't draft a flow. Try rephrasing.");
+      setCopilotError(apiErrorMessage(e, "Couldn't draft a flow. Try rephrasing."));
     } finally {
       setCopilotBusy(false);
     }

@@ -18,6 +18,7 @@ import {
 } from "@/hooks/useWorkspaces";
 import type { WorkspaceFilePin } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Workspace "drive" on the home screen — drag/drop or pick photos and
@@ -73,11 +74,12 @@ export function WorkspaceFilesPanel({
       try {
         await upload.mutateAsync({ file, folderId: null });
       } catch (err) {
-        const detail =
-          (err as { response?: { data?: { detail?: string } } })?.response
-            ?.data?.detail ??
-          `Couldn't add "${file.name}". It may be too large or an unsupported type.`;
-        setError(detail);
+        setError(
+          apiErrorMessage(
+            err,
+            `Couldn't add "${file.name}". It may be too large or an unsupported type.`
+          )
+        );
       } finally {
         setUploading((u) => {
           const i = u.indexOf(file.name);

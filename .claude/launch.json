@@ -16,6 +16,13 @@
       "autoPort": false
     },
     {
+      "name": "promptly-website",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "serve", "website", "-l", "5320", "--no-clipboard"],
+      "port": 5320,
+      "autoPort": false
+    },
+    {
       "name": "promptly-vite-alt",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--config", "vite.preview-claude-alt.config.ts"],

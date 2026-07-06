@@ -5,7 +5,7 @@ import {
   ArrowLeft,
   Check,
   Clock,
-  FolderKanban,
+  LayoutGrid,
   Ghost,
   GitBranch,
   Loader2,
@@ -65,6 +65,7 @@ import type {
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 // Defaults applied when the user has never touched the toggles.
 //   * Tools defaults ON so the AI can invoke artefact tools (PDF,
@@ -926,10 +927,9 @@ export function ChatPage({
         await chatApi.deleteMessage(id, messageId);
       } catch (err) {
         store.setMessages(snapshot);
-        const detail =
-          (err as { response?: { data?: { detail?: string } } })?.response?.data
-            ?.detail ?? "Couldn't delete that message. Try again.";
-        toast.error(detail);
+        toast.error(
+          apiErrorMessage(err, "Couldn't delete that message. Try again.")
+        );
       }
     },
     [id]
@@ -987,10 +987,7 @@ export function ChatPage({
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Conversation compacted");
     } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Compaction failed. Try again in a moment.";
-      toast.error(detail);
+      toast.error(apiErrorMessage(err, "Compaction failed. Try again in a moment."));
     }
   }, [id, queryClient]);
 
@@ -1027,10 +1024,9 @@ export function ChatPage({
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Chat kept — it won't expire anymore");
     } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't keep the chat. Try again in a moment.";
-      toast.error(detail);
+      toast.error(
+        apiErrorMessage(err, "Couldn't keep the chat. Try again in a moment.")
+      );
     }
   }, [id, queryClient]);
 
@@ -1455,7 +1451,7 @@ function WorkspaceBreadcrumb({
         Back to workspace
       </button>
       <span className="inline-flex items-center gap-1 text-[var(--text-muted)]">
-        <FolderKanban className="h-3 w-3 text-[var(--accent)]" />
+        <LayoutGrid className="h-3 w-3 text-[var(--accent)]" />
         <span className="truncate font-medium text-[var(--text)]">
           {workspace?.title ?? "Workspace"}
         </span>

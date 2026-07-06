@@ -1,4 +1,4 @@
-import { FolderKanban, Loader2 } from "lucide-react";
+import { LayoutGrid, Loader2 } from "lucide-react";
 
 import { Modal } from "@/components/shared/Modal";
 import {
@@ -47,7 +47,7 @@ export function ShareInvitesPanel({ open, onClose }: Props) {
         <div className="space-y-5">
           <section>
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-              <FolderKanban className="h-3 w-3" />
+              <LayoutGrid className="h-3 w-3" />
               Workspace invites ({wsInvites.length})
             </h3>
             <ul className="divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">

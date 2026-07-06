@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   CalendarClock,
   Copy,
-  FolderKanban,
+  LayoutGrid,
   Globe,
   KeyRound,
   MoreVertical,
@@ -180,7 +180,7 @@ export function TasksPage() {
                 {(groups.workspaces.length > 0 || g.id !== "personal") && (
                   <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                     {g.id !== "personal" && (
-                      <FolderKanban className="h-3.5 w-3.5" />
+                      <LayoutGrid className="h-3.5 w-3.5" />
                     )}
                     {g.title}
                   </h2>

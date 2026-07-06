@@ -17,6 +17,7 @@ import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { useBrowseFiles, useUploadFile } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /** A file already resolved and ready to send. */
@@ -799,11 +800,5 @@ function humanSize(n: number): string {
 }
 
 function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
+  return apiErrorMessage(e);
 }

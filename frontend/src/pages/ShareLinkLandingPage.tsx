@@ -28,6 +28,7 @@ import { shareApi } from "@/api/share";
 import { Button } from "@/components/shared/Button";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
+import { normalizeApiDetail } from "@/utils/apiError";
 
 import { humanSize } from "@/components/files/helpers";
 
@@ -931,8 +932,8 @@ function FileLandingIcon({ mime }: { mime: string }) {
 function extractHttpError(e: unknown): string {
   if (typeof e === "object" && e && "response" in e) {
     const resp = (e as { response?: { data?: { detail?: unknown }; status?: number } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
+    const detail = normalizeApiDetail(resp?.data?.detail);
+    if (detail) return detail;
     if (resp?.status === 401) return "Password required.";
     if (resp?.status === 404) return "Share link not found.";
     if (resp?.status === 410) return "This share link is no longer active.";

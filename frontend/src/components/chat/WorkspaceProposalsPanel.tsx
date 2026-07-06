@@ -20,6 +20,7 @@ import {
 import { proposalsApi, type WorkspaceProposal } from "@/api/chat";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Preview cards for the AI's workspace write-back proposals (Batch 4.1).
@@ -67,9 +68,7 @@ export function WorkspaceProposalsPanel({
       );
     },
     onError: (e) => {
-      const detail = (e as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail;
-      toast.error(detail || "Couldn't apply the proposal. Try again.");
+      toast.error(apiErrorMessage(e, "Couldn't apply the proposal. Try again."));
       void qc.invalidateQueries({ queryKey: key });
     },
   });

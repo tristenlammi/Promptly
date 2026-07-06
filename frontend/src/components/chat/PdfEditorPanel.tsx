@@ -25,6 +25,7 @@ import { apiClient } from "@/api/client";
 import { filesApi, type FileSourceContent } from "@/api/files";
 import type { MessageAttachmentSnapshot } from "@/api/types";
 import { useEditorStore } from "@/store/editorStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /**
@@ -1095,11 +1096,5 @@ function humanSize(n: number): string {
 }
 
 function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return String(e);
+  return apiErrorMessage(e);
 }

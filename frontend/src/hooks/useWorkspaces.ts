@@ -30,6 +30,7 @@ import {
   type WorkspaceMemory,
 } from "@/api/workspaces";
 import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 
 const KEYS = {
   root: ["workspaces"] as const,
@@ -199,10 +200,7 @@ export function useDeleteDriveFolder(workspaceId: string) {
       workspacesApi.deleteDriveFolder(workspaceId, folderId),
     onSuccess: invalidate,
     onError: (err) => {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't delete the folder.";
-      toast.error(detail);
+      toast.error(apiErrorMessage(err, "Couldn't delete the folder."));
     },
   });
 }
@@ -214,10 +212,7 @@ export function useMoveDriveFile(workspaceId: string) {
       workspacesApi.moveDriveFile(workspaceId, vars.fileId, vars.folderId),
     onSuccess: invalidate,
     onError: (err) => {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't move the file.";
-      toast.error(detail);
+      toast.error(apiErrorMessage(err, "Couldn't move the file."));
     },
   });
 }
@@ -233,10 +228,7 @@ export function useDuplicateWorkspaceItem(workspaceId: string) {
       toast.success(`Duplicated as “${created.title}”`);
     },
     onError: (err) => {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't duplicate this item.";
-      toast.error(detail);
+      toast.error(apiErrorMessage(err, "Couldn't duplicate this item."));
     },
   });
 }

@@ -9,6 +9,7 @@ import {
 } from "@/hooks/useWorkspaces";
 import type { WorkspaceParticipant } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 
 /**
@@ -67,10 +68,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
       await create.mutateAsync({ ...base, role });
       setPicked(null);
     } catch (err: unknown) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Couldn't send the invite. Try again.";
-      setErrorMsg(String(detail));
+      setErrorMsg(apiErrorMessage(err, "Couldn't send the invite. Try again."));
     }
   };
 

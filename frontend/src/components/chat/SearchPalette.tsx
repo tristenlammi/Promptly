@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FolderKanban,
+  LayoutGrid,
   Search,
   Sparkles,
   Users,
@@ -13,6 +13,7 @@ import {
 import { chatApi } from "@/api/chat";
 import { workspacesApi } from "@/api/workspaces";
 import type { ConversationSearchHit } from "@/api/types";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
 
@@ -320,7 +321,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           {!dateRange && wsGroups.length > 0 && (
             <div className="border-t border-[var(--border)]">
               <div className="flex items-center gap-1.5 px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-                <FolderKanban className="h-3 w-3" />
+                <LayoutGrid className="h-3 w-3" />
                 In your workspaces
               </div>
               {wsGroups.map((g) => (
@@ -514,11 +515,5 @@ function formatRelative(iso: string): string {
 }
 
 function extractError(e: unknown): string {
-  if (typeof e === "object" && e && "response" in e) {
-    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
-    const detail = resp?.data?.detail;
-    if (typeof detail === "string") return detail;
-  }
-  if (e instanceof Error) return e.message;
-  return "Search failed.";
+  return apiErrorMessage(e, "Search failed.");
 }

@@ -15,6 +15,7 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
 
 export function CredentialsModal({
   open,
@@ -59,9 +60,7 @@ export function CredentialsModal({
       reset();
       toast.success("Credential saved");
     } catch (e) {
-      const detail = (e as { response?: { data?: { detail?: string } } })
-        .response?.data?.detail;
-      setError(detail || "Couldn't save the credential.");
+      setError(apiErrorMessage(e, "Couldn't save the credential."));
     } finally {
       setBusy(false);
     }

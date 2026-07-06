@@ -92,6 +92,7 @@ import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSetti
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
 import { workspacesApi, type WorkspaceItemNode } from "@/api/workspaces";
+import { apiErrorMessage } from "@/utils/apiError";
 import {
   clearPendingHighlight,
   onPendingHighlight,
@@ -1240,10 +1241,7 @@ function WorkspaceNotePane({
       })
       .catch((err) => {
         if (cancelled) return;
-        const detail =
-          (err as { response?: { data?: { detail?: string } } })?.response?.data
-            ?.detail ?? "Couldn't open this note.";
-        setError(detail);
+        setError(apiErrorMessage(err, "Couldn't open this note."));
       });
     return () => {
       cancelled = true;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FolderKanban, FolderMinus, FolderPlus, Loader2 } from "lucide-react";
+import { Check, LayoutGrid, FolderMinus, FolderPlus, Loader2 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
@@ -83,7 +83,7 @@ export function MoveToWorkspaceMenu({
         {busy ? (
           <Loader2 className={cn("animate-spin", compact ? "h-4 w-4" : "h-3.5 w-3.5")} />
         ) : (
-          <FolderKanban className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} />
+          <LayoutGrid className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} />
         )}
         {!compact && (currentWorkspaceId ? "Workspace" : "Add to workspace")}
       </button>
@@ -118,7 +118,7 @@ export function MoveToWorkspaceMenu({
                     active && "text-[var(--accent)]"
                   )}
                 >
-                  <FolderKanban className="h-3.5 w-3.5" />
+                  <LayoutGrid className="h-3.5 w-3.5" />
                   <span className="flex-1 truncate">{p.title}</span>
                   {active && <Check className="h-3.5 w-3.5" />}
                 </button>

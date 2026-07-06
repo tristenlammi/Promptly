@@ -9,7 +9,7 @@ import {
   Download,
   FileCode,
   FileText,
-  FolderKanban,
+  LayoutGrid,
   FolderMinus,
   Loader2,
   Pin,
@@ -255,7 +255,7 @@ export function ConversationRowContextMenu({
                   "bg-[var(--accent)]/10 text-[var(--accent)]"
                 )}
               >
-                <FolderKanban className="h-3 w-3" />
+                <LayoutGrid className="h-3 w-3" />
               </span>
               <span className="flex-1 font-medium">Move to workspace…</span>
               <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
@@ -369,7 +369,7 @@ export function ConversationRowContextMenu({
                       ) : isCurrent ? (
                         <Check className="h-3 w-3 text-[var(--accent)]" />
                       ) : (
-                        <FolderKanban className="h-3 w-3 text-[var(--text-muted)]" />
+                        <LayoutGrid className="h-3 w-3 text-[var(--text-muted)]" />
                       )}
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium">

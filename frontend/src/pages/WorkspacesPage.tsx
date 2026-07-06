@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Archive,
   ArrowUpDown,
-  FolderKanban,
+  LayoutGrid,
   Plus,
   Search,
   Upload,
@@ -281,7 +281,7 @@ function Tabs({
       <TabButton
         active={tab === "active"}
         onClick={() => onChange("active")}
-        icon={<FolderKanban className="h-3.5 w-3.5" />}
+        icon={<LayoutGrid className="h-3.5 w-3.5" />}
         label="Active"
         count={activeCount}
       />
@@ -360,7 +360,7 @@ function EmptyState({
   return (
     <div className="mt-10 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 text-center">
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/10">
-        <FolderKanban className="h-5 w-5 text-[var(--accent)]" />
+        <LayoutGrid className="h-5 w-5 text-[var(--accent)]" />
       </div>
       <h2 className="text-lg font-semibold">Create your first workspace</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
