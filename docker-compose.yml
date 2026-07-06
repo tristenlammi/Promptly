@@ -198,6 +198,13 @@ services:
       # and ``sandbox-net`` so it can reach the isolated code sandbox.
       - promptly
       - sandbox-net
+    extra_hosts:
+      # Lets the backend reach a *native* host Ollama via
+      # ``OLLAMA_URL=http://host.docker.internal:11434`` (the default when
+      # install.sh detects one and doesn't bundle a container). Docker
+      # Desktop provides this alias automatically; ``host-gateway`` makes it
+      # work on Linux/Unraid too. Harmless when a bundled Ollama is used.
+      - "host.docker.internal:host-gateway"
 
   arq-worker:
     # Durable execution of scheduled-automation runs. Same image as the
@@ -232,6 +239,10 @@ services:
     networks:
       - promptly
       - sandbox-net
+    extra_hosts:
+      # Same host-Ollama reachability as the backend (the worker runs
+      # research/automation jobs that may hit Ollama too).
+      - "host.docker.internal:host-gateway"
 
   collab:
     # Hocuspocus websocket collaboration server for Drive documents.

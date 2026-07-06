@@ -7,19 +7,18 @@
 # this completes.
 #
 # Usage from the repo root:
-#   .\install.ps1              # full stack (chat, web search, local Ollama)
-#   .\install.ps1 -NoOllama    # skip the bundled Ollama container - for
-#                              # hosts that already run Ollama (set
-#                              # OLLAMA_URL in .env), or that don't want
-#                              # local models at all.
-#   .\install.ps1 -NoSearch    # skip the bundled SearXNG container -
-#                              # web search stays off until you add
-#                              # Brave/Tavily keys in the admin panel.
-#   .\install.ps1 -Minimal     # both of the above.
+#   .\install.ps1               # cloud-first: bring your API keys (set in
+#                               # the setup wizard). Auto-detects and uses a
+#                               # native Ollama if one runs on the host.
+#   .\install.ps1 -WithOllama   # also bundle an Ollama container for local
+#                               # models (NVIDIA -> CUDA via WSL2, else CPU;
+#                               # a native host Ollama is usually faster).
+#   .\install.ps1 -NoSearch     # skip the bundled SearXNG container - web
+#                               # search stays off until you add Brave/Tavily
+#                               # keys in the admin panel.
 #
-# The choice persists: it's written to COMPOSE_PROFILES in .env, so a
-# plain `docker compose up -d` keeps honouring it. Re-run with a flag
-# to change your mind later.
+# The choice persists in COMPOSE_PROFILES in .env, so a plain
+# `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
 #
 # If PowerShell refuses to run the script with an
 # "execution policy" error, do this once in the same window:
@@ -31,13 +30,15 @@
 # ============================================================
 [CmdletBinding()]
 param(
-    [switch]$Minimal,
+    [switch]$WithOllama,
+    [switch]$NoSearch,
+    # Back-compat: -NoOllama is now the default, -Minimal == -NoSearch.
     [switch]$NoOllama,
-    [switch]$NoSearch
+    [switch]$Minimal
 )
 
-if ($Minimal) { $NoOllama = $true; $NoSearch = $true }
-$ProfileFlagsGiven = $Minimal -or $NoOllama -or $NoSearch
+if ($Minimal) { $NoSearch = $true }
+$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoOllama -or $Minimal
 
 $ErrorActionPreference = "Stop"
 
@@ -106,18 +107,18 @@ function Set-EnvLine([ref]$Text, [string]$Key, [string]$Value) {
     }
 }
 
-# Ollama hardware auto-detection. On Windows/Docker Desktop:
-#   NVIDIA — accelerated inside the container via the WSL2 backend.
-#   AMD    — Docker can't pass Radeon GPUs into Linux containers, but
-#            Ollama's native WINDOWS build supports them: if a host
-#            Ollama is present we wire the stack to it; otherwise CPU
-#            with a hint.
-#   else   — CPU container.
-# Overridable by editing COMPOSE_PROFILES in .env
-# (tokens: ollama = CPU, gpu = NVIDIA).
-$OllamaVariant = "ollama"
-$OllamaLabel   = "CPU (universal fallback)"
-$OllamaNote    = $null
+# Ollama mode. Default: no bundled container — cloud-first, or wire to a
+# native host Ollama if one's running (better GPU support than the
+# container on every platform). -WithOllama bundles a container instead:
+# NVIDIA accelerates via the WSL2 backend; AMD/Intel run CPU (Docker on
+# Windows can't pass those GPUs into a Linux container).
+#   cloud    no Ollama; connect providers in the wizard
+#   host     native host Ollama detected -> wire OLLAMA_URL
+#   bundled  -WithOllama: run a container (gpu or ollama[cpu])
+$OllamaMode  = "cloud"
+$OllamaLabel = "cloud providers only (connect your API keys in the wizard)"
+$OllamaNote  = $null
+$OllamaProfile = $null
 function Test-HostOllama {
     if (Get-Command ollama -ErrorAction SilentlyContinue) { return $true }
     try {
@@ -125,28 +126,33 @@ function Test-HostOllama {
         return $true
     } catch { return $false }
 }
-if (-not $NoOllama) {
+if ($WithOllama) {
+    $OllamaMode = "bundled"
     $hasNvidia = $false
     if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
         try { nvidia-smi -L *> $null; $hasNvidia = ($LASTEXITCODE -eq 0) } catch {}
     }
     if ($hasNvidia) {
-        $OllamaVariant = "gpu"
-        $OllamaLabel   = "NVIDIA GPU (CUDA via WSL2)"
+        $OllamaProfile = "gpu"
+        $OllamaLabel   = "bundled container - NVIDIA GPU (CUDA via WSL2)"
     } else {
+        $OllamaProfile = "ollama"
+        $OllamaLabel   = "bundled container - CPU"
         $hasAmd = [bool](Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match "AMD|Radeon" })
-        if ($hasAmd -and (Test-HostOllama)) {
-            $OllamaVariant = "host"
-            $OllamaLabel   = "native host Ollama (Radeon acceleration)"
-        } elseif ($hasAmd) {
-            $OllamaNote = "AMD GPU detected. Docker can't accelerate it, but Ollama's Windows build can: install it from ollama.com, then re-run .\install.ps1 to wire it up."
+        if ($hasAmd) {
+            $OllamaNote = "AMD GPU can't be accelerated in Docker on Windows. For Radeon speed, install Ollama natively (ollama.com) and re-run WITHOUT -WithOllama."
         }
     }
+} elseif (Test-HostOllama) {
+    $OllamaMode  = "host"
+    $OllamaLabel = "native host Ollama (detected on :11434)"
+} else {
+    $OllamaNote = "Want local models? Install Ollama natively (https://ollama.com) and re-run, or use -WithOllama to bundle it."
 }
 
 $profiles = @()
-if (-not $NoOllama -and $OllamaVariant -ne "host") { $profiles += $OllamaVariant }
+if ($OllamaMode -eq "bundled") { $profiles += $OllamaProfile }
 if (-not $NoSearch) { $profiles += "search" }
 $profilesCsv = $profiles -join ","
 
@@ -154,18 +160,15 @@ if ($ProfileFlagsGiven -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
     Write-Section "Configuring optional services"
     Set-EnvLine ([ref]$envText) "COMPOSE_PROFILES" $profilesCsv
     Set-EnvLine ([ref]$envText) "SEARXNG_ENABLED" $(if ($NoSearch) { "false" } else { "true" })
-    if (-not $NoOllama) {
-        Write-Ok "Ollama: $OllamaLabel"
-        if ($OllamaNote) { Write-Skip $OllamaNote }
-        if ($OllamaVariant -eq "host" -and $envText -notmatch "(?m)^OLLAMA_URL=") {
-            Set-EnvLine ([ref]$envText) "OLLAMA_URL" "http://host.docker.internal:11434"
-        }
+    Write-Ok "Ollama: $OllamaLabel"
+    if ($OllamaNote) { Write-Skip $OllamaNote }
+    if ($OllamaMode -eq "host" -and $envText -notmatch "(?m)^OLLAMA_URL=") {
+        Set-EnvLine ([ref]$envText) "OLLAMA_URL" "http://host.docker.internal:11434"
     }
-    if ($NoOllama) { Write-Skip "-NoOllama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)" }
     if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
-    Write-Ok "COMPOSE_PROFILES=$profilesCsv"
+    Write-Ok "COMPOSE_PROFILES=$(if ($profilesCsv) { $profilesCsv } else { '<none>' })"
 } else {
-    Write-Skip "COMPOSE_PROFILES already set, leaving untouched (re-run with -NoOllama/-NoSearch/-Minimal to change)"
+    Write-Skip "COMPOSE_PROFILES already set, leaving untouched (re-run with -WithOllama/-NoSearch to change)"
 }
 
 # Persist .env in LF mode (the Linux containers parse it).
@@ -232,9 +235,9 @@ Write-Host "    1. Create the bootstrap admin account."
 Write-Host "    2. (Optional) Set the public URL people will reach Promptly on."
 Write-Host "    3. (Optional) Pick how knowledge libraries get embedded."
 Write-Host "    4. (Optional) Protect the admin account with two-step verification."
-if ($NoOllama) {
+if ($OllamaMode -eq "cloud") {
     Write-Host ""
-    Write-Skip "Bundled Ollama is disabled. For local models/embeddings, set OLLAMA_URL in .env (e.g. http://host.docker.internal:11434) or re-run without -NoOllama."
+    Write-Skip "No local-model runtime. Connect a cloud provider (OpenAI, Anthropic, OpenRouter, ...) in the wizard. For local models, install Ollama natively and re-run, or use -WithOllama."
 }
 if ($NoSearch) {
     Write-Host ""

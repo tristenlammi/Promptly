@@ -8,23 +8,22 @@
 # this completes.
 #
 # Usage (from the repo root):
-#   ./install.sh              # full stack (chat, web search, local Ollama)
-#   ./install.sh --no-ollama  # skip the bundled Ollama container - for
-#                             # hosts that already run Ollama (set
-#                             # OLLAMA_URL in .env to point at it), or
-#                             # that don't want local models at all.
-#   ./install.sh --no-search  # skip the bundled SearXNG container -
-#                             # web search stays off until you add
-#                             # Brave/Tavily keys in the admin panel.
-#   ./install.sh --minimal    # both of the above.
+#   ./install.sh                # cloud-first: bring your API keys (set in
+#                               # the setup wizard). Auto-detects and uses a
+#                               # native Ollama if one runs on the host.
+#   ./install.sh --with-ollama  # also bundle an Ollama container for local
+#                               # models - GPU auto-detected (NVIDIA/AMD),
+#                               # else CPU. A native host Ollama is usually
+#                               # faster; this is for hosts without one.
+#   ./install.sh --no-search    # skip the bundled SearXNG container - web
+#                               # search stays off until you add Brave/Tavily
+#                               # keys in the admin panel.
 #
-# The choice persists: it's written to COMPOSE_PROFILES in .env, so a
-# plain `docker compose up -d` keeps honouring it. Re-run with a flag
-# to change your mind later.
+# The choice persists in COMPOSE_PROFILES in .env, so a plain
+# `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
 #
 # Re-running is safe - already-set values in .env are preserved
-# untouched. Only placeholders that still say "change-me" get
-# replaced.
+# untouched. Only placeholders that still say "change-me" get replaced.
 # ============================================================
 set -euo pipefail
 
@@ -37,16 +36,17 @@ yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 
 # ---------- argument parsing ----------
-NO_OLLAMA=false
+WITH_OLLAMA=false
 NO_SEARCH=false
 PROFILE_FLAGS_GIVEN=false
 for arg in "$@"; do
   case "$arg" in
-    --no-ollama) NO_OLLAMA=true;  PROFILE_FLAGS_GIVEN=true ;;
-    --no-search) NO_SEARCH=true;  PROFILE_FLAGS_GIVEN=true ;;
-    --minimal)   NO_OLLAMA=true;  NO_SEARCH=true; PROFILE_FLAGS_GIVEN=true ;;
+    --with-ollama) WITH_OLLAMA=true; PROFILE_FLAGS_GIVEN=true ;;
+    --no-search)   NO_SEARCH=true;   PROFILE_FLAGS_GIVEN=true ;;
+    # Back-compat: --no-ollama is now the default; accept it silently.
+    --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
     -h|--help)
-      sed -n '2,27p' "$0" | sed 's/^# //; s/^#//'
+      sed -n '2,25p' "$0" | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
@@ -113,8 +113,8 @@ seed_secret POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 # ---------- 3. optional services (compose profiles) ----------
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
 # compose reads it on every invocation, so a plain `docker compose up -d`
-# keeps honouring the install-time choice. Managed tokens: ollama, search.
-# An operator-added "gpu" token is always preserved.
+# keeps honouring the install-time choice. Managed tokens: ollama/gpu/rocm
+# (only with --with-ollama) and search.
 set_env_line() {
   local key="$1" value="$2"
   if grep -qE "^${key}=" .env; then
@@ -124,56 +124,54 @@ set_env_line() {
   fi
 }
 
-# ---------- Ollama hardware auto-detection ----------
-# Picks the best Ollama variant for this machine so acceleration works
-# out of the box. Overridable any time by editing COMPOSE_PROFILES in
-# .env (tokens: ollama = CPU, gpu = NVIDIA CUDA, rocm = AMD).
-#   gpu    NVIDIA GPU + Docker GPU support
-#   rocm   AMD GPU (/dev/kfd via the amdgpu driver)
-#   host   macOS: Docker has no Metal passthrough, so if a native
-#          Ollama is on the host we point the stack at it instead
-#   ollama CPU container (universal fallback; Intel GPUs land here —
-#          upstream Ollama has no Intel acceleration yet)
-OLLAMA_VARIANT="ollama"
-OLLAMA_VARIANT_LABEL="CPU (universal fallback)"
-OLLAMA_VARIANT_NOTE=""
-detect_ollama_variant() {
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    if command -v ollama >/dev/null 2>&1 \
-       || curl -fsS --max-time 1 http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
-      OLLAMA_VARIANT="host"
-      OLLAMA_VARIANT_LABEL="native host Ollama (Metal acceleration)"
-    else
-      OLLAMA_VARIANT="ollama"
-      OLLAMA_VARIANT_LABEL="CPU container"
-      OLLAMA_VARIANT_NOTE="macOS: Docker can't reach the GPU. For Metal acceleration: 'brew install ollama', start it, re-run ./install.sh"
+# ---------- Ollama mode ----------
+# By default Promptly does NOT bundle an Ollama container: containerised
+# Ollama has worse GPU support than a native install on every platform,
+# and most self-hosters bring cloud API keys. Instead we auto-detect a
+# native Ollama on the host and point the stack at it. --with-ollama
+# bundles the container anyway, choosing the best variant for the box.
+#   cloud    no Ollama; connect providers in the wizard (default)
+#   host     a native Ollama is running on the host -> wire OLLAMA_URL
+#   bundled  --with-ollama: run a container (gpu/rocm/ollama[cpu])
+OLLAMA_MODE="cloud"
+OLLAMA_LABEL="cloud providers only (connect your API keys in the wizard)"
+OLLAMA_NOTE=""
+OLLAMA_PROFILE=""
+
+host_ollama_present() {
+  command -v ollama >/dev/null 2>&1 \
+    || curl -fsS --max-time 1 http://127.0.0.1:11434/api/version >/dev/null 2>&1
+}
+
+# Best bundled-container variant (only consulted with --with-ollama).
+detect_bundled_variant() {
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 \
+     && { docker info 2>/dev/null | grep -qi nvidia || uname -r | grep -qi microsoft; }; then
+    OLLAMA_PROFILE="gpu";  OLLAMA_LABEL="bundled container - NVIDIA GPU (CUDA)"
+  elif [[ -e /dev/kfd && -e /dev/dri ]]; then
+    OLLAMA_PROFILE="rocm"; OLLAMA_LABEL="bundled container - AMD GPU (ROCm)"
+  else
+    OLLAMA_PROFILE="ollama"; OLLAMA_LABEL="bundled container - CPU"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+      OLLAMA_NOTE="NVIDIA GPU found but Docker can't use it - install the NVIDIA Container Toolkit for acceleration."
+    elif [[ "$(uname -s)" == "Darwin" ]]; then
+      OLLAMA_NOTE="macOS: the bundled container is CPU-only (no Metal in Docker). Install Ollama natively and re-run WITHOUT --with-ollama for acceleration."
     fi
-    return
-  fi
-  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-    # Docker must be able to hand the GPU to containers: the NVIDIA
-    # Container Toolkit on Linux, or Docker Desktop's WSL2 backend.
-    if docker info 2>/dev/null | grep -qi nvidia || uname -r | grep -qi microsoft; then
-      OLLAMA_VARIANT="gpu"
-      OLLAMA_VARIANT_LABEL="NVIDIA GPU (CUDA)"
-    else
-      OLLAMA_VARIANT_NOTE="NVIDIA GPU found, but Docker can't use it - install the NVIDIA Container Toolkit and re-run ./install.sh for GPU acceleration"
-    fi
-    return
-  fi
-  if [[ -e /dev/kfd && -e /dev/dri ]]; then
-    OLLAMA_VARIANT="rocm"
-    OLLAMA_VARIANT_LABEL="AMD GPU (ROCm)"
   fi
 }
 
-profiles=()
-if ! $NO_OLLAMA; then
-  detect_ollama_variant
-  if [[ "$OLLAMA_VARIANT" != "host" ]]; then
-    profiles+=("$OLLAMA_VARIANT")
-  fi
+if $WITH_OLLAMA; then
+  OLLAMA_MODE="bundled"
+  detect_bundled_variant
+elif host_ollama_present; then
+  OLLAMA_MODE="host"
+  OLLAMA_LABEL="native host Ollama (detected on :11434)"
+else
+  OLLAMA_NOTE="Want local models? Install Ollama natively (https://ollama.com) and re-run, or use --with-ollama to bundle it."
 fi
+
+profiles=()
+[[ "$OLLAMA_MODE" == "bundled" ]] && profiles+=("$OLLAMA_PROFILE")
 $NO_SEARCH || profiles+=("search")
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
 
@@ -182,21 +180,23 @@ if $PROFILE_FLAGS_GIVEN || ! grep -qE '^COMPOSE_PROFILES=' .env; then
   set_env_line COMPOSE_PROFILES "$profiles_csv"
   # The backend health probe + search provisioning key off this flag.
   set_env_line SEARXNG_ENABLED "$($NO_SEARCH && echo false || echo true)"
-  if ! $NO_OLLAMA; then
-    green "  Ollama: ${OLLAMA_VARIANT_LABEL}"
-    [[ -n "$OLLAMA_VARIANT_NOTE" ]] && yellow "  ${OLLAMA_VARIANT_NOTE}"
-    if [[ "$OLLAMA_VARIANT" == "host" ]]; then
-      # Point the backend at the host's native Ollama. Respect an
-      # operator-set URL; only seed when the line is missing.
-      grep -qE '^OLLAMA_URL=' .env \
-        || printf 'OLLAMA_URL=http://host.docker.internal:11434\n' >> .env
-    fi
+  green "  Ollama: ${OLLAMA_LABEL}"
+  [[ -n "$OLLAMA_NOTE" ]] && yellow "  ${OLLAMA_NOTE}"
+  if [[ "$OLLAMA_MODE" == "host" ]]; then
+    # Point the backend at the host's native Ollama. Respect an
+    # operator-set URL; only seed when the line is missing. The
+    # host.docker.internal alias is provided to the backend + worker in
+    # compose via extra_hosts (works on Linux/Unraid too, not just
+    # Docker Desktop).
+    grep -qE '^OLLAMA_URL=' .env \
+      || printf 'OLLAMA_URL=http://host.docker.internal:11434\n' >> .env
+    [[ "$(uname -s)" == "Linux" ]] \
+      && yellow "  If the backend can't reach it, start host Ollama with OLLAMA_HOST=0.0.0.0"
   fi
-  $NO_OLLAMA && yellow "  --no-ollama: bundled Ollama disabled (set OLLAMA_URL in .env to use a host install)"
   $NO_SEARCH && yellow "  --no-search: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)"
-  green "  COMPOSE_PROFILES=${profiles_csv}"
+  green "  COMPOSE_PROFILES=${profiles_csv:-<none>}"
 else
-  yellow "  COMPOSE_PROFILES already set, leaving untouched (re-run with --no-ollama/--no-search/--minimal to change)"
+  yellow "  COMPOSE_PROFILES already set, leaving untouched (re-run with --with-ollama/--no-search to change)"
 fi
 
 # ---------- 4. build + start ----------
@@ -261,11 +261,11 @@ echo "    1. Create the bootstrap admin account."
 echo "    2. (Optional) Set the public URL people will reach Promptly on."
 echo "    3. (Optional) Pick how knowledge libraries get embedded."
 echo "    4. (Optional) Protect the admin account with two-step verification."
-if $NO_OLLAMA; then
+if [[ "$OLLAMA_MODE" == "cloud" ]]; then
   echo
-  yellow "  Note: bundled Ollama is disabled. For local models/embeddings,"
-  yellow "  set OLLAMA_URL in .env (e.g. http://host.docker.internal:11434)"
-  yellow "  or re-run ./install.sh without --no-ollama / --minimal."
+  yellow "  Note: no local-model runtime. Connect a cloud provider (OpenAI,"
+  yellow "  Anthropic, OpenRouter, ...) in the wizard. For local models, run"
+  yellow "  Ollama natively and re-run, or install with --with-ollama."
 fi
 if $NO_SEARCH; then
   echo

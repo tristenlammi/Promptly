@@ -30,23 +30,25 @@ The script generates all secrets, builds and starts the stack, and waits for
 it to come up healthy. Open **http://localhost:8087** and the first-run wizard
 takes it from there — admin account, optional public URL, embeddings, MFA.
 
+By default Promptly is **cloud-first**: connect your API keys (OpenAI,
+Anthropic, OpenRouter, …) in the wizard. It does not bundle an Ollama
+container — but if you're already running Ollama natively on the host, the
+installer detects it and wires the stack to it automatically.
+
 | Install option | Effect |
 | :-- | :-- |
-| `--no-ollama` | Skip bundled Ollama — using a host install? set `OLLAMA_URL` in `.env` |
-| `--no-search` | Skip bundled SearXNG web search — add Brave/Tavily keys later in Admin |
-| `--minimal` | Both of the above |
+| `--with-ollama` | Bundle a local-model container. GPU auto-detected: NVIDIA (CUDA), AMD (ROCm), else CPU |
+| `--no-search` | Skip the bundled SearXNG web search — add Brave/Tavily keys later in Admin |
 
-PowerShell spelling: `-NoOllama`, `-NoSearch`, `-Minimal`.
+PowerShell spelling: `-WithOllama`, `-NoSearch`.
 
-**Hardware acceleration is auto-detected**: NVIDIA GPUs get the CUDA build
-(via the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-on Linux, or Docker Desktop's WSL2 backend on Windows). AMD GPUs get the ROCm
-build on Linux; on Windows and on Apple Silicon — where Docker can't reach
-the GPU — the installer wires the stack to a host-native Ollama instead
-(Radeon-accelerated on Windows, Metal on macOS; install it from
-[ollama.com](https://ollama.com) first). Everything else runs the universal
-CPU build. The choice persists via `COMPOSE_PROFILES` in `.env`; re-run the
-script any time to re-detect.
+**Want local models?** A **native** Ollama ([ollama.com](https://ollama.com))
+is the best option on every platform — better GPU support than the container,
+and the installer auto-wires it. Use `--with-ollama` only when you'd rather
+Docker manage it; on Linux that gives real GPU acceleration (NVIDIA via the
+[Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html),
+AMD via ROCm), while on macOS/Windows the container is CPU-only (Docker can't
+reach the GPU there). The choice persists in `COMPOSE_PROFILES` in `.env`.
 
 ## Highlights
 
