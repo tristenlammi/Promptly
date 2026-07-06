@@ -57,9 +57,13 @@ export function NewChatButton({ compact = false }: NewChatButtonProps) {
   };
 
   if (compact) {
+    // Collapsed rail is 56px wide — a side-by-side circle + caret (58px)
+    // overflows it, so the split stacks vertically: the circle starts a
+    // chat, the slim handle underneath opens the temporary-chat popover
+    // (flyout to the right, clear of the rail).
     return (
       <div ref={popoverRef} className="relative">
-        <div className="flex items-center gap-0.5">
+        <div className="flex flex-col items-center gap-0.5">
           <button
             type="button"
             onClick={startNormal}
@@ -76,7 +80,7 @@ export function NewChatButton({ compact = false }: NewChatButtonProps) {
             type="button"
             onClick={() => setOpen((v) => !v)}
             className={cn(
-              "inline-flex h-9 w-5 items-center justify-center rounded-full",
+              "inline-flex h-4 w-9 items-center justify-center rounded-full",
               "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)]",
               "dark:hover:bg-white/[0.06]"
             )}
@@ -163,7 +167,7 @@ function PopoverMenu({
       className={cn(
         "absolute z-30 mt-2 w-64 overflow-hidden rounded-card border shadow-lg",
         "border-[var(--border)] bg-[var(--surface)]",
-        side === "left" ? "left-0" : "left-full ml-2 top-0 mt-0"
+        side === "left" ? "left-0" : "left-full ml-3 top-0 mt-0"
       )}
     >
       <PopoverItem
