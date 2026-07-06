@@ -1,0 +1,7 @@
+# Shows a "Sponsor" button on the GitHub repo.
+# The button only appears once the account is enrolled in GitHub Sponsors:
+#   https://github.com/sponsors  → set up a sponsor profile for the account.
+# Add other platforms here if you use them, e.g.:
+#   ko_fi: yourhandle
+#   buy_me_a_coffee: yourhandle
+github: [tristenlammi]
