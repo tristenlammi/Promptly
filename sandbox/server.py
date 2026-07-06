@@ -47,24 +47,7 @@ app = FastAPI(title="Promptly Sandbox", docs_url=None, redoc_url=None)
 SCRATCH_ROOT = Path(os.environ.get("SANDBOX_SCRATCH", "/sandbox/run"))
 
 
-def _resolve_sandbox_secret() -> str:
-    """The shared bearer the backend authenticates with. Prefer the env var;
-    fall back to the auto-generated shared secret file (zero-config compose
-    path) so backend↔sandbox still match when no .env set SANDBOX_SECRET."""
-    env = os.environ.get("SANDBOX_SECRET", "").strip()
-    if env:
-        return env
-    try:
-        return (
-            open(os.environ.get("SECRET_KEY_FILE", "/secrets/secret_key"))
-            .read()
-            .strip()
-        )
-    except OSError:
-        return ""
-
-
-SECRET = _resolve_sandbox_secret()
+SECRET = os.environ.get("SANDBOX_SECRET", "").strip()
 
 # ---- Persistent sessions -------------------------------------------
 # When a job carries a ``session_id``, its working directory survives

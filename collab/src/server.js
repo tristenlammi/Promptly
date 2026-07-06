@@ -19,7 +19,6 @@
  * public surface is the `/api/collab/:document_id` websocket path
  * proxied through nginx.
  */
-import { readFileSync } from "node:fs";
 import { Server } from "@hocuspocus/server";
 import { Database } from "@hocuspocus/extension-database";
 import { jwtVerify } from "jose";
@@ -32,22 +31,7 @@ const { Pool } = pkg;
 // --- Config -----------------------------------------------------------
 
 const PORT = Number(process.env.PORT || 1234);
-// Zero-config fallback: when compose passed SECRET_KEY through empty (no
-// .env), read the shared key the `secrets-init` service generated into the
-// mounted volume — the same value the backend resolves — so the collab JWT
-// and snapshot bearer still match. An env-provided SECRET_KEY wins.
-const SECRET_KEY =
-  process.env.SECRET_KEY ||
-  (() => {
-    try {
-      return readFileSync(
-        process.env.SECRET_KEY_FILE || "/secrets/secret_key",
-        "utf8"
-      ).trim();
-    } catch {
-      return "";
-    }
-  })();
+const SECRET_KEY = process.env.SECRET_KEY || "";
 const DATABASE_URL = process.env.DATABASE_URL;
 const BACKEND_INTERNAL_URL =
   process.env.BACKEND_INTERNAL_URL || "http://backend:8000";

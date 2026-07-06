@@ -1,17 +1,30 @@
 # ============================================================
 # Promptly — single-file production compose.
 #
-# This is the only file you need to bring the stack up:
+# Run the installer first (it seeds a real `.env` and brings the
+# stack up in one step):
+#
+#   ./install.sh          (Linux/macOS)
+#   .\install.ps1         (Windows)
+#
+# After that, this file is all you need for day-to-day operation:
 #
 #   docker compose up -d
 #
-# Works the same on Unraid (Compose Manager points at this
-# file), a plain Linux server, or Docker Desktop. The defaults
-# are tuned for "drop in and run" — ports stay out of the
-# well-known cluster so they don't collide with the Unraid web
-# UI, Portainer, the *arr stack, qBittorrent etc., and all
-# stateful data lives in ./data/ alongside the compose file
-# so backups and inspection are trivial.
+# Works the same on Unraid (Compose Manager points at this file), a
+# plain Linux server, or Docker Desktop — as long as `.env` exists
+# next to it with real secrets. Compose Manager users without a shell
+# to run the installer: copy `.env.example` to `.env` and fill in
+# SECRET_KEY / POSTGRES_PASSWORD / SEARXNG_SECRET by hand (each has an
+# `openssl rand -hex N` one-liner in the comment above it) — the
+# backend refuses to boot on the placeholder values either way, with
+# an error telling you exactly what to fix.
+#
+# The defaults are tuned for "drop in and run" — ports stay out of
+# the well-known cluster so they don't collide with the Unraid web
+# UI, Portainer, the *arr stack, qBittorrent etc., and all stateful
+# data lives in ./data/ alongside the compose file so backups and
+# inspection are trivial.
 #
 # Override anything via .env (see .env.example). The most
 # common ones are:
@@ -29,34 +42,6 @@
 name: Promptly
 
 services:
-  # One-shot: generate the shared app secret on first boot so
-  # `docker compose up` works with NO .env at all. It writes a strong
-  # random SECRET_KEY to the `promptly-secrets` volume (mounted read-only
-  # by backend / arq-worker / collab / sandbox), and the apps read it only
-  # when their env didn't provide one — so an operator's .env (or the value
-  # ./install.sh seeds) always wins. Idempotent: an existing key is left
-  # untouched, so restarts and redeploys keep the same JWT/vault key.
-  secrets-init:
-    image: alpine:3.20
-    container_name: Promptly-SecretsInit
-    command:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        if [ ! -s /secrets/secret_key ]; then
-          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secrets/secret_key
-          chmod 0444 /secrets/secret_key
-          echo "[secrets-init] generated a new SECRET_KEY"
-        else
-          echo "[secrets-init] SECRET_KEY already present — leaving it"
-        fi
-    volumes:
-      - promptly-secrets:/secrets
-    restart: "no"
-    networks:
-      - promptly
-
   nginx:
     image: nginx:alpine
     container_name: Promptly-Nginx
@@ -155,14 +140,10 @@ services:
       # to inspect, and survives container recreation.
       - ./data/uploads:/app/uploads
       - ./data/whiteboard:/app/whiteboard
-      # Read-only: the auto-generated SECRET_KEY (used only if env is empty).
-      - promptly-secrets:/secrets:ro
     expose:
       - "8000"
     mem_limit: ${BACKEND_MEM_LIMIT:-4g}
     depends_on:
-      secrets-init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -229,10 +210,7 @@ services:
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/whiteboard:/app/whiteboard
-      - promptly-secrets:/secrets:ro
     depends_on:
-      secrets-init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -267,13 +245,9 @@ services:
       - DATABASE_URL=postgresql://promptly:${POSTGRES_PASSWORD:-promptly}@postgres:5432/promptly
       - BACKEND_INTERNAL_URL=http://backend:8000
       - SNAPSHOT_DEBOUNCE_MS=${COLLAB_SNAPSHOT_DEBOUNCE_MS:-3000}
-    volumes:
-      - promptly-secrets:/secrets:ro
     expose:
       - "1234"
     depends_on:
-      secrets-init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       backend:
@@ -514,10 +488,6 @@ services:
     tmpfs:
       - /sandbox/run:size=512m,uid=10001,gid=10001,mode=0700
       - /tmp:size=64m
-    # Read-only shared secret (used only if SANDBOX_SECRET env is empty, i.e.
-    # the zero-config no-.env path) — matches the backend's resolved key.
-    volumes:
-      - promptly-secrets:/secrets:ro
     cap_drop:
       - ALL
     security_opt:
@@ -526,9 +496,6 @@ services:
     mem_limit: 1g
     expose:
       - "8000"
-    depends_on:
-      secrets-init:
-        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)\""]
@@ -621,11 +588,3 @@ networks:
     name: promptly-sandbox
     driver: bridge
     internal: true
-
-volumes:
-  # Holds the auto-generated SECRET_KEY (see the `secrets-init` service).
-  # A named volume rather than a ./data bind so the key isn't accidentally
-  # committed or synced; it persists across `docker compose down`/`up` so the
-  # JWT/vault key is stable. Wiped only by `docker compose down -v`.
-  promptly-secrets:
-    name: promptly-secrets

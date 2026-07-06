@@ -1,7 +1,6 @@
 """Application settings loaded from environment variables."""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
 from pydantic import Field, model_validator
@@ -12,13 +11,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # whose DOMAIN is not "localhost" must override this — the app refuses
 # to boot otherwise (see ``validate_production_safety``).
 _INSECURE_SECRET_PLACEHOLDER = "insecure-dev-only-change-me"
-
-# Zero-config secret file: the ``secrets-init`` compose service generates a
-# strong random SECRET_KEY here on first boot and every backend container
-# mounts the volume read-only. Lets ``docker compose up`` work with no ``.env``
-# while the JWT/vault key stays strong, unique per install, and stable across
-# restarts. An explicit env/.env ``SECRET_KEY`` always wins over this file.
-_SECRET_KEY_FILE = os.environ.get("SECRET_KEY_FILE", "/secrets/secret_key")
 
 
 class InsecureProductionConfig(RuntimeError):
@@ -315,27 +307,14 @@ class Settings(BaseSettings):
         return self.DOMAIN.strip().lower() not in {"", "localhost", "127.0.0.1"}
 
     @model_validator(mode="after")
-    def _resolve_generated_secrets(self) -> "Settings":
-        """Fill secrets from the auto-generated shared file when the env didn't
-        provide them (the zero-config ``docker compose up`` path).
+    def _mirror_sandbox_secret(self) -> "Settings":
+        """The code-sandbox bearer reuses ``SECRET_KEY`` by default.
 
-        Only kicks in when ``SECRET_KEY`` is empty or the dev placeholder — an
-        operator-set value (env or ``.env``, incl. the install script's seed)
-        is left untouched. Runs before :meth:`validate_boot_safety`, so a
-        file-sourced key satisfies the boot guard just like an env one.
+        Compose already passes it through explicitly, but this keeps a
+        bare ``uvicorn``/non-compose launch (``.env`` sets ``SECRET_KEY``
+        only) working the same way, rather than backend and sandbox
+        landing on mismatched — or empty — bearers.
         """
-        if not self.SECRET_KEY or self.SECRET_KEY == _INSECURE_SECRET_PLACEHOLDER:
-            try:
-                candidate = (
-                    open(_SECRET_KEY_FILE, encoding="utf-8").read().strip()
-                )
-            except OSError:
-                candidate = ""
-            if len(candidate) >= 32:
-                self.SECRET_KEY = candidate
-        # The code-sandbox bearer reuses SECRET_KEY. When compose passed it
-        # through empty (no .env), mirror the resolved value so backend and
-        # sandbox still share a secret rather than both landing on "".
         if not self.CODE_SANDBOX_SECRET:
             self.CODE_SANDBOX_SECRET = self.SECRET_KEY
         return self
