@@ -79,6 +79,7 @@ export interface RegenerateOverride {
   model_id: string;
 }
 
+import { CollapsibleUserText } from "./CollapsibleUserText";
 import { MessageStats } from "./MessageStats";
 import {
   ToolActivityCard,
@@ -1126,7 +1127,9 @@ function MessageBubbleImpl({
             )}
           >
             {isUser ? (
-              renderMentionText(content)
+              <CollapsibleUserText>
+                {renderMentionText(content)}
+              </CollapsibleUserText>
             ) : (
               <>
                 {thinking != null && (
