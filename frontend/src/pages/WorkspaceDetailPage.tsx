@@ -1760,11 +1760,11 @@ function NotebookTabs({
               }}
               onDragEnd={() => setDragId(null)}
               className={cn(
-                "group inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition",
+                "group inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition",
                 canEdit && "cursor-grab active:cursor-grabbing",
                 dragId === p.id && "opacity-50",
                 active
-                  ? "bg-[var(--accent)]/15 text-[var(--text)]"
+                  ? "bg-[var(--accent)] text-white"
                   : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] "
               )}
             >

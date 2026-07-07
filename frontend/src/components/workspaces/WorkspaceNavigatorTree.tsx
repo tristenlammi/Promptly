@@ -1704,7 +1704,11 @@ function TreeRow({
             <span className="w-3 shrink-0" aria-hidden />
           )}
 
-          <NodeIcon node={node} expanded={expanded || !!isDropParent} />
+          <NodeIcon
+            node={node}
+            expanded={expanded || !!isDropParent}
+            selected={isSelected}
+          />
 
           {renaming ? (
             <input
@@ -1852,9 +1856,11 @@ function TreeRow({
 function NodeIcon({
   node,
   expanded,
+  selected = false,
 }: {
   node: WorkspaceItemNode;
   expanded: boolean;
+  selected?: boolean;
 }) {
   // Respect an explicit emoji icon if the node carries one. Lucide names
   // would need a registry to resolve; emoji renders directly, which is
@@ -1862,35 +1868,39 @@ function NodeIcon({
   if (node.icon && isEmoji(node.icon)) {
     return <span className="shrink-0 text-sm leading-none">{node.icon}</span>;
   }
-  // Soft per-kind tints so the rail scans by colour, echoing the Drive's
-  // type-coloured icons (folders match its accent-coloured folders). Kept to
-  // the icons only — row backgrounds stay reserved for selection/hover/drop.
   const base = "h-4 w-4 shrink-0";
+  // Monochrome by kind — the item type is legible from the icon SHAPE, so
+  // colour is reserved to mean something: the accent marks folders (the
+  // structural anchor, echoing the Drive's accent folders) and the selected
+  // row. Kinds scanning as six saturated hues made the rail read as a
+  // different, busier product than the calm overview.
+  const tint =
+    node.kind === "folder" || selected
+      ? "text-[var(--accent)]"
+      : "text-[var(--text-muted)]";
   switch (node.kind) {
-    case "folder": {
-      const cls = cn(base, "text-[var(--accent)]");
+    case "folder":
       return expanded ? (
-        <FolderOpen className={cls} />
+        <FolderOpen className={cn(base, tint)} />
       ) : (
-        <Folder className={cls} />
+        <Folder className={cn(base, tint)} />
       );
-    }
     case "chat":
-      return <MessageSquare className={cn(base, "text-sky-500/90")} />;
+      return <MessageSquare className={cn(base, tint)} />;
     case "canvas":
-      return <Shapes className={cn(base, "text-fuchsia-500/80")} />;
+      return <Shapes className={cn(base, tint)} />;
     case "board":
-      return <Columns3 className={cn(base, "text-violet-500/90")} />;
+      return <Columns3 className={cn(base, tint)} />;
     case "sheet":
-      return <Table2 className={cn(base, "text-emerald-500/90")} />;
+      return <Table2 className={cn(base, tint)} />;
     case "container":
-      return <Layers className={cn(base, "text-indigo-400/90")} />;
+      return <Layers className={cn(base, tint)} />;
     case "task":
       // A clock reads "scheduled"; reserve the bolt for the context flag.
-      return <Clock className={cn(base, "text-rose-500/80")} />;
+      return <Clock className={cn(base, tint)} />;
     case "note":
     default:
-      return <FileText className={cn(base, "text-amber-500/90")} />;
+      return <FileText className={cn(base, tint)} />;
   }
 }
 

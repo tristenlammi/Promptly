@@ -60,8 +60,13 @@ export function WorkspaceCard({
   return (
     <div
       className={cn(
-        "group relative flex min-h-[170px] flex-col justify-between overflow-hidden rounded-card border p-4 transition",
-        "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]/40",
+        "group relative flex min-h-[170px] flex-col justify-between overflow-hidden rounded-card border p-4",
+        "transition duration-150 will-change-transform",
+        // Lift + shadow on hover — the resting border is intentionally faint,
+        // so a border-colour-only hover was barely perceptible and the grid
+        // felt static.
+        "border-[var(--border)] bg-[var(--surface)]",
+        "hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-lg",
         isArchived && "opacity-80",
         isCollaborator && "border-[var(--accent)]/30"
       )}

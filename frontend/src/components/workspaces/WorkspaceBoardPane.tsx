@@ -80,9 +80,11 @@ const DEFAULT_COLUMNS: BoardColumn[] = [
 const genColId = () => "c_" + Math.random().toString(36).slice(2, 9);
 
 const PRIORITY_META: Record<TaskPriority, { dot: string; label: string }> = {
-  high: { dot: "bg-red-500", label: "High priority" },
-  medium: { dot: "bg-amber-400", label: "Medium priority" },
-  low: { dot: "bg-slate-400", label: "Low priority" },
+  // Semantic tokens (theme-aware) rather than raw Tailwind hues, so the
+  // board's status colours match the rest of the app in both themes.
+  high: { dot: "bg-[var(--danger)]", label: "High priority" },
+  medium: { dot: "bg-[var(--warning)]", label: "Medium priority" },
+  low: { dot: "bg-[var(--text-muted)]", label: "Low priority" },
 };
 const PRIORITY_RANK: Record<TaskPriority, number> = {
   high: 0,
