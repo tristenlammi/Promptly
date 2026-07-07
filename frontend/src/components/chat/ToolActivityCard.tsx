@@ -337,14 +337,21 @@ export function ToolActivityCard({
 }) {
   const [open, setOpen] = useState(false);
 
-  const running = streaming && steps.some((s) => s.status === "pending");
-  const current = running
+  // The card is "in progress" for the whole stream, NOT only while a tool
+  // call is mid-flight. Keying the layout on "is a step pending" made it
+  // strobe open/closed between tool calls: for a beat between one call
+  // finishing and the next starting (and while the final answer streams),
+  // no step is pending, so it fell through to the collapsed finished view,
+  // then snapped back when the next call began. Gate on `streaming` so the
+  // live card stays put until the turn actually ends.
+  const inProgress = streaming;
+  const current = inProgress
     ? steps.find((s) => s.status === "pending") ?? null
     : null;
 
   // A live run_agents fan-out owns the card: show the per-agent view
   // (the mockup) rather than a single "Running agents…" line.
-  const liveAgents = running
+  const liveAgents = inProgress
     ? steps.find(
         (s) =>
           s.status === "pending" &&
@@ -373,28 +380,37 @@ export function ToolActivityCard({
     return <AgentFanout agents={liveAgents} />;
   }
 
-  // ---- While running: live header + settled timeline, always open ----
-  if (running) {
-    const info = current ? infoFor(current.name) : GENERIC_INFO;
+  // ---- While the turn is in progress: live header + settled timeline,
+  //      always open. Between tool calls (and while the final answer
+  //      streams) no step is pending — show a neutral "Working…" header
+  //      instead of collapsing, so the card never strobes. ----
+  if (inProgress) {
+    const info = current ? infoFor(current.name) : null;
     const arg = current ? stepArg(current) : null;
     return (
       <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
         <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--text-muted)]">
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
           <span className="truncate">
-            <span className="text-[var(--text)]">{info.verb}</span>
-            {arg && (
-              <span className="text-[var(--text-muted)]">
-                {" "}
-                <span className="text-[var(--text)]">{arg}</span>
-              </span>
-            )}
-            …
-            {current?.progressMessage && (
-              <span className="text-[var(--text-muted)]">
-                {" · "}
-                {current.progressMessage}
-              </span>
+            {info ? (
+              <>
+                <span className="text-[var(--text)]">{info.verb}</span>
+                {arg && (
+                  <span className="text-[var(--text-muted)]">
+                    {" "}
+                    <span className="text-[var(--text)]">{arg}</span>
+                  </span>
+                )}
+                …
+                {current?.progressMessage && (
+                  <span className="text-[var(--text-muted)]">
+                    {" · "}
+                    {current.progressMessage}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-[var(--text)]">Working…</span>
             )}
           </span>
         </div>
