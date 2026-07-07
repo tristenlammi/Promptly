@@ -8,14 +8,16 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { cn } from "@/utils/cn";
 import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  ArrowUpRight,
   FileText,
   FolderX,
   ChevronRight,
@@ -24,10 +26,11 @@ import {
   Link2,
   Loader2,
   MessageSquare,
+  PenTool,
   Plus,
   Search,
   Shapes,
-  Sparkles,
+  StickyNote,
   Table2,
   Share2,
   Upload,
@@ -89,9 +92,13 @@ import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
+import {
+  ItemPreviewContext,
+  useItemPreview,
+} from "@/components/workspaces/itemPreviewContext";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
-import { workspacesApi, type WorkspaceItemNode } from "@/api/workspaces";
+import { type WorkspaceItemNode } from "@/api/workspaces";
 import { apiErrorMessage } from "@/utils/apiError";
 import {
   clearPendingHighlight,
@@ -317,12 +324,30 @@ export function WorkspaceDetailPage() {
     }
   };
 
+  // Item-link preview (0148): clicking an @-mention pill (note) or a linked
+  // shape (canvas) opens the item in a modal rather than jumping to it.
+  // Resolve the full tree node so the preview knows the item's title/ref.
+  const [previewNode, setPreviewNode] = useState<WorkspaceItemNode | null>(
+    null
+  );
+  const handlePreview = useCallback(
+    (node: WorkspaceItemNode) => {
+      const full = tree ? findNode(tree, node.id) : null;
+      setPreviewNode(full ?? node);
+    },
+    [tree, findNode]
+  );
+  const openPreviewFully = (node: WorkspaceItemNode) => {
+    setPreviewNode(null);
+    handleSelect(node);
+  };
+
   // Desktop-only surface by design — the fixed navigator + item panes
   // don't fit a phone. Direct links get a friendly notice.
   if (isMobile) return <WorkspaceMobileGate />;
 
   return (
-    <>
+    <ItemPreviewContext.Provider value={handlePreview}>
       <TopNav
         title={workspace?.title ?? "Workspace"}
         subtitle={
@@ -695,7 +720,127 @@ export function WorkspaceDetailPage() {
           }}
         />
       )}
-    </>
+
+      <ItemPreviewModal
+        node={previewNode}
+        workspaceId={id}
+        canEdit={canEdit && !isArchived}
+        onOpenFully={openPreviewFully}
+        onClose={() => setPreviewNode(null)}
+      />
+    </ItemPreviewContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Item preview modal (0148)
+// ---------------------------------------------------------------------
+
+/** Icon + label per item kind for the preview modal header. */
+const KIND_META: Partial<
+  Record<WorkspaceItemNode["kind"], { icon: typeof FileText; label: string }>
+> = {
+  note: { icon: StickyNote, label: "Note" },
+  canvas: { icon: PenTool, label: "Canvas" },
+  board: { icon: Columns3, label: "Board" },
+  sheet: { icon: Table2, label: "Sheet" },
+  chat: { icon: MessageSquare, label: "Chat" },
+  container: { icon: Layers, label: "Notebook" },
+  task: { icon: Zap, label: "Automation" },
+};
+
+/**
+ * Lightweight modal preview of a workspace item, opened by clicking an
+ * ``@``-mention pill in a note or a linked shape on a canvas. Renders the
+ * SAME kind-switch (`WorkspaceItemView`) the panes use, so note / canvas /
+ * board / sheet / chat all preview. An "Open" button navigates to the item
+ * fully (in the main pane); the item stays editable, so this is a quick peek
+ * that can become a full open in one click.
+ */
+function ItemPreviewModal({
+  node,
+  workspaceId,
+  canEdit,
+  onOpenFully,
+  onClose,
+}: {
+  node: WorkspaceItemNode | null;
+  workspaceId: string;
+  canEdit: boolean;
+  onOpenFully: (node: WorkspaceItemNode) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!node) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [node, onClose]);
+
+  if (!node) return null;
+  const Icon = KIND_META[node.kind]?.icon ?? FileText;
+  const kindLabel = KIND_META[node.kind]?.label ?? "Item";
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        aria-label="Close preview"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Preview ${node.title || kindLabel}`}
+        className="relative flex h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-xl"
+      >
+        <header className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
+          <Icon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          <span className="truncate text-sm font-semibold text-[var(--text)]">
+            {node.title || `Untitled ${kindLabel.toLowerCase()}`}
+          </span>
+          <span className="shrink-0 rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            {kindLabel}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onOpenFully(node)}
+              className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--accent-hover)]"
+            >
+              <ArrowUpRight className="h-3.5 w-3.5" />
+              Open
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <WorkspaceItemView
+            key={node.id}
+            node={node}
+            workspaceId={workspaceId}
+            onOpenItem={onOpenFully}
+            onClose={onClose}
+            canEdit={canEdit}
+          />
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1152,6 +1297,10 @@ function WorkspaceNotePane({
   );
   const wikiLink = useMemo(() => ({ items: wikiItems }), [wikiItems]);
 
+  // Clicking an item link (a ``@``-mention pill or a ``[[`` wiki-link) opens
+  // the item in the preview modal when a handler is available, falling back to
+  // opening it fully otherwise.
+  const preview = useItemPreview();
   const handleEditorClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const anchor = (e.target as HTMLElement | null)?.closest("a");
@@ -1161,7 +1310,7 @@ function WorkspaceNotePane({
       e.preventDefault();
       e.stopPropagation();
       const known = linkables.find((n) => n.id === parsed.item);
-      onOpenItem(
+      const target =
         known ?? {
           id: parsed.item,
           kind: parsed.kind as WorkspaceItemNode["kind"],
@@ -1171,10 +1320,10 @@ function WorkspaceNotePane({
           position: 0,
           indexing_status: null,
           children: [],
-        }
-      );
+        };
+      (preview ?? onOpenItem)(target);
     },
-    [linkables, onOpenItem]
+    [linkables, onOpenItem, preview]
   );
 
   // Deep citation (4.2): a citation/search hit that opened this note may
@@ -1281,11 +1430,6 @@ function WorkspaceNotePane({
           wikiLink={wikiLink}
         />
       </div>
-      <RelatedItemsStrip
-        workspaceId={workspaceId}
-        itemId={node.id}
-        onOpenItem={onOpenItem}
-      />
       <BacklinksPanel
         workspaceId={workspaceId}
         itemId={node.id}
@@ -1868,57 +2012,6 @@ function BacklinksPanel({
 /** Embedding-nearest neighbours of the open note (Batch 4.5) — the
  *  knowledge-graph-without-discipline strip. Hidden when embeddings are
  *  off or nothing clears the relevance floor. */
-function RelatedItemsStrip({
-  workspaceId,
-  itemId,
-  onOpenItem,
-}: {
-  workspaceId: string;
-  itemId: string;
-  onOpenItem: (node: WorkspaceItemNode) => void;
-}) {
-  const { data } = useQuery({
-    queryKey: ["workspaces", "related", workspaceId, itemId],
-    queryFn: () => workspacesApi.related(workspaceId, itemId),
-    staleTime: 5 * 60_000,
-  });
-  const items = data?.items ?? [];
-  if (items.length === 0) return null;
-  return (
-    <div className="border-t border-[var(--border)] px-4 py-2.5">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        <Sparkles className="h-3 w-3" />
-        Related
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((r) => (
-          <button
-            key={r.item_id}
-            type="button"
-            onClick={() =>
-              onOpenItem({
-                id: r.item_id,
-                kind: r.kind as WorkspaceItemNode["kind"],
-                ref_id: r.ref_id,
-                title: r.title,
-                icon: null,
-                position: 0,
-                indexing_status: null,
-                children: [],
-              })
-            }
-            className="inline-flex max-w-xs items-center gap-1.5 truncate rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs text-[var(--text)] transition hover:bg-[var(--accent)]/10"
-            title={`${r.title} — related by meaning`}
-          >
-            <Sparkles className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
-            <span className="truncate">{r.title || "Untitled"}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /**
  * Inline frame for a selected canvas item. Unlike the note pane (which
  * pops the document editor as a modal), the canvas renders a real inline

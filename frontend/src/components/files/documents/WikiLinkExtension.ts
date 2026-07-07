@@ -49,6 +49,11 @@ export interface WikiLinkOptions {
 }
 
 export const WikiLinkPluginKey = new PluginKey("wikiLink");
+/** Second trigger — ``@`` — sharing the wiki-link machinery. Same item
+ *  targets, same relative-href Link mark; only the trigger char differs, so
+ *  ``@Kitchen`` and ``[[Kitchen`` produce identical links. Needs its own
+ *  plugin key so the two Suggestion plugins don't collide. */
+export const MentionPluginKey = new PluginKey("wikiMention");
 
 /** Build the in-app relative href the Link mark carries. Relative on
  *  purpose — survives the Yjs → HTML → bleach snapshot pipeline, and the
@@ -241,15 +246,21 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
 
   addProseMirrorPlugins() {
     const extensionThis = this;
-    const suggestion: Omit<SuggestionOptions<WikiTarget>, "editor"> = {
-      pluginKey: WikiLinkPluginKey,
-      char: "[[",
-      // Trigger anywhere (after a word, at line start, …) — wiki-links are
-      // commonly typed mid-sentence, so don't require a leading space.
-      allowedPrefixes: null,
-      // Query is the run of non-whitespace after ``[[``; substring-filter
-      // server-side. (Allowing spaces would make the greedy regex run to
-      // end-of-line since there's no closing ``]]`` token to anchor on.)
+    // One suggestion config, parameterised by trigger char + plugin key, so
+    // ``[[`` and ``@`` share every behaviour (items, insert command, popup).
+    const makeSuggestion = (
+      char: string,
+      pluginKey: PluginKey
+    ): Omit<SuggestionOptions<WikiTarget>, "editor"> => ({
+      pluginKey,
+      char,
+      // ``[[`` triggers anywhere (wiki-links are typed mid-word); ``@`` only
+      // at line-start or after a space, so it doesn't fire inside emails
+      // (``foo@bar``) — mirroring the chat composer's ``(?:^|\s)@`` rule.
+      allowedPrefixes: char === "@" ? [" "] : null,
+      // Query is the run of non-whitespace after the trigger; substring-filter
+      // client-side. (Allowing spaces would make the greedy regex run to
+      // end-of-line since there's no closing token to anchor on.)
       allowSpaces: false,
 
       items: ({ query }) => extensionThis.options.items(query),
@@ -325,13 +336,11 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
           },
         };
       },
-    };
+    });
 
     return [
-      Suggestion({
-        editor: this.editor,
-        ...suggestion,
-      }),
+      Suggestion({ editor: this.editor, ...makeSuggestion("[[", WikiLinkPluginKey) }),
+      Suggestion({ editor: this.editor, ...makeSuggestion("@", MentionPluginKey) }),
     ];
   },
 });

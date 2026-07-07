@@ -20,6 +20,7 @@ import {
   parseWikiHref,
 } from "@/components/files/documents/WikiLinkExtension";
 import { ErrorState } from "@/components/shared/Callout";
+import { useItemPreview } from "./itemPreviewContext";
 import { ItemPaneHeader } from "./ItemPaneHeader";
 import { PresenceChips, usePresencePeers } from "./PresenceChips";
 import { WorkspaceItemPicker } from "./WorkspaceItemPicker";
@@ -173,6 +174,8 @@ export function WorkspaceCanvasPane({
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageSel, setImageSel] = useState<ImageSelection | null>(null);
   const [bgState, setBgState] = useState<BgState>("idle");
+  // Item-link clicks open the shared preview modal when available (0148).
+  const previewItem = useItemPreview();
   // Cross-item linking (Phase 8) — a single selected shape can be linked
   // to a workspace item. Only wired when the pane knows its workspace.
   const linkingEnabled = !readOnly && !!workspaceId && !!onOpenItem;
@@ -329,17 +332,19 @@ export function WorkspaceCanvasPane({
     [linkSel, workspaceId, setElementLink]
   );
 
-  // Route a click on an element's link: workspace-item hrefs open inline;
-  // anything else falls through to Excalidraw's default (new tab).
+  // Route a click on an element's link: workspace-item hrefs open in the
+  // preview modal (falling back to inline open when no preview handler is in
+  // context); anything else falls through to Excalidraw's default (new tab).
   const handleLinkOpen = useCallback(
     (
       element: { link?: string | null },
       event: { preventDefault: () => void }
     ) => {
       const parsed = parseWikiHref(element.link);
-      if (!parsed || !onOpenItem) return;
+      const open = previewItem ?? onOpenItem;
+      if (!parsed || !open) return;
       event.preventDefault();
-      onOpenItem({
+      open({
         id: parsed.item,
         kind: parsed.kind as WorkspaceItemNode["kind"],
         ref_id: parsed.ref,
@@ -350,7 +355,7 @@ export function WorkspaceCanvasPane({
         children: [],
       });
     },
-    [onOpenItem]
+    [onOpenItem, previewItem]
   );
 
   // Clear any pending debounce on unmount / canvas swap.
