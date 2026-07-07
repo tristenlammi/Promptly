@@ -350,6 +350,7 @@ export function WorkspaceDetailPage() {
     <ItemPreviewContext.Provider value={handlePreview}>
       <TopNav
         title={workspace?.title ?? "Workspace"}
+        titleSize="lg"
         subtitle={
           workspace?.description
             ? workspace.description

@@ -12,9 +12,20 @@ interface TopNavProps {
   subtitle?: string;
   actions?: ReactNode;
   className?: string;
+  /** ``"lg"`` gives the title real page-heading prominence — used where the
+   *  header IS the page's primary title (e.g. a workspace), so the title
+   *  doesn't have to be re-printed larger further down the page. Defaults to
+   *  the compact size every other surface uses. */
+  titleSize?: "default" | "lg";
 }
 
-export function TopNav({ title, subtitle, actions, className }: TopNavProps) {
+export function TopNav({
+  title,
+  subtitle,
+  actions,
+  className,
+  titleSize = "default",
+}: TopNavProps) {
   const titleIsString = typeof title === "string";
   const isMobile = useIsMobile();
   const openMobileNav = useUIStore((s) => s.openMobileNav);
@@ -52,7 +63,10 @@ export function TopNav({ title, subtitle, actions, className }: TopNavProps) {
         <div className="min-w-0 flex-1">
           <h1
             className={cn(
-              "text-sm font-semibold tracking-tight",
+              "font-semibold tracking-tight",
+              titleSize === "lg"
+                ? "text-lg leading-tight"
+                : "text-sm",
               titleIsString && "truncate"
             )}
           >

@@ -751,7 +751,7 @@ export function WorkspaceBoardPane({
                   setDragId(null);
                 }}
                 className={cn(
-                  "flex w-[270px] shrink-0 flex-col rounded-lg border bg-[var(--surface)]/40 transition md:flex-1",
+                  "flex w-[270px] shrink-0 flex-col rounded-card border bg-[var(--surface)]/40 transition md:flex-1",
                   dropCol === col.id
                     ? "border-[var(--accent)] bg-[var(--accent)]/5"
                     : "border-[var(--border)]"
@@ -1400,7 +1400,7 @@ function BoardCard({
         onOpen();
       }}
       className={cn(
-        "group cursor-pointer overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg)] shadow-sm transition hover:border-[var(--accent)]",
+        "group cursor-pointer overflow-hidden rounded-card border border-[var(--border)] bg-[var(--bg)] shadow-[var(--shadow-sm)] transition hover:border-[var(--accent)]",
         canEdit && "active:cursor-grabbing",
         dragging && "opacity-40"
       )}

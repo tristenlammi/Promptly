@@ -73,7 +73,6 @@ import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
  */
 export function WorkspaceOverviewPane({
   workspaceId,
-  title,
   onOpenItem,
   canEdit,
   onOpenSettings,
@@ -192,16 +191,15 @@ export function WorkspaceOverviewPane({
     <div className="mx-auto w-full max-w-5xl px-6 py-8">
       {/* ---- Identity header ------------------------------------------ */}
       <div className="flex flex-wrap items-start justify-between gap-3">
+        {/* The workspace name is the page title in the top bar now (titleSize
+            "lg"), so the overview leads with context, not a duplicate title. */}
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">
-            {title}
-          </h1>
           {workspace?.description ? (
-            <p className="mt-1 max-w-xl text-sm text-[var(--text-muted)]">
+            <p className="max-w-xl text-sm text-[var(--text-muted)]">
               {workspace.description}
             </p>
           ) : (
-            <p className="mt-1 text-sm text-[var(--text-muted)]">
+            <p className="text-sm text-[var(--text-muted)]">
               Everything here — notes, boards, files, chats — feeds one
               project brain.
             </p>

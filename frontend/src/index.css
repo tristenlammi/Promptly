@@ -69,6 +69,13 @@
   --success: #059669;
   --success-bg: rgba(16, 185, 129, 0.12);
   --success-border: rgba(16, 185, 129, 0.38);
+  /* Elevation scale — one intentional set of shadows so depth reads
+     consistently (row < card/hover < menu/overlay), instead of the ad-hoc
+     mix of Tailwind's `shadow-sm` and `shadow-lg`. Theme-aware: dark needs
+     heavier shadows to register against the low-contrast surfaces. */
+  --shadow-sm: 0 1px 2px rgba(26, 26, 25, 0.06);
+  --shadow-md: 0 4px 16px -2px rgba(26, 26, 25, 0.10), 0 2px 4px rgba(26, 26, 25, 0.05);
+  --shadow-lg: 0 14px 34px -10px rgba(26, 26, 25, 0.18), 0 4px 8px rgba(26, 26, 25, 0.06);
 }
 
 html.dark {
@@ -96,6 +103,11 @@ html.dark {
   --danger: #F87171;
   --warning: #FBBF24;
   --success: #34D399;
+  /* Heavier elevation on dark so shadows register against the low-contrast
+     warm-dark surfaces (see the :root scale for the rationale). */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 4px 16px -2px rgba(0, 0, 0, 0.40), 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 16px 42px -12px rgba(0, 0, 0, 0.60), 0 4px 10px rgba(0, 0, 0, 0.35);
 }
 
 html,

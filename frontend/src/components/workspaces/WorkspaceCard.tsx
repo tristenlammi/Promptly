@@ -66,7 +66,7 @@ export function WorkspaceCard({
         // so a border-colour-only hover was barely perceptible and the grid
         // felt static.
         "border-[var(--border)] bg-[var(--surface)]",
-        "hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-lg",
+        "hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-[var(--shadow-lg)]",
         isArchived && "opacity-80",
         isCollaborator && "border-[var(--accent)]/30"
       )}
