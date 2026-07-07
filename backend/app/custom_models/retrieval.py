@@ -104,10 +104,20 @@ async def _similarity_search(
     qvec_literal: str,
     dim: int,
     k: int,
+    file_ids: list[uuid.UUID] | None = None,
 ) -> list[RetrievedChunk]:
     """Top-K cosine search within one owner scope. ``scope_col`` is the
-    knowledge_chunks owner column (``custom_model_id`` / ``workspace_id``)."""
+    knowledge_chunks owner column (``custom_model_id`` / ``workspace_id``).
+
+    ``file_ids`` optionally narrows the search to a specific set of source
+    files within the scope — used to give a workspace's authored items
+    (notes/boards) a guaranteed retrieval slice that a large pinned file
+    can't crowd out. Empty/None searches the whole scope."""
     column = f"embedding_{dim}"
+    # Optional per-file narrowing. Mirrors the ``= ANY(:param)`` uuid-array
+    # binding used elsewhere (chat.semantic_search) — asyncpg binds a
+    # ``list[uuid.UUID]`` straight to a uuid[] array, no cast needed.
+    file_filter = "AND kc.user_file_id = ANY(:fids)" if file_ids else ""
     # ``<=>`` is pgvector's cosine distance operator (smaller = more
     # similar). We return ``1 - distance`` as the human "score" so the
     # frontend can display percentages without knowing pgvector's
@@ -130,13 +140,19 @@ async def _similarity_search(
           -- chunks linger. Without this, a deleted board/note/sheet keeps
           -- feeding stale content into every answer.
           AND f.trashed_at IS NULL
+          {file_filter}
         ORDER BY kc.{column} <=> CAST(:qvec AS vector({dim}))
         LIMIT :k
         """
     )
-    result = await db.execute(
-        sql, {"qvec": qvec_literal, "sid": str(scope_id), "k": max(1, k)}
-    )
+    params: dict[str, object] = {
+        "qvec": qvec_literal,
+        "sid": str(scope_id),
+        "k": max(1, k),
+    }
+    if file_ids:
+        params["fids"] = file_ids
+    result = await db.execute(sql, params)
     return [
         RetrievedChunk(
             chunk_id=row["id"],
@@ -187,10 +203,12 @@ async def retrieve_workspace_context(
     workspace_id: uuid.UUID,
     query: str,
     top_k: int = 6,
+    file_ids: list[uuid.UUID] | None = None,
 ) -> list[RetrievedChunk]:
     """Top-K chunks most similar to ``query`` among a workspace's pinned,
     indexed files. Same graceful-degradation contract as
-    :func:`retrieve_context`."""
+    :func:`retrieve_context`. ``file_ids`` narrows the search to specific
+    source files (e.g. a workspace's authored items)."""
     query = (query or "").strip()
     if not query:
         return []
@@ -205,6 +223,7 @@ async def retrieve_workspace_context(
         qvec_literal=qvec_literal,
         dim=dim,
         k=top_k,
+        file_ids=file_ids,
     )
 
 

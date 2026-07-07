@@ -1944,45 +1944,83 @@ def _format_context_block(
     canvases: list[tuple[WorkspaceItem, "WorkspaceCanvas"]],
     boards: list[tuple[WorkspaceItem, UserFile]] | None = None,
     sheets: list[tuple[WorkspaceItem, "Spreadsheet"]] | None = None,
-) -> str | None:
+) -> tuple[str | None, list[uuid.UUID]]:
     """Full text of the workspace's notes + canvases + boards + sheets for
-    full-dump mode. Capped so a runaway set can't blow the context window
-    (retrieval takes over past the cap). ``None`` when there's nothing."""
-    sections: list[tuple[str, str]] = []
+    full-dump mode, capped so a runaway set can't blow the context window.
+
+    Returns ``(block, omitted_backing_file_ids)``. Under the cap this is the
+    full text of every item (identical to the old behaviour). Over the cap,
+    whole items are included until the budget is reached — items are **never
+    sliced mid-content** — and the rest are reported as omitted rather than
+    silently truncated. Their backing file ids let the caller recover the
+    query-relevant parts via retrieval, so nothing vanishes. ``(None, [])``
+    when there's nothing to inject."""
+    # (title, text, backing_file_id | None). The backing id is the
+    # knowledge_chunks source file so an omitted item can be recovered
+    # via retrieval scoped to just these ids.
+    sections: list[tuple[str, str, uuid.UUID | None]] = []
     for it, uf in notes:
         text = (uf.content_text or "").strip()
         if text:
-            sections.append((it.title, text))
+            sections.append((it.title, text, uf.id))
     for it, c in canvases:
         text = (c.content_text or "").strip()
         if text:
-            sections.append((f"{it.title} (canvas)", text))
+            sections.append((f"{it.title} (canvas)", text, c.text_file_id))
     for it, uf in boards or []:
         text = (uf.content_text or "").strip()
         if text:
-            sections.append((f"{it.title} (board)", text))
+            sections.append((f"{it.title} (board)", text, uf.id))
     for it, s in sheets or []:
         text = (s.content_text or "").strip()
         if text:
-            sections.append((f"{it.title} (sheet)", text))
+            sections.append((f"{it.title} (sheet)", text, s.text_file_id))
     if not sections:
-        return None
+        return None, []
 
     header = (
         "The user's notes, canvases, boards, and sheets in this workspace. "
         "Treat them as authoritative context for this conversation:"
     )
     parts: list[str] = []
+    omitted_titles: list[str] = []
+    omitted_ids: list[uuid.UUID] = []
     used = 0
-    for title, text in sections:
+    for title, text, fid in sections:
         seg = f"\n\n## {title}\n{text}"
-        if used + len(seg) > _NOTES_FULLDUMP_CHAR_CAP:
-            seg = seg[: max(0, _NOTES_FULLDUMP_CHAR_CAP - used)]
-        parts.append(seg)
-        used += len(seg)
-        if used >= _NOTES_FULLDUMP_CHAR_CAP:
-            break
-    return header + "".join(parts)
+        if used + len(seg) <= _NOTES_FULLDUMP_CHAR_CAP:
+            parts.append(seg)
+            used += len(seg)
+        elif not parts:
+            # A single item larger than the entire budget: include it
+            # truncated at a whitespace boundary (clearly marked) rather
+            # than dropping it whole — nothing else is competing yet.
+            budget = max(0, _NOTES_FULLDUMP_CHAR_CAP - used)
+            clipped = seg[:budget]
+            cut = clipped.rfind(" ")
+            if cut > budget - 200:
+                clipped = clipped[:cut]
+            parts.append(
+                clipped + "\n\n…(truncated — full item available on request)"
+            )
+            used += len(clipped)
+        else:
+            omitted_titles.append(title)
+            if fid is not None:
+                omitted_ids.append(fid)
+
+    block = header + "".join(parts)
+    if omitted_titles:
+        shown = ", ".join(f"“{t}”" for t in omitted_titles[:12])
+        more = (
+            "" if len(omitted_titles) <= 12 else f" (+{len(omitted_titles) - 12} more)"
+        )
+        block += (
+            f"\n\n---\n{len(omitted_titles)} more item(s) in this workspace "
+            "aren't shown in full above due to the context limit: "
+            f"{shown}{more}. They're listed in the workspace map above."
+        )
+    return block, omitted_ids
 
 
 _MAP_KIND_LABEL = {
@@ -2174,9 +2212,32 @@ async def build_workspace_injection(
     # retrieval mode a big pinned file (e.g. a 600k-token PDF) would otherwise
     # dominate top-k and starve a two-task board or a small sheet out of the
     # context entirely. Retrieval then adds the large pinned files on top.
-    struct_block = _format_context_block(
+    struct_block, omitted_ids = _format_context_block(
         note_rows, canvas_rows, board_rows, sheet_rows
     )
+    # Authored items that overflowed the full-dump cap used to be silently
+    # sliced off. Instead, recover the query-relevant parts of just those
+    # items via a retrieval pass scoped to their backing files — so a big
+    # pinned file can't crowd them out and nothing vanishes. Embedder-only;
+    # with no embedder the overflow items stay listed in the workspace map.
+    if omitted_ids and cfg is not None:
+        recovered = await retrieve_workspace_context(
+            db,
+            workspace_id=workspace_id,
+            query=query,
+            top_k=WORKSPACE_RETRIEVAL_TOP_K,
+            file_ids=omitted_ids,
+        )
+        if excluded:
+            recovered = [c for c in recovered if c.user_file_id not in excluded]
+        if recovered:
+            excerpt_block = (
+                "Relevant excerpts from workspace items that were too long to "
+                "include in full above:\n\n" + format_retrieved_block(recovered)
+            )
+            struct_block = "\n\n".join(
+                p for p in (struct_block, excerpt_block) if p
+            )
 
     if not retrieval_active:
         # Full-dump: pinned files ride the attachment path; the authored
