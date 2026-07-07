@@ -66,8 +66,14 @@ The full tour — live demos included — is at **[chatpromptly.com](https://cha
 ## Updating
 
 ```bash
-git pull && ./install.sh   # re-running is always safe; keeps your secrets and data
+./update.sh                 # Linux/macOS  (pull + rebuild + recreate + reload nginx + health check)
+.\update.ps1                # Windows
 ```
+
+Re-running `./install.sh` still works and is safe (it keeps your secrets and
+data), but `update.sh` is preferred for updates: it reloads the bind-mounted
+nginx config, uses the right compose profiles so SearXNG/Ollama aren't
+dropped, and waits for the backend to come back healthy.
 
 ## Backup
 
