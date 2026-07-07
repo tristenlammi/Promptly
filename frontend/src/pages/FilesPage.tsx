@@ -53,6 +53,8 @@ import {
   formatRelativeTime,
   humanSize,
   kindLabel,
+  splitFileExt,
+  withFileExt,
 } from "@/components/files/helpers";
 import { DriveItemIcon } from "@/components/files/DriveItemIcon";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
@@ -2120,9 +2122,11 @@ function FileRow({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
+  // Rename edits the base name only (no extension); the real extension is
+  // re-attached on commit so the user never types ".pdf".
   const [rename, setRename] = useState<{ open: boolean; value: string }>({
     open: false,
-    value: file.filename,
+    value: splitFileExt(file.filename).base,
   });
   const [trashOpen, setTrashOpen] = useState(false);
   const renameFile = useRenameFile();
@@ -2131,10 +2135,11 @@ function FileRow({
   const unstarFile = useUnstarFile();
   // List view renames in place; grid keeps the modal.
   const [editing, setEditing] = useState(false);
-  const commitRename = (name: string) => {
+  const commitRename = (base: string) => {
     setEditing(false);
-    if (name !== file.filename)
-      void renameFile.mutateAsync({ id: file.id, filename: name, scope });
+    const full = withFileExt(base, file.filename);
+    if (full && full !== file.filename)
+      void renameFile.mutateAsync({ id: file.id, filename: full, scope });
   };
 
   const mutationItems: ContextMenuItem[] = [
@@ -2172,7 +2177,7 @@ function FileRow({
       label: "Rename",
       onClick: () =>
         layout === "grid"
-          ? setRename({ open: true, value: file.filename })
+          ? setRename({ open: true, value: splitFileExt(file.filename).base })
           : setEditing(true),
       disabled: !writable,
     },
@@ -2228,10 +2233,13 @@ function FileRow({
         title="Rename file"
         value={rename.value}
         onChange={(v) => setRename((r) => ({ ...r, value: v }))}
-        onClose={() => setRename({ open: false, value: file.filename })}
+        onClose={() =>
+          setRename({ open: false, value: splitFileExt(file.filename).base })
+        }
         onSubmit={async (v) => {
-          await renameFile.mutateAsync({ id: file.id, filename: v, scope });
-          setRename({ open: false, value: v });
+          const full = withFileExt(v, file.filename);
+          await renameFile.mutateAsync({ id: file.id, filename: full, scope });
+          setRename({ open: false, value: splitFileExt(full).base });
         }}
       />
 
@@ -2343,7 +2351,7 @@ function FileRow({
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <DriveItemIcon file={file} />
           <InlineRenameField
-            initial={file.filename}
+            initial={splitFileExt(file.filename).base}
             onCommit={commitRename}
             onCancel={() => setEditing(false)}
           />

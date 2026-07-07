@@ -52,17 +52,36 @@ export function kindLabel(file: FileItem): string {
 
 /** User-facing file name for the Drive list / details / previews.
  *
- *  Native Drive Documents (TipTap + Y.js) are physically stored as
- *  ``*.html`` blobs, but that extension is an implementation detail —
- *  the Kind column already says "Doc". Strip the trailing ``.html`` /
- *  ``.htm`` for documents so the user sees a clean title ("Tasklist"),
- *  while genuinely uploaded files keep their real extension. */
+ *  The Kind column already names the file type, so the extension in the
+ *  title is redundant noise — we strip it for display (and for renaming, so
+ *  the user never has to type ``.pdf``). The real extension is preserved on
+ *  the stored ``filename`` and re-appended on rename via ``withFileExt``. */
 export function displayFileName(file: FileItem): string {
-  const name = file.filename || "";
-  if (file.source_kind === "document") {
-    return name.replace(/\.html?$/i, "");
+  return splitFileExt(file.filename || "").base;
+}
+
+/** Split a filename into its base + trailing extension (``".pdf"`` incl. the
+ *  dot). Only treats a short alphanumeric run after a non-leading dot as an
+ *  extension, so hidden files (``.env``) and dotted names without a real
+ *  extension (``report v1.2 draft``) are left whole. */
+export function splitFileExt(filename: string): { base: string; ext: string } {
+  const m = filename.match(/\.[A-Za-z0-9]{1,8}$/);
+  if (m && m.index !== undefined && m.index > 0) {
+    return { base: filename.slice(0, m.index), ext: m[0] };
   }
-  return name;
+  return { base: filename, ext: "" };
+}
+
+/** Re-attach the original file's extension to a user-typed base name, so a
+ *  rename of "Birth Certificate" keeps ".pdf". No-ops when the user already
+ *  typed the extension, or when the original had none. */
+export function withFileExt(base: string, originalFilename: string): string {
+  const trimmed = base.trim();
+  const { ext } = splitFileExt(originalFilename);
+  if (!ext) return trimmed;
+  return trimmed.toLowerCase().endsWith(ext.toLowerCase())
+    ? trimmed
+    : trimmed + ext;
 }
 
 export function extractError(e: unknown): string {
