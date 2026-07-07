@@ -310,6 +310,7 @@ from app.mcp.router import router as mcp_admin_router  # noqa: E402
 from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E402
 from app.groups.router import router as groups_admin_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
+from app.chat.folders_router import router as chat_folders_router  # noqa: E402
 from app.chat.proposals_router import router as proposals_router  # noqa: E402
 from app.tasks.hooks_router import router as hooks_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
@@ -344,6 +345,11 @@ app.include_router(
     workspace_defaults_router,
     prefix="/api/workspace-defaults",
     tags=["workspace-defaults"],
+)
+# Personal chat folders (0148) — registered before the main chat router so
+# ``/api/chat/folders`` resolves to the folder CRUD, not a conversation path.
+app.include_router(
+    chat_folders_router, prefix="/api/chat/folders", tags=["chat-folders"]
 )
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 # Workspace write-back proposals (Batch 4.1) — conversation-scoped, so

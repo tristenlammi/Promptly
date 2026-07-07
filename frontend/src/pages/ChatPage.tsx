@@ -39,6 +39,7 @@ import {
   useBranchConversation,
   useConversationQuery,
 } from "@/hooks/useConversations";
+import { useChatFoldersQuery } from "@/hooks/useChatFolders";
 import type { AttachedFile } from "@/components/chat/AttachmentPickerModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -112,6 +113,22 @@ export function ChatPage({
     if (raw === "ephemeral" || raw === "one_hour") return raw;
     return null;
   }, [id, location.search]);
+  // Chat folders (0148) — ``/chat?folder=<id>`` starts a new chat inside a
+  // folder (from the folder's + button). The id is threaded into create so
+  // the server places the chat and applies the folder's default model; the
+  // effect below also pre-selects that model in the composer.
+  const pendingFolderId = useMemo<string | null>(() => {
+    if (id) return null;
+    return new URLSearchParams(location.search).get("folder");
+  }, [id, location.search]);
+  const { data: chatFolders } = useChatFoldersQuery();
+  const pendingFolder = useMemo(
+    () =>
+      pendingFolderId
+        ? chatFolders?.find((f) => f.id === pendingFolderId) ?? null
+        : null,
+    [pendingFolderId, chatFolders]
+  );
   const setActive = useChatStore((s) => s.setActive);
   const setMessages = useChatStore((s) => s.setMessages);
   const replaceMessage = useChatStore((s) => s.replaceMessage);
@@ -425,7 +442,22 @@ export function ChatPage({
     Boolean(chatWorkspaceId) && chatWorkspace?.memory_mode !== "off";
   useEffect(() => {
     if (!id) {
-      useModelStore.getState().applyDefault();
+      // New chat in a folder: seed the folder's default model (a
+      // pre-selection the user can still change). Falls back to the normal
+      // personal/admin default when the folder has no model.
+      if (
+        pendingFolder?.default_provider_id &&
+        pendingFolder?.default_model_id
+      ) {
+        useModelStore
+          .getState()
+          .setSelection(
+            pendingFolder.default_provider_id,
+            pendingFolder.default_model_id
+          );
+      } else {
+        useModelStore.getState().applyDefault();
+      }
       return;
     }
     const store = useModelStore.getState();
@@ -452,6 +484,7 @@ export function ChatPage({
     convModelId,
     wsDefaultProviderId,
     wsDefaultModelId,
+    pendingFolder,
   ]);
 
   // Hydrate the reasoning chip from the loaded conversation whenever
@@ -688,6 +721,7 @@ export function ChatPage({
                 ? reasoningEffort
                 : undefined,
             temporary_mode: pendingTemporaryMode,
+            folder_id: pendingFolderId,
           });
           upsertConversation(conv);
           // Preseed the conversation-detail query cache so the chat page
@@ -1353,6 +1387,7 @@ export function ChatPage({
               const newConv = await chatApi.create({
                 provider_id: selectedModel.provider_id,
                 model_id: selectedModel.model_id,
+                folder_id: pendingFolderId,
               });
               convId = String(newConv.id);
               setActive(convId);

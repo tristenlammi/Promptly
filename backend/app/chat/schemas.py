@@ -176,6 +176,10 @@ class ConversationSummary(BaseModel):
     # under a :class:`Workspace`; surfaced so the sidebar can group
     # chats by workspace and the breadcrumb can render "Workspace → Chat".
     workspace_id: uuid.UUID | None = None
+    # Chat folders (0148) — non-NULL when this personal chat lives in a
+    # user-created folder. Drives the sidebar grouping. Mutually exclusive
+    # with ``workspace_id`` (a chat in a workspace is never in a folder).
+    folder_id: uuid.UUID | None = None
     # Phase 1 — per-conversation custom instructions. Hydrated into the
     # chat header's "Instructions" editor so the owner can see / tweak
     # the per-chat steer. NULL / blank when unset.
@@ -222,6 +226,11 @@ class ConversationCreate(BaseModel):
     # files are included automatically on every send. Temporary chats
     # cannot belong to a workspace (the two lifecycles are in tension).
     workspace_id: uuid.UUID | None = None
+    # Chat folders (0148) — create this chat inside a personal folder. The
+    # folder's default model is applied when the payload omits a model, and
+    # the folder's live system prompt then shapes every send. Ignored when
+    # ``workspace_id`` is set (workspace chats aren't foldered).
+    folder_id: uuid.UUID | None = None
 
 
 class ConversationUpdate(BaseModel):
@@ -251,6 +260,12 @@ class ConversationUpdate(BaseModel):
     # any other value sets it (the router trims it). Capped so a runaway
     # paste can't blow up the system prompt.
     system_prompt: str | None = Field(default=None, max_length=8000)
+    # Chat folders (0148) — move this chat into / out of a personal folder.
+    # ``None`` (field absent) leaves it unchanged; an explicit ``null`` in
+    # the JSON removes it from its folder (back to top-level); a UUID moves
+    # it into that folder. The router validates folder ownership and clears
+    # it whenever the chat is moved into a workspace.
+    folder_id: uuid.UUID | None = None
     # Phase 9 — pause/resume auto-capture for this conversation.
     memory_capture_paused: bool | None = None
     # Convert a temporary chat into a permanent one ("Keep this chat").
@@ -583,3 +598,50 @@ class RegenerateMessageRequest(BaseModel):
     # pass an explicit cap when they want one.
     max_tokens: int | None = Field(default=None, ge=1, le=100_000)
     tools_enabled: bool = False
+
+
+# --------------------------------------------------------------------
+# Chat folders (0148)
+# --------------------------------------------------------------------
+
+
+class ChatFolderBase(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    name: str = Field(min_length=1, max_length=120)
+    # Live default system prompt for chats in the folder. Empty = none.
+    system_prompt: str | None = Field(default=None, max_length=8000)
+    default_model_id: str | None = Field(default=None, max_length=255)
+    default_provider_id: uuid.UUID | None = None
+
+
+class ChatFolderCreate(ChatFolderBase):
+    pass
+
+
+class ChatFolderUpdate(BaseModel):
+    """PATCH payload — every field optional; ``model_fields_set`` decides
+    what to touch so a rename doesn't wipe the model default, and an explicit
+    ``null`` clears the prompt / model."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    system_prompt: str | None = Field(default=None, max_length=8000)
+    default_model_id: str | None = Field(default=None, max_length=255)
+    default_provider_id: uuid.UUID | None = None
+
+
+class ChatFolderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    name: str
+    system_prompt: str | None = None
+    default_model_id: str | None = None
+    default_provider_id: uuid.UUID | None = None
+    # Number of active (non-archived) chats currently in the folder —
+    # rendered as a count chip next to the folder name in the sidebar.
+    chat_count: int = 0
+    created_at: datetime
+    updated_at: datetime

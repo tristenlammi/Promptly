@@ -72,6 +72,11 @@ export interface CreateConversationPayload {
   /** Phase P1 — create under a workspace. Temporary chats can't
    *  belong to a workspace (enforced server-side). */
   workspace_id?: string | null;
+  /** Chat folders (0148) — create this chat inside a personal folder. The
+   *  folder's default model is applied when no model is passed, and its
+   *  live system prompt then shapes every send. Ignored server-side when a
+   *  ``workspace_id`` is also set. */
+  folder_id?: string | null;
 }
 
 export interface UpdateConversationPayload {
@@ -88,6 +93,10 @@ export interface UpdateConversationPayload {
   /** Phase 1 — per-conversation custom instructions. Pass a string to
    *  set (empty string clears it); omit to leave unchanged. */
   system_prompt?: string;
+  /** Chat folders (0148) — move into / out of a personal folder. Pass a
+   *  folder id to move; pass ``null`` to remove it from its folder; omit to
+   *  leave unchanged. */
+  folder_id?: string | null;
   /** Phase 9 — pause / resume auto-memory capture for this conversation. */
   memory_capture_paused?: boolean;
   /** "Keep this chat" — pass ``null`` to promote a temporary chat to a

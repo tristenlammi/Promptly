@@ -9,6 +9,7 @@ import {
   Download,
   FileCode,
   FileText,
+  Folder,
   LayoutGrid,
   FolderMinus,
   Loader2,
@@ -17,6 +18,7 @@ import {
 
 import { chatApi } from "@/api/chat";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
+import { useChatFoldersQuery } from "@/hooks/useChatFolders";
 import { useUpdateConversation } from "@/hooks/useConversations";
 import { cn } from "@/utils/cn";
 
@@ -32,6 +34,9 @@ interface Props {
   /** Workspace this chat currently belongs to (``null`` for a standalone
    *  chat). Drives the checkmark + "Remove from workspace" affordance. */
   currentWorkspaceId: string | null;
+  /** Personal folder this chat is in (``null`` = ungrouped). Drives the
+   *  "Move to folder" checkmark + "Remove from folder" affordance. */
+  currentFolderId: string | null;
   /** Current pinned state — drives the Pin/Unpin label. */
   pinned: boolean;
   /** Toggle the pin. The row owns the mutation; the menu just fires it. */
@@ -62,6 +67,7 @@ const MENU_MIN_WIDTH = 240;
 export function ConversationRowContextMenu({
   conversationId,
   currentWorkspaceId,
+  currentFolderId,
   pinned,
   onTogglePin,
   onArchive,
@@ -76,11 +82,13 @@ export function ConversationRowContextMenu({
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Phase 3.2 — "Move to workspace" is a second level inside this menu.
-  const [view, setView] = useState<"main" | "move">("main");
+  // Phase 3.2 — "Move to workspace"; 0148 — "Move to folder". Both are
+  // second-level views inside this menu.
+  const [view, setView] = useState<"main" | "move" | "folder">("main");
   // Busy target id during a move; ``"__remove__"`` while detaching.
   const [movingTo, setMovingTo] = useState<string | null>(null);
   const workspaces = useWorkspaces({ archived: false });
+  const { data: folders } = useChatFoldersQuery();
   const updateConv = useUpdateConversation();
   const qc = useQueryClient();
 
@@ -95,6 +103,26 @@ export function ConversationRowContextMenu({
       });
       // Refresh workspace membership counts / workspace conversation lists.
       qc.invalidateQueries({ queryKey: ["workspaces"] });
+      onClose();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Couldn't move this chat. Try again."
+      );
+    } finally {
+      setMovingTo(null);
+    }
+  };
+
+  const doMoveFolder = async (targetId: string | null) => {
+    if (movingTo !== null) return;
+    setMovingTo(targetId ?? "__remove__");
+    setError(null);
+    try {
+      await updateConv.mutateAsync({
+        id: conversationId,
+        payload: { folder_id: targetId },
+      });
+      qc.invalidateQueries({ queryKey: ["chat-folders"] });
       onClose();
     } catch (e) {
       setError(
@@ -261,6 +289,27 @@ export function ConversationRowContextMenu({
               <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
             </button>
 
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setView("folder")}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
+                  "bg-[var(--accent)]/10 text-[var(--accent)]"
+                )}
+              >
+                <Folder className="h-3 w-3" />
+              </span>
+              <span className="flex-1 font-medium">Move to folder…</span>
+              <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+            </button>
+
             <div className="my-1 border-t border-[var(--border)]" />
 
             <div
@@ -299,7 +348,7 @@ export function ConversationRowContextMenu({
               onSelect={() => void doExport("pdf")}
             />
           </>
-        ) : (
+        ) : view === "move" ? (
           <>
             <button
               type="button"
@@ -374,6 +423,82 @@ export function ConversationRowContextMenu({
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium">
                       {p.title || "Untitled workspace"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setView("main")}
+              className={cn(
+                "flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide transition",
+                "text-[var(--text-muted)] hover:text-[var(--text)]"
+              )}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Move to folder
+            </button>
+
+            {currentFolderId && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={movingTo !== null}
+                onClick={() => void doMoveFolder(null)}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                  "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]",
+                  "disabled:cursor-not-allowed disabled:opacity-60"
+                )}
+              >
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                  {movingTo === "__remove__" ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <FolderMinus className="h-3 w-3" />
+                  )}
+                </span>
+                <span className="flex-1">Remove from folder</span>
+              </button>
+            )}
+
+            <div className="max-h-60 overflow-y-auto">
+              {folders && folders.length === 0 && (
+                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
+                  No folders yet. Create one from the sidebar.
+                </div>
+              )}
+              {folders?.map((f) => {
+                const isCurrent = f.id === currentFolderId;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    role="menuitem"
+                    disabled={movingTo !== null || isCurrent}
+                    onClick={() => void doMoveFolder(f.id)}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
+                      "text-[var(--text)] hover:bg-[var(--accent)]/[0.08]",
+                      "disabled:cursor-not-allowed",
+                      isCurrent && "opacity-80"
+                    )}
+                  >
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                      {movingTo === f.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : isCurrent ? (
+                        <Check className="h-3 w-3 text-[var(--accent)]" />
+                      ) : (
+                        <Folder className="h-3 w-3 text-[var(--text-muted)]" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {f.name}
                     </span>
                   </button>
                 );

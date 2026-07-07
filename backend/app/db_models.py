@@ -10,6 +10,7 @@ from app.auth.events import AuthEvent  # noqa: F401
 from app.auth.models import User  # noqa: F401
 from app.billing.models import UsageDaily  # noqa: F401
 from app.chat.models import (  # noqa: F401
+    ChatFolder,
     CompareGroup,
     Conversation,
     ConversationExcludedWorkspaceFile,

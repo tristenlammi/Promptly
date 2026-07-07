@@ -2,15 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
+  ChevronDown,
+  ChevronRight,
   Clock,
+  Folder,
+  FolderPlus,
   LogOut,
   MoreHorizontal,
+  Pencil,
   Pin,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Settings,
   ShieldCheck,
   Star,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -44,6 +51,11 @@ import { ConversationSearchBox } from "./ConversationSearchBox";
 import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
 import { InstallAppButton } from "./InstallAppButton";
 import { NewChatButton } from "./NewChatButton";
+import { FolderEditModal } from "./FolderEditModal";
+import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
+import { useFolderUiStore } from "@/store/folderUiStore";
+import { confirm } from "@/components/shared/ConfirmDialog";
+import type { ChatFolder } from "@/api/folders";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -64,6 +76,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isMobile = useIsMobile();
   const { isLoading: convLoading } = useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
+  // Folder create/edit modal. ``folderModal`` = null (closed), "new", or the
+  // folder being edited.
+  const [folderModal, setFolderModal] = useState<"new" | ChatFolder | null>(
+    null
+  );
 
   // Workspace-scoped chats live exclusively inside their workspace's
   // detail page now — surfacing them again in the global sidebar
@@ -79,13 +96,40 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     () => conversations.filter((c) => !c.workspace_id && !c.archived_at),
     [conversations]
   );
-  const pinned = useMemo(
-    () => personalConversations.filter((c) => c.pinned),
+  // Chat folders (0148). Folders live above Pinned; their chats show only
+  // inside the folder, so they're excluded from the pinned/date buckets
+  // (same principle as workspace chats). ``foldered`` maps folder id → its
+  // chats (pinned first, then recency).
+  const { data: folders = [] } = useChatFoldersQuery();
+  const foldered = useMemo(() => {
+    const byFolder = new Map<string, ConversationSummary[]>();
+    for (const c of personalConversations) {
+      if (!c.folder_id) continue;
+      const list = byFolder.get(c.folder_id) ?? [];
+      list.push(c);
+      byFolder.set(c.folder_id, list);
+    }
+    for (const list of byFolder.values()) {
+      list.sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return b.updated_at.localeCompare(a.updated_at);
+      });
+    }
+    return byFolder;
+  }, [personalConversations]);
+
+  // Ungrouped personal chats (not in any folder) drive Pinned + date buckets.
+  const ungrouped = useMemo(
+    () => personalConversations.filter((c) => !c.folder_id),
     [personalConversations]
   );
+  const pinned = useMemo(
+    () => ungrouped.filter((c) => c.pinned),
+    [ungrouped]
+  );
   const unpinned = useMemo(
-    () => personalConversations.filter((c) => !c.pinned),
-    [personalConversations]
+    () => ungrouped.filter((c) => !c.pinned),
+    [ungrouped]
   );
   const groups = useMemo(() => groupByBucket(unpinned), [unpinned]);
 
@@ -224,6 +268,43 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           searchActive && "hidden"
         )}
       >
+        {/* Folders (0148) — always at the very top, above Pinned. Each is
+            collapsed by default; the header row toggles it. The + on the row
+            starts a new chat inside the folder. */}
+        <div className="mb-1 mt-1 flex items-center justify-between gap-1 px-2">
+          <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            <Folder className="h-3 w-3" /> Folders
+          </span>
+          <button
+            type="button"
+            onClick={() => setFolderModal("new")}
+            className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+            title="New folder"
+            aria-label="New folder"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {folders.length === 0 ? (
+          <button
+            type="button"
+            onClick={() => setFolderModal("new")}
+            className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <FolderPlus className="h-3.5 w-3.5" /> New folder
+          </button>
+        ) : (
+          folders.map((f) => (
+            <FolderRow
+              key={f.id}
+              folder={f}
+              chats={foldered.get(f.id) ?? []}
+              activeId={activeId}
+              onEdit={() => setFolderModal(f)}
+            />
+          ))
+        )}
+
         {pinned.length > 0 && (
           <SectionHeader>
             <Pin className="h-3 w-3 fill-current" /> Pinned
@@ -259,6 +340,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Footer */}
       <UserFooter />
+
+      <FolderEditModal
+        open={folderModal !== null}
+        folder={folderModal === "new" ? null : folderModal}
+        onClose={() => setFolderModal(null)}
+      />
     </aside>
   );
 }
@@ -573,6 +660,7 @@ function ConversationRow({
         <ConversationRowContextMenu
           conversationId={conv.id}
           currentWorkspaceId={conv.workspace_id ?? null}
+          currentFolderId={conv.folder_id ?? null}
           pinned={!!conv.pinned}
           onTogglePin={() =>
             update.mutate({ id: conv.id, payload: { pinned: !conv.pinned } })
@@ -583,6 +671,174 @@ function ConversationRow({
         />
       )}
     </>
+  );
+}
+
+/**
+ * A collapsible chat-folder row (0148). Collapsed by default; the header
+ * toggles expansion. The + starts a new chat inside the folder (which also
+ * expands it); the ⋯ menu edits or deletes the folder. Deleting lifts the
+ * chats back to top-level (server SET NULL), never deletes them.
+ */
+function FolderRow({
+  folder,
+  chats,
+  activeId,
+  onEdit,
+}: {
+  folder: ChatFolder;
+  chats: ConversationSummary[];
+  activeId: string | undefined;
+  onEdit: () => void;
+}) {
+  const navigate = useNavigate();
+  const expanded = useFolderUiStore((s) => !!s.expanded[folder.id]);
+  const toggle = useFolderUiStore((s) => s.toggle);
+  const expand = useFolderUiStore((s) => s.expand);
+  const del = useDeleteFolder();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  const newChatInFolder = () => {
+    expand(folder.id);
+    navigate(`/chat?folder=${folder.id}`);
+  };
+
+  const handleDelete = async () => {
+    setMenuOpen(false);
+    const ok = await confirm({
+      title: `Delete "${folder.name}"?`,
+      message:
+        "The folder is removed, but its chats aren't — they move back to your main chat list.",
+      confirmLabel: "Delete folder",
+      danger: true,
+    });
+    if (ok) del.mutate(folder.id);
+  };
+
+  return (
+    <div className="mb-0.5">
+      <div
+        className={cn(
+          "group relative flex items-center gap-1 rounded-md px-1.5 py-1.5 text-sm transition",
+          "text-[var(--text)] hover:bg-[var(--hover)]"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => toggle(folder.id)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          aria-expanded={expanded}
+          title={expanded ? "Collapse folder" : "Expand folder"}
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+          )}
+          <Folder className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+          <span className="truncate font-medium">{folder.name}</span>
+          {chats.length > 0 && (
+            <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-muted)]">
+              {chats.length}
+            </span>
+          )}
+        </button>
+
+        {/* Always-visible + (core action) */}
+        <button
+          type="button"
+          onClick={newChatInFolder}
+          className="shrink-0 rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+          title="New chat in this folder"
+          aria-label="New chat in this folder"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+
+        {/* ⋯ folder actions (edit / delete). Always visible so it works on
+            touch without a hover. */}
+        <div ref={menuRef} className="relative shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+            title="Folder options"
+            aria-label="Folder options"
+            aria-expanded={menuOpen}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-30 mt-1 min-w-[150px] overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onEdit();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--text)] transition hover:bg-[var(--accent)]/[0.08]"
+              >
+                <Pencil className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                Edit folder
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void handleDelete()}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--danger)] transition hover:bg-[var(--danger-bg)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete folder
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="ml-3 border-l border-[var(--border)] pl-1.5">
+          {chats.length === 0 ? (
+            <button
+              type="button"
+              onClick={newChatInFolder}
+              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            >
+              <Plus className="h-3 w-3" /> New chat
+            </button>
+          ) : (
+            chats.map((c) => (
+              <ConversationRow key={c.id} conv={c} activeId={activeId} />
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

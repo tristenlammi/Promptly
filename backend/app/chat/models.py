@@ -154,6 +154,19 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Personal chat folders (0148). A user-created folder groups top-level
+    # personal chats in the sidebar and carries a live default system prompt
+    # + a default model. NULL = ungrouped (today's default). Folders are a
+    # PERSONAL concept — mutually exclusive with ``workspace_id`` (a chat
+    # moved into a workspace leaves its folder; the router enforces this).
+    # ``ON DELETE SET NULL`` so deleting a folder lifts its chats back to
+    # top-level rather than deleting history.
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chat_folders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Workspace-tree placement (0140). A chat is synthesised into its
     # workspace's navigator tree with no backing ``workspace_items`` row.
     # These two columns let the user drag a chat to reorder it or drop it
@@ -227,6 +240,51 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<Conversation id={self.id} title={self.title!r}>"
+
+
+class ChatFolder(UUIDPKMixin, TimestampMixin, Base):
+    """A user-created folder that groups personal chats in the sidebar.
+
+    Unlike a :class:`Workspace` (a shared, multi-surface container), a folder
+    is a lightweight PERSONAL organiser: it lives only in one user's chat
+    sidebar, holds no members or files, and carries two inheritable defaults —
+    a live system prompt and a default model — that shape the chats inside it.
+
+    Semantics (chosen product behaviour):
+      * ``system_prompt`` — merged LIVE into every contained chat's outbound
+        system prompt (under the per-chat instruction layer). Editing the
+        folder updates all its chats on their next turn.
+      * ``default_provider_id`` / ``default_model_id`` — the model pre-selected
+        when a new chat is created in the folder. Not forced: each chat keeps
+        its own sticky model afterward.
+
+    Deleting a folder lifts its chats back to top-level (``Conversation
+    .folder_id`` is ``ON DELETE SET NULL``), never deleting history.
+    """
+
+    __tablename__ = "chat_folders"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    # Live default system prompt for chats in this folder. NULL / blank = none.
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Default model for new chats created in this folder (a pre-selection, not
+    # a lock). Same free-form ``model_id`` + FK ``provider_id`` shape as the
+    # conversation and workspace defaults. ``ON DELETE SET NULL`` on the
+    # provider so removing a provider cleanly clears the default.
+    default_model_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    default_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="SET NULL"), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatFolder id={self.id} name={self.name!r}>"
 
 
 class CompareGroup(UUIDPKMixin, TimestampMixin, Base):

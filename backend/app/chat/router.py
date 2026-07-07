@@ -40,6 +40,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.billing.usage import check_budget, maybe_alert_admins, record_usage
 from app.chat.models import (
+    ChatFolder,
     CompareGroup,
     Conversation,
     ConversationExcludedWorkspaceFile,
@@ -984,6 +985,28 @@ async def create_conversation(
                 update={"provider_id": workspace.default_provider_id}
             )
 
+    # Chat folders (0148) — validate the requested folder (personal-scope
+    # only, so it's mutually exclusive with a workspace) and inherit its
+    # default model when the payload didn't pick one. The folder's system
+    # prompt is applied LIVE in the stream, so nothing is copied here.
+    folder_id: uuid.UUID | None = None
+    if payload.folder_id is not None and workspace_id is None:
+        folder = await db.get(ChatFolder, payload.folder_id)
+        if folder is None or folder.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Folder not found",
+            )
+        folder_id = folder.id
+        if payload.model_id is None and folder.default_model_id:
+            payload = payload.model_copy(
+                update={"model_id": folder.default_model_id}
+            )
+        if payload.provider_id is None and folder.default_provider_id:
+            payload = payload.model_copy(
+                update={"provider_id": folder.default_provider_id}
+            )
+
     # Workspace-wide default chat model — final defensive fallback for
     # callers (e.g. older clients, scripted API access) that POST a
     # create-conversation payload without an explicit model pair.
@@ -1029,6 +1052,7 @@ async def create_conversation(
         temporary_mode=payload.temporary_mode,
         expires_at=expires_at,
         workspace_id=workspace_id,
+        folder_id=folder_id,
     )
     db.add(conv)
     await db.commit()
@@ -1239,6 +1263,30 @@ async def update_conversation(
             )
             require_workspace_write(_wrole)
             conv.workspace_id = workspace.id
+            # A workspace chat is never also in a personal folder — moving
+            # into a workspace lifts it out of its folder.
+            conv.folder_id = None
+
+    # Chat folders (0148) — move this personal chat into / out of a folder.
+    # Only honoured when the client explicitly sent the field. An explicit
+    # null removes it from its folder; a UUID moves it (owner-validated).
+    # Folders are personal, so a foldered chat can't also be in a workspace.
+    if "folder_id" in payload.model_fields_set:
+        if payload.folder_id is None:
+            conv.folder_id = None
+        else:
+            if conv.workspace_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A workspace chat can't be put in a personal folder.",
+                )
+            folder = await db.get(ChatFolder, payload.folder_id)
+            if folder is None or folder.user_id != user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Folder not found",
+                )
+            conv.folder_id = folder.id
 
     await db.commit()
     await db.refresh(conv)
@@ -4556,6 +4604,21 @@ async def _stream_generator(
         )
         if account_prompt:
             system_prompt = merge_system_prompt(system_prompt or "", account_prompt)
+        # Chat folder prompt (0148). When a personal chat lives in a folder,
+        # the folder's system prompt applies LIVE to every chat inside — a
+        # shared context / persona for the whole folder. It sits above the
+        # account-wide steer but below the per-chat instructions, so the
+        # order is: per-chat > folder > account > workspace > base. Loaded
+        # only when the chat is actually foldered (one cheap get).
+        if getattr(conv, "folder_id", None) is not None:
+            folder = await db.get(ChatFolder, conv.folder_id)
+            folder_prompt = (
+                (folder.system_prompt or "").strip() if folder else ""
+            ) or None
+            if folder_prompt:
+                system_prompt = merge_system_prompt(
+                    folder_prompt, system_prompt or ""
+                )
         # Per-conversation custom instructions (Phase 1). A free-text
         # steer ("answer concisely", "you're a Rust expert") that lives
         # on the chat itself — narrower than the project prompt, so it
