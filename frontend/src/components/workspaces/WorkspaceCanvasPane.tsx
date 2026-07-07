@@ -72,16 +72,17 @@ interface LinkSelection {
  */
 const TEXT_DEBOUNCE_MS = 1500;
 
-// The board's drawing-surface colour, matched to the app ``--bg`` in each
-// theme so the canvas reads as part of the app rather than Excalidraw's own
-// cool white / #121212 defaults. Excalidraw needs a concrete colour string
-// (no CSS vars in appState), so we resolve it per theme and re-assert it
-// whenever the board theme changes. (The board uses Excalidraw's NATIVE dark
-// theme — there is no invert filter.)
-const CANVAS_BG_LIGHT = "#FAF9F7";
-const CANVAS_BG_DARK = "#1C1917";
-const bgForTheme = (t: "light" | "dark"): string =>
-  t === "dark" ? CANVAS_BG_DARK : CANVAS_BG_LIGHT;
+// The canvas background, matched to the app's rail (--bg light, #FAF9F7).
+// IMPORTANT: this is a SINGLE value for BOTH themes on purpose. Excalidraw's
+// dark theme runs the whole <canvas> through its own internal
+// `invert(93%) hue-rotate(180deg)` filter, which turns this warm off-white
+// into a warm near-black (~#181715) — almost exactly the app's dark rail
+// (#1C1917). So one light value reads as the rail in BOTH themes; Excalidraw's
+// filter does the dark conversion for us. (Setting a *dark* value here would
+// get inverted to light in dark mode — which is exactly the bug this fixes.)
+const CANVAS_BG = "#FAF9F7";
+// Both themes resolve to the same source colour — see above.
+const bgForTheme = (_t: "light" | "dark"): string => CANVAS_BG;
 
 export function WorkspaceCanvasPane({
   canvasId,
