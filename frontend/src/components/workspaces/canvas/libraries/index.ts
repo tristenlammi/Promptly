@@ -5,6 +5,7 @@ import {
 import type { LibraryItems } from "@excalidraw/excalidraw/types";
 
 import type { IconSpec } from "./_helpers";
+import { PROMPTLY_PRESETS } from "./presets";
 import { NETWORK_ICONS } from "./network";
 import { ELECTRICAL_ICONS } from "./electrical";
 
@@ -80,7 +81,13 @@ export function buildBundledLibraryItems(): LibraryItems {
   if (cached) return cached;
   try {
     cached = [
-      ...buildIconLibrary([...NETWORK_ICONS, ...ELECTRICAL_ICONS]),
+      // Promptly's own node + sticky presets first, so they're the top of
+      // the library panel.
+      ...buildIconLibrary([
+        ...PROMPTLY_PRESETS,
+        ...NETWORK_ICONS,
+        ...ELECTRICAL_ICONS,
+      ]),
       ...loadDropInPacks(),
     ];
   } catch {

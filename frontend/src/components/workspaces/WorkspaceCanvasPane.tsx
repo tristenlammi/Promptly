@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link2, Link2Off, Loader2, Wand2 } from "lucide-react";
+import { Link2, Link2Off, Loader2, Plus, Wand2 } from "lucide-react";
 import {
+  convertToExcalidrawElements,
   Excalidraw,
-  getTextFromElements,
   sceneCoordsToViewportCoords,
+  viewportCoordsToSceneCoords,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
@@ -28,6 +29,7 @@ import { useCanvasCollabProvider } from "./useCanvasCollabProvider";
 import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
 import { buildBundledLibraryItems } from "./canvas/libraries";
 import { removeImageBackground } from "./canvas/backgroundRemoval";
+import { canvasSceneToText } from "./canvas/sceneText";
 
 // The onChange element list type, derived from the component so we don't
 // reach into Excalidraw's internal element type-paths.
@@ -70,13 +72,16 @@ interface LinkSelection {
  */
 const TEXT_DEBOUNCE_MS = 1500;
 
-// The canvas background, matched to the app's left rail (--bg light, #FAF9F7).
-// Excalidraw needs a concrete colour string (no CSS vars in appState), and in
-// dark mode it runs the whole <canvas> through `invert(93%) hue-rotate(180deg)`
-// — which turns this warm off-white into a warm near-black (~#181715), almost
-// exactly the dark rail (#1C1917). So one value reads as the rail in BOTH
-// themes; the filter does the dark conversion for us.
-const CANVAS_BG = "#FAF9F7";
+// The board's drawing-surface colour, matched to the app ``--bg`` in each
+// theme so the canvas reads as part of the app rather than Excalidraw's own
+// cool white / #121212 defaults. Excalidraw needs a concrete colour string
+// (no CSS vars in appState), so we resolve it per theme and re-assert it
+// whenever the board theme changes. (The board uses Excalidraw's NATIVE dark
+// theme — there is no invert filter.)
+const CANVAS_BG_LIGHT = "#FAF9F7";
+const CANVAS_BG_DARK = "#1C1917";
+const bgForTheme = (t: "light" | "dark"): string =>
+  t === "dark" ? CANVAS_BG_DARK : CANVAS_BG_LIGHT;
 
 export function WorkspaceCanvasPane({
   canvasId,
@@ -124,7 +129,11 @@ export function WorkspaceCanvasPane({
       libraryItems: buildBundledLibraryItems(),
       appState: {
         theme: expectedThemeRef.current,
-        viewBackgroundColor: CANVAS_BG,
+        viewBackgroundColor: bgForTheme(expectedThemeRef.current),
+        // Clean, mockup-matching defaults for anything drawn on a fresh
+        // board: architect stroke (no sketchy roughness) + the app accent.
+        currentItemRoughness: 0,
+        currentItemStrokeColor: "#d97757",
       },
     }),
     []
@@ -142,20 +151,23 @@ export function WorkspaceCanvasPane({
     store.followApp(appTheme);
     const themeChanged =
       !store.overridden && appTheme !== expectedThemeRef.current;
-    const bgWrong =
-      excalidrawAPI.getAppState().viewBackgroundColor !== CANVAS_BG;
     if (themeChanged) expectedThemeRef.current = appTheme;
+    // Background follows the *effective* board theme (the override when the
+    // user flipped Excalidraw's own toggle, else the app theme).
+    const wantBg = bgForTheme(expectedThemeRef.current);
+    const bgWrong =
+      excalidrawAPI.getAppState().viewBackgroundColor !== wantBg;
     // Separate literals (not a Partial<AppState> var) so each satisfies
     // updateScene under exactOptionalPropertyTypes.
     if (themeChanged && bgWrong) {
       excalidrawAPI.updateScene({
-        appState: { theme: appTheme, viewBackgroundColor: CANVAS_BG },
+        appState: { theme: appTheme, viewBackgroundColor: wantBg },
       });
     } else if (themeChanged) {
       excalidrawAPI.updateScene({ appState: { theme: appTheme } });
     } else if (bgWrong) {
       excalidrawAPI.updateScene({
-        appState: { viewBackgroundColor: CANVAS_BG },
+        appState: { viewBackgroundColor: wantBg },
       });
     }
   }, [appTheme, excalidrawAPI]);
@@ -181,6 +193,9 @@ export function WorkspaceCanvasPane({
   const linkingEnabled = !readOnly && !!workspaceId && !!onOpenItem;
   const [linkSel, setLinkSel] = useState<LinkSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The picker serves two flows: "link" attaches the selected shape to an
+  // item (Phase 8); "insert" drops a fresh styled node bound to an item (A2).
+  const [pickerMode, setPickerMode] = useState<"link" | "insert">("link");
   const selIdRef = useRef<string | null>(null);
 
   // --- RAG text push (debounced) --------------------------------------
@@ -197,7 +212,10 @@ export function WorkspaceCanvasPane({
       }
       debounceRef.current = window.setTimeout(() => {
         debounceRef.current = null;
-        const text = getTextFromElements(elements, "\n").trim();
+        // Structured serialization (A3): labels + connection graph + linked
+        // items, so workspace chats understand the board — not just a flat
+        // bag of its text.
+        const text = canvasSceneToText(elements).trim();
         if (text === lastTextRef.current) return;
         lastTextRef.current = text;
         void canvasApi.updateText(canvasId, text).catch(() => {
@@ -224,6 +242,16 @@ export function WorkspaceCanvasPane({
         useCanvasThemeStore
           .getState()
           .setManual(nextTheme, useThemeStore.getState().resolved());
+        // Keep the drawing surface matched to the freshly-flipped theme.
+        const wantBg = bgForTheme(nextTheme);
+        if (
+          (appState as { viewBackgroundColor?: string }).viewBackgroundColor !==
+          wantBg
+        ) {
+          excalidrawAPI?.updateScene({
+            appState: { viewBackgroundColor: wantBg },
+          });
+        }
       }
 
       // Surface the "Remove background" button for a single selected image.
@@ -332,6 +360,66 @@ export function WorkspaceCanvasPane({
     [linkSel, workspaceId, setElementLink]
   );
 
+  // A2 — drop a first-class "item node": a clean terracotta node labelled
+  // with the item's title and bound to it, created at the current viewport
+  // centre. Clicking it opens the item (preview modal), so the node *is* the
+  // workspace item, not just an annotation.
+  const handleInsertItemNode = useCallback(
+    (node: WorkspaceItemNode) => {
+      const api = excalidrawAPI;
+      if (!api || !workspaceId) return;
+      const href = buildWikiHref({
+        id: node.id,
+        kind: node.kind,
+        refId: node.ref_id,
+        title: node.title,
+        workspaceId,
+      });
+      const rect = containerRef.current?.getBoundingClientRect();
+      const centre = viewportCoordsToSceneCoords(
+        {
+          clientX: (rect?.left ?? 0) + (rect?.width ?? 800) / 2,
+          clientY: (rect?.top ?? 0) + (rect?.height ?? 500) / 2,
+        },
+        api.getAppState()
+      );
+      const width = 200;
+      const height = 64;
+      const created = convertToExcalidrawElements([
+        {
+          type: "rectangle",
+          x: centre.x - width / 2,
+          y: centre.y - height / 2,
+          width,
+          height,
+          strokeColor: "#d97757",
+          backgroundColor: "transparent",
+          strokeWidth: 2,
+          roughness: 0,
+          roundness: { type: 3 },
+          link: href,
+          label: {
+            text: node.title || "Untitled",
+            fontSize: 16,
+            strokeColor: "#d97757",
+          },
+        },
+      ] as Parameters<typeof convertToExcalidrawElements>[0]);
+      api.updateScene({
+        elements: [...api.getSceneElements(), ...created],
+      });
+      // Push through the collab binding so peers + persistence see the node
+      // (updateScene alone doesn't fire our onChange for this path).
+      binding.onChange(
+        api.getSceneElements(),
+        api.getAppState(),
+        api.getFiles()
+      );
+      setPickerOpen(false);
+    },
+    [excalidrawAPI, workspaceId, binding]
+  );
+
   // Route a click on an element's link: workspace-item hrefs open in the
   // preview modal (falling back to inline open when no preview handler is in
   // context); anything else falls through to Excalidraw's default (new tab).
@@ -392,6 +480,24 @@ export function WorkspaceCanvasPane({
           </span>
         </div>
       )}
+      {/* A2 — insert a workspace item as a first-class node. Top-right is the
+          one corner Excalidraw's default UI leaves clear. */}
+      {linkingEnabled && (
+        <div className="absolute right-2 top-2 z-20">
+          <button
+            type="button"
+            onClick={() => {
+              setPickerMode("insert");
+              setPickerOpen(true);
+            }}
+            title="Drop a workspace item onto the board as a linked node"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text)] shadow-md transition hover:bg-[var(--surface-hover)]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Insert item
+          </button>
+        </div>
+      )}
       {imageSel && (
         <div
           className="absolute z-20"
@@ -438,7 +544,10 @@ export function WorkspaceCanvasPane({
         >
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onClick={() => {
+              setPickerMode("link");
+              setPickerOpen(true);
+            }}
             title={
               linkSel.linked
                 ? "Change the linked workspace item"
@@ -473,7 +582,9 @@ export function WorkspaceCanvasPane({
       {pickerOpen && workspaceId && (
         <WorkspaceItemPicker
           workspaceId={workspaceId}
-          onPick={handleLinkPicked}
+          onPick={
+            pickerMode === "insert" ? handleInsertItemNode : handleLinkPicked
+          }
           onClose={() => setPickerOpen(false)}
         />
       )}
