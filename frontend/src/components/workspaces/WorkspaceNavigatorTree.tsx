@@ -630,7 +630,7 @@ export function WorkspaceNavigatorTree({
           onKeyDown={handleTreeKeyDown}
           role="tree"
           aria-label="Workspace content"
-          className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]/40"
+          className="min-h-0 flex-1 overflow-y-auto px-1 pb-3 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)]/40"
         >
           <SortableContext
             items={[...pinnedIds, ...mainIds]}
@@ -787,7 +787,7 @@ export function WorkspaceNavigatorTree({
 // Drag & drop plumbing (dnd-kit flattened sortable tree)
 // ---------------------------------------------------------------------
 const PIN_ZONE_ID = "__pin_zone__";
-const INDENT = 14; // px of indentation per depth level
+const INDENT = 12; // px of indentation per depth level
 
 // Rows hold still while dragging — the drop location is communicated by the
 // indicator line / folder highlight instead of sortable shuffling, so the
@@ -1667,23 +1667,23 @@ function TreeRow({
             "origin-left scale-[0.98] cursor-grabbing rounded-md bg-[var(--surface)] shadow-lg ring-1 ring-[var(--accent)]/40",
           sortable && !renaming && "cursor-grab active:cursor-grabbing"
         )}
-        style={{ paddingLeft: depth * INDENT + 4 }}
+        style={{ paddingLeft: depth * INDENT + 2 }}
       >
         <button
           type="button"
           onClick={handleClick}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+          className="flex min-w-0 flex-1 items-center gap-1 py-1.5 text-left"
         >
           {isFolder ? (
-            <span className="shrink-0 text-[var(--text-muted)]">
+            <span className="flex w-3 shrink-0 items-center justify-center text-[var(--text-muted)]">
               {expanded ? (
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="h-3 w-3" />
               ) : (
-                <ChevronRight className="h-3.5 w-3.5" />
+                <ChevronRight className="h-3 w-3" />
               )}
             </span>
           ) : (
-            <span className="w-3.5 shrink-0" />
+            <span className="w-3 shrink-0" />
           )}
 
           {/* Context state: the *excluded* glyph is permanent (it's the
