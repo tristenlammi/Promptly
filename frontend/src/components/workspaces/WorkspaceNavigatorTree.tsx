@@ -1641,12 +1641,22 @@ function TreeRow({
       <div
         {...dragHandle}
         className={cn(
-          "group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors",
+          // ``outline-none`` suppresses the browser's native blue focus ring —
+          // the dnd-kit drag handle spreads a ``tabIndex`` onto this row, so a
+          // click focuses it and Chromium would otherwise draw its default
+          // outline. Selection + keyboard focus get their own styles below.
+          "group flex items-center gap-1 rounded-md pr-1 text-sm outline-none transition-colors",
+          // Match the chat sidebar's selected row: a neutral filled background
+          // (not an outline), with the accent reserved for the icon (P1).
           isSelected
-            ? "bg-[var(--accent)]/10 text-[var(--text)]"
+            ? "bg-[var(--hover-strong)] text-[var(--text)]"
             : "text-[var(--text)] hover:bg-[var(--hover)]",
+          // Keyboard-nav focus keeps a subtle accent (not blue) ring — but
+          // only when the row isn't the selected one (whose fill already marks
+          // it), so a plain click reads as just the filled row, like chat.
           focused &&
             !overlay &&
+            !isSelected &&
             "ring-1 ring-inset ring-[var(--accent)]/60",
           isDropParent &&
             "bg-[var(--accent)]/15 ring-2 ring-inset ring-[var(--accent)]/70",
