@@ -146,6 +146,18 @@ function buildItems(hasWikiLink: boolean): SlashItem[] {
         editor.chain().focus().deleteRange(range).setDetails().run(),
     },
     {
+      title: "Callout",
+      hint: "highlighted box",
+      keywords: ["callout", "admonition", "note", "info", "warning", "aside"],
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .setCallout({ variant: "info" })
+          .run(),
+    },
+    {
       title: "Image",
       hint: "upload a picture",
       keywords: ["photo", "picture", "upload", "img"],

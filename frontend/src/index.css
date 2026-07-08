@@ -768,6 +768,78 @@ html.dark .promptly-doc mark {
   margin-top: 0.25rem;
 }
 
+/* Callout / admonition box (our custom node). The variant drives the
+   colour + leading icon via CSS vars; the box holds normal block content.
+   Same colours as the bubble-menu variant dots. Works on light + dark. */
+.promptly-doc .doc-callout {
+  position: relative;
+  margin: 0.85rem 0;
+  padding: 0.7rem 0.9rem 0.7rem 2.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--callout-border);
+  background: var(--callout-bg);
+  --callout-border: rgba(14, 165, 233, 0.4);
+  --callout-bg: rgba(14, 165, 233, 0.08);
+}
+.promptly-doc .doc-callout > :first-child {
+  margin-top: 0;
+}
+.promptly-doc .doc-callout > :last-child {
+  margin-bottom: 0;
+}
+.promptly-doc .doc-callout::before {
+  content: "ℹ️";
+  position: absolute;
+  left: 0.8rem;
+  top: 0.66rem;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+.promptly-doc .doc-callout[data-variant="warning"] {
+  --callout-border: rgba(245, 158, 11, 0.42);
+  --callout-bg: rgba(245, 158, 11, 0.1);
+}
+.promptly-doc .doc-callout[data-variant="warning"]::before {
+  content: "⚠️";
+}
+.promptly-doc .doc-callout[data-variant="success"] {
+  --callout-border: rgba(16, 185, 129, 0.42);
+  --callout-bg: rgba(16, 185, 129, 0.09);
+}
+.promptly-doc .doc-callout[data-variant="success"]::before {
+  content: "✅";
+}
+.promptly-doc .doc-callout[data-variant="danger"] {
+  --callout-border: rgba(244, 63, 94, 0.42);
+  --callout-bg: rgba(244, 63, 94, 0.09);
+}
+.promptly-doc .doc-callout[data-variant="danger"]::before {
+  content: "⛔";
+}
+
+/* Block drag handle — the grip that appears left of the hovered block
+   (Tiptap's MIT DragHandle positions the wrapper; we style the grip). */
+.doc-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.5rem;
+  border-radius: 0.35rem;
+  color: var(--text-muted);
+  cursor: grab;
+  opacity: 0.55;
+  transition: background 0.12s ease, opacity 0.12s ease, color 0.12s ease;
+}
+.doc-drag-handle:hover {
+  background: var(--hover);
+  color: var(--text);
+  opacity: 1;
+}
+.doc-drag-handle:active {
+  cursor: grabbing;
+}
+
 /* Placeholder text for an empty editor — TipTap's Placeholder
    extension only adds the ``is-editor-empty`` class; the visible
    text comes from a CSS pseudo-element reading ``data-placeholder``. */

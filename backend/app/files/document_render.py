@@ -137,7 +137,16 @@ def _iframe_attr_ok(tag: str, name: str, value: str) -> bool:
 
 
 _ALLOWED_ATTRS: dict[str, Any] = {
-    "*": ["class", "id", "style", "data-checked", "data-type", "dir", "lang"],
+    "*": [
+        "class",
+        "id",
+        "style",
+        "data-checked",
+        "data-type",
+        "data-variant",  # callout colour
+        "dir",
+        "lang",
+    ],
     "a": ["href", "title", "target", "rel"],
     "audio": ["controls", "preload", "src"],
     "img": ["src", "alt", "title", "width", "height"],
@@ -346,6 +355,17 @@ def _wrap(tag_name: str, attrs: dict[str, Any], inner: str) -> str:
     if tag_name in ("details", "detailsSummary", "detailsContent"):
         mapped = _BLOCK_MAP.get(tag_name, "div") or "div"
         return f"<{mapped}>{inner}</{mapped}>"
+
+    # Callout box — variant drives the colour/icon in CSS. Mirror the
+    # editor's renderHTML so the collab snapshot matches a manual save.
+    if tag_name == "callout":
+        variant = str(attrs.get("variant") or "info")
+        if variant not in ("info", "warning", "success", "danger"):
+            variant = "info"
+        return (
+            f'<div class="doc-callout" data-type="callout" '
+            f'data-variant="{variant}">{inner}</div>'
+        )
 
     # Fall back to the declared block mapping.
     html_tag = _BLOCK_MAP.get(tag_name)

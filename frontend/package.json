@@ -38,6 +38,8 @@
     "@tiptap/extension-details": "^2.27.2",
     "@tiptap/extension-details-content": "^2.27.2",
     "@tiptap/extension-details-summary": "^2.27.2",
+    "@tiptap/extension-drag-handle": "^2.27.2",
+    "@tiptap/extension-drag-handle-react": "^2.27.2",
     "@tiptap/extension-highlight": "^2.27.2",
     "@tiptap/extension-image": "^2.27.2",
     "@tiptap/extension-link": "^2.27.2",

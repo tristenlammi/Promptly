@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import {
   AlertTriangle,
   Check,
@@ -9,6 +10,7 @@ import {
   FileCode,
   FileDown,
   FileText,
+  GripVertical,
   History,
   Loader2,
   MoveHorizontal,
@@ -31,6 +33,7 @@ import {
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
+import { EditorBubbleMenu } from "./EditorBubbleMenu";
 import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
 
@@ -966,6 +969,19 @@ export function DocumentEditorModal({
             </div>
           )}
         </div>
+        {/* Selection formatter + block drag handle (both MIT / our own —
+            no Tiptap Pro). Guarded on a live editor + no collab error. */}
+        {editor && !error && <EditorBubbleMenu editor={editor} />}
+        {editor && !error && canEdit && (
+          <DragHandle editor={editor}>
+            <span
+              className="doc-drag-handle"
+              aria-label="Drag to move block"
+            >
+              <GripVertical className="h-4 w-4" />
+            </span>
+          </DragHandle>
+        )}
         <DocumentOutline editor={editor} />
         <WordCountPill editor={editor} />
       </div>

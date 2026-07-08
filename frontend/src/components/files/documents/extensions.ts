@@ -23,6 +23,7 @@ import type { Doc as YDoc } from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 
 import { AudioExtension } from "./AudioExtension";
+import { CalloutExtension } from "./CalloutExtension";
 import { SlashCommandExtension } from "./SlashCommandExtension";
 import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 
@@ -192,6 +193,9 @@ export function buildExtensions({
     }),
     DetailsSummary,
     DetailsContent,
+    // Coloured info/warning/success/danger callout boxes (our own node —
+    // no Pro dependency). Variant persists via ``data-variant``.
+    CalloutExtension,
     // The "/" block menu the Placeholder text promises. Commands reuse
     // the toolbar's chains; image/audio delegate to the toolbar's picker
     // via a CustomEvent (see SlashCommandExtension for why).
