@@ -2165,10 +2165,11 @@ async def read_workspace_item_text(
     user_id: uuid.UUID,
     title: str,
     kind: str | None = None,
-) -> tuple[str, str, str | None] | None:
+) -> tuple[WorkspaceItem, str | None] | None:
     """Resolve a workspace item by (case-insensitive) title and return
-    ``(resolved_title, kind, full_text)`` — the backend of the
-    ``read_workspace_item`` chat tool.
+    ``(item, full_text)`` — the backend of the ``read_workspace_item`` chat
+    tool. The item is returned (not just its title) so the tool can emit an
+    item-link pill from its id/kind/ref_id.
 
     Mirrors the visibility rules the workspace map uses (private items are
     visible only to their creator; trashed/archived items are excluded) so
@@ -2217,7 +2218,7 @@ async def read_workspace_item_text(
         return None
     it = matches[0]
     text = await _item_backing_text(db, it)
-    return (it.title or "Untitled", it.kind, text)
+    return (it, text)
 
 
 async def build_workspace_injection(

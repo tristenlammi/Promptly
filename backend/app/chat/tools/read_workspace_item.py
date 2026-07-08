@@ -97,11 +97,27 @@ class ReadWorkspaceItemTool(Tool):
                 f'No note, board, sheet, or canvas titled "{title}" is visible '
                 "in this workspace. Check the workspace map for the exact title."
             )
-        resolved_title, resolved_kind, text = result
+        item, text = result
+        resolved_title = item.title or "Untitled"
+        resolved_kind = item.kind
+        # An item-link pill the UI renders under the tool card — opens the
+        # item in the workspace preview modal.
+        item_ref = {
+            "id": str(item.id),
+            "kind": item.kind,
+            "ref_id": str(item.ref_id) if item.ref_id else None,
+            "title": resolved_title,
+            "workspace_id": str(conv.workspace_id),
+        }
         if not text:
             return ToolResult(
                 content=f'"{resolved_title}" ({resolved_kind}) is currently empty.',
-                meta={"title": resolved_title, "kind": resolved_kind, "chars": 0},
+                meta={
+                    "title": resolved_title,
+                    "kind": resolved_kind,
+                    "chars": 0,
+                    "items": [item_ref],
+                },
             )
         return ToolResult(
             content=f'Full content of {resolved_kind} "{resolved_title}":\n\n{text}',
@@ -109,5 +125,6 @@ class ReadWorkspaceItemTool(Tool):
                 "title": resolved_title,
                 "kind": resolved_kind,
                 "chars": len(text),
+                "items": [item_ref],
             },
         )

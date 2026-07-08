@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   Check,
@@ -7,12 +8,16 @@ import {
   FileText,
   Globe,
   Image as ImageIcon,
+  LayoutGrid,
   Loader2,
+  PenLine,
   Search,
+  Table,
   Users,
   Wrench,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import type {
   AgentProgress,
@@ -20,6 +25,9 @@ import type {
   ToolInvocation,
   ToolProgressData,
 } from "@/api/types";
+import type { WorkspaceItemNode } from "@/api/workspaces";
+import { useItemPreview } from "@/components/workspaces/itemPreviewContext";
+import { buildWikiHref } from "@/components/files/documents/WikiLinkExtension";
 import { cn } from "@/utils/cn";
 
 /**
@@ -372,6 +380,9 @@ export function ToolActivityCard({
       }, 0),
     [steps],
   );
+  // Workspace items a tool touched (read_workspace_item, query_board_cards)
+  // surface as clickable pills under the card. Dedupe by id across steps.
+  const linkedItems = useMemo(() => collectLinkedItems(steps), [steps]);
 
   if (steps.length === 0) return null;
 
@@ -388,6 +399,7 @@ export function ToolActivityCard({
     const info = current ? infoFor(current.name) : null;
     const arg = current ? stepArg(current) : null;
     return (
+      <>
       <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
         <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--text-muted)]">
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
@@ -424,6 +436,8 @@ export function ToolActivityCard({
           </div>
         )}
       </div>
+      <ItemPillRow items={linkedItems} />
+      </>
     );
   }
 
@@ -451,6 +465,7 @@ export function ToolActivityCard({
   if (totalT) metaBits.push(totalT);
 
   return (
+    <>
     <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
       <button
         type="button"
@@ -489,6 +504,113 @@ export function ToolActivityCard({
             ))}
           </div>
         ))}
+    </div>
+    <ItemPillRow items={linkedItems} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Item-link pills — clickable chips under the card that open a workspace
+// item (a note/board/sheet/canvas a tool read) in the preview modal.
+// ---------------------------------------------------------------------
+interface LinkedItem {
+  id: string;
+  kind: string;
+  ref_id: string | null;
+  title: string;
+  workspace_id: string;
+}
+
+/** Pull the ``items`` a tool emitted in its meta, deduped by id, in the
+ *  order first seen. Tolerant of the loosely-typed ``meta`` bag. */
+function collectLinkedItems(steps: ActivityStep[]): LinkedItem[] {
+  const seen = new Set<string>();
+  const out: LinkedItem[] = [];
+  for (const s of steps) {
+    const raw = s.meta?.items;
+    if (!Array.isArray(raw)) continue;
+    for (const r of raw) {
+      if (!r || typeof r !== "object") continue;
+      const o = r as Record<string, unknown>;
+      const id = typeof o.id === "string" ? o.id : null;
+      const workspace_id =
+        typeof o.workspace_id === "string" ? o.workspace_id : null;
+      if (!id || !workspace_id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        kind: typeof o.kind === "string" ? o.kind : "note",
+        ref_id: typeof o.ref_id === "string" ? o.ref_id : null,
+        title: typeof o.title === "string" ? o.title : "Untitled",
+        workspace_id,
+      });
+    }
+  }
+  return out;
+}
+
+const ITEM_KIND_ICON: Record<string, LucideIcon> = {
+  note: FileText,
+  board: LayoutGrid,
+  sheet: Table,
+  canvas: PenLine,
+};
+
+function ItemPillRow({ items }: { items: LinkedItem[] }) {
+  const preview = useItemPreview();
+  const navigate = useNavigate();
+  if (items.length === 0) return null;
+
+  const open = (item: LinkedItem) => {
+    if (preview) {
+      const node: WorkspaceItemNode = {
+        id: item.id,
+        kind: item.kind as WorkspaceItemNode["kind"],
+        ref_id: item.ref_id,
+        title: item.title,
+        icon: null,
+        position: 0,
+        indexing_status: null,
+        children: [],
+      };
+      preview(node);
+      return;
+    }
+    // No preview provider on this surface (chat rendered outside the
+    // workspace detail page) — navigate to the item in the workspace.
+    navigate(
+      buildWikiHref({
+        id: item.id,
+        kind: item.kind,
+        refId: item.ref_id,
+        title: item.title,
+        workspaceId: item.workspace_id,
+      }),
+    );
+  };
+
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {items.map((item) => {
+        const Icon = ITEM_KIND_ICON[item.kind] ?? FileText;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => open(item)}
+            title={`Open "${item.title}"`}
+            className={cn(
+              "inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border px-2.5 py-1",
+              "border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[12px] font-medium text-[var(--accent)]",
+              "transition hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/15",
+            )}
+          >
+            <Icon className="h-3 w-3 shrink-0" />
+            <span className="truncate">{item.title}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -300,5 +300,16 @@ class QueryBoardCardsTool(Tool):
                 "board": board.title,
                 "count": int(count),
                 "filters": applied,
+                # Item-link pill the UI renders under the tool card — opens
+                # the board in the workspace preview modal.
+                "items": [
+                    {
+                        "id": str(board.id),
+                        "kind": "board",
+                        "ref_id": str(board.ref_id) if board.ref_id else None,
+                        "title": board.title,
+                        "workspace_id": str(conv.workspace_id),
+                    }
+                ],
             },
         )
