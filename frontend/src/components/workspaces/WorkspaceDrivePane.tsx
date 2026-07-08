@@ -7,11 +7,9 @@ import {
   FolderInput,
   FolderPlus,
   HardDrive,
-  Image as ImageIcon,
   Loader2,
   Pencil,
   Search,
-  FileText,
   Trash2,
   Upload,
   X,
@@ -31,6 +29,7 @@ import {
   humanSize,
 } from "@/components/files/helpers";
 import { Button } from "@/components/shared/Button";
+import { DriveItemIcon } from "@/components/files/DriveItemIcon";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Modal } from "@/components/shared/Modal";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -517,7 +516,7 @@ function FolderRow({
           onClick={onOpen}
           className="flex w-full items-center gap-2 text-left"
         >
-          <Folder className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+          <DriveItemIcon folder={folder} tile />
           <span className="truncate font-medium text-[var(--text)]">
             {folder.name}
           </span>
@@ -588,11 +587,7 @@ function FileRow({
           className="flex w-full items-center gap-2 text-left"
           title={`Preview ${file.filename}`}
         >
-          {isImage ? (
-            <ImageIcon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-          ) : (
-            <FileText className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-          )}
+          <DriveItemIcon file={file} tile />
           <span
             className={cn(
               "truncate",

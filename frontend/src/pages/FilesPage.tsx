@@ -2012,7 +2012,7 @@ function FolderRow({
       )}
       {editing ? (
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <DriveItemIcon folder={folder} />
+          <DriveItemIcon folder={folder} tile />
           <InlineRenameField
             initial={folder.name}
             onCommit={commitRename}
@@ -2025,7 +2025,7 @@ function FolderRow({
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
         title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
       >
-        <DriveItemIcon folder={folder} />
+        <DriveItemIcon folder={folder} tile />
         <span className="truncate text-sm font-medium">{folder.name}</span>
         {folder.starred_at && (
           <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
@@ -2349,7 +2349,7 @@ function FileRow({
       )}
       {editing ? (
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <DriveItemIcon file={file} />
+          <DriveItemIcon file={file} tile />
           <InlineRenameField
             initial={splitFileExt(file.filename).base}
             onCommit={commitRename}
@@ -2361,7 +2361,7 @@ function FileRow({
           onClick={onPreview}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
-          <DriveItemIcon file={file} />
+          <DriveItemIcon file={file} tile />
           <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
             <span className="truncate">{displayFileName(file)}</span>
             {file.starred_at && (

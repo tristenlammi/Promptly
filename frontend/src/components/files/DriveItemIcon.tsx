@@ -7,12 +7,13 @@ import {
   Folder as FolderIcon,
   Image as ImageIcon,
   Inbox,
+  type LucideIcon,
   Music,
   Sparkles,
   Table as TableIcon,
 } from "lucide-react";
 
-import type { FileItem, FolderItem, SystemFolderKind } from "@/api/files";
+import type { SystemFolderKind } from "@/api/files";
 import { classifyMime } from "./helpers";
 import { cn } from "@/utils/cn";
 
@@ -21,74 +22,117 @@ import { cn } from "@/utils/cn";
  * scannable at a glance (the way a real drive colour-codes by type).
  * Keyed off the shared `classifyMime` so it stays in lockstep with the
  * preview renderer. Folders get their system-aware glyph.
+ *
+ * `tile` renders the glyph inside a translucent tinted square — the same
+ * pastel-tile treatment the workspace navigator uses — so the account
+ * Drive and workspace Drive lists match the item submenu. Plain (no tile)
+ * is the bare coloured glyph, used at the larger grid / details sizes.
+ *
+ * Prop shapes are structural (not the full `FileItem` / `FolderItem`) so
+ * the workspace Drive's lighter `WorkspaceDriveFile` / `WorkspaceDriveFolder`
+ * rows can share the exact same icon.
  */
-export function DriveItemIcon({
-  file,
-  folder,
-  className,
-}: {
-  file?: FileItem;
-  folder?: FolderItem;
-  className?: string;
-}) {
-  const sz = cn("shrink-0", className ?? "h-5 w-5");
+type IconFile = {
+  filename: string;
+  mime_type: string;
+  source_kind?: string | null;
+};
+// ``name`` is only here to give the structural type a non-optional-overlap
+// property (both FolderItem and WorkspaceDriveFolder carry it) so TS doesn't
+// flag the otherwise all-optional shape as a weak type; the icon only reads
+// ``system_kind``.
+type IconFolder = { name: string; system_kind?: SystemFolderKind | null };
 
-  if (folder) {
-    return <FolderGlyph kind={folder.system_kind} className={sz} />;
-  }
-  if (!file) return <FileIcon className={cn(sz, "text-[var(--text-muted)]")} />;
+interface Tint {
+  Icon: LucideIcon;
+  /** Glyph colour class. */
+  text: string;
+  /** Matching translucent tile-background class (tile mode only). */
+  tile: string;
+}
 
+const NEUTRAL: Tint = {
+  Icon: FileIcon,
+  text: "text-[var(--text-muted)]",
+  tile: "bg-[var(--text-muted)]/10",
+};
+
+function fileTint(file: IconFile): Tint {
   const lower = (file.filename || "").toLowerCase();
   const mime = (file.mime_type || "").toLowerCase();
 
   if (mime.startsWith("video/"))
-    return <Film className={cn(sz, "text-fuchsia-500")} />;
+    return { Icon: Film, text: "text-fuchsia-500", tile: "bg-fuchsia-500/15" };
   if (mime.startsWith("audio/"))
-    return <Music className={cn(sz, "text-pink-500")} />;
+    return { Icon: Music, text: "text-pink-500", tile: "bg-pink-500/15" };
   if (/\.(zip|tar|gz|tgz|rar|7z)$/.test(lower))
-    return <Archive className={cn(sz, "text-amber-600")} />;
+    return { Icon: Archive, text: "text-amber-600", tile: "bg-amber-600/15" };
 
   const kind = classifyMime(file.mime_type, file.filename, file.source_kind);
   switch (kind) {
     case "image":
-      return <ImageIcon className={cn(sz, "text-violet-500")} />;
+      return { Icon: ImageIcon, text: "text-violet-500", tile: "bg-violet-500/15" };
     case "pdf":
-      return <FileText className={cn(sz, "text-rose-500")} />;
+      return { Icon: FileText, text: "text-rose-500", tile: "bg-rose-500/15" };
     case "document":
-      return <FileText className={cn(sz, "text-sky-500")} />;
+      return { Icon: FileText, text: "text-sky-500", tile: "bg-sky-500/15" };
     case "code":
-      return <FileCode className={cn(sz, "text-amber-500")} />;
+      return { Icon: FileCode, text: "text-amber-500", tile: "bg-amber-500/15" };
     case "code_artifact":
       // csv/json/html/svg/markdown live here — split sheets from the rest.
       if (/\.csv$/.test(lower))
-        return <TableIcon className={cn(sz, "text-emerald-500")} />;
-      return <FileCode className={cn(sz, "text-emerald-500")} />;
+        return { Icon: TableIcon, text: "text-emerald-500", tile: "bg-emerald-500/15" };
+      return { Icon: FileCode, text: "text-emerald-500", tile: "bg-emerald-500/15" };
     case "markdown":
     case "text":
-      return <FileText className={cn(sz, "text-sky-500")} />;
+      return { Icon: FileText, text: "text-sky-500", tile: "bg-sky-500/15" };
     default:
-      return <FileIcon className={cn(sz, "text-[var(--text-muted)]")} />;
+      return NEUTRAL;
   }
 }
 
-function FolderGlyph({
-  kind,
+function folderTint(kind: SystemFolderKind | null | undefined): Tint {
+  const Icon: LucideIcon =
+    kind === "chat_uploads"
+      ? Inbox
+      : kind === "generated_root"
+        ? Sparkles
+        : kind === "generated_files"
+          ? FileText
+          : kind === "generated_media"
+            ? ImageIcon
+            : FolderIcon;
+  // Folders anchor the structure — the accent tile, echoing the navigator.
+  return { Icon, text: "text-[var(--accent)]", tile: "bg-[var(--accent-soft)]" };
+}
+
+export function DriveItemIcon({
+  file,
+  folder,
   className,
+  tile = false,
 }: {
-  kind: SystemFolderKind | null;
+  file?: IconFile;
+  folder?: IconFolder;
   className?: string;
+  /** Render inside a pastel tinted square (matches the navigator tree). */
+  tile?: boolean;
 }) {
-  const c = cn(className, "text-[var(--accent)]");
-  switch (kind) {
-    case "chat_uploads":
-      return <Inbox className={c} />;
-    case "generated_root":
-      return <Sparkles className={c} />;
-    case "generated_files":
-      return <FileText className={c} />;
-    case "generated_media":
-      return <ImageIcon className={c} />;
-    default:
-      return <FolderIcon className={c} />;
+  const t = folder ? folderTint(folder.system_kind) : file ? fileTint(file) : NEUTRAL;
+
+  if (tile) {
+    return (
+      <span
+        className={cn(
+          "grid shrink-0 place-items-center rounded-md",
+          className ?? "h-5 w-5",
+          t.tile
+        )}
+      >
+        <t.Icon className={cn("h-3 w-3", t.text)} />
+      </span>
+    );
   }
+
+  return <t.Icon className={cn("shrink-0", className ?? "h-5 w-5", t.text)} />;
 }

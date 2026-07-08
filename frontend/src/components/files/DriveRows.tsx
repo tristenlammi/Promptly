@@ -95,7 +95,7 @@ export function DriveFileRow({
         onClick={click}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <DriveItemIcon file={file} />
+        <DriveItemIcon file={file} tile />
         <span className="flex min-w-0 flex-col">
           <span className="flex items-center gap-1.5 truncate text-sm">
             <span className="truncate">{displayFileName(file)}</span>
@@ -202,7 +202,7 @@ export function DriveFolderRow({
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <DriveItemIcon folder={folder} />
+        <DriveItemIcon folder={folder} tile />
         <span className="flex min-w-0 flex-col">
           <span className="flex items-center gap-1.5 truncate text-sm font-medium">
             <span className="truncate">{folder.name}</span>
