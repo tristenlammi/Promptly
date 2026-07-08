@@ -359,20 +359,21 @@ export function WorkspaceOverviewPane({
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--text-muted)]">
                 {(
                   [
-                    ["note", counts?.notes ?? 0, FileText],
-                    ["board", counts?.boards ?? 0, Columns3],
-                    ["sheet", counts?.sheets ?? 0, Table2],
-                    ["canvas", counts?.canvases ?? 0, PenTool],
-                    ["chat", counts?.chats ?? 0, MessageSquare],
-                    ["file", counts?.files ?? 0, Layers],
+                    // [key, singular, plural, count, Icon] — explicit plural so
+                    // "canvas" reads "canvases", not the naive +"s" "canvass".
+                    ["note", "note", "notes", counts?.notes ?? 0, FileText],
+                    ["board", "board", "boards", counts?.boards ?? 0, Columns3],
+                    ["sheet", "sheet", "sheets", counts?.sheets ?? 0, Table2],
+                    ["canvas", "canvas", "canvases", counts?.canvases ?? 0, PenTool],
+                    ["chat", "chat", "chats", counts?.chats ?? 0, MessageSquare],
+                    ["file", "file", "files", counts?.files ?? 0, Layers],
                   ] as const
                 )
-                  .filter(([, v]) => v > 0)
-                  .map(([label, v, Icon]) => (
-                    <span key={label} className="inline-flex items-center gap-1">
+                  .filter(([, , , v]) => v > 0)
+                  .map(([key, one, many, v, Icon]) => (
+                    <span key={key} className="inline-flex items-center gap-1">
                       <Icon className="h-3 w-3" />
-                      {v} {label}
-                      {v === 1 ? "" : "s"}
+                      {v} {v === 1 ? one : many}
                     </span>
                   ))}
               </div>
@@ -701,7 +702,7 @@ function KnowledgeHealthCard({
                   onOpen({
                     id: s.item_id,
                     kind: s.kind as WorkspaceItemNode["kind"],
-                    ref_id: null,
+                    ref_id: s.ref_id,
                     title: s.title,
                   })
                 }
@@ -729,7 +730,7 @@ function KnowledgeHealthCard({
                   onOpen({
                     id: h.item_id,
                     kind: h.kind as WorkspaceItemNode["kind"],
-                    ref_id: null,
+                    ref_id: h.ref_id,
                     title: h.title,
                   })
                 }

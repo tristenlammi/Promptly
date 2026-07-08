@@ -117,6 +117,7 @@ export type WorkspaceItemKind =
   | "chat"
   | "sheet"
   | "container"
+  | "roster"
   | "task";
 
 /** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
@@ -155,6 +156,78 @@ export interface SpreadsheetData {
   workspace_id: string;
   title: string;
   data: unknown[] | null;
+}
+
+// --- Roster (shift schedule) -----------------------------------------
+export interface RosterShift {
+  id: string;
+  /** Workspace member user_id the shift is assigned to. */
+  personId: string;
+  /** ISO date "YYYY-MM-DD". */
+  date: string;
+  /** true → uses start/end times; false → an untimed shift with just hours. */
+  timed: boolean;
+  start: string | null; // "HH:MM"
+  end: string | null; // "HH:MM"
+  hours: number;
+  tags: string[];
+  /** Per-shift colour override; null = the person's default colour. */
+  color: string | null;
+  note: string;
+  /** Non-null links occurrences of the same recurring series. */
+  recurGroup: string | null;
+  /** The template this shift was stamped from (for filtering); null if none. */
+  templateId?: string | null;
+}
+
+export interface RosterTag {
+  id: string;
+  label: string;
+  color: string;
+}
+
+/** A saved shift preset. Select one in the rail, then drag a person onto a day
+ *  to stamp the template's times/tags/colour instead of the defaults. */
+export interface RosterTemplate {
+  id: string;
+  label: string;
+  timed: boolean;
+  start: string; // "HH:MM"
+  end: string; // "HH:MM"
+  hours: number;
+  tags: string[];
+  color: string | null;
+  /** Optional default note stamped onto shifts created from this template. */
+  note?: string;
+}
+
+export interface RosterSettings {
+  published: boolean;
+  publishedAt: string | null;
+  /** Hash of the shift list at last publish — non-equal ⇒ unpublished edits. */
+  publishedHash?: string | null;
+  /** personId → weekly hour target. */
+  targets: Record<string, number>;
+  /** personId → colour override. */
+  colors: Record<string, string>;
+  /** personId → default tag ids stamped onto shifts assigned to them. */
+  personTags?: Record<string, string[]>;
+  defaultStart: string; // "HH:MM"
+  defaultEnd: string; // "HH:MM"
+  tags: RosterTag[];
+  templates: RosterTemplate[];
+}
+
+export interface RosterDoc {
+  settings: RosterSettings;
+  shifts: RosterShift[];
+}
+
+export interface RosterData {
+  id: string;
+  workspace_id: string;
+  title: string;
+  data: RosterDoc | null;
 }
 
 // ---------------------------------------------------------------------
@@ -331,12 +404,14 @@ export interface WorkspaceOverview {
       item_id: string;
       kind: string;
       title: string;
+      ref_id: string | null;
       updated_at: string | null;
     }>;
     heavy: Array<{
       item_id: string;
       kind: string;
       title: string;
+      ref_id: string | null;
       chars: number | null;
     }>;
   };
@@ -454,7 +529,15 @@ export interface WorkspaceTaskUpdatePayload {
 
 
 export interface CreateWorkspaceItemPayload {
-  kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container" | "chat";
+  kind:
+    | "folder"
+    | "note"
+    | "canvas"
+    | "board"
+    | "sheet"
+    | "container"
+    | "chat"
+    | "roster";
   parent_id?: string | null;
   title?: string;
 }
@@ -890,6 +973,26 @@ export const workspacesApi = {
   ): Promise<SpreadsheetData> {
     const { data } = await apiClient.put<SpreadsheetData>(
       `/workspaces/${id}/spreadsheets/${sheetId}`,
+      payload
+    );
+    return data;
+  },
+
+  // --- Roster pages (single-user persistence) --------------------------
+  async getRoster(id: string, rosterId: string): Promise<RosterData> {
+    const { data } = await apiClient.get<RosterData>(
+      `/workspaces/${id}/rosters/${rosterId}`
+    );
+    return data;
+  },
+
+  async saveRoster(
+    id: string,
+    rosterId: string,
+    payload: { data: unknown; content_text?: string; title?: string }
+  ): Promise<RosterData> {
+    const { data } = await apiClient.put<RosterData>(
+      `/workspaces/${id}/rosters/${rosterId}`,
       payload
     );
     return data;

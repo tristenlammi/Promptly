@@ -73,6 +73,10 @@ class HealthItem(BaseModel):
     item_id: uuid.UUID
     kind: str
     title: str
+    # Backing entity id (the note's UserFile, canvas, sheet, …). The
+    # frontend needs it to actually open the item — without it a note opens
+    # to "no underlying document".
+    ref_id: uuid.UUID | None = None
     # Stale: last touched. Heavy: indexed characters.
     updated_at: datetime | None = None
     chars: int | None = None
@@ -286,6 +290,7 @@ async def workspace_overview(
                 item_id=it.id,
                 kind=it.kind,
                 title=it.title,
+                ref_id=it.ref_id,
                 updated_at=it.updated_at,
             )
             for it in stale_rows
@@ -343,11 +348,15 @@ async def workspace_overview(
         if chars and chars > 10_000:  # under ~2.5k tokens nobody cares
             heavy.append(
                 HealthItem(
-                    item_id=it.id, kind=it.kind, title=it.title, chars=chars
+                    item_id=it.id,
+                    kind=it.kind,
+                    title=it.title,
+                    ref_id=it.ref_id,
+                    chars=chars,
                 )
             )
     heavy.sort(key=lambda h: h.chars or 0, reverse=True)
-    health.heavy = heavy[:3]
+    health.heavy = heavy[:5]
 
     return WorkspaceOverview(
         counts=counts,
