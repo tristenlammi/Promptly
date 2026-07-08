@@ -6,7 +6,6 @@ import {
   LayoutGrid,
   Plus,
   Search,
-  Upload,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -14,7 +13,6 @@ import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard";
 import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
-import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { NewWorkspaceModal } from "@/components/workspaces/NewWorkspaceModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
@@ -42,7 +40,6 @@ export function WorkspacesPage() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("active");
 
   const { data: activeWorkspaces, isLoading: activeLoading } = useWorkspaces({
@@ -120,14 +117,6 @@ export function WorkspacesPage() {
         subtitle="Project spaces — notes, boards, sheets, canvases, chats, and automations, with an AI that knows all of it"
         actions={
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              leftIcon={<Upload className="h-4 w-4" />}
-              onClick={() => setImportOpen(true)}
-              title="Import chat conversations (ChatGPT / Claude exports). Workspace import lives in the New-workspace dialog."
-            >
-              Import chats
-            </Button>
             <Button
               variant="primary"
               leftIcon={<Plus className="h-4 w-4" />}
@@ -213,11 +202,6 @@ export function WorkspacesPage() {
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         onCreated={(id) => navigate(`/workspaces/${id}`)}
-      />
-
-      <ImportConversationsModal
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
       />
 
       <ConfirmDoubleModal
