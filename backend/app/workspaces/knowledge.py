@@ -2138,6 +2138,88 @@ def _with_map(map_md: str | None, block: str | None) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
+async def _item_backing_text(
+    db: AsyncSession, item: WorkspaceItem
+) -> str | None:
+    """Full flattened text of a single workspace item, by kind. ``None`` for
+    kinds with no readable body (folder/container/chat) or a missing/trashed
+    backing row."""
+    if item.kind in ("note", "board"):
+        uf = await db.get(UserFile, item.ref_id)
+        if uf is None or uf.trashed_at is not None:
+            return None
+        return (uf.content_text or "").strip() or None
+    if item.kind == "sheet":
+        s = await db.get(Spreadsheet, item.ref_id)
+        return ((s.content_text or "").strip() or None) if s is not None else None
+    if item.kind == "canvas":
+        c = await db.get(WorkspaceCanvas, item.ref_id)
+        return ((c.content_text or "").strip() or None) if c is not None else None
+    return None
+
+
+async def read_workspace_item_text(
+    db: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    title: str,
+    kind: str | None = None,
+) -> tuple[str, str, str | None] | None:
+    """Resolve a workspace item by (case-insensitive) title and return
+    ``(resolved_title, kind, full_text)`` — the backend of the
+    ``read_workspace_item`` chat tool.
+
+    Mirrors the visibility rules the workspace map uses (private items are
+    visible only to their creator; trashed/archived items are excluded) so
+    the chat can only read what it was allowed to know exists. Prefers an
+    exact title match, falling back to an *unambiguous* case-insensitive
+    substring match. Returns ``None`` when nothing visible matches (or a
+    substring match is ambiguous — the caller should ask for the exact
+    title). ``full_text`` is ``None`` for an empty or bodyless item."""
+    title = (title or "").strip()
+    if not title:
+        return None
+    visible = or_(
+        WorkspaceItem.visibility != "private",
+        WorkspaceItem.created_by == user_id,
+    )
+    base = select(WorkspaceItem).where(
+        WorkspaceItem.workspace_id == workspace_id,
+        WorkspaceItem.archived_at.is_(None),
+        WorkspaceItem.trashed_at.is_(None),
+        visible,
+    )
+    if kind:
+        base = base.where(WorkspaceItem.kind == kind)
+
+    exact = (
+        await db.execute(
+            base.where(func.lower(WorkspaceItem.title) == title.lower()).order_by(
+                WorkspaceItem.position.asc()
+            )
+        )
+    ).scalars().all()
+    matches = list(exact)
+    if not matches:
+        like = (
+            await db.execute(
+                base.where(
+                    func.lower(WorkspaceItem.title).like(f"%{title.lower()}%")
+                ).order_by(WorkspaceItem.position.asc())
+            )
+        ).scalars().all()
+        if len(like) == 1:
+            matches = list(like)
+        # >1 substring hits: ambiguous — treat as no-match so the model
+        # retries with an exact title rather than us guessing.
+    if not matches:
+        return None
+    it = matches[0]
+    text = await _item_backing_text(db, it)
+    return (it.title or "Untitled", it.kind, text)
+
+
 async def build_workspace_injection(
     db: AsyncSession,
     *,

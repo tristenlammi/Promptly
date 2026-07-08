@@ -17,6 +17,7 @@ from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
+from app.chat.tools.read_workspace_item import ReadWorkspaceItemTool
 from app.chat.tools.run_agents import RunAgentsTool
 from app.chat.tools.web_search import WebSearchTool
 from app.chat.tools.workspace_write import (
@@ -50,6 +51,8 @@ REGISTRY: list[Tool] = [
     # only advertised in workspace chats.
     ProposeWorkspaceNoteTool(),
     ProposeBoardCardsTool(),
+    # Read-back: open a workspace item's full content on demand (Track 1 P3).
+    ReadWorkspaceItemTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the
