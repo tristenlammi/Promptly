@@ -353,9 +353,7 @@ export function DocumentToolbar({
         <ToolButton label="Insert YouTube" onClick={handleInsertYoutube}>
           <YoutubeIcon className="h-4 w-4" />
         </ToolButton>
-        <ToolButton label="Insert table" onClick={handleInsertTable}>
-          <TableIcon className="h-4 w-4" />
-        </ToolButton>
+        <TableSizeButton editor={editor} />
         <ToolButton label="Insert details" onClick={handleInsertDetails}>
           <ListVideo className="h-4 w-4" />
         </ToolButton>
@@ -702,6 +700,91 @@ function ColorButton({ editor }: { editor: Editor | null }) {
                   )}
                 </button>
               ))}
+            </div>
+          </>,
+          document.body
+        )}
+    </>
+  );
+}
+
+/** Google-Docs-style table size picker — hover the grid to choose R×C. */
+function TableSizeButton({ editor }: { editor: Editor | null }) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const [hover, setHover] = useState({ r: 0, c: 0 });
+  const MAX = 8;
+
+  return (
+    <>
+      <ToolButton
+        label="Insert table"
+        onClick={(e) => {
+          setAnchor(e.currentTarget.getBoundingClientRect());
+          setHover({ r: 0, c: 0 });
+          setOpen((o) => !o);
+        }}
+      >
+        <TableIcon className="h-4 w-4" />
+      </ToolButton>
+      {open &&
+        anchor &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[75]"
+              onMouseDown={() => setOpen(false)}
+            />
+            <div
+              style={{
+                position: "fixed",
+                top: Math.min(anchor.bottom + 6, window.innerHeight - 180),
+                left: Math.max(8, Math.min(anchor.left, window.innerWidth - 190)),
+                zIndex: 76,
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl"
+            >
+              <div
+                className="grid gap-0.5"
+                style={{ gridTemplateColumns: `repeat(${MAX}, 1fr)` }}
+                onMouseLeave={() => setHover({ r: 0, c: 0 })}
+              >
+                {Array.from({ length: MAX * MAX }).map((_, i) => {
+                  const r = Math.floor(i / MAX) + 1;
+                  const c = (i % MAX) + 1;
+                  const on = r <= hover.r && c <= hover.c;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onMouseEnter={() => setHover({ r, c })}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        editor
+                          ?.chain()
+                          .focus()
+                          .insertTable({
+                            rows: r,
+                            cols: c,
+                            withHeaderRow: true,
+                          })
+                          .run();
+                        setOpen(false);
+                      }}
+                      className={cn(
+                        "h-4 w-4 rounded-[3px] border transition-colors",
+                        on
+                          ? "border-[var(--accent)] bg-[var(--accent)]/40"
+                          : "border-[var(--border)] bg-[var(--bg)]"
+                      )}
+                    />
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 text-center text-[11px] text-[var(--text-muted)]">
+                {hover.r || 0} × {hover.c || 0}
+              </div>
             </div>
           </>,
           document.body

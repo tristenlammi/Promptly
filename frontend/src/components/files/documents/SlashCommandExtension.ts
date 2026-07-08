@@ -158,6 +158,20 @@ function buildItems(hasWikiLink: boolean): SlashItem[] {
           .run(),
     },
     {
+      title: "2 columns",
+      hint: "side-by-side",
+      keywords: ["columns", "column", "layout", "grid", "split", "two"],
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setColumns(2).run(),
+    },
+    {
+      title: "3 columns",
+      hint: "three-up layout",
+      keywords: ["columns", "column", "layout", "grid", "split", "three"],
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setColumns(3).run(),
+    },
+    {
       title: "Image",
       hint: "upload a picture",
       keywords: ["photo", "picture", "upload", "img"],

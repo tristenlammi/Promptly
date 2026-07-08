@@ -27,6 +27,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 
 import { AudioExtension } from "./AudioExtension";
 import { CalloutExtension } from "./CalloutExtension";
+import { Column, Columns } from "./ColumnsExtension";
 import { MentionMark } from "./MentionMark";
 import { SlashCommandExtension } from "./SlashCommandExtension";
 import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
@@ -210,6 +211,9 @@ export function buildExtensions({
     // Coloured info/warning/success/danger callout boxes (our own node —
     // no Pro dependency). Variant persists via ``data-variant``.
     CalloutExtension,
+    // Multi-column layouts (our own nodes — no Pro dependency).
+    Columns,
+    Column,
     // The "/" block menu the Placeholder text promises. Commands reuse
     // the toolbar's chains; image/audio delegate to the toolbar's picker
     // via a CustomEvent (see SlashCommandExtension for why).

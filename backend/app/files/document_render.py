@@ -379,6 +379,12 @@ def _wrap(tag_name: str, attrs: dict[str, Any], inner: str) -> str:
         mapped = _BLOCK_MAP.get(tag_name, "div") or "div"
         return f"<{mapped}>{inner}</{mapped}>"
 
+    # Multi-column layout — flex row + equal columns via CSS.
+    if tag_name == "columns":
+        return f'<div class="doc-columns" data-type="columns">{inner}</div>'
+    if tag_name == "column":
+        return f'<div class="doc-column" data-type="column">{inner}</div>'
+
     # Callout box — variant drives the colour/icon in CSS. Mirror the
     # editor's renderHTML so the collab snapshot matches a manual save.
     if tag_name == "callout":

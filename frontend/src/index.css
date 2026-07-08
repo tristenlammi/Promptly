@@ -827,6 +827,30 @@ html.dark .promptly-doc mark {
   white-space: nowrap;
 }
 
+/* Multi-column layout (our Columns/Column nodes). Flex row of equal
+   columns; stacks on very narrow editors so it never overflows. */
+.promptly-doc .doc-columns {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0.85rem 0;
+}
+.promptly-doc .doc-column {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.promptly-doc .doc-column > :first-child {
+  margin-top: 0;
+}
+.promptly-doc .doc-column > :last-child {
+  margin-bottom: 0;
+}
+@media (max-width: 640px) {
+  .promptly-doc .doc-columns {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
 /* Block drag handle — the grip that appears left of the hovered block
    (Tiptap's MIT DragHandle positions the wrapper; we style the grip). */
 .doc-drag-handle {
