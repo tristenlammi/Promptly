@@ -645,6 +645,7 @@ export function FilesPage({
             scope={scope}
             currentFolderId={folderId}
             onNavigate={navigateToFolder}
+            onNewFolder={() => setShowNewFolderPage(true)}
             version={treeVersion}
           />
         </aside>
