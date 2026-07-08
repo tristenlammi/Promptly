@@ -481,24 +481,6 @@ export function WorkspaceCanvasPane({
           </span>
         </div>
       )}
-      {/* A2 — insert a workspace item as a first-class node. Top-right is the
-          one corner Excalidraw's default UI leaves clear. */}
-      {linkingEnabled && (
-        <div className="absolute right-2 top-2 z-20">
-          <button
-            type="button"
-            onClick={() => {
-              setPickerMode("insert");
-              setPickerOpen(true);
-            }}
-            title="Drop a workspace item onto the board as a linked node"
-            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text)] shadow-md transition hover:bg-[var(--surface-hover)]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Insert item
-          </button>
-        </div>
-      )}
       {imageSel && (
         <div
           className="absolute z-20"
@@ -579,6 +561,27 @@ export function WorkspaceCanvasPane({
         onLinkOpen={linkingEnabled ? handleLinkOpen : undefined}
         viewModeEnabled={readOnly}
         initialData={initialData}
+        // Render "Insert item" *inside* Excalidraw's own top-right cluster
+        // so it lays out beside the Library button instead of overlapping it
+        // (the old absolute overlay collided with Excalidraw's native UI).
+        renderTopRightUI={
+          linkingEnabled && !readOnly
+            ? () => (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickerMode("insert");
+                    setPickerOpen(true);
+                  }}
+                  title="Drop a workspace item onto the board as a linked node"
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Insert item
+                </button>
+              )
+            : undefined
+        }
       />
       {pickerOpen && workspaceId && (
         <WorkspaceItemPicker

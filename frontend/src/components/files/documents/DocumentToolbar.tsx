@@ -16,6 +16,7 @@ import {
   ListOrdered,
   ListTodo,
   ListVideo,
+  MessageSquareText,
   Minus,
   Music,
   Pilcrow,
@@ -354,6 +355,15 @@ export function DocumentToolbar({
         </ToolButton>
         <ToolButton label="Insert details" onClick={handleInsertDetails}>
           <ListVideo className="h-4 w-4" />
+        </ToolButton>
+        <ToolButton
+          label="Callout"
+          active={editor?.isActive("callout")}
+          onClick={() =>
+            editor?.chain().focus().setCallout({ variant: "info" }).run()
+          }
+        >
+          <MessageSquareText className="h-4 w-4" />
         </ToolButton>
         <ToolButton
           label="Horizontal rule"
