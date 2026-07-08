@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import { authApi } from "@/api/auth";
 import type { UserPreferencesUpdate, UserSettings } from "@/api/types";
@@ -21,6 +21,13 @@ type SpellPrefKey =
   | "spellcheck_lang"
   | "spellcheck_words";
 
+// Stable identity for the "no personal words yet" case. Returning a fresh
+// ``[]`` each render would change the array identity every render, and since
+// consumers put ``personalWords`` in effect deps that dispatch editor
+// transactions, a new ``[]`` triggers a render→dispatch→render loop that
+// freezes the note editor. One shared empty array avoids that.
+const EMPTY_WORDS: string[] = [];
+
 export function useSpellcheckPrefs() {
   const settings = useAuthStore((s) => s.user?.settings);
   const patchSettings = useAuthStore((s) => s.patchSettings);
@@ -31,9 +38,14 @@ export function useSpellcheckPrefs() {
     (settings?.spellcheck_autocorrect as boolean | undefined) ?? false;
   const rawLang = settings?.spellcheck_lang as string | undefined;
   const lang = isSupportedLang(rawLang) ? rawLang : defaultSpellLang();
-  const personalWords = Array.isArray(settings?.spellcheck_words)
-    ? (settings!.spellcheck_words as string[])
-    : [];
+  const rawWords = settings?.spellcheck_words;
+  // Memoised so identity is stable across renders (see EMPTY_WORDS). Keyed on
+  // the actual stored array — it only changes when the user edits their
+  // dictionary, which is exactly when consumers should re-run.
+  const personalWords = useMemo<string[]>(
+    () => (Array.isArray(rawWords) ? (rawWords as string[]) : EMPTY_WORDS),
+    [rawWords]
+  );
 
   const persist = useCallback(
     (patch: Pick<UserPreferencesUpdate, SpellPrefKey>) => {
