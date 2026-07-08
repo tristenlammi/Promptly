@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  AlignLeft,
   CornerDownLeft,
   FileText,
   Folder,
@@ -20,6 +22,12 @@ import {
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 import { setPendingHighlight } from "./deepCitation";
+
+/** Strip the FTS snippet's HTML down to just its ``<mark>`` highlights so it's
+ *  safe to render (the backend only wraps matches in ``<mark>``). */
+function sanitizeSnippet(snippet: string): string {
+  return snippet.replace(/<(?!\/?mark\b)[^>]*>/gi, "").slice(0, 400);
+}
 
 /** Rewrite bare ``[n]`` citation markers into markdown links on a
  *  ``#ws-cite-n`` anchor so the renderer below can turn them into
@@ -224,6 +232,39 @@ export function WorkspaceCommandPalette({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ``open`` only re-reads recents
   }, [flat, query, workspaceId, open]);
 
+  // Content search — the quick-switcher above matches titles/paths; this runs
+  // the backend full-text + semantic search so a query also finds items by
+  // what's *inside* them (note bodies, board cards, sheets, files).
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query.trim()), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+  const { data: searchData } = useQuery({
+    queryKey: ["workspaces", "search", workspaceId, debounced],
+    queryFn: () => workspacesApi.search(workspaceId, debounced),
+    enabled: open && debounced.length >= 2,
+  });
+  const titleIds = useMemo(
+    () => new Set(results.map((f) => f.node.id)),
+    [results]
+  );
+  // Only content/semantic hits that the title matches above didn't already
+  // surface — deduped, so the two sections never repeat an item.
+  const contentHits = useMemo(() => {
+    const hits = searchData?.hits ?? [];
+    const seen = new Set<string>();
+    return hits
+      .filter((h) => {
+        if (!h.item_id) return false;
+        if (h.source !== "text" && h.source !== "semantic") return false;
+        if (titleIds.has(h.item_id) || seen.has(h.item_id)) return false;
+        seen.add(h.item_id);
+        return true;
+      })
+      .slice(0, 8);
+  }, [searchData, titleIds]);
+
   // Reset everything each time the palette opens.
   useEffect(() => {
     if (open) {
@@ -320,7 +361,7 @@ export function WorkspaceCommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Jump to an item, or ask this workspace…"
+            placeholder="Search items + their content, or ask this workspace…"
             className="flex-1 bg-transparent py-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
           />
         </div>
@@ -456,6 +497,38 @@ export function WorkspaceCommandPalette({
                 </li>
               );
             })}
+            {contentHits.length > 0 && (
+              <>
+                <div className="flex items-center gap-1.5 px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  <AlignLeft className="h-3 w-3" />
+                  Found in content
+                </div>
+                {contentHits.map((h) => (
+                  <li key={`content-${h.item_id}`}>
+                    <button
+                      type="button"
+                      onClick={() => jumpToCitation(h.item_id, h.snippet)}
+                      className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-[var(--hover)]"
+                    >
+                      <span className="flex items-center gap-2 text-sm">
+                        <KindIcon kind={h.kind as WorkspaceItemNode["kind"]} />
+                        <span className="flex-1 truncate text-[var(--text)]">
+                          {h.title || "Untitled"}
+                        </span>
+                      </span>
+                      {h.snippet && (
+                        <span
+                          className="search-snippet line-clamp-2 pl-6 text-xs text-[var(--text-muted)]"
+                          dangerouslySetInnerHTML={{
+                            __html: sanitizeSnippet(h.snippet),
+                          }}
+                        />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </>
+            )}
           </ul>
         )}
       </div>

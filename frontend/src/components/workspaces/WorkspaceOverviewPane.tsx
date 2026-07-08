@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -8,7 +8,6 @@ import {
   Circle,
   Clock,
   Columns3,
-  CornerDownLeft,
   FileText,
   Layers,
   Loader2,
@@ -32,7 +31,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   workspacesApi,
   type WorkspaceActivityEvent,
-  type WorkspaceAskResponse,
   type WorkspaceItemNode,
   type WorkspaceTask,
 } from "@/api/workspaces";
@@ -50,8 +48,6 @@ import { relativeTime } from "@/components/tasks/RunStatusChip";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
-import { AskAnswer } from "./WorkspaceCommandPalette";
-import { setPendingHighlight } from "./deepCitation";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
 
 /**
@@ -163,14 +159,6 @@ export function WorkspaceOverviewPane({
     walk(tree ?? []);
     return out;
   }, [tree]);
-  const jumpToCitation = (itemId: string | null, snippet?: string | null) => {
-    if (!itemId) return;
-    const node = flatTree.find((n) => n.id === itemId);
-    if (!node) return;
-    if (snippet && node.ref_id) setPendingHighlight(node.ref_id, snippet);
-    onOpenItem(node);
-  };
-
   const counts = overview?.counts;
   const recent = overview?.recent ?? [];
   const noteChecks = overview?.tasks ?? [];
@@ -262,10 +250,8 @@ export function WorkspaceOverviewPane({
         </div>
       ) : null}
 
-      {/* ---- Ask hero — the project answers you ----------------------- */}
-      {!isEmpty && (
-        <AskHero workspaceId={workspaceId} onJump={jumpToCitation} />
-      )}
+      {/* Ask hero removed — the single Ask/Search surface is the ⌘K palette
+          (the "Ask" button by Back). */}
 
       {/* ---- Two-column body ------------------------------------------ */}
       <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-3">
@@ -443,112 +429,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
     <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
       {children}
     </h2>
-  );
-}
-
-// --------------------------------------------------------------------
-// Ask hero — grounded Q&A, inline on the hub
-// --------------------------------------------------------------------
-function AskHero({
-  workspaceId,
-  onJump,
-}: {
-  workspaceId: string;
-  onJump: (itemId: string | null, snippet?: string | null) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [asking, setAsking] = useState(false);
-  const [answer, setAnswer] = useState<WorkspaceAskResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [askedQuery, setAskedQuery] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  const runAsk = async () => {
-    const q = query.trim();
-    if (!q || asking) return;
-    setAsking(true);
-    setError(null);
-    setAnswer(null);
-    setAskedQuery(q);
-    try {
-      const res = await workspacesApi.ask(workspaceId, q);
-      setAnswer(res);
-    } catch {
-      setError("Couldn't get an answer — try again in a moment.");
-    } finally {
-      setAsking(false);
-    }
-  };
-
-  return (
-    <section className="mt-6">
-      <div
-        className={cn(
-          "rounded-card border bg-[var(--surface)] transition",
-          asking || answer || error
-            ? "border-[var(--accent)]/40"
-            : "border-[var(--border)] focus-within:border-[var(--accent)]/60"
-        )}
-      >
-        <div className="flex items-center gap-2.5 px-4 py-3">
-          <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void runAsk();
-            }}
-            placeholder="Ask anything about this project — answers cite your notes, boards, and files…"
-            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
-          />
-          {asking ? (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
-          ) : query.trim() ? (
-            <button
-              type="button"
-              onClick={() => void runAsk()}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white transition hover:opacity-90"
-            >
-              Ask
-              <CornerDownLeft className="h-3 w-3" />
-            </button>
-          ) : null}
-        </div>
-        {(answer || error || asking) && (
-          <div className="border-t border-[var(--border)] px-4 py-3">
-            {asking && (
-              <p className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Reading the workspace…
-              </p>
-            )}
-            {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-            {answer && (
-              <>
-                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                  {askedQuery}
-                </p>
-                <AskAnswer answer={answer} onJump={onJump} />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAnswer(null);
-                    setError(null);
-                    setQuery("");
-                    inputRef.current?.focus();
-                  }}
-                  className="mt-2 text-xs text-[var(--text-muted)] underline-offset-2 transition hover:text-[var(--text)] hover:underline"
-                >
-                  Clear
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </section>
   );
 }
 
