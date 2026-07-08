@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link2, Link2Off, Loader2, Plus, Wand2 } from "lucide-react";
+import {
+  FileText,
+  LayoutGrid,
+  Link2,
+  Link2Off,
+  Loader2,
+  type LucideIcon,
+  MessageSquare,
+  Pencil,
+  Plus,
+  Shapes,
+  Table2,
+  Wand2,
+} from "lucide-react";
 import {
   convertToExcalidrawElements,
   Excalidraw,
@@ -21,6 +34,7 @@ import {
   parseWikiHref,
 } from "@/components/files/documents/WikiLinkExtension";
 import { ErrorState } from "@/components/shared/Callout";
+import { useWorkspaceTree } from "@/hooks/useWorkspaces";
 import { useItemPreview } from "./itemPreviewContext";
 import { ItemPaneHeader } from "./ItemPaneHeader";
 import { PresenceChips, usePresencePeers } from "./PresenceChips";
@@ -55,7 +69,20 @@ interface LinkSelection {
   left: number;
   top: number;
   linked: boolean;
+  /** Parsed from the element's wiki-link href, when it points at an item. */
+  itemId: string | null;
+  kind: string | null;
+  refId: string | null;
 }
+
+/** Per-kind glyph for the linked-item pill (mirrors the chat item pills). */
+const LINK_PILL_ICON: Record<string, LucideIcon> = {
+  note: FileText,
+  board: LayoutGrid,
+  sheet: Table2,
+  canvas: Shapes,
+  chat: MessageSquare,
+};
 
 /**
  * Live, multiplayer Excalidraw board for a workspace canvas item.
@@ -193,6 +220,23 @@ export function WorkspaceCanvasPane({
   // to a workspace item. Only wired when the pane knows its workspace.
   const linkingEnabled = !readOnly && !!workspaceId && !!onOpenItem;
   const [linkSel, setLinkSel] = useState<LinkSelection | null>(null);
+  // Resolve a linked shape's item id → title/kind so the overlay pill can
+  // show the item's real name instead of the raw wiki-link URL.
+  const { data: tree } = useWorkspaceTree(workspaceId);
+  const itemsById = useMemo(() => {
+    const map = new Map<
+      string,
+      { title: string; kind: string; ref_id: string | null }
+    >();
+    const walk = (nodes: WorkspaceItemNode[]) => {
+      for (const n of nodes) {
+        map.set(n.id, { title: n.title, kind: n.kind, ref_id: n.ref_id });
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(tree ?? []);
+    return map;
+  }, [tree]);
   const [pickerOpen, setPickerOpen] = useState(false);
   // The picker serves two flows: "link" attaches the selected shape to an
   // item (Phase 8); "insert" drops a fresh styled node bound to an item (A2).
@@ -295,11 +339,15 @@ export function WorkspaceCanvasPane({
             appState
           );
           const rect = containerRef.current?.getBoundingClientRect();
+          const parsed = parseWikiHref(el.link);
           linkNext = {
             elementId: el.id,
             left: p.x - (rect?.left ?? 0),
             top: p.y - (rect?.top ?? 0),
-            linked: !!parseWikiHref(el.link),
+            linked: !!parsed,
+            itemId: parsed?.item ?? null,
+            kind: parsed?.kind ?? null,
+            refId: parsed?.ref ?? null,
           };
         }
       }
@@ -538,44 +586,87 @@ export function WorkspaceCanvasPane({
           </button>
         </div>
       )}
-      {linkSel && (
-        <div
-          className="absolute z-20 flex gap-1"
-          style={{
-            left: linkSel.left,
-            top: linkSel.top,
-            transform: "translate(6px, -6px)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setPickerMode("link");
-              setPickerOpen(true);
-            }}
-            title={
-              linkSel.linked
-                ? "Change the linked workspace item"
-                : "Link this shape to a workspace item"
-            }
-            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] shadow-md transition hover:bg-[var(--surface-hover)]"
-          >
-            <Link2 className="h-3.5 w-3.5" />
-            {linkSel.linked ? "Linked" : "Link to item"}
-          </button>
-          {linkSel.linked && (
-            <button
-              type="button"
-              onClick={() => setElementLink(linkSel.elementId, null)}
-              title="Remove the link"
-              aria-label="Remove link"
-              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-[var(--text-muted)] shadow-md transition hover:text-[var(--danger)]"
+      {linkSel &&
+        (() => {
+          const info = linkSel.itemId ? itemsById.get(linkSel.itemId) : null;
+          const title = info?.title || (linkSel.linked ? "Linked item" : "");
+          const PillIcon =
+            LINK_PILL_ICON[(info?.kind || linkSel.kind || "note") as string] ??
+            FileText;
+          return (
+            <div
+              className="absolute z-20 flex items-center gap-1"
+              style={{
+                left: linkSel.left,
+                top: linkSel.top,
+                transform: "translate(6px, -6px)",
+              }}
             >
-              <Link2Off className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      )}
+              {linkSel.linked ? (
+                <>
+                  {/* Terracotta name pill — click opens the linked item. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!linkSel.itemId) return;
+                      const open = previewItem ?? onOpenItem;
+                      open?.({
+                        id: linkSel.itemId,
+                        kind: (linkSel.kind ??
+                          "note") as WorkspaceItemNode["kind"],
+                        ref_id: info?.ref_id ?? linkSel.refId,
+                        title,
+                        icon: null,
+                        position: 0,
+                        indexing_status: null,
+                        children: [],
+                      });
+                    }}
+                    title={`Open “${title}”`}
+                    className="inline-flex max-w-[14rem] items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent)] shadow-md transition hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/15"
+                  >
+                    <PillIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{title}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickerMode("link");
+                      setPickerOpen(true);
+                    }}
+                    title="Change the linked item"
+                    aria-label="Change linked item"
+                    className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-[var(--text-muted)] shadow-md transition hover:text-[var(--text)]"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setElementLink(linkSel.elementId, null)}
+                    title="Remove the link"
+                    aria-label="Remove link"
+                    className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-[var(--text-muted)] shadow-md transition hover:text-[var(--danger)]"
+                  >
+                    <Link2Off className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickerMode("link");
+                    setPickerOpen(true);
+                  }}
+                  title="Link this shape to a workspace item"
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs font-medium text-[var(--text)] shadow-md transition hover:bg-[var(--surface-hover)]"
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  Link to item
+                </button>
+              )}
+            </div>
+          );
+        })()}
       <Excalidraw
         excalidrawAPI={setExcalidrawAPI}
         onChange={handleChange}

@@ -850,6 +850,15 @@ html.dark .promptly-doc mark {
   cursor: grabbing;
 }
 
+/* Canvas: hide Excalidraw's native hyperlink popup for our workspace-item
+   links (href carries ``item=``) — WorkspaceCanvasPane shows a terracotta
+   name pill instead of the raw /workspaces/…?item=… URL. Plain web links
+   keep their native popup, and the native link *input* (no anchor yet) is
+   untouched so adding a plain link still works. */
+.promptly-canvas .excalidraw-hyperlinkContainer:has(a[href*="item="]) {
+  display: none !important;
+}
+
 /* Placeholder text for an empty editor — TipTap's Placeholder
    extension only adds the ``is-editor-empty`` class; the visible
    text comes from a CSS pseudo-element reading ``data-placeholder``. */
