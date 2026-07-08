@@ -82,6 +82,7 @@ from app.workspaces.shares import (
     get_accessible_workspace,
     is_owner_of_workspace,
     load_workspace_participants,
+    require_workspace_admin,
     require_workspace_write,
 )
 from app.chat.schemas import ConversationSummary
@@ -586,9 +587,11 @@ async def update_workspace(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceSummary:
-    # Editors + owner can edit workspace settings; viewers are read-only.
+    # Settings are an admin concern: owner + admin only. Plain editors can
+    # edit content but not the workspace's title / prompt / default model /
+    # memory / storage; viewers are read-only.
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
+    require_workspace_admin(access_role)
     # ``model_fields_set`` tells us which keys were actually sent by
     # the client — lets us differentiate "leave alone" (absent) from
     # "set to null" (explicit clear). Matches the PATCH semantics

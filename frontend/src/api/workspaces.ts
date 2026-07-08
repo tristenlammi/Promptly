@@ -85,9 +85,10 @@ export interface WorkspaceDetail extends WorkspaceSummary {
   per_turn_tokens: number;
   retrieval_active: boolean;
   indexing_count: number;
-  /** Caller's fine-grained permission. ``viewer`` is read-only;
-   *  ``editor``/``owner`` can edit. */
-  access_role: "owner" | "editor" | "viewer";
+  /** Caller's fine-grained permission. ``viewer`` is read-only; ``editor``
+   *  edits content only; ``admin``/``owner`` also edit settings + manage
+   *  members. */
+  access_role: "owner" | "admin" | "editor" | "viewer";
   /** Opt-in rolling workspace memory (legacy mirror of ``memory_mode``). */
   auto_memory_enabled: boolean;
   /** Tri-state memory mode: "off" | "auto" | "manual". */
@@ -471,7 +472,7 @@ export interface MoveWorkspaceItemPayload {
   position: number;
 }
 
-export type WorkspaceShareRole = "editor" | "viewer";
+export type WorkspaceShareRole = "admin" | "editor" | "viewer";
 
 /** One share row on the owner-facing management list. */
 export interface WorkspaceShareRow {

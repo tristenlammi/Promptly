@@ -34,7 +34,7 @@ export function ShareWorkspaceDialog({
     >
       <WorkspaceMembersPanel
         workspaceId={workspaceId}
-        isOwner
+        canManage
         owner={null}
         collaborators={[]}
       />

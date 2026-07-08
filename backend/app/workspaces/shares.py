@@ -69,7 +69,24 @@ async def is_owner_of_workspace(
     return ws
 
 
-WorkspaceAccessRole = Literal["owner", "editor", "viewer"]
+WorkspaceAccessRole = Literal["owner", "admin", "editor", "viewer"]
+
+# The collaborator roles a share row can carry (owner is implicit — it's
+# the workspace's ``user_id``, never a share). ``editor`` is the stored
+# default for legacy rows.
+ShareRole = Literal["admin", "editor", "viewer"]
+
+
+def normalize_share_role(raw: str | None) -> ShareRole:
+    """Map a stored ``WorkspaceShare.role`` string to a known tier.
+
+    Anything unrecognised (or a pre-role NULL) falls back to ``editor``,
+    matching the historical default so old rows keep working."""
+    if raw == "viewer":
+        return "viewer"
+    if raw == "admin":
+        return "admin"
+    return "editor"
 
 
 async def get_accessible_workspace(
@@ -103,12 +120,7 @@ async def get_accessible_workspace(
         )
     ).scalars().first()
     if share is not None:
-        # ``role`` is non-null post-0071; default to editor for any
-        # pre-migration row that somehow lacks it.
-        role: WorkspaceAccessRole = (
-            "viewer" if share.role == "viewer" else "editor"
-        )
-        return ws, role
+        return ws, normalize_share_role(share.role)
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Workspace not found",
@@ -116,12 +128,43 @@ async def get_accessible_workspace(
 
 
 def require_workspace_write(role: WorkspaceAccessRole) -> None:
-    """403 when the caller is a read-only viewer. Owner + editor pass."""
+    """403 when the caller is a read-only viewer. Owner/admin/editor pass.
+
+    This gates *content* mutations (chats, notes, canvas, boards, files).
+    Settings + membership use :func:`require_workspace_admin` instead."""
     if role == "viewer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You have view-only access to this workspace.",
         )
+
+
+def require_workspace_admin(role: WorkspaceAccessRole) -> None:
+    """403 unless the caller can administer the workspace.
+
+    Only ``owner`` and ``admin`` pass — this gates workspace *settings*
+    (title / description / system prompt / default + memory model) and
+    *membership* (invite / re-role / remove). Editors and viewers can't
+    reach it even though editors can freely edit content."""
+    if role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the workspace owner or an admin can do that.",
+        )
+
+
+async def require_admin_workspace(
+    workspace_id: uuid.UUID,
+    user: User,
+    db: AsyncSession,
+) -> Workspace:
+    """Resolve a workspace and assert the caller is owner/admin, else 403/404.
+
+    Convenience wrapper for the member-management + settings endpoints so
+    they get the same owner-or-admin gate in one call."""
+    ws, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_admin(role)
+    return ws
 
 
 # ====================================================================
@@ -136,7 +179,7 @@ class WorkspaceShareRow(BaseModel):
     workspace_id: uuid.UUID
     invitee: ShareUserBrief
     status: WorkspaceShareStatus
-    role: Literal["editor", "viewer"]
+    role: ShareRole
     created_at: datetime
     accepted_at: datetime | None
 
@@ -162,9 +205,10 @@ class CreateWorkspaceShareRequest(BaseModel):
 
     username: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=320)
-    # Permission level for the invite. Defaults to full editor access
-    # (back-compat with the pre-role share UI).
-    role: Literal["editor", "viewer"] = "editor"
+    # Permission level for the invite: ``admin`` (settings + members),
+    # ``editor`` (content only), or ``viewer`` (read-only). Defaults to
+    # editor (back-compat with the pre-role share UI).
+    role: ShareRole = "editor"
 
 
 class WorkspaceParticipants(BaseModel):
@@ -219,8 +263,8 @@ async def list_workspace_shares(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[WorkspaceShareRow]:
-    """List every share row on a workspace. Owner only."""
-    ws = await is_owner_of_workspace(workspace_id, user, db)
+    """List every share row on a workspace. Owner + admin."""
+    ws = await require_admin_workspace(workspace_id, user, db)
     rows = (
         await db.execute(
             select(WorkspaceShare, User)
@@ -235,7 +279,7 @@ async def list_workspace_shares(
             workspace_id=share.workspace_id,
             invitee=_brief(invitee),
             status=share.status,  # type: ignore[arg-type]
-            role="viewer" if share.role == "viewer" else "editor",
+            role=normalize_share_role(share.role),
             created_at=share.created_at,
             accepted_at=share.accepted_at,
         )
@@ -255,13 +299,13 @@ async def create_workspace_share(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceShareRow:
-    """Invite someone to collaborate on a workspace. Owner only.
+    """Invite someone to collaborate on a workspace. Owner + admin.
 
     Same idempotent behaviour as conversation shares: re-inviting a
     pending user returns the existing row; re-inviting after they
     declined flips the row back to ``pending``; self-invites 400.
     """
-    ws = await is_owner_of_workspace(workspace_id, user, db)
+    ws = await require_admin_workspace(workspace_id, user, db)
     # Reuse the conversation-share resolver so "find user by
     # username or email" stays a single code path for both share
     # surfaces.
@@ -356,7 +400,7 @@ async def create_workspace_share(
         workspace_id=share.workspace_id,
         invitee=_brief(invitee),
         status=share.status,  # type: ignore[arg-type]
-        role="viewer" if share.role == "viewer" else "editor",
+        role=normalize_share_role(share.role),
         created_at=share.created_at,
         accepted_at=share.accepted_at,
     )
@@ -375,7 +419,7 @@ async def revoke_workspace_share(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Owner revokes, or invitee leaves, a workspace share.
+    """Owner/admin revokes, or invitee leaves, a workspace share.
 
     Hard-deletes the row. The unique ``(workspace_id, invitee_user_id)``
     constraint means a follow-up invite starts cleanly as
@@ -397,7 +441,14 @@ async def revoke_workspace_share(
         )
     is_owner = ws.user_id == user.id
     is_invitee = share.invitee_user_id == user.id
+    is_admin = False
     if not (is_owner or is_invitee):
+        # Neither the owner nor the person leaving — only a workspace admin
+        # may remove *other* members. ``get_accessible_workspace`` 404s a
+        # non-member, which is exactly the response we'd give anyway.
+        _, caller_role = await get_accessible_workspace(workspace_id, user, db)
+        is_admin = caller_role == "admin"
+    if not (is_owner or is_invitee or is_admin):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Share not found"
         )
@@ -546,6 +597,9 @@ __all__ = [
     "invite_router",
     "is_owner_of_workspace",
     "load_workspace_participants",
+    "normalize_share_role",
+    "require_admin_workspace",
+    "require_workspace_admin",
     "require_workspace_write",
     "router",
 ]

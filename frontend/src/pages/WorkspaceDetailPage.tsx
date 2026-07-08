@@ -283,6 +283,10 @@ export function WorkspaceDetailPage() {
   const isArchived = Boolean(workspace?.archived_at);
   const isOwner = (workspace?.role ?? "owner") === "owner";
   const canEdit = (workspace?.access_role ?? "owner") !== "viewer";
+  // Settings + members are an admin concern (owner/admin); plain editors
+  // edit content only. Mirrors the backend's require_workspace_admin gate.
+  const accessRole = workspace?.access_role ?? "owner";
+  const canManage = accessRole === "owner" || accessRole === "admin";
   const collaboratorCount = workspace?.collaborators?.length ?? 0;
 
   // Everything — chats included — opens inline in the main pane so the
@@ -514,7 +518,7 @@ export function WorkspaceDetailPage() {
                 <WorkspaceSettingsContent
                   workspace={workspace}
                   isOwner={isOwner}
-                  canEdit={canEdit}
+                  canManage={canManage}
                   onArchive={async () => {
                     const ok = await confirm({
                       title: "Archive workspace",

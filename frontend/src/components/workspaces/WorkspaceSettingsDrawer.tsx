@@ -62,7 +62,7 @@ export function WorkspaceSettingsDrawer({
   onClose,
   workspace,
   isOwner,
-  canEdit,
+  canManage,
   onArchive,
   onUnarchive,
   onDelete,
@@ -73,7 +73,7 @@ export function WorkspaceSettingsDrawer({
   onClose: () => void;
   workspace: WorkspaceDetail;
   isOwner: boolean;
-  canEdit: boolean;
+  canManage: boolean;
   onArchive: () => void;
   onUnarchive: () => void;
   onDelete: () => void;
@@ -116,7 +116,7 @@ export function WorkspaceSettingsDrawer({
         <WorkspaceSettingsContent
           workspace={workspace}
           isOwner={isOwner}
-          canEdit={canEdit}
+          canManage={canManage}
           onArchive={onArchive}
           onUnarchive={onUnarchive}
           onDelete={onDelete}
@@ -134,7 +134,7 @@ export function WorkspaceSettingsDrawer({
 export function WorkspaceSettingsContent({
   workspace,
   isOwner,
-  canEdit,
+  canManage,
   onArchive,
   onUnarchive,
   onDelete,
@@ -143,7 +143,7 @@ export function WorkspaceSettingsContent({
 }: {
   workspace: WorkspaceDetail;
   isOwner: boolean;
-  canEdit: boolean;
+  canManage: boolean;
   onArchive: () => void;
   onUnarchive: () => void;
   onDelete: () => void;
@@ -196,13 +196,13 @@ export function WorkspaceSettingsContent({
               archivePending={archivePending}
               unarchivePending={unarchivePending}
               isOwner={isOwner}
-              canEdit={canEdit}
+              canManage={canManage}
             />
           )}
           {tab === "members" && (
             <WorkspaceMembersPanel
               workspaceId={workspace.id}
-              isOwner={isOwner}
+              canManage={canManage}
               owner={workspace.owner}
               collaborators={workspace.collaborators ?? []}
             />
@@ -503,7 +503,7 @@ function SettingsTab({
   archivePending,
   unarchivePending,
   isOwner,
-  canEdit,
+  canManage,
 }: {
   workspace: WorkspaceDetail;
   onArchive: () => void;
@@ -512,7 +512,7 @@ function SettingsTab({
   archivePending: boolean;
   unarchivePending: boolean;
   isOwner: boolean;
-  canEdit: boolean;
+  canManage: boolean;
 }) {
   const [title, setTitle] = useState(workspace.title);
   const [description, setDescription] = useState(workspace.description ?? "");
@@ -574,7 +574,7 @@ function SettingsTab({
   const skipFirst = useRef(true);
 
   useEffect(() => {
-    if (!canEdit) return;
+    if (!canManage) return;
     if (skipFirst.current) {
       skipFirst.current = false;
       return;
@@ -608,7 +608,7 @@ function SettingsTab({
     memModelId,
     memProviderId,
     dirty,
-    canEdit,
+    canManage,
   ]);
 
   // Let the "Saved" confirmation fade back to the resting hint.
@@ -636,7 +636,7 @@ function SettingsTab({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            disabled={!canEdit}
+            disabled={!canManage}
             className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
             maxLength={255}
           />
@@ -649,7 +649,7 @@ function SettingsTab({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
-            disabled={!canEdit}
+            disabled={!canManage}
             className="w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
             maxLength={2000}
           />
@@ -657,18 +657,18 @@ function SettingsTab({
         <WorkspaceInstructionsEditor
           value={systemPrompt}
           onChange={setSystemPrompt}
-          disabled={!canEdit}
+          disabled={!canManage}
         />
         <WorkspaceModelField
           modelId={modelId}
           providerId={providerId}
-          disabled={!canEdit}
+          disabled={!canManage}
           onChange={(m, p) => {
             setModelId(m);
             setProviderId(p);
           }}
         />
-        {canEdit && (
+        {canManage && (
           <div className="flex h-5 items-center justify-end">
             <AutosaveIndicator
               state={saveState}
@@ -678,7 +678,7 @@ function SettingsTab({
         )}
       </section>
 
-      {canEdit && (
+      {canManage && (
         <section className="space-y-3 border-t border-[var(--border)] pt-6">
           <h3 className="text-sm font-semibold">Workspace memory</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -723,7 +723,7 @@ function SettingsTab({
           <WorkspaceModelField
             modelId={memModelId}
             providerId={memProviderId}
-            disabled={!canEdit}
+            disabled={!canManage}
             label="Memory model"
             labelHint="(maintains the memory — pick any model from your stack)"
             clearLabel="Use the workspace default model"
@@ -776,7 +776,7 @@ function SettingsTab({
           </div>
           <WorkspaceMemoryEditor
             workspaceId={workspace.id}
-            canEdit={canEdit}
+            canManage={canManage}
           />
             </>
           )}
@@ -968,10 +968,10 @@ function AutosaveIndicator({
  */
 function WorkspaceMemoryEditor({
   workspaceId,
-  canEdit,
+  canManage,
 }: {
   workspaceId: string;
-  canEdit: boolean;
+  canManage: boolean;
 }) {
   const { data, isLoading } = useWorkspaceMemory(workspaceId);
   const save = useSaveWorkspaceMemory(workspaceId);
@@ -1057,17 +1057,17 @@ function WorkspaceMemoryEditor({
           <textarea
             value={value}
             onChange={(e) => setDraft(e.target.value)}
-            disabled={!canEdit || isLoading}
+            disabled={!canManage || isLoading}
             rows={14}
             placeholder={
-              canEdit
+              canManage
                 ? "# Workspace overview\n\n## Durable facts\n- …\n\n## Decisions\n- …"
                 : "No memory stored yet."
             }
             className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
             maxLength={40000}
           />
-          {canEdit && (
+          {canManage && (
             <>
               <div className="flex items-center justify-between gap-2">
                 <Button

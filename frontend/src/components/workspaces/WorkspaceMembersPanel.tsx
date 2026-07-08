@@ -7,7 +7,10 @@ import {
   useDeleteWorkspaceShare,
   useWorkspaceShares,
 } from "@/hooks/useWorkspaces";
-import type { WorkspaceParticipant } from "@/api/workspaces";
+import type {
+  WorkspaceParticipant,
+  WorkspaceShareRole,
+} from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
 import { UserAvatar } from "@/components/shared/UserAvatar";
@@ -16,25 +19,25 @@ import { UserAvatar } from "@/components/shared/UserAvatar";
  * Members + sharing UI, shared by the owner's quick "Share" dialog and the
  * Settings → Members tab.
  *
- *  - Owners get the full manager: invite by username/email with a role,
- *    plus the live share list (pending/accepted) with revoke. Data comes
- *    from the owner-only ``/shares`` endpoint.
+ *  - Owner + admins get the full manager: invite by username/email with a
+ *    role, plus the live share list (pending/accepted) with revoke. Data
+ *    comes from the owner/admin-only ``/shares`` endpoint.
  *  - Everyone else gets a read-only roster built from the workspace detail's
  *    ``owner`` + ``collaborators`` (which every member already receives), so
  *    no extra grant is needed.
  */
 export function WorkspaceMembersPanel({
   workspaceId,
-  isOwner,
+  canManage,
   owner,
   collaborators,
 }: {
   workspaceId: string;
-  isOwner: boolean;
+  canManage: boolean;
   owner: WorkspaceParticipant | null;
   collaborators: WorkspaceParticipant[];
 }) {
-  if (isOwner) return <OwnerShareManager workspaceId={workspaceId} />;
+  if (canManage) return <OwnerShareManager workspaceId={workspaceId} />;
   return <ReadOnlyRoster owner={owner} collaborators={collaborators} />;
 }
 
@@ -47,7 +50,7 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
   const remove = useDeleteWorkspaceShare(workspaceId);
 
   const [picked, setPicked] = useState<UserPickerValue>(null);
-  const [role, setRole] = useState<"editor" | "viewer">("editor");
+  const [role, setRole] = useState<WorkspaceShareRole>("editor");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const excludeUserIds = useMemo(
@@ -76,8 +79,10 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
     <div>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Invite a teammate to the whole workspace — every chat, file, note, and
-        canvas. <span className="font-medium text-[var(--text)]">Editors</span>{" "}
-        can create and edit;{" "}
+        canvas. <span className="font-medium text-[var(--text)]">Admins</span>{" "}
+        also manage settings and members;{" "}
+        <span className="font-medium text-[var(--text)]">Editors</span> create
+        and edit content;{" "}
         <span className="font-medium text-[var(--text)]">Viewers</span> can read
         only.
       </p>
@@ -100,11 +105,12 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
         </div>
         <select
           value={role}
-          onChange={(e) => setRole(e.target.value as "editor" | "viewer")}
+          onChange={(e) => setRole(e.target.value as WorkspaceShareRole)}
           disabled={create.isPending}
           title="Permission level"
           className="rounded-input border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
         >
+          <option value="admin">Admin</option>
           <option value="editor">Editor</option>
           <option value="viewer">Viewer</option>
         </select>
@@ -162,7 +168,11 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
                   </div>
                 </div>
                 <span className="shrink-0 rounded-full bg-[var(--border)]/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                  {row.role === "viewer" ? "Viewer" : "Editor"}
+                  {row.role === "viewer"
+                    ? "Viewer"
+                    : row.role === "admin"
+                      ? "Admin"
+                      : "Editor"}
                 </span>
                 <StatusPill status={row.status} />
                 <button

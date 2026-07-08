@@ -1110,11 +1110,15 @@ class WorkspaceShare(UUIDPKMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending", server_default="pending"
     )
-    # Permission level once accepted (Phase 4). ``editor`` (default,
-    # back-compat with pre-0071 shares) grants full read+write — edit
-    # settings, pin/unpin files, add chats. ``viewer`` is read-only.
-    # Owner-only actions (delete / archive / manage shares) are never
-    # available to either; those gate on ``ws.user_id``.
+    # Permission level once accepted. Three collaborator tiers:
+    # ``admin`` administers the workspace (edit settings, set the default
+    # model, manage members) but can't delete/transfer it or change the
+    # storage cap; ``editor`` (default, back-compat with pre-0071 shares)
+    # edits *content* — chats, notes, canvas, boards, files — but not
+    # settings or members; ``viewer`` is read-only. Owner-only actions
+    # (delete / archive / storage cap / transfer) gate on ``ws.user_id``.
+    # Plain ``String(16)`` with no CHECK, so widening the vocabulary needs
+    # no migration.
     role: Mapped[str] = mapped_column(
         String(16), nullable=False, default="editor", server_default="editor"
     )

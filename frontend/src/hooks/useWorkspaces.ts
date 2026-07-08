@@ -19,6 +19,7 @@ import {
   type CreateWorkspacePayload,
   type WorkspaceInviteRow,
   type WorkspaceShareRow,
+  type WorkspaceShareRole,
   type UpdateWorkspacePayload,
   type WorkspaceItemNode,
   type CreateWorkspaceItemPayload,
@@ -701,7 +702,7 @@ export function useCreateWorkspaceShare(workspaceId: string) {
     mutationFn: (payload: {
       username?: string;
       email?: string;
-      role?: "editor" | "viewer";
+      role?: WorkspaceShareRole;
     }) => workspacesApi.createShare(workspaceId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.shares(workspaceId) });
