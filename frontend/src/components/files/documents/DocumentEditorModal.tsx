@@ -33,7 +33,6 @@ import {
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
-import { EditorBubbleMenu } from "./EditorBubbleMenu";
 import { LinkHoverPreview } from "./LinkHoverPreview";
 import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
@@ -988,9 +987,9 @@ export function DocumentEditorModal({
             </div>
           )}
         </div>
-        {/* Selection formatter + block drag handle (both MIT / our own —
-            no Tiptap Pro). Guarded on a live editor + no collab error. */}
-        {editor && !error && <EditorBubbleMenu editor={editor} />}
+        {/* Block drag handle (MIT). Guarded on a live editor + no collab
+            error. (The selection bubble menu was removed — it duplicated
+            the toolbar.) */}
         {editor && !error && canEdit && (
           <DragHandle editor={editor}>
             <span
