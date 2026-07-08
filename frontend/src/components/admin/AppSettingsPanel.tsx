@@ -667,6 +667,8 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
   // here too.
   const [detecting, setDetecting] = useState(false);
   const [providerNote, setProviderNote] = useState<string | null>(null);
+  const [autofillEmail, setAutofillEmail] = useState("");
+  const [autofillMsg, setAutofillMsg] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<
     { ok: boolean; msg: string } | null
@@ -684,29 +686,38 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
   );
 
   // Look the address up in Mozilla's ISPDB and fill in the server fields.
-  // Non-destructive: only populates blanks, so it never clobbers settings an
-  // admin has already typed (or a stored config being edited).
-  const detect = async (addr: string) => {
+  //   * ``force`` (the explicit Fetch button) overwrites Host/Port/TLS — the
+  //     admin asked us to set them — and fills Username/From-address if blank.
+  //   * otherwise (field blur) it's non-destructive: only populates blanks so
+  //     it never clobbers something already typed.
+  // Returns whether a match was found so the button can surface "not found".
+  const detect = async (addr: string, force = false): Promise<boolean> => {
     const email = addr.trim();
-    if (!email.includes("@")) return;
+    if (!email.includes("@")) return false;
     setDetecting(true);
     setProviderNote(null);
     try {
       const cfg = await adminApi.emailAutoconfig(email);
-      if (!cfg.found) return;
+      if (!cfg.found) return false;
       setForm((prev) => ({
         ...prev,
-        smtp_host: prev.smtp_host || cfg.host || "",
-        smtp_port:
-          prev.smtp_port || (cfg.port != null ? String(cfg.port) : ""),
+        smtp_host: force ? cfg.host || prev.smtp_host : prev.smtp_host || cfg.host || "",
+        smtp_port: force
+          ? cfg.port != null
+            ? String(cfg.port)
+            : prev.smtp_port
+          : prev.smtp_port || (cfg.port != null ? String(cfg.port) : ""),
         smtp_username: prev.smtp_username || cfg.username || email,
+        smtp_from_address: prev.smtp_from_address || email,
         smtp_use_tls:
           typeof cfg.use_tls === "boolean" ? cfg.use_tls : prev.smtp_use_tls,
       }));
       if (cfg.note) setProviderNote(cfg.note);
       setSavedAt(null);
+      return true;
     } catch {
       // Best-effort — leave the fields for manual entry.
+      return false;
     } finally {
       setDetecting(false);
     }
@@ -866,16 +877,60 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
     >
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Powers sign-in codes, notifications, automations, and feedback. Enter
-        your email in <span className="font-medium">From address</span> and the
-        server settings fill in automatically (via Mozilla's provider
-        database). The password is encrypted at rest with the same key used for
-        provider API keys, and is never returned by the API after it's saved.
+        your email below and hit <span className="font-medium">Fetch</span> to
+        auto-fill the server settings (via Mozilla's provider database), or fill
+        them in by hand. The password is encrypted at rest with the same key
+        used for provider API keys, and is never returned by the API after it's
+        saved.
       </p>
 
-      {detecting && (
-        <p className="mb-3 text-[11px] text-[var(--text-muted)]">
-          Looking up your provider's settings…
-        </p>
+      {/* Auto-fill helper: type an address, click Fetch, and the ISPDB lookup
+          populates Host / Port / TLS (+ Username / From address if blank). */}
+      <div className="mb-3 flex items-end gap-2">
+        <div className="flex-1">
+          <Field
+            label="Auto-fill from email address"
+            value={autofillEmail}
+            onChange={(v) => {
+              setAutofillEmail(v);
+              setAutofillMsg(null);
+            }}
+            placeholder="you@example.com"
+            type="email"
+            disabled={busy || detecting}
+          />
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={async () => {
+            // Prefer the dedicated box; fall back to whatever email-looking
+            // value is already in the fields so it works wherever they typed.
+            const candidate = [
+              autofillEmail,
+              form.smtp_from_address,
+              form.smtp_username,
+              form.smtp_host,
+            ].find((v) => v.includes("@"));
+            if (!candidate) {
+              setAutofillMsg("Enter your email address first.");
+              return;
+            }
+            const ok = await detect(candidate, true);
+            setAutofillMsg(
+              ok
+                ? null
+                : "No settings found for that provider — enter them manually below."
+            );
+          }}
+          loading={detecting}
+          disabled={busy}
+        >
+          Fetch
+        </Button>
+      </div>
+      {autofillMsg && (
+        <p className="mb-3 text-[11px] text-[var(--text-muted)]">{autofillMsg}</p>
       )}
       {isGmail && (
         <p className="mb-3 text-[11px] text-[var(--text-muted)]">
