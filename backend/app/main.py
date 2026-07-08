@@ -326,6 +326,7 @@ from app.chat.proposals_router import router as proposals_router  # noqa: E402
 from app.tasks.hooks_router import router as hooks_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
+from app.files.links_router import router as links_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
 from app.files.share_router import router as file_share_router  # noqa: E402
 from app.local_models.router import router as local_models_router  # noqa: E402
@@ -449,6 +450,8 @@ app.include_router(
     workspace_invite_router, prefix="/api", tags=["workspaces"]
 )
 app.include_router(models_router, prefix="/api/models", tags=["models"])
+# Link unfurl for the note editor's rich link previews (SSRF-safe).
+app.include_router(links_router, prefix="/api/links", tags=["links"])
 # Custom Models — admin-curated assistants (personality + knowledge
 # library). Lives under the admin prefix so non-admins can't list
 # them; the picker integration on ``/api/models/available`` exposes

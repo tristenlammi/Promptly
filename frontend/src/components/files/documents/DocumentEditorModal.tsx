@@ -34,6 +34,7 @@ import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
 import { EditorBubbleMenu } from "./EditorBubbleMenu";
+import { LinkHoverPreview } from "./LinkHoverPreview";
 import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
 
@@ -165,6 +166,8 @@ export function DocumentEditorModal({
   // through a ref so paste / drop handlers can still access the
   // live editor at call time without re-creating it on every render.
   const editorRef = useRef<Editor | null>(null);
+  // Scope for the link hover-preview's delegated listener.
+  const editorAreaRef = useRef<HTMLDivElement | null>(null);
 
   // Track outstanding pasted/dropped uploads so the SaveIndicator
   // can show "Uploading…" without each paste needing its own toast.
@@ -916,7 +919,7 @@ export function DocumentEditorModal({
 
       {/* Editor area — relative wrapper so the outline rail + word-count
           pill float over the scroll region instead of scrolling with it. */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={editorAreaRef} className="relative flex min-h-0 flex-1 flex-col">
         <div
           className={cn(
             "flex-1 overflow-y-auto",
@@ -984,6 +987,7 @@ export function DocumentEditorModal({
         )}
         <DocumentOutline editor={editor} />
         <WordCountPill editor={editor} />
+        <LinkHoverPreview containerRef={editorAreaRef} />
       </div>
 
       {historyOpen && (
