@@ -30,6 +30,7 @@ import {
 } from "@/components/files/helpers";
 import { Button } from "@/components/shared/Button";
 import { DriveItemIcon } from "@/components/files/DriveItemIcon";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Modal } from "@/components/shared/Modal";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -393,6 +394,9 @@ export function WorkspaceDrivePane({
               <tr className="border-b border-[var(--border)] text-left text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
                 <th className="w-7 py-1.5" aria-label="Select" />
                 <th className="py-1.5 font-medium">Name</th>
+                <th className="hidden w-36 py-1.5 font-medium md:table-cell">
+                  Owner
+                </th>
                 <th className="hidden w-24 py-1.5 font-medium lg:table-cell">
                   Added
                 </th>
@@ -428,6 +432,7 @@ export function WorkspaceDrivePane({
                     <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
                     <span className="truncate">{name}</span>
                   </td>
+                  <td className="hidden md:table-cell" />
                   <td className="hidden lg:table-cell" />
                   <td />
                   <td className="text-[11px]">Uploading…</td>
@@ -522,6 +527,7 @@ function FolderRow({
           </span>
         </button>
       </td>
+      <td className="hidden md:table-cell" />
       <td className="hidden lg:table-cell" />
       <td />
       <td className="text-[11px] text-[var(--text-muted)]">Folder</td>
@@ -607,6 +613,22 @@ function FileRow({
             </span>
           )}
         </button>
+      </td>
+      <td className="hidden md:table-cell">
+        {file.owner ? (
+          <span className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+            <UserAvatar
+              name={file.owner.username}
+              userId={file.owner.user_id}
+              avatarUrl={file.owner.avatar_url}
+              color={file.owner.avatar_color}
+              size={18}
+            />
+            <span className="truncate">{file.owner.username}</span>
+          </span>
+        ) : (
+          <span className="text-xs text-[var(--text-muted)]/50">—</span>
+        )}
       </td>
       <td className="hidden text-xs text-[var(--text-muted)] lg:table-cell">
         {formatRelativeTime(file.pinned_at)}

@@ -221,10 +221,12 @@ class WorkspaceDriveFolder(BaseModel):
 class WorkspaceDriveFile(WorkspaceFilePin):
     """A drive file = a pinned file + its placement. ``folder_id`` is null
     at the drive root; ``movable`` is false for legacy pins that live in a
-    member's personal Drive (they list at root and can't be re-foldered)."""
+    member's personal Drive (they list at root and can't be re-foldered).
+    ``owner`` is who added the file (``pinned_by``); null on legacy pins."""
 
     folder_id: uuid.UUID | None = None
     movable: bool = True
+    owner: WorkspaceParticipant | None = None
 
 
 class WorkspaceDriveResponse(BaseModel):

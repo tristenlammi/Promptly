@@ -174,6 +174,8 @@ export interface WorkspaceDriveFile extends WorkspaceFilePin {
   /** false for legacy pins living in a member's personal Drive —
    *  they list at root and can't be re-foldered. */
   movable: boolean;
+  /** Who added the file (``pinned_by``); null on pre-0071 legacy pins. */
+  owner: WorkspaceParticipant | null;
 }
 
 export interface WorkspaceDriveResponse {

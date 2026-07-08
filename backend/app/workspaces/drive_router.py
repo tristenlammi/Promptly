@@ -78,6 +78,7 @@ from app.workspaces.schemas import (
     WorkspaceDriveFolderRename,
     WorkspaceDriveMove,
     WorkspaceDriveResponse,
+    WorkspaceParticipant,
 )
 from app.workspaces.shares import (
     get_accessible_workspace,
@@ -177,7 +178,12 @@ async def _drive_used_bytes(db: AsyncSession, workspace_id: uuid.UUID) -> int:
 
 
 def _pin_to_drive_file(
-    pin: WorkspaceFile, uf: UserFile, *, in_subtree: bool, root_id: uuid.UUID
+    pin: WorkspaceFile,
+    uf: UserFile,
+    *,
+    in_subtree: bool,
+    root_id: uuid.UUID,
+    owner: WorkspaceParticipant | None = None,
 ) -> WorkspaceDriveFile:
     # The drive root is ``null`` client-side — normalise files sitting
     # directly in the Files folder (and legacy out-of-subtree pins) to it.
@@ -197,6 +203,18 @@ def _pin_to_drive_file(
         context_enabled=pin.context_enabled,
         folder_id=folder_id,
         movable=in_subtree,
+        owner=owner,
+    )
+
+
+def _participant(u: User) -> WorkspaceParticipant:
+    """Minimal identity row for the Drive's Owner column."""
+    return WorkspaceParticipant(
+        user_id=u.id,
+        username=u.username,
+        email=u.email,
+        avatar_url=u.avatar_url,
+        avatar_color=u.avatar_color,
     )
 
 
@@ -228,15 +246,29 @@ async def get_drive(
         .where(WorkspaceFile.workspace_id == ws.id)
         .order_by(WorkspaceFile.pinned_at.asc())
     )
+    rows = [
+        (pin, uf)
+        for pin, uf in pins_q.all()
+        if uf.source_kind != WORKSPACE_MEMORY_SOURCE_KIND
+    ]
+    # Resolve who added each file (the Owner column) in one batch. NULL
+    # pinned_by (pre-0071 pins) simply has no owner.
+    owner_ids = {pin.pinned_by for pin, _ in rows if pin.pinned_by is not None}
+    owners: dict[uuid.UUID, WorkspaceParticipant] = {}
+    if owner_ids:
+        for u in (
+            await db.execute(select(User).where(User.id.in_(owner_ids)))
+        ).scalars().all():
+            owners[u.id] = _participant(u)
     files = [
         _pin_to_drive_file(
             pin,
             uf,
             in_subtree=uf.folder_id in subtree_ids,
             root_id=root.id,
+            owner=owners.get(pin.pinned_by) if pin.pinned_by else None,
         )
-        for pin, uf in pins_q.all()
-        if uf.source_kind != WORKSPACE_MEMORY_SOURCE_KIND
+        for pin, uf in rows
     ]
 
     used = sum(f.size_bytes for f in files)
@@ -455,7 +487,9 @@ async def upload_drive_file(
             "folder_name": target.name,
         },
     )
-    return _pin_to_drive_file(pin, row, in_subtree=True, root_id=root.id)
+    return _pin_to_drive_file(
+        pin, row, in_subtree=True, root_id=root.id, owner=_participant(user)
+    )
 
 
 # ---------------------------------------------------------------------
@@ -649,4 +683,11 @@ async def move_drive_file(
     await db.commit()
     await db.refresh(uf)
     await db.refresh(pin)
-    return _pin_to_drive_file(pin, uf, in_subtree=True, root_id=root.id)
+    owner_row = await db.get(User, pin.pinned_by) if pin.pinned_by else None
+    return _pin_to_drive_file(
+        pin,
+        uf,
+        in_subtree=True,
+        root_id=root.id,
+        owner=_participant(owner_row) if owner_row else None,
+    )
