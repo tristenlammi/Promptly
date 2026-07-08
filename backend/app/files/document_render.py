@@ -220,6 +220,10 @@ def _render_marks(text: str, formats: dict[str, Any] | None) -> str:
         elif mark_name == "code":
             open_tags.append("<code>")
             close_tags.append("</code>")
+        elif mark_name == "mention":
+            # @person chip — plain styled span; text carries the @name.
+            open_tags.append('<span class="doc-mention" data-type="mention">')
+            close_tags.append("</span>")
         elif mark_name == "highlight":
             color = (attrs or {}).get("color") if isinstance(attrs, dict) else None
             if color:

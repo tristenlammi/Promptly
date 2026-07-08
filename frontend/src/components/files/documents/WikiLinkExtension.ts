@@ -34,18 +34,29 @@ import Suggestion, {
  * tokens so the two feel like siblings.
  */
 
-/** A single selectable wiki-link target. */
+/** A single selectable wiki-link target.
+ *
+ * The ``@`` menu reuses this shape for people and dates too, discriminated
+ * by ``kind``: a normal item (note/board/…) inserts a wiki Link mark; a
+ * ``"person"`` inserts a mention chip (``@name``); a ``"date"`` inserts
+ * ``insertText`` as plain text. ``[[`` only ever yields items. */
 export interface WikiTarget {
   id: string;
   kind: string;
   refId: string | null;
   title: string;
   workspaceId: string;
+  /** For ``kind === "date"`` — the literal text to drop in (e.g. the
+   *  formatted date); ignored for items/people. */
+  insertText?: string;
 }
 
 export interface WikiLinkOptions {
-  /** Resolve the popup list for the current query (substring match). */
+  /** Resolve the popup list for the current ``[[`` query (items only). */
   items: (query: string) => Promise<WikiTarget[]>;
+  /** Resolve the ``@`` menu — items + people + dates. Falls back to
+   *  ``items`` when absent (so ``@`` still links items). */
+  mentions?: (query: string) => Promise<WikiTarget[]>;
 }
 
 export const WikiLinkPluginKey = new PluginKey("wikiLink");
@@ -99,9 +110,11 @@ class WikiLinkPopup {
   private items: WikiTarget[] = [];
   private highlighted = 0;
   private onPick: (target: WikiTarget) => void;
+  private header: string;
 
-  constructor(onPick: (target: WikiTarget) => void) {
+  constructor(onPick: (target: WikiTarget) => void, header: string) {
     this.onPick = onPick;
+    this.header = header;
     this.el = document.createElement("div");
     this.el.className = "wiki-link-popup";
     // Inline the structural styles so the popup works without a CSS
@@ -171,14 +184,14 @@ class WikiLinkPopup {
     const header = document.createElement("div");
     header.style.cssText =
       "padding:0.375rem 0.5rem 0.25rem;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)";
-    header.textContent = "Link to a workspace item";
+    header.textContent = this.header;
     el.appendChild(header);
 
     if (this.items.length === 0) {
       const empty = document.createElement("div");
       empty.style.cssText =
         "padding:0.5rem;color:var(--text-muted);font-size:0.75rem";
-      empty.textContent = "No matching items.";
+      empty.textContent = "No matches.";
       el.appendChild(empty);
       return;
     }
@@ -223,7 +236,13 @@ class WikiLinkPopup {
       const title = document.createElement("span");
       title.style.cssText =
         "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500";
-      title.textContent = target.title || "Untitled";
+      // People read as "@name"; dates show their formatted value inline.
+      title.textContent =
+        target.kind === "person"
+          ? `@${target.title}`
+          : target.kind === "date"
+            ? `${target.title} — ${target.insertText ?? ""}`
+            : target.title || "Untitled";
 
       row.append(title, kind);
       el.appendChild(row);
@@ -232,7 +251,7 @@ class WikiLinkPopup {
     const footer = document.createElement("div");
     footer.style.cssText =
       "padding:0.25rem 0.5rem;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);margin-top:0.25rem";
-    footer.textContent = "↑↓ navigate · click or Enter to link · Esc to close";
+    footer.textContent = "↑↓ navigate · click or Enter to insert · Esc to close";
     el.appendChild(footer);
   }
 
@@ -269,13 +288,48 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
       // end-of-line since there's no closing token to anchor on.)
       allowSpaces: false,
 
-      items: ({ query }) => extensionThis.options.items(query),
+      // ``@`` pulls the richer people+dates+items list when provided;
+      // ``[[`` stays items-only.
+      items: ({ query }) =>
+        char === "@" && extensionThis.options.mentions
+          ? extensionThis.options.mentions(query)
+          : extensionThis.options.items(query),
 
-      // Replace the typed ``[[query`` with the item's title carrying a Link
-      // mark, then a trailing space. ``insertContentAt`` over the suggestion
-      // range deletes the trigger text for us.
+      // Insert the picked target over the suggestion range (which deletes
+      // the trigger text). Three shapes:
+      //   · date   → the formatted date as plain text
+      //   · person → "@name" carrying the mention chip mark
+      //   · item   → the title carrying an in-app wiki Link mark
       command: ({ editor, range, props }) => {
         const target = props;
+        if (target.kind === "date") {
+          editor
+            .chain()
+            .focus()
+            .insertContentAt(range, [
+              { type: "text", text: target.insertText || target.title },
+              { type: "text", text: " " },
+            ])
+            .run();
+          return;
+        }
+        if (target.kind === "person") {
+          editor
+            .chain()
+            .focus()
+            .insertContentAt(range, [
+              {
+                type: "text",
+                text: `@${target.title}`,
+                marks: [{ type: "mention" }],
+              },
+              { type: "text", text: " " },
+            ])
+            // Drop the mention mark so subsequent typing isn't chipped.
+            .unsetMark("mention")
+            .run();
+          return;
+        }
         const href = buildWikiHref(target);
         const label = target.title || "Untitled";
         editor
@@ -303,7 +357,12 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
         return {
           onStart: (props: SuggestionProps<WikiTarget>) => {
             currentCommand = props.command;
-            popup = new WikiLinkPopup((target) => currentCommand?.(target));
+            popup = new WikiLinkPopup(
+              (target) => currentCommand?.(target),
+              char === "@"
+                ? "Mention a person, item, or date"
+                : "Link to a workspace item"
+            );
             popup.setItems(props.items);
             popup.position(props.clientRect?.() ?? null);
           },

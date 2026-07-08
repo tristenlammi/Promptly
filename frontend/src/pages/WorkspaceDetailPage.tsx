@@ -1280,10 +1280,9 @@ function WorkspaceNotePane({
   const { data: tree } = useWorkspaceTree(workspaceId);
   const linkables = useMemo(() => collectLinkables(tree ?? []), [tree]);
 
-  const wikiItems = useCallback(
-    async (query: string): Promise<WikiTarget[]> => {
-      const q = query.trim().toLowerCase();
-      return linkables
+  const itemTargets = useCallback(
+    (q: string): WikiTarget[] =>
+      linkables
         .filter((n) => n.id !== node.id)
         .filter((n) => !q || n.title.toLowerCase().includes(q))
         .slice(0, 8)
@@ -1293,11 +1292,84 @@ function WorkspaceNotePane({
           refId: n.ref_id,
           title: n.title,
           workspaceId,
-        }));
-    },
+        })),
     [linkables, node.id, workspaceId]
   );
-  const wikiLink = useMemo(() => ({ items: wikiItems }), [wikiItems]);
+
+  const wikiItems = useCallback(
+    async (query: string): Promise<WikiTarget[]> =>
+      itemTargets(query.trim().toLowerCase()),
+    [itemTargets]
+  );
+
+  // ``@`` also offers workspace people and date shortcuts (Notion-style),
+  // discriminated by ``kind`` — people insert an @mention chip, dates drop
+  // a formatted date, items link as before.
+  const { data: ws } = useWorkspace(workspaceId);
+  const members = useMemo(() => {
+    const rows = [ws?.owner, ...(ws?.collaborators ?? [])].filter(
+      (p): p is NonNullable<typeof p> => Boolean(p)
+    );
+    const seen = new Set<string>();
+    return rows.filter((p) =>
+      seen.has(p.user_id) ? false : (seen.add(p.user_id), true)
+    );
+  }, [ws]);
+
+  const wikiMentions = useCallback(
+    async (query: string): Promise<WikiTarget[]> => {
+      const q = query.trim().toLowerCase();
+      const people: WikiTarget[] = members
+        .filter((m) => !q || m.username.toLowerCase().includes(q))
+        .slice(0, 6)
+        .map((m) => ({
+          id: m.user_id,
+          kind: "person",
+          refId: null,
+          title: m.username,
+          workspaceId,
+        }));
+
+      const fmt = (d: Date) =>
+        d.toLocaleDateString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      const dayFrom = (offset: number) => {
+        const d = new Date();
+        d.setDate(d.getDate() + offset);
+        return d;
+      };
+      const dates: WikiTarget[] = [
+        { label: "Today", offset: 0 },
+        { label: "Tomorrow", offset: 1 },
+        { label: "Yesterday", offset: -1 },
+        { label: "Next week", offset: 7 },
+      ]
+        .filter(
+          ({ label }) =>
+            !q || label.toLowerCase().includes(q) || "date".includes(q)
+        )
+        .map(({ label, offset }) => ({
+          id: `date-${label}`,
+          kind: "date",
+          refId: null,
+          title: label,
+          workspaceId,
+          insertText: fmt(dayFrom(offset)),
+        }));
+
+      return [...people, ...itemTargets(q), ...dates];
+    },
+    [members, itemTargets, workspaceId]
+  );
+
+  const wikiLink = useMemo(
+    () => ({ items: wikiItems, mentions: wikiMentions }),
+    [wikiItems, wikiMentions]
+  );
 
   // Clicking an item link (a ``@``-mention pill or a ``[[`` wiki-link) opens
   // the item in the preview modal when a handler is available, falling back to

@@ -817,6 +817,16 @@ html.dark .promptly-doc mark {
   content: "⛔";
 }
 
+/* @person mention chip (our MentionMark). */
+.promptly-doc .doc-mention {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0.35rem;
+  padding: 0.02rem 0.3rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* Block drag handle — the grip that appears left of the hovered block
    (Tiptap's MIT DragHandle positions the wrapper; we style the grip). */
 .doc-drag-handle {

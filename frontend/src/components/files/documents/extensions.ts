@@ -24,6 +24,7 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 
 import { AudioExtension } from "./AudioExtension";
 import { CalloutExtension } from "./CalloutExtension";
+import { MentionMark } from "./MentionMark";
 import { SlashCommandExtension } from "./SlashCommandExtension";
 import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 
@@ -140,6 +141,10 @@ export function buildExtensions({
     Highlight.configure({
       multicolor: true,
     }),
+    // Person-mention chip styling (@people). Registered always so any doc
+    // can parse/preserve an existing mention, even opened outside a
+    // workspace; only workspace notes actually insert them.
+    MentionMark,
     Link.configure({
       openOnClick: false,
       autolink: true,
