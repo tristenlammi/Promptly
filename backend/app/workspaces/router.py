@@ -199,6 +199,21 @@ async def _validate_default_model(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="That model isn't enabled for the selected provider.",
         )
+    # A workspace's default model follows whoever *sets* it: the default
+    # must be a model the editing caller can personally use. A member who
+    # only has models 1 & 2 can't pin model 3; a member (or admin) who
+    # does have model 3 can. Send-time already gates every user by their
+    # own access and falls back if the stored default is out of reach, so
+    # this just keeps the person choosing the default honest.
+    from app.models_config.access import is_model_allowed
+
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=model_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only set the default to a model you have access to.",
+        )
 
 
 async def _summary_with_rollups(
