@@ -1222,6 +1222,21 @@ export function ChatPage({
               embedded={embedded}
             />
           )}
+          {/* Embedded workspace chats have no TopNav, so surface the
+              creator's Private/Shared toggle in its own slim bar here. */}
+          {embedded &&
+            id &&
+            isOwner &&
+            !effectiveTemporaryMode &&
+            conversation?.workspace_id && (
+              <div className="flex items-center justify-end gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-1.5">
+                <ChatVisibilityToggle
+                  conversationId={id}
+                  visibility={conversation?.visibility ?? "private"}
+                  compact={false}
+                />
+              </div>
+            )}
           {/* Context-window UI (pill + warning banner) is desktop-only
               — the mobile header has no space for the pill and the
               banner chews up precious vertical room above the chat.
