@@ -11,6 +11,21 @@ import {
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { cn } from "@/utils/cn";
 import {
@@ -18,15 +33,16 @@ import {
   ArchiveRestore,
   ArrowLeft,
   ArrowUpRight,
+  CalendarDays,
   FileText,
   FolderX,
   ChevronRight,
+  Clock,
   Columns3,
   Layers,
   Link2,
   Loader2,
   MessageSquare,
-  PenTool,
   Plus,
   Search,
   Shapes,
@@ -77,6 +93,7 @@ import {
   recordRecentItem,
 } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
+import { WorkspaceRosterPane } from "@/components/workspaces/WorkspaceRosterPane";
 import { ItemContextToggle } from "@/components/workspaces/ItemPaneHeader";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -228,6 +245,26 @@ export function WorkspaceDetailPage() {
     []
   );
 
+  // Find a node's parent (nodes carry no ``parent_id``, so walk the tree).
+  // Used to redirect a click on a notebook page to the notebook's tabbed
+  // pane instead of opening the page standalone.
+  const findParent = useCallback(
+    (
+      nodes: WorkspaceItemNode[] | undefined,
+      childId: string,
+      parent: WorkspaceItemNode | null = null
+    ): WorkspaceItemNode | null => {
+      if (!nodes) return null;
+      for (const n of nodes) {
+        if (n.id === childId) return parent;
+        const found = findParent(n.children, childId, n);
+        if (found) return found;
+      }
+      return null;
+    },
+    []
+  );
+
   // Restore selection from the URL once the tree is available — once per
   // workspace id, so closing an item later doesn't re-open it, and a
   // workspace switch re-reads (and clears stale state).
@@ -293,17 +330,40 @@ export function WorkspaceDetailPage() {
   // Everything — chats included — opens inline in the main pane so the
   // rail + nav stay put. (Folders are toggled in the tree, not selected.)
   const handleSelect = (node: WorkspaceItemNode) => {
+    // A page that lives inside a notebook opens *in* the notebook's tabbed
+    // view (its selection bar), never as a standalone item with a
+    // breadcrumb. Redirect to the parent notebook and tell it which tab to
+    // activate — via localStorage (so it's right on first mount) and a live
+    // event (so an already-open notebook switches tabs immediately).
+    const parent = findParent(tree, node.id);
+    let target = node;
+    if (parent && parent.kind === "container") {
+      target = parent;
+      try {
+        localStorage.setItem(
+          `promptly.notebook.activePage.${parent.id}`,
+          node.id
+        );
+      } catch {
+        /* private mode / quota — the event below still switches the tab */
+      }
+      window.dispatchEvent(
+        new CustomEvent("promptly:notebook-activate-page", {
+          detail: { notebookId: parent.id, pageId: node.id },
+        })
+      );
+    }
     // Automations now render inline in the workspace (rail + top bar stay put),
     // like notes/canvases — the standalone /tasks page is still one click away.
     // Avoid the same item on both sides of a split.
-    if (secondary && secondary.id === node.id) setSecondary(null);
+    if (secondary && secondary.id === target.id) setSecondary(null);
     setSettingsOpen(false);
     setDriveOpen(false);
     // The search pane also masks the item pane — clear it too, or a tree
     // click while searching updates the URL but visibly does nothing.
     setSearchOpen(false);
-    setSelected(node);
-    if (id) recordRecentItem(id, node.id); // feeds the ⌘K "Recent" section
+    setSelected(target);
+    if (id) recordRecentItem(id, target.id); // feeds the ⌘K "Recent" section
   };
 
   // Split-screen: open a note/canvas/chat alongside the primary one. Folders
@@ -453,14 +513,6 @@ export function WorkspaceDetailPage() {
                   setDriveOpen(true);
                 }}
                 atDrive={driveOpen}
-                onSearch={() => {
-                  setSecondary(null);
-                  setSettingsOpen(false);
-                  setDriveOpen(false);
-                  setSelected(null);
-                  setSearchOpen(true);
-                }}
-                atSearch={searchOpen}
                 onNewTask={
                   canEdit && !isArchived
                     ? () => setTaskChooserOpen(true)
@@ -746,13 +798,16 @@ export function WorkspaceDetailPage() {
 const KIND_META: Partial<
   Record<WorkspaceItemNode["kind"], { icon: typeof FileText; label: string }>
 > = {
-  note: { icon: StickyNote, label: "Note" },
-  canvas: { icon: PenTool, label: "Canvas" },
+  // Icons must match the navigator rail's NodeIcon / notebookPageIcon so an
+  // item shows the same symbol in its title as in the nav.
+  note: { icon: FileText, label: "Note" },
+  canvas: { icon: Shapes, label: "Canvas" },
   board: { icon: Columns3, label: "Board" },
   sheet: { icon: Table2, label: "Sheet" },
   chat: { icon: MessageSquare, label: "Chat" },
   container: { icon: Layers, label: "Notebook" },
-  task: { icon: Zap, label: "Automation" },
+  roster: { icon: CalendarDays, label: "Roster" },
+  task: { icon: Clock, label: "Automation" },
 };
 
 /**
@@ -899,6 +954,7 @@ function WorkspaceMainPane({
       node.kind === "board" ||
       node.kind === "sheet" ||
       node.kind === "container" ||
+      node.kind === "roster" ||
       node.kind === "task")
   ) {
     return (
@@ -1205,6 +1261,16 @@ function WorkspaceItemView({
         boardItemId={node.id}
         canEdit={canEdit}
         onOpenItem={onOpenItem}
+      />
+    );
+  }
+  if (node.kind === "roster" && node.ref_id) {
+    return (
+      <WorkspaceRosterPane
+        workspaceId={workspaceId}
+        rosterId={node.ref_id}
+        node={node}
+        canEdit={canEdit}
       />
     );
   }
@@ -1531,13 +1597,20 @@ function WorkspaceNotePane({
 }
 
 /** Kinds a notebook page can be. */
-type NotebookPageKind = "note" | "sheet" | "canvas" | "board" | "chat";
+type NotebookPageKind =
+  | "note"
+  | "sheet"
+  | "canvas"
+  | "board"
+  | "chat"
+  | "roster";
 
 const NOTEBOOK_ADD_KINDS: { kind: NotebookPageKind; label: string }[] = [
   { kind: "note", label: "Note" },
   { kind: "sheet", label: "Sheet" },
   { kind: "canvas", label: "Canvas" },
   { kind: "board", label: "Board" },
+  { kind: "roster", label: "Roster" },
   { kind: "chat", label: "Chat" },
 ];
 
@@ -1551,10 +1624,24 @@ function notebookPageIcon(kind: string) {
       return Columns3;
     case "chat":
       return MessageSquare;
+    case "roster":
+      return CalendarDays;
     default:
       return FileText;
   }
 }
+
+/** Per-kind pastel tile for a notebook page's tab — mirrors the navigator
+ *  rail's NodeIcon tiles so the tab strip reads with the same visual
+ *  language (pastel symbol + accent selection) as the sidebar. */
+const PAGE_TILE: Record<string, { tile: string; ink: string }> = {
+  note: { tile: "bg-[rgba(245,158,11,0.16)]", ink: "text-[#F59E0B]" },
+  canvas: { tile: "bg-[rgba(59,130,246,0.16)]", ink: "text-[#3B82F6]" },
+  board: { tile: "bg-[rgba(16,185,129,0.16)]", ink: "text-[#10B981]" },
+  sheet: { tile: "bg-[rgba(236,72,153,0.16)]", ink: "text-[#EC4899]" },
+  chat: { tile: "bg-[rgba(217,119,87,0.16)]", ink: "text-[#D97757]" },
+  roster: { tile: "bg-[rgba(21,154,168,0.16)]", ink: "text-[#159AA8]" },
+};
 
 /** Recursive lookup of a tree node by id (the selected snapshot can go stale
  *  after pages are added; panes re-derive from the live tree with this). */
@@ -1628,6 +1715,25 @@ function WorkspaceNotebookPane({
       /* ignore quota / private-mode errors */
     }
   }, [activeId, activeKey]);
+
+  // Clicking one of this notebook's pages in the rail fires this event so an
+  // already-open notebook jumps to that tab (a fresh mount reads localStorage
+  // above instead). Scoped to our own notebook id.
+  useEffect(() => {
+    const onActivate = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        notebookId: string;
+        pageId: string;
+      };
+      if (detail?.notebookId === node.id) setActiveId(detail.pageId);
+    };
+    window.addEventListener("promptly:notebook-activate-page", onActivate);
+    return () =>
+      window.removeEventListener(
+        "promptly:notebook-activate-page",
+        onActivate
+      );
+  }, [node.id]);
 
   const active = pages.find((p) => p.id === activeId) ?? null;
 
@@ -1747,6 +1853,153 @@ function NotebookEmptyState({
   );
 }
 
+/** A single sortable notebook tab. Wraps the page in dnd-kit's ``useSortable``
+ *  so the strip reorders with the same smooth animation as the navigator rail;
+ *  a small drag-activation distance keeps plain clicks (open / rename / toggle)
+ *  working. While renaming, drag is disabled and the tab becomes an input. */
+function SortableTab({
+  page,
+  active,
+  canEdit,
+  canDelete,
+  renaming,
+  draftTitle,
+  onDraftChange,
+  onCommitRename,
+  onCancelRename,
+  onStartRename,
+  onSelect,
+  onToggleContext,
+  onDelete,
+}: {
+  page: WorkspaceItemNode;
+  active: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  renaming: boolean;
+  draftTitle: string;
+  onDraftChange: (v: string) => void;
+  onCommitRename: () => void;
+  onCancelRename: () => void;
+  onStartRename: () => void;
+  onSelect: () => void;
+  onToggleContext: (enabled: boolean) => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: page.id, disabled: !canEdit || renaming });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const Icon = notebookPageIcon(page.kind);
+  const { tile, ink } = PAGE_TILE[page.kind] ?? PAGE_TILE.note;
+  const contextOn = page.context_enabled !== false;
+
+  if (renaming) {
+    return (
+      <input
+        ref={setNodeRef}
+        style={style}
+        autoFocus
+        value={draftTitle}
+        onChange={(e) => onDraftChange(e.target.value)}
+        onBlur={onCommitRename}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onCommitRename();
+          if (e.key === "Escape") onCancelRename();
+        }}
+        className="min-w-[6rem] rounded-md border border-[var(--accent)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
+      />
+    );
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cn(
+        "group relative inline-flex shrink-0 items-center gap-1.5 rounded-md py-1 pl-2.5 pr-2 text-xs",
+        canEdit && "cursor-grab active:cursor-grabbing",
+        isDragging && "z-10 opacity-60 shadow-md",
+        // Match the navigator rail's selected row: a neutral filled background
+        // with the accent reserved for the left indicator bar + pastel tile.
+        active
+          ? "bg-[var(--hover-strong)] font-semibold text-[var(--text)]"
+          : "font-medium text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      )}
+    >
+      {active && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-r-full bg-[var(--accent)]"
+        />
+      )}
+      <button
+        type="button"
+        onClick={onSelect}
+        onDoubleClick={() => {
+          if (canEdit) onStartRename();
+        }}
+        className="inline-flex max-w-[12rem] items-center gap-1.5 truncate"
+        title={
+          canEdit
+            ? "Click to open · double-click to rename · drag to reorder"
+            : page.title
+        }
+      >
+        <span
+          className={cn(
+            "grid h-5 w-5 shrink-0 place-items-center rounded-md",
+            tile
+          )}
+        >
+          <Icon className={cn("h-3 w-3", ink)} />
+        </span>
+        <span className="truncate">{page.title || "Untitled"}</span>
+      </button>
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => onToggleContext(!contextOn)}
+          className={cn(
+            "transition",
+            contextOn
+              ? "text-[var(--accent)]"
+              : "text-[var(--text-muted)] opacity-0 group-hover:opacity-100"
+          )}
+          aria-label={
+            contextOn
+              ? "Used as workspace context — click to exclude"
+              : "Excluded from workspace context — click to include"
+          }
+          title={
+            contextOn
+              ? "Used as workspace context (click to exclude)"
+              : "Excluded from workspace context (click to include)"
+          }
+        >
+          {contextOn ? (
+            <Zap className="h-3 w-3" />
+          ) : (
+            <ZapOff className="h-3 w-3" />
+          )}
+        </button>
+      )}
+      {canEdit && canDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="opacity-0 transition group-hover:opacity-100"
+          aria-label="Delete page"
+          title="Delete page"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * Tab strip for a Notebook's pages (child items). The scrollable tab list is
  * isolated in its own ``overflow-x-auto`` container so the "+" add menu — a
@@ -1778,7 +2031,14 @@ function NotebookTabs({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [dragId, setDragId] = useState<string | null>(null);
+
+  // dnd-kit horizontal sortable — smooth animated reordering that matches the
+  // navigator rail. A small activation distance means a plain click still
+  // opens / renames / toggles a tab instead of starting a drag.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
+  );
+  const pageIds = useMemo(() => pages.map((p) => p.id), [pages]);
 
   if (pages.length === 0 && !canEdit) return null;
 
@@ -1794,126 +2054,61 @@ function NotebookTabs({
     onAdd(kind);
   };
 
-  // Reorder: drop the dragged page immediately *before* the target. We
-  // compute a float midpoint between the target and its left neighbour
-  // (among the other pages) so no full renumber is needed — the same
-  // scheme the navigator tree uses.
-  const handleDropBefore = (targetId: string) => {
-    if (!dragId || dragId === targetId) return;
-    const others = pages.filter((p) => p.id !== dragId);
-    const idx = others.findIndex((p) => p.id === targetId);
-    if (idx < 0) return;
-    const target = others[idx];
-    const prev = others[idx - 1];
-    const before = prev ? prev.position : target.position - 1;
-    onReorder(dragId, (before + target.position) / 2);
+  // Reorder via a float midpoint between the dropped tab's new neighbours — the
+  // same no-renumber scheme the navigator rail uses.
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIndex = pages.findIndex((p) => p.id === active.id);
+    const newIndex = pages.findIndex((p) => p.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const reordered = arrayMove(pages, oldIndex, newIndex);
+    const at = reordered.findIndex((p) => p.id === active.id);
+    const prev = reordered[at - 1];
+    const next = reordered[at + 1];
+    let pos: number;
+    if (prev && next) pos = (prev.position + next.position) / 2;
+    else if (prev) pos = prev.position + 1;
+    else if (next) pos = next.position - 1;
+    else return;
+    onReorder(active.id as string, pos);
   };
 
   return (
     <div className="flex items-center gap-1 border-b border-[var(--border)] px-2 py-1">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        {pages.map((p) => {
-          const active = p.id === activeId;
-          const Icon = notebookPageIcon(p.kind);
-          if (renamingId === p.id) {
-            return (
-              <input
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={pageIds}
+            strategy={horizontalListSortingStrategy}
+          >
+            {pages.map((p) => (
+              <SortableTab
                 key={p.id}
-                autoFocus
-                value={draftTitle}
-                onChange={(e) => setDraftTitle(e.target.value)}
-                onBlur={() => commitRename(p.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename(p.id);
-                  if (e.key === "Escape") setRenamingId(null);
-                }}
-                className="min-w-[6rem] rounded-md border border-[var(--accent)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] outline-none"
-              />
-            );
-          }
-          const contextOn = p.context_enabled !== false;
-          return (
-            <div
-              key={p.id}
-              draggable={canEdit}
-              onDragStart={() => setDragId(p.id)}
-              onDragOver={(e) => {
-                if (canEdit && dragId) e.preventDefault();
-              }}
-              onDrop={() => {
-                handleDropBefore(p.id);
-                setDragId(null);
-              }}
-              onDragEnd={() => setDragId(null)}
-              className={cn(
-                "group inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition",
-                canEdit && "cursor-grab active:cursor-grabbing",
-                dragId === p.id && "opacity-50",
-                active
-                  ? "bg-[var(--accent)] text-white"
-                  : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] "
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => onSelect(p.id)}
-                onDoubleClick={() => {
-                  if (!canEdit) return;
+                page={p}
+                active={p.id === activeId}
+                canEdit={canEdit}
+                canDelete={pages.length > 1}
+                renaming={renamingId === p.id}
+                draftTitle={draftTitle}
+                onDraftChange={setDraftTitle}
+                onCommitRename={() => commitRename(p.id)}
+                onCancelRename={() => setRenamingId(null)}
+                onStartRename={() => {
                   setDraftTitle(p.title);
                   setRenamingId(p.id);
                 }}
-                className="inline-flex max-w-[12rem] items-center gap-1.5 truncate"
-                title={
-                  canEdit
-                    ? "Click to open · double-click to rename · drag to reorder"
-                    : p.title
-                }
-              >
-                <Icon className="h-3 w-3 shrink-0 opacity-70" />
-                <span className="truncate">{p.title || "Untitled"}</span>
-              </button>
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => onToggleContext(p.id, !contextOn)}
-                  className={cn(
-                    "transition",
-                    contextOn
-                      ? "text-[var(--accent)]"
-                      : "text-[var(--text-muted)] opacity-0 group-hover:opacity-100"
-                  )}
-                  aria-label={
-                    contextOn
-                      ? "Used as workspace context — click to exclude"
-                      : "Excluded from workspace context — click to include"
-                  }
-                  title={
-                    contextOn
-                      ? "Used as workspace context (click to exclude)"
-                      : "Excluded from workspace context (click to include)"
-                  }
-                >
-                  {contextOn ? (
-                    <Zap className="h-3 w-3" />
-                  ) : (
-                    <ZapOff className="h-3 w-3" />
-                  )}
-                </button>
-              )}
-              {canEdit && pages.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => onDelete(p.id)}
-                  className="opacity-0 transition group-hover:opacity-100"
-                  aria-label="Delete page"
-                  title="Delete page"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          );
-        })}
+                onSelect={() => onSelect(p.id)}
+                onToggleContext={(enabled) => onToggleContext(p.id, enabled)}
+                onDelete={() => onDelete(p.id)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
       {canEdit && (
         <div className="relative shrink-0">
