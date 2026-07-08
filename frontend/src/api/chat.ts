@@ -580,17 +580,29 @@ export interface WorkspaceProposalCard {
   due_date?: string;
 }
 
+/** The change an ``update_cards`` proposal applies to every matched card.
+ *  ``due_date: null`` means "clear the due date". */
+export interface WorkspaceProposalChanges {
+  status?: string;
+  priority?: "low" | "medium" | "high";
+  due_date?: string | null;
+}
+
 export interface WorkspaceProposal {
   id: string;
   conversation_id: string;
   workspace_id: string;
-  kind: "create_note" | "add_cards";
+  kind: "create_note" | "add_cards" | "update_cards";
   payload: {
     title?: string;
     markdown?: string;
     board_item_id?: string;
     board_title?: string;
     cards?: WorkspaceProposalCard[];
+    /** update_cards only — the ids of the cards being changed. */
+    card_ids?: string[];
+    /** update_cards only — the change applied to every matched card. */
+    changes?: WorkspaceProposalChanges;
   };
   status: "pending" | "applied" | "dismissed";
   applied_item_id: string | null;

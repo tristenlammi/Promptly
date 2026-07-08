@@ -23,6 +23,7 @@ from app.chat.tools.run_agents import RunAgentsTool
 from app.chat.tools.web_search import WebSearchTool
 from app.chat.tools.workspace_write import (
     ProposeBoardCardsTool,
+    ProposeBoardUpdatesTool,
     ProposeWorkspaceNoteTool,
 )
 
@@ -52,6 +53,9 @@ REGISTRY: list[Tool] = [
     # only advertised in workspace chats.
     ProposeWorkspaceNoteTool(),
     ProposeBoardCardsTool(),
+    # Edit existing cards (status/priority/due) — the update half of the
+    # board write-back, e.g. "mark the in-progress cards done".
+    ProposeBoardUpdatesTool(),
     # Read-back: open a workspace item's full content on demand (Track 1 P3).
     ReadWorkspaceItemTool(),
     # Structured board queries — count/filter cards for real (Track 1 P4).

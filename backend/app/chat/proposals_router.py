@@ -144,6 +144,10 @@ async def apply_proposal(
         item_id = await _apply_add_cards(
             db, background, ws=ws, user=user, payload=p.payload
         )
+    elif p.kind == "update_cards":
+        item_id = await _apply_update_cards(
+            db, background, ws=ws, user=user, payload=p.payload
+        )
     else:  # pragma: no cover — future kinds
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -241,6 +245,65 @@ async def _apply_add_cards(
                 created_by=user.id,
             )
         )
+    await db.flush()
+    try:
+        from app.workspaces.knowledge import index_board_for_workspace
+
+        background.add_task(index_board_for_workspace, ws.id, board.id)
+    except Exception:  # noqa: BLE001
+        logger.warning("proposal board reindex enqueue failed", exc_info=True)
+    return board.id
+
+
+async def _apply_update_cards(
+    db: AsyncSession,
+    background: BackgroundTasks,
+    *,
+    ws: Workspace,
+    user: User,
+    payload: dict[str, Any],
+) -> uuid.UUID:
+    """Apply an ``update_cards`` proposal: push the snapshotted ``changes``
+    onto each still-present card. Cards that vanished since the proposal was
+    filed are skipped (best-effort bulk edit), and ``status`` moves keep the
+    legacy ``done`` flag + ``completed_at`` in lockstep the same way the
+    board's own PATCH does."""
+    from app.workspaces.tasks_router import _is_done_status
+
+    board_id = uuid.UUID(str(payload.get("board_item_id")))
+    board = await db.get(WorkspaceItem, board_id)
+    if board is None or board.workspace_id != ws.id or board.kind != "board":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="The target board no longer exists — dismiss this proposal.",
+        )
+    changes = payload.get("changes") or {}
+    now = datetime.now(timezone.utc)
+    for raw_id in payload.get("card_ids") or []:
+        try:
+            task_id = uuid.UUID(str(raw_id))
+        except (ValueError, TypeError):
+            continue
+        task = await db.get(WorkspaceTask, task_id)
+        if task is None or task.board_item_id != board.id:
+            continue
+        if "status" in changes:
+            task.status = str(changes["status"])
+            task.done = await _is_done_status(db, board.id, task.status)
+            task.completed_at = now if task.done else None
+        if changes.get("priority") in ("low", "medium", "high"):
+            task.priority = changes["priority"]
+        if "due_date" in changes:
+            raw_due = changes["due_date"]
+            if raw_due is None:
+                task.due_at = None
+            else:
+                try:
+                    task.due_at = datetime.fromisoformat(str(raw_due)).replace(
+                        tzinfo=timezone.utc
+                    )
+                except ValueError:
+                    pass  # leave the existing due date untouched
     await db.flush()
     try:
         from app.workspaces.knowledge import index_board_for_workspace

@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 
 import { proposalsApi, type WorkspaceProposal } from "@/api/chat";
+import type { WorkspaceItemNode } from "@/api/workspaces";
+import { useItemPreview } from "@/components/workspaces/itemPreviewContext";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -64,7 +66,11 @@ export function WorkspaceProposalsPanel({
       qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
       qc.invalidateQueries({ queryKey: ["workspaces", "tasks", workspaceId] });
       toast.success(
-        updated.kind === "create_note" ? "Note created" : "Cards added"
+        updated.kind === "create_note"
+          ? "Note created"
+          : updated.kind === "update_cards"
+            ? "Cards updated"
+            : "Cards added"
       );
     },
     onError: (e) => {
@@ -115,10 +121,38 @@ function ProposalCard({
   onDismiss: () => void;
 }) {
   const navigate = useNavigate();
+  const preview = useItemPreview();
   const [expanded, setExpanded] = useState(false);
   const isNote = p.kind === "create_note";
+  const isUpdate = p.kind === "update_cards";
   const cards = p.payload.cards ?? [];
   const applied = p.status === "applied";
+  const changeSummary = isUpdate ? describeChanges(p.payload.changes) : null;
+
+  // "Open" jumps to what Apply produced. Prefer the item-preview modal
+  // (same as an @-mention pill) when we're inside the workspace page;
+  // fall back to a route change otherwise.
+  const openApplied = () => {
+    const kind: WorkspaceItemNode["kind"] = isNote ? "note" : "board";
+    if (p.applied_item_id && preview) {
+      preview({
+        id: p.applied_item_id,
+        kind,
+        ref_id: null,
+        title: p.payload.title ?? p.payload.board_title ?? "",
+        icon: null,
+        position: 0,
+        indexing_status: null,
+        children: [],
+      });
+      return;
+    }
+    navigate(
+      p.applied_item_id
+        ? `/workspaces/${p.workspace_id}?item=${p.applied_item_id}`
+        : `/workspaces/${p.workspace_id}`
+    );
+  };
 
   return (
     <div
@@ -145,6 +179,16 @@ function ProposalCard({
                 “{p.payload.title ?? "Untitled"}”
               </span>
             </>
+          ) : isUpdate ? (
+            <>
+              update {cards.length} card{cards.length === 1 ? "" : "s"} on{" "}
+              <span className="font-medium">
+                “{p.payload.board_title ?? "the board"}”
+              </span>
+              {changeSummary && (
+                <span className="text-[var(--text-muted)]"> · {changeSummary}</span>
+              )}
+            </>
           ) : (
             <>
               add {cards.length} card{cards.length === 1 ? "" : "s"} to{" "}
@@ -169,13 +213,7 @@ function ProposalCard({
         {applied ? (
           <button
             type="button"
-            onClick={() =>
-              navigate(
-                p.applied_item_id
-                  ? `/workspaces/${p.workspace_id}?item=${p.applied_item_id}`
-                  : `/workspaces/${p.workspace_id}`
-              )
-            }
+            onClick={openApplied}
             className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium text-[var(--success)] transition hover:bg-[var(--success-bg)]"
           >
             <ExternalLink className="h-3.5 w-3.5" />
@@ -217,6 +255,24 @@ function ProposalCard({
                 {p.payload.markdown ?? ""}
               </ReactMarkdown>
             </div>
+          ) : isUpdate ? (
+            <>
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent)]">
+                <SquareKanban className="h-3.5 w-3.5" />
+                {changeSummary ?? "update cards"}
+              </div>
+              <ul className="max-h-72 space-y-1 overflow-y-auto">
+                {cards.map((c, i) => (
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 text-sm text-[var(--text)]"
+                  >
+                    <CircleDot className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                    <span className="min-w-0 truncate">{c.title}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : (
             <ul className="space-y-1.5">
               {cards.map((c, i) => (
@@ -251,10 +307,30 @@ function ProposalCard({
             ) : (
               <SquareKanban className="h-3 w-3" />
             )}
-            Nothing is written to the workspace until you hit Apply.
+            {isUpdate
+              ? "Nothing changes on the board until you hit Apply."
+              : "Nothing is written to the workspace until you hit Apply."}
           </p>
         </div>
       )}
     </div>
   );
+}
+
+/** One-line human summary of an ``update_cards`` change set for the card
+ *  header + preview chip (e.g. "mark done · high priority"). */
+function describeChanges(
+  changes: WorkspaceProposal["payload"]["changes"]
+): string | null {
+  if (!changes) return null;
+  const bits: string[] = [];
+  if (changes.status) {
+    bits.push(
+      changes.status === "done" ? "mark done" : `move to ${changes.status}`
+    );
+  }
+  if (changes.priority) bits.push(`${changes.priority} priority`);
+  if (changes.due_date === null) bits.push("clear due date");
+  else if (changes.due_date) bits.push(`due ${changes.due_date}`);
+  return bits.length ? bits.join(" · ") : null;
 }
