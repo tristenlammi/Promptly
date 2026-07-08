@@ -33,6 +33,7 @@ import { cn } from "@/utils/cn";
 import { documentsApi } from "@/api/documents";
 
 import { EmojiPicker } from "./EmojiPicker";
+import { LinkEditorPopover } from "./LinkEditorPopover";
 import { INSERT_ASSET_EVENT } from "./SlashCommandExtension";
 
 /**
@@ -161,17 +162,9 @@ export function DocumentToolbar({
     editor.chain().focus().setYoutubeVideo({ src: url }).run();
   };
 
-  const handleInsertLink = () => {
-    if (!editor) return;
-    const existing = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt("Link URL", existing ?? "https://");
-    if (url === null) return;
-    if (url.trim() === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-  };
+  // The in-app link editor (replaces window.prompt) anchors to the Link
+  // button; null when closed.
+  const [linkAnchor, setLinkAnchor] = useState<DOMRect | null>(null);
 
   const handleInsertTable = () => {
     if (!editor) return;
@@ -244,7 +237,13 @@ export function DocumentToolbar({
         >
           <Highlighter className="h-4 w-4" />
         </ToolButton>
-        <ToolButton label="Link" onClick={handleInsertLink}>
+        <ToolButton
+          label="Link"
+          active={editor?.isActive("link")}
+          onClick={(e) =>
+            setLinkAnchor(e.currentTarget.getBoundingClientRect())
+          }
+        >
           <LinkIcon className="h-4 w-4" />
         </ToolButton>
       </ToolbarGroup>
@@ -579,6 +578,14 @@ export function DocumentToolbar({
           anchor={emojiAnchor}
           onSelect={(glyph) => editor?.chain().focus().insertContent(glyph).run()}
           onClose={() => setEmojiOpen(false)}
+        />
+      )}
+
+      {editor && linkAnchor && (
+        <LinkEditorPopover
+          editor={editor}
+          anchor={linkAnchor}
+          onClose={() => setLinkAnchor(null)}
         />
       )}
 

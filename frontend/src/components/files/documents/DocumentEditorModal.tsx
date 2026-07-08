@@ -246,6 +246,22 @@ export function DocumentEditorModal({
             "min-h-[60vh] px-6 pb-24 pt-4"
           ),
         },
+        // Clicking an external link opens it in a new tab (Link is
+        // configured ``openOnClick:false`` so the cursor can land inside
+        // links, so we open explicitly here). In-app wiki links (``item=``)
+        // are left for the note pane's click handler → item preview modal.
+        handleClick: (_view, _pos, event) => {
+          const a = (event.target as HTMLElement | null)?.closest(
+            "a[href]"
+          ) as HTMLAnchorElement | null;
+          if (!a) return false;
+          const href = a.getAttribute("href") || "";
+          if (/^(https?:|mailto:|tel:)/i.test(href) && !href.includes("item=")) {
+            window.open(a.href, "_blank", "noopener,noreferrer");
+            return true;
+          }
+          return false;
+        },
         // Intercept pasted images before ProseMirror falls back to
         // its default behaviour (which just turns them into
         // base64-encoded data URIs the Image extension rejects). Each

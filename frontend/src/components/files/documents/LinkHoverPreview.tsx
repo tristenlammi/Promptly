@@ -142,6 +142,10 @@ function LinkCard({
     <div
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      onClick={() =>
+        window.open(href, "_blank", "noopener,noreferrer")
+      }
+      title="Open in a new tab"
       style={{
         position: "fixed",
         left,
@@ -150,7 +154,7 @@ function LinkCard({
         width: WIDTH,
         zIndex: 70,
       }}
-      className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-xl"
+      className="cursor-pointer overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-xl transition hover:border-[var(--accent)]/50"
     >
       {data?.image && (
         <img

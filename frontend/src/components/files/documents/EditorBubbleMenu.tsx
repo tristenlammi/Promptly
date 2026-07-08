@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { BubbleMenu, type Editor } from "@tiptap/react";
 import {
   Bold,
@@ -14,6 +15,7 @@ import {
   CALLOUT_VARIANTS,
   type CalloutVariant,
 } from "./CalloutExtension";
+import { LinkEditorPopover } from "./LinkEditorPopover";
 
 /**
  * Selection bubble toolbar — the quick inline formatter that floats over a
@@ -36,7 +38,8 @@ function MarkButton({
   children,
 }: {
   active: boolean;
-  onClick: () => void;
+  /** Receives the button's rect so link-style buttons can anchor a popover. */
+  onClick: (rect: DOMRect) => void;
   title: string;
   children: React.ReactNode;
 }) {
@@ -46,7 +49,7 @@ function MarkButton({
       title={title}
       aria-label={title}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
+      onClick={(e) => onClick(e.currentTarget.getBoundingClientRect())}
       className={cn(
         "inline-flex h-7 w-7 items-center justify-center rounded-md transition",
         active
@@ -60,22 +63,7 @@ function MarkButton({
 }
 
 export function EditorBubbleMenu({ editor }: { editor: Editor }) {
-  const setLink = () => {
-    const prev = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt("Link URL", prev ?? "");
-    if (url === null) return; // cancelled
-    if (url === "") {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
-      return;
-    }
-    editor
-      .chain()
-      .focus()
-      .extendMarkRange("link")
-      .setLink({ href: url })
-      .run();
-  };
-
+  const [linkAnchor, setLinkAnchor] = useState<DOMRect | null>(null);
   const inCallout = editor.isActive("callout");
 
   return (
@@ -128,11 +116,19 @@ export function EditorBubbleMenu({ editor }: { editor: Editor }) {
       </MarkButton>
       <MarkButton
         active={editor.isActive("link")}
-        onClick={setLink}
+        onClick={(rect) => setLinkAnchor(rect)}
         title="Link"
       >
         <LinkIcon className="h-4 w-4" />
       </MarkButton>
+
+      {linkAnchor && (
+        <LinkEditorPopover
+          editor={editor}
+          anchor={linkAnchor}
+          onClose={() => setLinkAnchor(null)}
+        />
+      )}
 
       {inCallout && (
         <>
