@@ -17,7 +17,6 @@ import {
   List,
   ListOrdered,
   ListTodo,
-  ListVideo,
   MessageSquareText,
   Minus,
   Music,
@@ -177,11 +176,6 @@ export function DocumentToolbar({
       .focus()
       .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
       .run();
-  };
-
-  const handleInsertDetails = () => {
-    if (!editor) return;
-    editor.chain().focus().setDetails().run();
   };
 
   const handleInsertHighlight = () => {
@@ -355,9 +349,6 @@ export function DocumentToolbar({
           <YoutubeIcon className="h-4 w-4" />
         </ToolButton>
         <TableSizeButton editor={editor} />
-        <ToolButton label="Insert details" onClick={handleInsertDetails}>
-          <ListVideo className="h-4 w-4" />
-        </ToolButton>
         <ToolButton
           label="Callout"
           active={editor?.isActive("callout")}
@@ -531,14 +522,6 @@ export function DocumentToolbar({
                 icon={<TableIcon className="h-5 w-5" />}
                 onClick={() => {
                   handleInsertTable();
-                  setOverflowOpen(false);
-                }}
-              />
-              <SheetButton
-                label="Details"
-                icon={<ListVideo className="h-5 w-5" />}
-                onClick={() => {
-                  handleInsertDetails();
                   setOverflowOpen(false);
                 }}
               />

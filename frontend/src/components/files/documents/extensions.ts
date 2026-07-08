@@ -200,6 +200,12 @@ export function buildExtensions({
     TableRow,
     TableHeader,
     TableCell,
+    // Details (collapsible "toggle") — the insert affordances (toolbar
+    // button, slash "Toggle", mobile sheet tile) were removed: the block
+    // rendered as a confusing empty box and Callouts cover the "highlight a
+    // section" need. These nodes stay REGISTERED so any older note that
+    // already contains a details block still parses + round-trips instead of
+    // dropping content; there's just no longer a way to insert a new one.
     Details.configure({
       persist: true,
       openClassName: "is-open",

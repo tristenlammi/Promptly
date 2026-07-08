@@ -139,13 +139,6 @@ function buildItems(hasWikiLink: boolean): SlashItem[] {
         editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
     },
     {
-      title: "Toggle",
-      hint: "collapsible section",
-      keywords: ["details", "collapse", "accordion", "fold"],
-      command: ({ editor, range }) =>
-        editor.chain().focus().deleteRange(range).setDetails().run(),
-    },
-    {
       title: "Callout",
       hint: "highlighted box",
       keywords: ["callout", "admonition", "note", "info", "warning", "aside"],
