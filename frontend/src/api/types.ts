@@ -80,6 +80,16 @@ export interface UserSettings {
    *  the ambient personal-context block and overrides locale inference.
    *  Absent / ``""`` = infer from location. */
   currency?: string;
+  /** Note-editor spell-check: draw live misspelling underlines. Absent = on. */
+  spellcheck_enabled?: boolean;
+  /** Note-editor spell-check: auto-replace a misspelled word with the top
+   *  suggestion on a word boundary (space/punctuation). Absent = off. */
+  spellcheck_autocorrect?: boolean;
+  /** Dictionary language code (``en`` | ``en-gb`` | ``en-au`` | ``es`` |
+   *  ``fr`` | ``pt``). Absent = derive from the browser locale. */
+  spellcheck_lang?: string;
+  /** Personal dictionary — lower-cased words the user added. */
+  spellcheck_words?: string[];
   // Anything else the server might surface — kept loose on purpose so
   // a backend rollout doesn't break the type-check on the client.
   [key: string]: unknown;
@@ -118,6 +128,14 @@ export interface UserPreferencesUpdate {
   /** Preferred display currency (ISO 4217). Pass an empty string to clear
    *  (fall back to locale inference). */
   currency?: string;
+  /** Note-editor spell-check: draw live misspelling underlines. */
+  spellcheck_enabled?: boolean;
+  /** Note-editor spell-check: auto-replace misspelled words on a boundary. */
+  spellcheck_autocorrect?: boolean;
+  /** Dictionary language code. Pass an empty string to clear. */
+  spellcheck_lang?: string;
+  /** Replace the full personal-dictionary word list. */
+  spellcheck_words?: string[];
 }
 
 export interface User {

@@ -37,7 +37,7 @@ import { documentsApi } from "@/api/documents";
 
 import { EmojiPicker } from "./EmojiPicker";
 import { LinkEditorPopover } from "./LinkEditorPopover";
-import { SpellCheckControl } from "./SpellCheckControl";
+import { SpellCheckControl, AutocorrectToggle } from "./SpellCheckControl";
 import { INSERT_ASSET_EVENT } from "./SlashCommandExtension";
 
 /**
@@ -405,9 +405,11 @@ export function DocumentToolbar({
 
       <Divider />
 
-      {/* Spell-check toggle + language picker (nspell / Hunspell). */}
+      {/* Spell-check toggle + language picker (nspell / Hunspell), plus the
+          type-time autocorrect toggle beside it. */}
       <ToolbarGroup>
         <SpellCheckControl />
+        <AutocorrectToggle />
       </ToolbarGroup>
 
       {/* Mobile overflow sheet trigger. On small screens we collapse

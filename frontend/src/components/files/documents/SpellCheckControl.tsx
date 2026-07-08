@@ -1,22 +1,19 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, SpellCheck } from "lucide-react";
+import { Check, SpellCheck, WandSparkles } from "lucide-react";
 
 import { cn } from "@/utils/cn";
-import { useSpellcheckStore } from "@/store/spellcheckStore";
 import { SPELL_LANGUAGES, spellLangShort } from "./spellDictionaries";
+import { useSpellcheckPrefs } from "./useSpellcheckPrefs";
 
 /**
  * Toolbar control for the note spell-checker: a toggle plus a language
  * picker, in a portal popover (same pattern as the colour / table controls).
  * The button badges the active language code; the accent ring shows when
- * checking is on.
+ * checking is on. Preferences are user-scoped (see useSpellcheckPrefs).
  */
 export function SpellCheckControl() {
-  const enabled = useSpellcheckStore((s) => s.enabled);
-  const lang = useSpellcheckStore((s) => s.lang);
-  const setEnabled = useSpellcheckStore((s) => s.setEnabled);
-  const setLang = useSpellcheckStore((s) => s.setLang);
+  const { enabled, lang, setEnabled, setLang } = useSpellcheckPrefs();
 
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
@@ -62,7 +59,7 @@ export function SpellCheckControl() {
             <div
               style={{
                 position: "fixed",
-                top: Math.min(anchor.bottom + 6, window.innerHeight - 320),
+                top: Math.min(anchor.bottom + 6, window.innerHeight - 340),
                 left: Math.max(
                   8,
                   Math.min(anchor.left, window.innerWidth - 232)
@@ -79,19 +76,7 @@ export function SpellCheckControl() {
                 className="flex w-full items-center justify-between px-3 py-2 text-sm text-[var(--text)] transition hover:bg-black/5 dark:hover:bg-white/10"
               >
                 <span className="font-medium">Check spelling</span>
-                <span
-                  className={cn(
-                    "relative h-5 w-9 rounded-full transition-colors",
-                    enabled ? "bg-[var(--accent)]" : "bg-[var(--border)]"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all",
-                      enabled ? "left-[1.125rem]" : "left-0.5"
-                    )}
-                  />
-                </span>
+                <Switch on={enabled} />
               </button>
 
               <div className="my-1 h-px bg-[var(--border)]" />
@@ -127,5 +112,57 @@ export function SpellCheckControl() {
           document.body
         )}
     </>
+  );
+}
+
+/**
+ * Standalone toolbar toggle for type-time autocorrect, sitting next to the
+ * language control. Independent of the squiggle toggle — you can autocorrect
+ * without underlines or vice-versa (both just need a dictionary loaded, which
+ * the editor host handles).
+ */
+export function AutocorrectToggle() {
+  const { autocorrect, setAutocorrect } = useSpellcheckPrefs();
+  return (
+    <button
+      type="button"
+      title={
+        autocorrect
+          ? "Autocorrect while typing: on — misspelled words fix on space. Click to turn off."
+          : "Autocorrect while typing: off. Click to turn on."
+      }
+      aria-label="Autocorrect while typing"
+      aria-pressed={autocorrect}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => setAutocorrect(!autocorrect)}
+      className={cn(
+        "inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--muted)] transition",
+        "hover:bg-black/5 hover:text-[var(--text)] dark:hover:bg-white/10",
+        autocorrect && "bg-black/10 text-[var(--text)] dark:bg-white/15"
+      )}
+    >
+      <WandSparkles
+        className={cn("h-4 w-4", autocorrect && "text-[var(--accent)]")}
+      />
+    </button>
+  );
+}
+
+/** Small on/off pill used inside the popover. */
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span
+      className={cn(
+        "relative h-5 w-9 rounded-full transition-colors",
+        on ? "bg-[var(--accent)]" : "bg-[var(--border)]"
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all",
+          on ? "left-[1.125rem]" : "left-0.5"
+        )}
+      />
+    </span>
   );
 }

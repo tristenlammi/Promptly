@@ -258,6 +258,52 @@ class UserPreferencesUpdate(BaseModel):
     # (or who simply wants a different currency) gets consistent pricing.
     # ``None`` = no change; ``""`` clears it (falls back to locale inference).
     currency: str | None = Field(default=None, max_length=8)
+    # Note-editor spell-check preferences (user-scoped so they follow the
+    # account across devices, not just one browser's localStorage).
+    #   * ``spellcheck_enabled`` — draw the live misspelling underlines.
+    #   * ``spellcheck_autocorrect`` — replace a misspelled word with the top
+    #     suggestion when the user types a word boundary (space / punctuation).
+    #   * ``spellcheck_lang`` — dictionary language code (see the frontend
+    #     ``SPELL_LANGUAGES`` set). ``""`` clears back to the browser default.
+    #   * ``spellcheck_words`` — the user's personal dictionary (words they
+    #     "Add to dictionary"-ed). Replaces the whole list; normalised below.
+    spellcheck_enabled: bool | None = None
+    spellcheck_autocorrect: bool | None = None
+    spellcheck_lang: str | None = Field(default=None, max_length=8)
+    spellcheck_words: list[str] | None = None
+
+    @field_validator("spellcheck_lang")
+    @classmethod
+    def _clean_spellcheck_lang(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if v == "":
+            return ""  # "" → clear (frontend falls back to browser locale)
+        allowed = {"en", "en-gb", "en-au", "es", "fr", "pt"}
+        if v not in allowed:
+            raise ValueError("Unsupported spell-check language.")
+        return v
+
+    @field_validator("spellcheck_words")
+    @classmethod
+    def _clean_spellcheck_words(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        # Normalise: lower-case, letters/apostrophes only, deduped, bounded so
+        # a client can't dump an unbounded blob into the JSONB settings column.
+        seen: list[str] = []
+        for item in v:
+            word = str(item).strip().lower()
+            if not word or len(word) > 64:
+                continue
+            if not re.fullmatch(r"[^\W\d_][\w'’-]*", word, re.UNICODE):
+                continue
+            if word not in seen:
+                seen.append(word)
+            if len(seen) >= 2000:
+                break
+        return seen
 
     @field_validator("currency")
     @classmethod

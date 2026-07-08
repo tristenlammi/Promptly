@@ -1,12 +1,14 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import type { EditorView } from "@tiptap/pm/view";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 import type { NspellLike } from "./spellDictionaries";
 
 /**
- * Real-time spell-checking as a ProseMirror decoration overlay.
+ * Real-time spell-checking as a ProseMirror decoration overlay, plus optional
+ * type-time autocorrect.
  *
  * Unlike the browser's native ``spellcheck`` attribute (unreliable, un-
  * styleable, no language control, no custom suggestions), this walks the
@@ -16,13 +18,17 @@ import type { NspellLike } from "./spellDictionaries";
  * alongside Yjs collaboration — peers don't see each other's squiggles and
  * the CRDT is untouched.
  *
- * Words inside code (inline ``code`` mark or ``codeBlock``), links, and
- * ``@mention`` chips are skipped — flagging a URL or a variable name as a
- * typo is just noise.
+ *  - **Squiggles** (``enabled``): the word the caret is currently inside is
+ *    skipped, so a word doesn't get underlined mid-typing — only once you
+ *    move on from it.
+ *  - **Autocorrect** (``autocorrect``): when you type a word boundary
+ *    (space / punctuation), a confidently-misspelled preceding word is
+ *    replaced with the top suggestion. It's a normal transaction, so one
+ *    undo reverts it.
  *
- * Clicking a squiggle fires ``options.onWordClick`` (wired by the editor host
- * to open the suggestion popover). We return ``false`` from ``handleClick`` so
- * the caret still lands where the user clicked — the popover is additive.
+ * Words inside code (inline ``code`` mark or ``codeBlock``), links, and
+ * ``@mention`` chips are skipped for both — flagging or "fixing" a URL or a
+ * variable name is just noise.
  */
 
 export const spellCheckPluginKey = new PluginKey<SpellCheckPluginState>(
@@ -34,6 +40,10 @@ export const spellCheckPluginKey = new PluginKey<SpellCheckPluginState>(
  *  {@link SpellCheckWordClick}. */
 export const SPELLCHECK_WORD_EVENT = "promptly:spellcheck-word";
 
+/** Transaction meta flag marking our own autocorrect edit, so it can't
+ *  re-trigger the checker or be mistaken for user input. */
+const AUTOCORRECT_META = "promptlyAutocorrectApplied";
+
 export interface SpellCheckWordClick {
   word: string;
   from: number;
@@ -44,7 +54,10 @@ export interface SpellCheckWordClick {
 }
 
 export interface SpellCheckConfig {
+  /** Draw the misspelling underlines. */
   enabled: boolean;
+  /** Auto-replace misspelled words on a typed word boundary. */
+  autocorrect: boolean;
   spell: NspellLike | null;
   /** Lower-cased words to treat as correct (personal dictionary + ignores). */
   ignored: Set<string>;
@@ -62,14 +75,16 @@ export interface SpellCheckOptions {
 const SKIP_MARKS = new Set(["code", "link"]);
 const SKIP_NODES = new Set(["codeBlock", "mention"]);
 
-// A "word" for checking: a run of letters (any script) with internal
-// apostrophes. Digits, punctuation, and symbols split words apart. The
-// Unicode ``\p{L}`` class keeps accented + non-Latin scripts intact.
-const WORD_RE = /\p{L}[\p{L}'’]*/gu;
+// A "word": a letter (any script) followed by letters / apostrophes / hyphens.
+// Digits and other symbols split words apart, so code-ish tokens (``abc123``)
+// don't get flagged or corrected.
+const WORD_RE = /\p{L}[\p{L}'’-]*/gu;
+const WORD_TAIL_RE = /([\p{L}][\p{L}'’-]*)$/u;
+// Characters that end a word for autocorrect purposes.
+const BOUNDARY_RE = /[\s.,;:!?)\]}"»]/;
 
 // Guard against pathological docs — past this many characters we stop
-// decorating so a giant paste can't jank typing. (nspell lookups are cheap,
-// but building a huge DecorationSet on every keystroke is not.)
+// decorating so a giant paste can't jank typing.
 const MAX_CHARS = 200_000;
 
 function shouldSkip(node: PMNode, parent: PMNode | null): boolean {
@@ -77,10 +92,15 @@ function shouldSkip(node: PMNode, parent: PMNode | null): boolean {
   return node.marks.some((m) => SKIP_MARKS.has(m.type.name));
 }
 
+function trim(word: string): string {
+  return word.replace(/^['’-]+|['’-]+$/g, "");
+}
+
 function buildDecorations(
   doc: PMNode,
   spell: NspellLike,
-  ignored: Set<string>
+  ignored: Set<string>,
+  caret: number | null
 ): DecorationSet {
   if (doc.content.size > MAX_CHARS) return DecorationSet.empty;
   const decorations: Decoration[] = [];
@@ -89,26 +109,122 @@ function buildDecorations(
     if (shouldSkip(node, parent)) return;
     const text = node.text;
     for (const m of text.matchAll(WORD_RE)) {
-      const word = m[0];
       if (m.index === undefined) continue;
-      // Skip trivial / non-alphabetic-ish tokens quickly.
-      if (word.length < 2) continue;
-      // Words with a lone apostrophe at an edge ("'tis" is fine; "it'" is
-      // a boundary artefact) — normalise trailing/leading marks.
-      const clean = word.replace(/^['’]+|['’]+$/g, "");
+      const raw = m[0];
+      const clean = trim(raw);
       if (clean.length < 2) continue;
       if (ignored.has(clean.toLowerCase())) continue;
       if (spell.correct(clean)) continue;
       const from = pos + m.index;
-      const to = from + word.length;
-      decorations.push(
-        Decoration.inline(from, to, {
-          class: "spellcheck-error",
-        })
-      );
+      const to = from + raw.length;
+      // Don't underline the word the caret is currently in — it reads as
+      // flagging a word "before it's finished". Once the caret leaves, it
+      // gets checked like everything else.
+      if (caret !== null && caret >= from && caret <= to) continue;
+      decorations.push(Decoration.inline(from, to, { class: "spellcheck-error" }));
     }
   });
   return DecorationSet.create(doc, decorations);
+}
+
+// ---- Autocorrect helpers -------------------------------------------------
+
+/** Bounded Levenshtein — returns ``cap + 1`` as soon as it's certain the
+ *  distance exceeds ``cap`` (cheap for the tiny strings we compare). */
+function levenshtein(a: string, b: string, cap: number): number {
+  const al = a.length;
+  const bl = b.length;
+  if (Math.abs(al - bl) > cap) return cap + 1;
+  let prev = Array.from({ length: bl + 1 }, (_, j) => j);
+  for (let i = 1; i <= al; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      cur[j] = v;
+      if (v < best) best = v;
+    }
+    if (best > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[bl];
+}
+
+/** Re-apply the source word's capitalisation to a suggestion. */
+function matchCase(src: string, dst: string): string {
+  if (src.length > 1 && src === src.toUpperCase() && src !== src.toLowerCase()) {
+    return dst.toUpperCase();
+  }
+  if (src[0] === src[0].toUpperCase() && src[0] !== src[0].toLowerCase()) {
+    return dst.charAt(0).toUpperCase() + dst.slice(1);
+  }
+  return dst;
+}
+
+/** The confident correction for a word, or null if we shouldn't touch it.
+ *  Conservative on purpose — a wrong autocorrect is far more annoying than a
+ *  missed one, so we only fix close, unambiguous typos. */
+function autoCorrection(
+  word: string,
+  spell: NspellLike,
+  ignored: Set<string>
+): string | null {
+  if (word.length < 3) return null;
+  const lower = word.toLowerCase();
+  if (ignored.has(lower)) return null;
+  // Leave short all-caps tokens alone — they're usually acronyms.
+  if (word === word.toUpperCase() && word !== lower && word.length <= 4) {
+    return null;
+  }
+  if (spell.correct(word)) return null;
+  const suggestions = spell.suggest(word);
+  if (suggestions.length === 0) return null;
+  const top = suggestions[0];
+  if (top.toLowerCase() === lower) return null;
+  const maxDist = word.length <= 4 ? 1 : 2;
+  if (levenshtein(lower, top.toLowerCase(), maxDist) > maxDist) return null;
+  const corrected = matchCase(word, top);
+  return corrected === word ? null : corrected;
+}
+
+/** On a typed word boundary, replace a confidently-misspelled preceding word.
+ *  Runs from ``handleTextInput`` (fires only on real typing, never deletes or
+ *  programmatic edits), so it can't fire on backspace. The replacement is
+ *  deferred to a microtask so the boundary character inserts first; the word
+ *  positions are before that insertion, so they stay valid. */
+function maybeAutocorrect(
+  view: EditorView,
+  from: number,
+  text: string,
+  st: SpellCheckConfig
+): void {
+  if (!st.spell) return;
+  if (!BOUNDARY_RE.test(text)) return;
+  const $from = view.state.doc.resolve(from);
+  const start = $from.start();
+  if (from <= start) return;
+  const before = view.state.doc.textBetween(start, from, "\n", "\0");
+  const m = WORD_TAIL_RE.exec(before);
+  if (!m) return;
+  const word = m[1];
+  // Don't correct inside code / links.
+  const $word = view.state.doc.resolve(from - word.length + 1);
+  if ($word.marks().some((mk) => SKIP_MARKS.has(mk.type.name))) return;
+  const corrected = autoCorrection(word, st.spell, st.ignored);
+  if (!corrected) return;
+  const wordFrom = from - word.length;
+  const wordTo = from;
+  queueMicrotask(() => {
+    if (view.isDestroyed) return;
+    const now = view.state.doc.textBetween(wordFrom, wordTo, "\n", "\0");
+    if (now !== word) return; // doc shifted under us — bail
+    view.dispatch(
+      view.state.tr
+        .insertText(corrected, wordFrom, wordTo)
+        .setMeta(AUTOCORRECT_META, true)
+    );
+  });
 }
 
 export const SpellCheckExtension = Extension.create<SpellCheckOptions>({
@@ -129,6 +245,7 @@ export const SpellCheckExtension = Extension.create<SpellCheckOptions>({
           init() {
             return {
               enabled: false,
+              autocorrect: false,
               spell: null,
               ignored: new Set<string>(),
               deco: DecorationSet.empty,
@@ -142,21 +259,21 @@ export const SpellCheckExtension = Extension.create<SpellCheckOptions>({
               ? { ...value, ...meta }
               : value;
 
-            // Nothing that affects spelling changed — just keep the existing
-            // decorations aligned with any doc edits.
-            if (!meta && !tr.docChanged) {
-              return {
-                ...cfg,
-                deco: value.deco.map(tr.mapping, tr.doc),
-              };
+            // Rebuild decorations on config change, doc edits, OR caret moves
+            // (the caret determines which word is skipped as "being typed").
+            const needRebuild = Boolean(meta) || tr.docChanged || tr.selectionSet;
+            if (!needRebuild) {
+              return { ...cfg, deco: value.deco.map(tr.mapping, tr.doc) };
             }
-
             if (!cfg.enabled || !cfg.spell) {
               return { ...cfg, deco: DecorationSet.empty };
             }
+            const caret = newState.selection.empty
+              ? newState.selection.head
+              : null;
             return {
               ...cfg,
-              deco: buildDecorations(newState.doc, cfg.spell, cfg.ignored),
+              deco: buildDecorations(newState.doc, cfg.spell, cfg.ignored, caret),
             };
           },
         },
@@ -164,15 +281,21 @@ export const SpellCheckExtension = Extension.create<SpellCheckOptions>({
           decorations(state) {
             return spellCheckPluginKey.getState(state)?.deco ?? null;
           },
+          handleTextInput(view, from, _to, text) {
+            const st = spellCheckPluginKey.getState(view.state);
+            if (st?.autocorrect && st.spell) {
+              maybeAutocorrect(view, from, text, st);
+            }
+            // Never consume the input — the character must still type.
+            return false;
+          },
           handleClick(view, pos, event) {
             const st = spellCheckPluginKey.getState(view.state);
             if (!st?.enabled || st.deco === DecorationSet.empty) return false;
             const hit = st.deco.find(pos, pos);
             if (hit.length === 0) return false;
             const { from, to } = hit[0];
-            const word = view.state.doc
-              .textBetween(from, to)
-              .replace(/^['’]+|['’]+$/g, "");
+            const word = trim(view.state.doc.textBetween(from, to));
             options.onWordClick?.({
               word,
               from,

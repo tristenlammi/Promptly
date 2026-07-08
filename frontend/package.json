@@ -64,6 +64,7 @@
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
     "dictionary-en": "^4.0.0",
+    "dictionary-en-au": "^3.0.0",
     "dictionary-en-gb": "^3.0.0",
     "dictionary-es": "^4.0.0",
     "dictionary-fr": "^3.0.0",

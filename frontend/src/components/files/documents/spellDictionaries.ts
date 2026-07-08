@@ -44,6 +44,12 @@ export const SPELL_LANGUAGES: SpellLang[] = [
     loader: () => import("virtual:hunspell/dictionary-en-gb"),
   },
   {
+    code: "en-au",
+    label: "English (AU)",
+    short: "EN-AU",
+    loader: () => import("virtual:hunspell/dictionary-en-au"),
+  },
+  {
     code: "es",
     label: "Español",
     short: "ES",
@@ -98,7 +104,8 @@ export function defaultSpellLang(): string {
     typeof navigator !== "undefined"
       ? navigator.language.toLowerCase()
       : "en";
-  if (nav.startsWith("en-gb") || nav.startsWith("en-au")) return "en-gb";
+  if (nav.startsWith("en-au")) return "en-au";
+  if (nav.startsWith("en-gb")) return "en-gb";
   const two = nav.slice(0, 2);
   return SPELL_LANGUAGES.find((l) => l.code === two)?.code ?? "en";
 }

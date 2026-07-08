@@ -44,7 +44,7 @@ import {
 } from "./SpellCheckExtension";
 import { SpellCheckPopover } from "./SpellCheckPopover";
 import { loadSpell } from "./spellDictionaries";
-import { useSpellcheckStore } from "@/store/spellcheckStore";
+import { useSpellcheckPrefs } from "./useSpellcheckPrefs";
 
 /**
  * Full-screen Document editor.
@@ -364,10 +364,13 @@ export function DocumentEditorModal({
   // ------------------------------------------------------------------
   // Spell-check — sync the persisted preference into the editor plugin
   // ------------------------------------------------------------------
-  const spellEnabled = useSpellcheckStore((s) => s.enabled);
-  const spellLang = useSpellcheckStore((s) => s.lang);
-  const personalWords = useSpellcheckStore((s) => s.personalWords);
-  const addPersonalWord = useSpellcheckStore((s) => s.addPersonalWord);
+  const {
+    enabled: spellEnabled,
+    autocorrect: spellAutocorrect,
+    lang: spellLang,
+    personalWords,
+    addPersonalWord,
+  } = useSpellcheckPrefs();
 
   // Words ignored just for this note (the popover's "Ignore in this note").
   // Resets when a different file opens.
@@ -392,12 +395,14 @@ export function DocumentEditorModal({
   }, []);
 
   // Push spell-check config into the plugin. Loading a dictionary is async
-  // (code-split chunk), so gate the enabled push on the instance resolving.
-  // ``ignored`` = personal dictionary ∪ this-note ignores, lower-cased.
+  // (code-split chunk), so gate the push on the instance resolving. The
+  // dictionary is needed if EITHER squiggles or autocorrect is on — they're
+  // independent toggles. ``ignored`` = personal dictionary ∪ this-note ignores.
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     const push = (config: {
       enabled: boolean;
+      autocorrect: boolean;
       spell: Awaited<ReturnType<typeof loadSpell>> | null;
       ignored: Set<string>;
     }) => {
@@ -406,8 +411,13 @@ export function DocumentEditorModal({
         editor.view.state.tr.setMeta(spellCheckPluginKey, config)
       );
     };
-    if (!spellEnabled) {
-      push({ enabled: false, spell: null, ignored: new Set() });
+    if (!spellEnabled && !spellAutocorrect) {
+      push({
+        enabled: false,
+        autocorrect: false,
+        spell: null,
+        ignored: new Set(),
+      });
       return;
     }
     let cancelled = false;
@@ -417,12 +427,24 @@ export function DocumentEditorModal({
         ...personalWords,
         ...Array.from(sessionIgnores, (w) => w.toLowerCase()),
       ]);
-      push({ enabled: true, spell, ignored });
+      push({
+        enabled: spellEnabled,
+        autocorrect: spellAutocorrect,
+        spell,
+        ignored,
+      });
     });
     return () => {
       cancelled = true;
     };
-  }, [editor, spellEnabled, spellLang, personalWords, sessionIgnores]);
+  }, [
+    editor,
+    spellEnabled,
+    spellAutocorrect,
+    spellLang,
+    personalWords,
+    sessionIgnores,
+  ]);
 
   // ------------------------------------------------------------------
   // Offline fallback — seed the editor from the saved HTML blob
