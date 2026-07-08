@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -129,6 +129,33 @@ function ProposalCard({
   const applied = p.status === "applied";
   const changeSummary = isUpdate ? describeChanges(p.payload.changes) : null;
 
+  // An applied banner is a receipt — it shouldn't linger full-size and pile
+  // up. A few seconds after it applies, fade it down to a compact ✓ chip
+  // (still clickable to open, still dismissable) so the trail stays legible
+  // without a stack of full-width cards. Hovering pauses the countdown so a
+  // user reaching for Open/Preview never has it vanish mid-reach. Pending
+  // cards never auto-collapse.
+  const [phase, setPhase] = useState<"full" | "fading" | "chip">("full");
+  const [hovered, setHovered] = useState(false);
+  useEffect(() => {
+    if (!applied || phase !== "full" || hovered) return;
+    const t = window.setTimeout(() => setPhase("fading"), 5000);
+    return () => window.clearTimeout(t);
+  }, [applied, phase, hovered]);
+  // Reset if a proposal somehow flips back to pending (e.g. refetch race).
+  useEffect(() => {
+    if (!applied) setPhase("full");
+  }, [applied]);
+
+  const appliedLabel = isNote
+    ? "Note created"
+    : isUpdate
+      ? `Updated ${cards.length} card${cards.length === 1 ? "" : "s"}`
+      : `Added ${cards.length} card${cards.length === 1 ? "" : "s"}`;
+  const appliedContext = isNote
+    ? p.payload.title
+    : p.payload.board_title;
+
   // "Open" jumps to what Apply produced. Prefer the item-preview modal
   // (same as an @-mention pill) when we're inside the workspace page;
   // fall back to a route change otherwise.
@@ -154,13 +181,70 @@ function ProposalCard({
     );
   };
 
+  // Collapsed receipt — a small ✓ chip that persists after the banner fades,
+  // so there's a lasting, clickable trace that the AI changed something.
+  if (applied && phase === "chip") {
+    return (
+      <div className="flex">
+        <button
+          type="button"
+          onClick={openApplied}
+          title={
+            appliedContext
+              ? `${appliedLabel} · ${appliedContext} — open`
+              : `${appliedLabel} — open`
+          }
+          className={cn(
+            "group inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+            "border-[var(--success)]/30 bg-[var(--success)]/10 text-[var(--success)]",
+            "transition hover:border-[var(--success)]/50 hover:bg-[var(--success)]/15"
+          )}
+        >
+          <Check className="h-3 w-3 shrink-0" />
+          <span className="truncate font-medium">{appliedLabel}</span>
+          {appliedContext && (
+            <span className="truncate text-[var(--success)]/70">
+              · {appliedContext}
+            </span>
+          )}
+          <span
+            role="button"
+            tabIndex={-1}
+            aria-label="Clear"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDismiss();
+            }}
+            className="ml-0.5 shrink-0 rounded-full p-0.5 text-[var(--success)]/60 opacity-0 transition hover:bg-[var(--success)]/20 hover:text-[var(--success)] group-hover:opacity-100"
+          >
+            <X className="h-3 w-3" />
+          </span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onTransitionEnd={(e) => {
+        // Only our own opacity fade ends the banner — ignore bubbled
+        // child hover transitions, which would swap to the chip early.
+        if (
+          phase === "fading" &&
+          e.target === e.currentTarget &&
+          e.propertyName === "opacity"
+        ) {
+          setPhase("chip");
+        }
+      }}
       className={cn(
-        "overflow-hidden rounded-card border bg-[var(--surface)]",
+        "overflow-hidden rounded-card border bg-[var(--surface)] transition-opacity duration-500",
         applied
           ? "border-[var(--success)]/40"
-          : "border-[var(--accent)]/50"
+          : "border-[var(--accent)]/50",
+        phase === "fading" ? "opacity-0" : "opacity-100"
       )}
     >
       <div className="flex items-center gap-2 px-3 py-2">
