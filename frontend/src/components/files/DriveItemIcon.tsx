@@ -57,6 +57,13 @@ const NEUTRAL: Tint = {
   tile: "bg-[var(--text-muted)]/10",
 };
 
+/** Public accessor for a file's kind colours — lets grid cards tint their
+ *  thumbnail backing / kind badge to match this icon. */
+export function fileKindTint(file: IconFile): { text: string; tile: string } {
+  const { text, tile } = fileTint(file);
+  return { text, tile };
+}
+
 function fileTint(file: IconFile): Tint {
   const lower = (file.filename || "").toLowerCase();
   const mime = (file.mime_type || "").toLowerCase();

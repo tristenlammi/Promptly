@@ -56,7 +56,7 @@ import {
   splitFileExt,
   withFileExt,
 } from "@/components/files/helpers";
-import { DriveItemIcon } from "@/components/files/DriveItemIcon";
+import { DriveItemIcon, fileKindTint } from "@/components/files/DriveItemIcon";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
 import { DriveThumb } from "@/components/files/DriveThumb";
 import { TopNav } from "@/components/layout/TopNav";
@@ -1945,7 +1945,7 @@ function FolderRow({
           className="flex w-full flex-1 flex-col gap-2 text-left"
           title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
         >
-          <div className="flex aspect-square w-full items-center justify-center rounded-md bg-[var(--bg)]">
+          <div className="flex aspect-square w-full items-center justify-center rounded-md bg-[var(--accent-soft)]">
             <DriveItemIcon
               folder={folder}
               className="h-12 w-12"
@@ -2294,15 +2294,76 @@ function FileRow({
           className="flex w-full flex-1 flex-col gap-2 text-left"
           title={displayFileName(file)}
         >
-          <DriveThumb
-            file={file}
-            className="aspect-square w-full rounded-md border border-[var(--border)]"
-          />
+          <div className="relative w-full">
+            <DriveThumb
+              file={file}
+              className={cn(
+                "aspect-square w-full rounded-md border border-[var(--border)]",
+                // Kind-tinted backing shows behind the fallback icon (and
+                // around transparent thumbnails), matching the list tiles.
+                fileKindTint(file).tile
+              )}
+            />
+            {/* Hover quick-actions — Preview is the card click; surface the
+                next two so they don't require the ⋯ menu. */}
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 rounded-b-md bg-gradient-to-t from-black/55 to-transparent p-1.5 opacity-0 transition group-hover:opacity-100">
+              <QuickAction
+                title="Preview"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPreview();
+                }}
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </QuickAction>
+              <QuickAction
+                title="Download"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void downloadAuthed(file);
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </QuickAction>
+              {writable && (
+                <QuickAction
+                  title={file.starred_at ? "Unstar" : "Star"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    (file.starred_at ? unstarFile : starFile).mutate({
+                      id: file.id,
+                      scope,
+                    });
+                  }}
+                >
+                  <Star
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      file.starred_at && "fill-yellow-400 text-yellow-400"
+                    )}
+                  />
+                </QuickAction>
+              )}
+            </div>
+          </div>
           <span className="line-clamp-2 w-full break-words text-sm font-medium">
             {displayFileName(file)}
           </span>
-          <span className="text-[10px] text-[var(--text-muted)]">
-            {humanSize(file.size_bytes)}
+          <span className="flex w-full items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+            <span
+              className={cn(
+                "shrink-0 rounded px-1.5 py-0.5 font-medium",
+                fileKindTint(file).tile,
+                fileKindTint(file).text
+              )}
+            >
+              {kindLabel(file)}
+            </span>
+            <span className="truncate">
+              {humanSize(file.size_bytes)}
+              {(file.updated_at ?? file.created_at) &&
+                ` · ${formatRelativeTime(file.updated_at ?? file.created_at)}`}
+            </span>
           </span>
         </button>
         <div className="mt-1.5 flex min-h-[18px] items-center justify-center gap-1">
@@ -2432,6 +2493,29 @@ function FileRow({
 /** Selection checkbox for a file/folder row. Hidden until the row is
  *  hovered (desktop) or selection mode is active, so it doesn't clutter
  *  the default browse view; always visible once checked. */
+/** A single hover quick-action button over a grid thumbnail. */
+function QuickAction({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: (e: React.MouseEvent) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
+    >
+      {children}
+    </button>
+  );
+}
+
 function SelectCheckbox({
   checked,
   active,
