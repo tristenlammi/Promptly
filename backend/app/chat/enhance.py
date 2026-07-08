@@ -30,6 +30,27 @@ _ENHANCE_SYSTEM_PROMPT: Final[str] = (
     "quotes, no commentary, no 'Here is' — just the improved prompt."
 )
 
+# Prose mode — improve a passage of a document (grammar/clarity/flow), not a
+# prompt. Used by the note editor's "AI enhance selection".
+_PROSE_SYSTEM_PROMPT: Final[str] = (
+    "You are a writing editor. Rewrite the passage the user gives you to be "
+    "clearer, tighter and better-flowing, fixing grammar and awkward "
+    "phrasing.\n\n"
+    "Rules:\n"
+    "- Preserve the original meaning, intent, tone and language. Don't add "
+    "new facts, claims, or content the passage didn't have.\n"
+    "- Improve grammar, word choice, clarity and rhythm; cut redundancy.\n"
+    "- Keep roughly the same length and format (if it's a bullet, keep a "
+    "bullet; a sentence stays a sentence). Don't add headings or preamble.\n"
+    "- Output ONLY the rewritten passage as plain text — no quotes, no "
+    "commentary, no 'Here is'."
+)
+
+_SYSTEM_BY_MODE: Final[dict[str, str]] = {
+    "prompt": _ENHANCE_SYSTEM_PROMPT,
+    "prose": _PROSE_SYSTEM_PROMPT,
+}
+
 # Guardrails: long enough for a detailed rewrite, bounded so a runaway
 # model can't balloon the cost of a trivial helper.
 _MAX_INPUT_CHARS: Final[int] = 8000
@@ -59,13 +80,20 @@ async def enhance_prompt(
     text: str,
     provider: ModelProvider,
     model_id: str,
+    mode: str = "prompt",
 ) -> str:
-    """Return an improved version of ``text``. Raises ``ProviderError`` on
-    upstream failure so the endpoint can surface a clean 502."""
+    """Return an improved version of ``text``. ``mode`` picks the editor
+    persona: ``"prompt"`` (sharpen a chat prompt) or ``"prose"`` (improve a
+    document passage). Raises ``ProviderError`` on upstream failure so the
+    endpoint can surface a clean 502."""
     draft = (text or "").strip()[:_MAX_INPUT_CHARS]
     if not draft:
         return ""
 
+    system = _SYSTEM_BY_MODE.get(mode, _ENHANCE_SYSTEM_PROMPT)
+    user_lead = (
+        "Passage to improve:" if mode == "prose" else "Rough prompt to improve:"
+    )
     chunks: list[str] = []
     async for token in model_router.stream_chat(
         provider=provider,
@@ -73,10 +101,10 @@ async def enhance_prompt(
         messages=[
             ChatMessage(
                 role="user",
-                content=f"Rough prompt to improve:\n\n{draft}",
+                content=f"{user_lead}\n\n{draft}",
             )
         ],
-        system=_ENHANCE_SYSTEM_PROMPT,
+        system=system,
         temperature=0.4,
         max_tokens=_MAX_OUTPUT_TOKENS,
         reasoning_effort="off",

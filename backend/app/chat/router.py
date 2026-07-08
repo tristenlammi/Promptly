@@ -2582,6 +2582,7 @@ async def enhance_prompt_endpoint(
             text=payload.text,
             provider=provider,
             model_id=effective_model_id,
+            mode=payload.mode,
         )
     except ProviderError as e:
         raise HTTPException(

@@ -318,11 +318,17 @@ export const chatApi = {
   async enhancePrompt(
     text: string,
     providerId?: string | null,
-    modelId?: string | null
+    modelId?: string | null,
+    mode: "prompt" | "prose" = "prompt"
   ): Promise<string> {
     const { data } = await apiClient.post<{ enhanced: string }>(
       `/chat/enhance-prompt`,
-      { text, provider_id: providerId ?? null, model_id: modelId ?? null }
+      {
+        text,
+        provider_id: providerId ?? null,
+        model_id: modelId ?? null,
+        mode,
+      }
     );
     return data.enhanced;
   },

@@ -33,6 +33,7 @@ import {
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
+import { EditorAiEnhance } from "./EditorAiEnhance";
 import { LinkHoverPreview } from "./LinkHoverPreview";
 import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
@@ -992,9 +993,11 @@ export function DocumentEditorModal({
             </div>
           )}
         </div>
+        {/* AI "Enhance" the selection — a single-purpose selection button
+            (not a formatting bubble menu; the toolbar covers formatting). */}
+        {editor && !error && canEdit && <EditorAiEnhance editor={editor} />}
         {/* Block drag handle (MIT). Guarded on a live editor + no collab
-            error. (The selection bubble menu was removed — it duplicated
-            the toolbar.) */}
+            error. */}
         {editor && !error && canEdit && (
           <DragHandle editor={editor}>
             <span

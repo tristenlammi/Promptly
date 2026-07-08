@@ -328,13 +328,15 @@ class SendMessageResponse(BaseModel):
 
 
 class EnhancePromptRequest(BaseModel):
-    """Phase 3.2 — rewrite a rough composer draft into a sharper prompt."""
+    """Phase 3.2 — rewrite a rough composer draft into a sharper prompt, or
+    (``mode="prose"``) improve a document passage from the note editor."""
 
     model_config = ConfigDict(protected_namespaces=())
 
     text: str = Field(min_length=1, max_length=8000)
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
+    mode: Literal["prompt", "prose"] = "prompt"
 
 
 class EnhancePromptResponse(BaseModel):
