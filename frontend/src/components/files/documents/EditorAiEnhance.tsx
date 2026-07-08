@@ -27,9 +27,21 @@ interface Proposal {
   html: string;
 }
 
-/** Serialize the current selection to an HTML string (structure preserved). */
-function selectionHtml(editor: Editor): string {
-  const { from, to } = editor.state.selection;
+/** The range to enhance. For an in-block selection it's the selection as-is
+ *  (inline). For a selection spanning blocks it snaps to whole-block
+ *  boundaries so we send + re-insert complete blocks — otherwise inserting
+ *  block content at an inline position splits the block and leaves an empty
+ *  one above ("space above" bug). */
+function targetRange(editor: Editor): { from: number; to: number } {
+  const sel = editor.state.selection;
+  const { $from, $to } = sel;
+  if ($from.sameParent($to)) return { from: sel.from, to: sel.to };
+  const range = $from.blockRange($to);
+  return range ? { from: range.start, to: range.end } : { from: sel.from, to: sel.to };
+}
+
+/** Serialize a range to an HTML string (structure preserved). */
+function rangeHtml(editor: Editor, from: number, to: number): string {
   const slice = editor.state.doc.slice(from, to);
   const frag = DOMSerializer.fromSchema(editor.schema).serializeFragment(
     slice.content
@@ -59,15 +71,15 @@ export function EditorAiEnhance({ editor }: { editor: Editor }) {
 
   const run = async () => {
     if (busy) return;
-    const { from, to } = editor.state.selection;
-    if (from === to) return;
+    if (editor.state.selection.empty) return;
+    const { from, to } = targetRange(editor);
     const plain = editor.state.doc.textBetween(from, to, "\n").trim();
     if (!plain) return;
     if (!providerId || !modelId) {
       toast.error("Pick a model first (in a chat) to use AI enhance.");
       return;
     }
-    const html = selectionHtml(editor);
+    const html = rangeHtml(editor, from, to);
     setBusy(true);
     try {
       const improved = (
