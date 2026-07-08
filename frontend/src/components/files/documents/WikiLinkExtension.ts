@@ -204,7 +204,13 @@ class WikiLinkPopup {
         this.highlighted = i;
         this.render();
       });
-      row.addEventListener("click", () => {
+      // Commit on mousedown, not click. The popup lives in document.body,
+      // so a click races the editor blur that tears the popup down before
+      // the click fires — which is why Enter worked but clicking a row did
+      // nothing. preventDefault keeps editor focus; select() commits the
+      // pick synchronously on press.
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
         this.highlighted = i;
         this.select();
       });
@@ -226,7 +232,7 @@ class WikiLinkPopup {
     const footer = document.createElement("div");
     footer.style.cssText =
       "padding:0.25rem 0.5rem;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);margin-top:0.25rem";
-    footer.textContent = "↑↓ navigate · Enter to link · Esc to close";
+    footer.textContent = "↑↓ navigate · click or Enter to link · Esc to close";
     el.appendChild(footer);
   }
 
