@@ -3,6 +3,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { Color } from "@tiptap/extension-color";
 import Details from "@tiptap/extension-details";
 import DetailsContent from "@tiptap/extension-details-content";
 import DetailsSummary from "@tiptap/extension-details-summary";
@@ -16,6 +17,8 @@ import TableHeader from "@tiptap/extension-table-header";
 import TableRow from "@tiptap/extension-table-row";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
+import TextStyle from "@tiptap/extension-text-style";
+import Typography from "@tiptap/extension-typography";
 import Underline from "@tiptap/extension-underline";
 import Youtube from "@tiptap/extension-youtube";
 import { common, createLowlight } from "lowlight";
@@ -138,6 +141,12 @@ export function buildExtensions({
       emptyEditorClass: "is-editor-empty",
     }),
     Underline,
+    // Smart typography — curly quotes, em/en dashes, ellipsis, ©/™/… (MIT).
+    Typography,
+    // Text colour: the Color mark rides on TextStyle (both MIT). Renders as
+    // ``<span style="color:…">`` — allow-listed + handled by the walker.
+    TextStyle,
+    Color,
     Highlight.configure({
       multicolor: true,
     }),

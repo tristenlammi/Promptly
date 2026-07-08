@@ -234,6 +234,11 @@ export function DocumentEditorModal({
       editable: canEdit,
       editorProps: {
         attributes: {
+          // Native browser spell-check — red squiggles + right-click
+          // "correct spelling" suggestions. (True type-time autocorrect
+          // isn't a browser primitive for contenteditable; this is the
+          // open-source, zero-dependency spell-checking path.)
+          spellcheck: "true",
           class: cn(
             // ``promptly-doc`` is our hand-rolled prose stylesheet
             // (see index.css) — Tailwind's preflight strips list

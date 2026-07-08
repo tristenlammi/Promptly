@@ -1,6 +1,8 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import {
+  Baseline,
   Bold,
   ChevronDown,
   Code2,
@@ -238,6 +240,7 @@ export function DocumentToolbar({
         >
           <Highlighter className="h-4 w-4" />
         </ToolButton>
+        <ColorButton editor={editor} />
         <ToolButton
           label="Link"
           active={editor?.isActive("link")}
@@ -612,6 +615,98 @@ export function DocumentToolbar({
         </div>
       )}
     </div>
+  );
+}
+
+const TEXT_COLORS: { name: string; value: string | null }[] = [
+  { name: "Default", value: null },
+  { name: "Terracotta", value: "#D97757" },
+  { name: "Red", value: "#EF4444" },
+  { name: "Orange", value: "#F97316" },
+  { name: "Amber", value: "#F59E0B" },
+  { name: "Green", value: "#10B981" },
+  { name: "Teal", value: "#14B8A6" },
+  { name: "Blue", value: "#3B82F6" },
+  { name: "Purple", value: "#8B5CF6" },
+  { name: "Pink", value: "#EC4899" },
+  { name: "Slate", value: "#64748B" },
+];
+
+/** Text-colour picker (@tiptap/extension-color, MIT). A swatch grid in a
+ *  portal popover; "Default" clears the colour. */
+function ColorButton({ editor }: { editor: Editor | null }) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const current = editor?.getAttributes("textStyle").color as
+    | string
+    | undefined;
+
+  return (
+    <>
+      <ToolButton
+        label="Text colour"
+        active={!!current}
+        onClick={(e) => {
+          setAnchor(e.currentTarget.getBoundingClientRect());
+          setOpen((o) => !o);
+        }}
+      >
+        <Baseline
+          className="h-4 w-4"
+          style={current ? { color: current } : undefined}
+        />
+      </ToolButton>
+      {open &&
+        anchor &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[75]"
+              onMouseDown={() => setOpen(false)}
+            />
+            <div
+              style={{
+                position: "fixed",
+                top: Math.min(anchor.bottom + 6, window.innerHeight - 120),
+                left: Math.max(8, Math.min(anchor.left, window.innerWidth - 200)),
+                zIndex: 76,
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="grid grid-cols-6 gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl"
+            >
+              {TEXT_COLORS.map((c) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  title={c.name}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    if (c.value) {
+                      editor?.chain().focus().setColor(c.value).run();
+                    } else {
+                      editor?.chain().focus().unsetColor().run();
+                    }
+                    setOpen(false);
+                  }}
+                  className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] transition hover:ring-2 hover:ring-[var(--accent)]/40"
+                >
+                  {c.value ? (
+                    <span
+                      className="h-4 w-4 rounded-full"
+                      style={{ background: c.value }}
+                    />
+                  ) : (
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      A
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body
+        )}
+    </>
   );
 }
 

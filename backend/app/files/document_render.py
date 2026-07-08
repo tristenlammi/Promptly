@@ -29,11 +29,21 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from typing import Any
 
 import bleach
 
 logger = logging.getLogger("promptly.files.document_render")
+
+# Colours allowed on a textStyle span (@tiptap/extension-color): hex,
+# rgb()/rgba(), or a bare CSS colour keyword. Anything else is dropped so a
+# ``style`` value can't smuggle arbitrary CSS through the snapshot.
+_SAFE_COLOR = re.compile(
+    r"^#[0-9a-fA-F]{3,8}$"
+    r"|^rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(?:,\s*[\d.]+\s*)?\)$"
+    r"|^[a-zA-Z]{3,20}$"
+)
 
 
 # --------------------------------------------------------------------
@@ -224,6 +234,15 @@ def _render_marks(text: str, formats: dict[str, Any] | None) -> str:
             # @person chip — plain styled span; text carries the @name.
             open_tags.append('<span class="doc-mention" data-type="mention">')
             close_tags.append("</span>")
+        elif mark_name == "textStyle":
+            # Text colour (@tiptap/extension-color). Only emit a safe colour
+            # token (hex / rgb / named) so the style value can't smuggle CSS.
+            color = (attrs or {}).get("color") if isinstance(attrs, dict) else None
+            if color and _SAFE_COLOR.match(str(color).strip()):
+                open_tags.append(
+                    f'<span style="color:{html.escape(str(color).strip())}">'
+                )
+                close_tags.append("</span>")
         elif mark_name == "highlight":
             color = (attrs or {}).get("color") if isinstance(attrs, dict) else None
             if color:
