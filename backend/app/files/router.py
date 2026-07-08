@@ -367,6 +367,30 @@ def _drive_listing_filter():
     )
 
 
+def _non_system_folder_filter(user: User):
+    """Exclude files sitting directly inside a system-managed folder.
+
+    The ``@``-mention picker uses this so it only surfaces files the
+    user actually filed themselves — never the Chat Uploads bucket
+    (which fills with re-attached résumés etc.), the Generated
+    Files/Media buckets, or the Workspaces root. Root-level files
+    (``folder_id`` NULL) always pass; only immediate children of a
+    ``system_kind``-tagged folder are filtered out (Chat Uploads is
+    flat and Generated's leaves are themselves system folders, so this
+    catches everything without a recursive walk).
+    """
+    from sqlalchemy import or_
+
+    system_folder_ids = select(FileFolder.id).where(
+        FileFolder.user_id == user.id,
+        FileFolder.system_kind.is_not(None),
+    )
+    return or_(
+        UserFile.folder_id.is_(None),
+        UserFile.folder_id.not_in(system_folder_ids),
+    )
+
+
 async def _build_breadcrumbs(
     db: AsyncSession, folder: FileFolder | None
 ) -> list[BreadcrumbEntry]:
@@ -1208,6 +1232,27 @@ async def upload_file(
     if parent_folder is None and scope == "mine":
         if route == "chat":
             parent_folder = await folder_for_chat_upload(db, user)
+            # Dedup (D1): re-attaching the SAME file (identical name + size)
+            # shouldn't spawn a fresh Chat Uploads row every time — that's how
+            # the folder filled with duplicate résumés. Reuse the existing row
+            # and drop the just-saved duplicate blob. Scoped to Chat Uploads
+            # only, so files the user deliberately filed are never deduped.
+            existing = (
+                await db.execute(
+                    select(UserFile)
+                    .where(
+                        UserFile.user_id == owner_id,
+                        UserFile.folder_id == parent_folder.id,
+                        UserFile.filename == clean_name,
+                        UserFile.size_bytes == size,
+                        UserFile.trashed_at.is_(None),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                delete_blob(rel_path)
+                return _file_to_response(existing, caller=user)
         elif route == "generated":
             # Reserved for the future "AI made this for you" flow —
             # routes by MIME so images/audio/video land in Media and
@@ -2459,6 +2504,7 @@ async def list_starred(
 async def list_recent(
     scope: Scope = Query("mine"),
     limit: int = Query(50, ge=1, le=200),
+    exclude_system_folders: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> RecentFilesResponse:
@@ -2467,12 +2513,19 @@ async def list_recent(
     Relies on the ``updated_at`` trigger installed in migration
     0035 — every row mutation bumps it, so this feed also captures
     renames / moves / re-renders, not just fresh uploads.
+
+    ``exclude_system_folders`` drops files living in the Chat
+    Uploads / Generated / Workspaces system buckets — used by the
+    ``@``-mention picker so it only offers files the user filed.
     """
-    file_filter = and_(
+    conds = [
         _file_owner_filter(user),
         UserFile.trashed_at.is_(None),
         _drive_listing_filter(),
-    )
+    ]
+    if exclude_system_folders:
+        conds.append(_non_system_folder_filter(user))
+    file_filter = and_(*conds)
     rows = (
         (
             await db.execute(
@@ -2496,6 +2549,7 @@ async def search_files(
     q: str = Query(..., min_length=1, max_length=256),
     scope: Scope = Query("mine"),
     limit: int = Query(20, ge=1, le=100),
+    exclude_system_folders: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FileSearchResponse:
@@ -2538,6 +2592,11 @@ async def search_files(
             _file_owner_filter(user),
             UserFile.trashed_at.is_(None),
             _drive_listing_filter(),
+            *(
+                [_non_system_folder_filter(user)]
+                if exclude_system_folders
+                else []
+            ),
             content_tsv.op("@@")(tsquery),
         )
         .order_by(desc(rank_expr))

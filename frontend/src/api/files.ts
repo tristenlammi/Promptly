@@ -532,19 +532,26 @@ export const filesApi = {
   },
   async listRecent(
     scope: FileScope,
-    limit = 50
+    limit = 50,
+    /** Drop files in the Chat Uploads / Generated / Workspaces system
+     *  buckets — used by the ``@``-mention picker. */
+    excludeSystemFolders = false
   ): Promise<RecentFilesResponse> {
+    const params = new URLSearchParams({ scope, limit: String(limit) });
+    if (excludeSystemFolders) params.set("exclude_system_folders", "true");
     const { data } = await apiClient.get<RecentFilesResponse>(
-      `/files/recent?scope=${scope}&limit=${limit}`
+      `/files/recent?${params.toString()}`
     );
     return data;
   },
   async search(
     q: string,
     scope: FileScope,
-    limit = 20
+    limit = 20,
+    excludeSystemFolders = false
   ): Promise<FileSearchResponse> {
     const params = new URLSearchParams({ q, scope, limit: String(limit) });
+    if (excludeSystemFolders) params.set("exclude_system_folders", "true");
     const { data } = await apiClient.get<FileSearchResponse>(
       `/files/search?${params.toString()}`
     );

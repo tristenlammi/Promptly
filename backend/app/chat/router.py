@@ -1491,8 +1491,25 @@ async def delete_conversation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
         )
+    owner_id = conv.user_id
     await db.delete(conv)
     await db.commit()
+
+    # D4 — the conversation's messages are gone (ON DELETE CASCADE), so
+    # any Chat Uploads file they were the last to reference is now an
+    # orphan. Trash those so deleting chats actually reclaims storage.
+    # Best-effort: a prune hiccup must never fail the delete the user
+    # already got a 204 mindset for.
+    if owner_id is not None:
+        try:
+            from app.files.chat_upload_prune import prune_orphaned_chat_uploads
+
+            await prune_orphaned_chat_uploads(db, owner_id)
+        except Exception:  # noqa: BLE001 — cleanup must never break delete
+            logger.exception(
+                "chat-uploads prune after conversation delete failed"
+            )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

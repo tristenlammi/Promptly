@@ -26,6 +26,7 @@ from app.observability.capture import (
     install_error_capture,
 )
 from app.chat.temporary_sweeper import start_sweeper
+from app.files.chat_upload_sweeper import start_chat_upload_sweeper
 from app.chat.semantic_index import start_semantic_indexer
 from app.tasks.scheduler import start_scheduler
 from app.redis_client import close_redis, redis
@@ -83,11 +84,21 @@ async def lifespan(_: FastAPI):
     from app.study.reminders import start_study_reminders
 
     study_reminders_task = start_study_reminders()
+    # D4 — backstop sweeper that trashes Chat Uploads files no live
+    # message still references (the delete-conversation hook covers the
+    # common case in real time; this catches edits / stragglers).
+    chat_upload_sweeper_task = start_chat_upload_sweeper()
     try:
         yield
     finally:
         logger.info("Promptly backend shutting down")
-        for bg in (sweeper_task, scheduler_task, indexer_task, study_reminders_task):
+        for bg in (
+            sweeper_task,
+            scheduler_task,
+            indexer_task,
+            study_reminders_task,
+            chat_upload_sweeper_task,
+        ):
             bg.cancel()
             try:
                 await bg
