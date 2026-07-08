@@ -447,6 +447,28 @@ export function WorkspaceCanvasPane({
     [onOpenItem, previewItem]
   );
 
+  // Excalidraw's top-right custom UI. MUST be a stable reference — passing a
+  // fresh inline function every render changes Excalidraw's props each cycle,
+  // which loops against ``handleChange``'s setState (React error #185, "max
+  // update depth"). Returns null when linking is off / read-only.
+  const renderTopRightUI = useCallback(() => {
+    if (!linkingEnabled || readOnly) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setPickerMode("insert");
+          setPickerOpen(true);
+        }}
+        title="Drop a workspace item onto the board as a linked node"
+        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Insert item
+      </button>
+    );
+  }, [linkingEnabled, readOnly]);
+
   // Clear any pending debounce on unmount / canvas swap.
   useEffect(() => {
     return () => {
@@ -562,26 +584,10 @@ export function WorkspaceCanvasPane({
         viewModeEnabled={readOnly}
         initialData={initialData}
         // Render "Insert item" *inside* Excalidraw's own top-right cluster
-        // so it lays out beside the Library button instead of overlapping it
-        // (the old absolute overlay collided with Excalidraw's native UI).
-        renderTopRightUI={
-          linkingEnabled && !readOnly
-            ? () => (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPickerMode("insert");
-                    setPickerOpen(true);
-                  }}
-                  title="Drop a workspace item onto the board as a linked node"
-                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--surface-hover)]"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Insert item
-                </button>
-              )
-            : undefined
-        }
+        // so it lays out beside the Library button instead of overlapping it.
+        // Stable reference (see the useCallback above) — an inline function
+        // here loops Excalidraw's update cycle.
+        renderTopRightUI={renderTopRightUI}
       />
       {pickerOpen && workspaceId && (
         <WorkspaceItemPicker
