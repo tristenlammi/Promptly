@@ -259,7 +259,7 @@ class Settings(BaseSettings):
     # without any central service), Reply-To = the submitting user. Defaults
     # to the maintainer so feedback reaches upstream; a self-hoster who'd
     # rather keep feedback in-house can point this at their own address.
-    FEEDBACK_EMAIL: str = "tristen.lammi@gmail.com"
+    FEEDBACK_EMAIL: str = "feedback@chatpromptly.com"
 
     # ---- SSRF allowlist ----
     # Comma-separated hostnames that ``safe_fetch`` will allow even
