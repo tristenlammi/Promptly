@@ -94,24 +94,36 @@ async def enhance_prompt(
     user_lead = (
         "Passage to improve:" if mode == "prose" else "Rough prompt to improve:"
     )
-    chunks: list[str] = []
-    async for token in model_router.stream_chat(
-        provider=provider,
-        model_id=model_id,
-        messages=[
-            ChatMessage(
-                role="user",
-                content=f"{user_lead}\n\n{draft}",
-            )
-        ],
-        system=system,
-        temperature=0.4,
-        max_tokens=_MAX_OUTPUT_TOKENS,
-        reasoning_effort="off",
-    ):
-        chunks.append(token)
+    messages = [ChatMessage(role="user", content=f"{user_lead}\n\n{draft}")]
 
-    cleaned = _sanitize("".join(chunks))
+    async def _collect(reasoning: str | None) -> str:
+        parts: list[str] = []
+        async for token in model_router.stream_chat(
+            provider=provider,
+            model_id=model_id,
+            messages=messages,
+            system=system,
+            temperature=0.4,
+            max_tokens=_MAX_OUTPUT_TOKENS,
+            reasoning_effort=reasoning,
+        ):
+            parts.append(token)
+        return "".join(parts)
+
+    # Enhance normally skips the thinking pass for speed/cost ("off"), but
+    # some reasoning models (e.g. certain OpenRouter routes) reject a disabled
+    # thinking pass ("Reasoning is mandatory …"). Fall back to letting the
+    # model reason — the ``<think>`` blocks are stripped by ``_sanitize``.
+    try:
+        raw = await _collect("off")
+    except ProviderError as e:
+        if "reasoning" in str(e).lower():
+            logger.info("enhance retrying with reasoning enabled: %s", e)
+            raw = await _collect(None)
+        else:
+            raise
+
+    cleaned = _sanitize(raw)
     # If the model produced nothing usable, hand back the original so the
     # caller can decide; an empty rewrite is never an improvement.
     return cleaned or draft

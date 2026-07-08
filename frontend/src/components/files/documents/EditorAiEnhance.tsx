@@ -67,7 +67,7 @@ export function EditorAiEnhance({ editor }: { editor: Editor }) {
   // selection. A stable wrapper never triggers that reconciliation.
   const show = hasSelection || busy;
   return (
-    <div className="absolute bottom-9 right-3 z-20 print:hidden">
+    <div className="absolute bottom-9 right-6 z-20 print:hidden">
       {show && (
         <button
           type="button"

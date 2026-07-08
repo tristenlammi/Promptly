@@ -73,7 +73,7 @@ export function WordCountPill({ editor }: { editor: Editor | null }) {
   return (
     <div
       title={`${stats.words.toLocaleString()} words · ${stats.chars.toLocaleString()} characters`}
-      className="pointer-events-none absolute bottom-2 right-3 z-10 rounded-full border border-[var(--border)] bg-[var(--surface)]/90 px-2 py-0.5 text-[10px] tabular-nums text-[var(--text-muted)] shadow-sm backdrop-blur print:hidden"
+      className="pointer-events-none absolute bottom-2 right-6 z-10 rounded-full border border-[var(--border)] bg-[var(--surface)]/90 px-2 py-0.5 text-[10px] tabular-nums text-[var(--text-muted)] shadow-sm backdrop-blur print:hidden"
     >
       {stats.words.toLocaleString()} words
     </div>
