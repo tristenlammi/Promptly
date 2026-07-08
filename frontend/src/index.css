@@ -847,23 +847,25 @@ html.dark .promptly-doc mark {
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
+  /* Accent-dominant with only gentle amber + violet hints — "slightly
+     rainbow" rather than a full spectrum. Crisp hard-edged ring (the mask
+     is pixel-sharp; no blur). */
   background: conic-gradient(
     from var(--ai-angle),
-    #d97757,
-    #f59e0b,
-    #10b981,
-    #3b82f6,
-    #8b5cf6,
-    #ec4899,
-    #d97757
+    var(--accent) 0deg,
+    #e8a56f 70deg,
+    var(--accent) 140deg,
+    #a78bfa 230deg,
+    #e8a56f 300deg,
+    var(--accent) 360deg
   );
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: 0.8;
-  animation: ai-ring-spin 5s linear infinite;
+  opacity: 0.6;
+  animation: ai-ring-spin 6s linear infinite;
   pointer-events: none;
 }
 @supports (background: conic-gradient(from 0deg, red, blue)) {

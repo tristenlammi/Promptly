@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { BubbleMenu, type Editor } from "@tiptap/react";
+import { useEffect, useState } from "react";
+import type { Editor } from "@tiptap/react";
 import { Loader2, Sparkles } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -9,18 +9,28 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /**
- * A single-purpose selection affordance: an "Enhance" button that floats
- * *below* a text selection and rewrites it with AI (grammar / clarity /
- * flow, meaning preserved). Deliberately NOT a formatting bubble menu — the
- * toolbar already covers formatting; this is the one thing it can't. The
- * button wears a slow, softly-rainbow animated ring (see .ai-enhance-ring
- * in index.css). Reuses the /chat/enhance-prompt endpoint in ``prose`` mode
- * with the user's currently selected model.
+ * "Enhance" the current selection with AI — rewrites it for clarity / flow
+ * (meaning preserved) via the /chat/enhance-prompt endpoint in ``prose``
+ * mode, using the user's selected model. Anchored bottom-right of the editor,
+ * just above the word-count pill; appears only while text is selected. Wears
+ * a slow, subtle animated ring (see .ai-enhance-ring in index.css).
  */
 export function EditorAiEnhance({ editor }: { editor: Editor }) {
   const providerId = useModelStore((s) => s.selectedProviderId);
   const modelId = useModelStore((s) => s.selectedModelId);
   const [busy, setBusy] = useState(false);
+  const [hasSelection, setHasSelection] = useState(false);
+
+  useEffect(() => {
+    const update = () => setHasSelection(!editor.state.selection.empty);
+    editor.on("selectionUpdate", update);
+    editor.on("transaction", update);
+    update();
+    return () => {
+      editor.off("selectionUpdate", update);
+      editor.off("transaction", update);
+    };
+  }, [editor]);
 
   const enhance = async () => {
     if (busy) return;
@@ -38,8 +48,6 @@ export function EditorAiEnhance({ editor }: { editor: Editor }) {
         await chatApi.enhancePrompt(text, providerId, modelId, "prose")
       ).trim();
       if (improved && improved !== text) {
-        // Replace the selection with the improved text (plain — marks on the
-        // old run are dropped, matching a rewrite).
         editor.chain().focus().insertContentAt({ from, to }, improved).run();
       } else {
         toast.info("Nothing to improve — it already reads well.");
@@ -51,13 +59,10 @@ export function EditorAiEnhance({ editor }: { editor: Editor }) {
     }
   };
 
+  if (!hasSelection && !busy) return null;
+
   return (
-    <BubbleMenu
-      editor={editor}
-      pluginKey="aiEnhance"
-      tippyOptions={{ duration: 150, placement: "bottom", maxWidth: "none" }}
-      shouldShow={({ from, to }) => from !== to}
-    >
+    <div className="absolute bottom-9 right-3 z-20 print:hidden">
       <button
         type="button"
         onMouseDown={(e) => e.preventDefault()}
@@ -76,6 +81,6 @@ export function EditorAiEnhance({ editor }: { editor: Editor }) {
         )}
         {busy ? "Enhancing…" : "Enhance"}
       </button>
-    </BubbleMenu>
+    </div>
   );
 }
