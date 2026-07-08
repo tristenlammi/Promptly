@@ -240,6 +240,17 @@ export function DocumentEditorModal({
           // isn't a browser primitive for contenteditable; this is the
           // open-source, zero-dependency spell-checking path.)
           spellcheck: "true",
+          // Pin the spell-check language so it doesn't depend on the
+          // browser's default locale.
+          lang: "en",
+          // Tell Grammarly / LanguageTool browser extensions to leave the
+          // editor alone. They inject nodes into the contenteditable that
+          // React doesn't know about, which throws "insertBefore … not a
+          // child of this node" on the next render (a classic React +
+          // rich-text-editor clash).
+          "data-gramm": "false",
+          "data-gramm_editor": "false",
+          "data-enable-grammarly": "false",
           class: cn(
             // ``promptly-doc`` is our hand-rolled prose stylesheet
             // (see index.css) — Tailwind's preflight strips list
