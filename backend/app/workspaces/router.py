@@ -181,8 +181,20 @@ async def _validate_default_model(
     provider = await _validate_provider(provider_id, user, db)
     if is_custom_model_id(model_id):
         return
-    enabled = (provider.enabled_models if provider else None) or []
-    if model_id not in enabled:
+    # ``enabled_models`` semantics must mirror the chat picker
+    # (``models_config.router``): NULL means "expose every catalog
+    # model" (the default for a provider the admin never curated), an
+    # explicit list narrows to those ids, and ``[]`` exposes none.
+    # The old ``enabled_models or []`` collapsed NULL into ``[]``, so a
+    # freshly-added provider (e.g. a direct DeepSeek key) rejected every
+    # model — you couldn't set it as a workspace default at all.
+    if provider is None:  # defensive — provider_id was non-None here
+        return
+    if provider.enabled_models is None:
+        allowed = {m.get("id") for m in (provider.models or [])}
+    else:
+        allowed = set(provider.enabled_models)
+    if model_id not in allowed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="That model isn't enabled for the selected provider.",
