@@ -4,6 +4,7 @@ import { Loader2, Lock, Users } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
 import type { ConversationDetail } from "@/api/types";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -29,8 +30,28 @@ export function ChatVisibilityToggle({
 
   const toggle = async () => {
     if (busy) return;
-    setBusy(true);
     const next = shared ? "private" : "workspace";
+    // Sharing exposes the chat to the whole workspace — confirm first so it's
+    // never an accidental one-click reveal. Un-sharing needs no gate.
+    if (next === "workspace") {
+      const ok = await confirm({
+        title: "Share this chat with the workspace?",
+        message: (
+          <>
+            Everyone in this workspace will be able to{" "}
+            <strong>open and read</strong> this chat, including its whole
+            history. It stays <strong>read-only</strong> for them — only you
+            can send messages in it.
+            <br />
+            <br />
+            You can switch it back to private at any time.
+          </>
+        ),
+        confirmLabel: "Share with workspace",
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
     try {
       await chatApi.update(conversationId, { visibility: next });
       qc.setQueryData<ConversationDetail>(

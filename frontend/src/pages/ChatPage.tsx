@@ -9,6 +9,7 @@ import {
   Ghost,
   GitBranch,
   Loader2,
+  MessageSquare,
   Zap,
 } from "lucide-react";
 
@@ -1222,21 +1223,32 @@ export function ChatPage({
               embedded={embedded}
             />
           )}
-          {/* Embedded workspace chats have no TopNav, so surface the
-              creator's Private/Shared toggle in its own slim bar here. */}
-          {embedded &&
-            id &&
-            isOwner &&
-            !effectiveTemporaryMode &&
-            conversation?.workspace_id && (
-              <div className="flex items-center justify-end gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-1.5">
+          {/* Embedded workspace chats have no TopNav, so give them the same
+              header chrome the other item panes use (kind icon + editable
+              title), with the creator's Private/Shared toggle on the right. */}
+          {embedded && conversation?.workspace_id && !hideWorkspaceBar && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-3 py-1.5">
+              <MessageSquare className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+              {id ? (
+                <EditableTitle
+                  conversationId={id}
+                  title={rawTitle}
+                  className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]"
+                />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]">
+                  New chat
+                </span>
+              )}
+              {id && isOwner && !effectiveTemporaryMode && (
                 <ChatVisibilityToggle
                   conversationId={id}
                   visibility={conversation?.visibility ?? "private"}
                   compact={false}
                 />
-              </div>
-            )}
+              )}
+            </div>
+          )}
           {/* Context-window UI (pill + warning banner) is desktop-only
               — the mobile header has no space for the pill and the
               banner chews up precious vertical room above the chat.
