@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -256,13 +256,48 @@ function joinClauses(clauses: string[]): string {
   return `${head} and ${tail}`;
 }
 
-/** Growing progress-bar width for one agent. We don't have a true %,
- *  so map the agent's tool-step count to an ever-advancing fill that
- *  eases toward — but never reaches — full while running; done snaps to
- *  100%. Reads as real progress without fabricating a number. */
-function agentWidth(a: AgentProgress): number {
-  if (a.status !== "running") return 100;
-  return Math.min(85, 18 + a.activity * 16);
+/** Continuous "slow fill" for one running agent's bar. We don't have a
+ *  true %, and driving the width straight off the step count made it lurch
+ *  forward in fixed segments (and sit dead-still between steps). Instead we
+ *  ease the width toward — but never reaching — a cap on every animation
+ *  frame, decelerating as it climbs, so it reads as a smooth, always-moving
+ *  fill. A busier agent (higher `activity`) creeps a touch faster. When the
+ *  agent is done/failed the hook returns 100 and the loop stops. */
+function useAgentFill(running: boolean, activity: number): number {
+  const [width, setWidth] = useState(6);
+  const activityRef = useRef(activity);
+  activityRef.current = activity;
+  const raf = useRef<number | null>(null);
+  const last = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!running) {
+      if (raf.current != null) cancelAnimationFrame(raf.current);
+      last.current = null;
+      return;
+    }
+    const CAP = 95;
+    const tick = (t: number) => {
+      // rAF hands us a timestamp; clamp the delta so a backgrounded tab that
+      // pauses rAF doesn't jump the bar on return.
+      if (last.current == null) last.current = t;
+      const dt = Math.min(0.1, (t - last.current) / 1000);
+      last.current = t;
+      setWidth((w) => {
+        if (w >= CAP) return CAP;
+        const rate = 0.12 + activityRef.current * 0.015;
+        return Math.min(CAP, w + (CAP - w) * rate * dt);
+      });
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => {
+      if (raf.current != null) cancelAnimationFrame(raf.current);
+      last.current = null;
+    };
+  }, [running]);
+
+  return running ? width : 100;
 }
 
 /** One sub-agent's live row — the terracotta-accented mini-card from
@@ -271,6 +306,7 @@ function agentWidth(a: AgentProgress): number {
 function AgentRow({ agent }: { agent: AgentProgress }) {
   const running = agent.status === "running";
   const failed = agent.status === "failed";
+  const width = useAgentFill(running, agent.activity);
   return (
     <div className="rounded-md border border-[var(--border)] border-l-2 border-l-[var(--accent)] bg-[var(--bg)] px-3 py-2">
       <div className="flex items-center gap-2">
@@ -291,11 +327,14 @@ function AgentRow({ agent }: { agent: AgentProgress }) {
       <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
         <div
           className={cn(
-            "h-full rounded-full transition-[width] duration-700 ease-out",
+            "h-full rounded-full",
+            // While running the width is stepped every frame by the rAF loop,
+            // so a CSS width-transition would only add lag — apply it just for
+            // the done/failed snap to 100%.
+            running ? "animate-pulse" : "transition-[width] duration-500 ease-out",
             failed ? "bg-[var(--warning)]" : "bg-[var(--accent)]",
-            running && "animate-pulse",
           )}
-          style={{ width: `${agentWidth(agent)}%` }}
+          style={{ width: `${width}%` }}
         />
       </div>
       <div className="mt-1 truncate font-mono text-[11px] text-[var(--text-muted)]">
