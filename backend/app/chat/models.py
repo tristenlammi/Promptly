@@ -154,6 +154,15 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Workspace-chat visibility: "private" (only the creator sees + opens it)
+    # or "workspace" (every member can read it — sending stays creator-only,
+    # enforced on the send path). Defaults to private so a new workspace chat
+    # isn't exposed to the whole team until the creator shares it. Ignored for
+    # personal (workspace-less) chats, which are always private to their user.
+    visibility: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="private", server_default="private"
+    )
+
     # Personal chat folders (0148). A user-created folder groups top-level
     # personal chats in the sidebar and carries a live default system prompt
     # + a default model. NULL = ungrouped (today's default). Folders are a
@@ -891,6 +900,48 @@ class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<Spreadsheet id={self.id} title={self.title!r}>"
+
+
+class Roster(UUIDPKMixin, TimestampMixin, Base):
+    """A shift roster — the backing entity for a ``kind='roster'`` workspace
+    item. Mirrors :class:`Spreadsheet`: the whole schedule (shifts + settings)
+    lives in ``data`` (JSONB), saved single-user via a debounced PUT.
+
+    ``content_text`` holds a flattened human-readable version ("Fri 22 Aug —
+    Ben 09:00–17:00 (8h) · Kitchen …") and ``text_file_id`` the backing Drive
+    text file that carries it into ``knowledge_chunks`` — so a chat can answer
+    "who's on Friday?" / "how many hours is Alia this week?" via workspace RAG.
+    """
+
+    __tablename__ = "rosters"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="Untitled roster",
+        server_default="Untitled roster",
+    )
+    # Roster JSON: ``{settings, shifts:[{id, personId, date, timed, start, end,
+    # hours, tags, color, note, recurGroup, published}]}``. NULL until first
+    # save → the client seeds an empty roster.
+    data: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # Flattened schedule text for RAG, pushed by the client on save (mirrors
+    # ``Spreadsheet.content_text``).
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Backing Drive text file that carries ``content_text`` into
+    # ``knowledge_chunks``. ``ON DELETE SET NULL`` so a Drive-side delete
+    # doesn't cascade away the roster.
+    text_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<Roster id={self.id} title={self.title!r}>"
 
 
 class WorkspaceFile(Base):

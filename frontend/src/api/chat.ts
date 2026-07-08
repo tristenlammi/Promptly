@@ -83,6 +83,9 @@ export interface UpdateConversationPayload {
   title?: string | null;
   pinned?: boolean;
   starred?: boolean;
+  /** Workspace-chat visibility (creator-only). "workspace" shares it
+   *  read-only with members; "private" makes it creator-only again. */
+  visibility?: "private" | "workspace";
   web_search_mode?: WebSearchMode;
   reasoning_effort?: ReasoningEffort;
   model_id?: string | null;

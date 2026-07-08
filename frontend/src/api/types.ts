@@ -706,6 +706,10 @@ export interface ConversationSummary {
   /** Phase P1 — Workspaces. Non-null when this chat lives inside a
    *  :class:`Workspace`. Drives the sidebar grouping + breadcrumb. */
   workspace_id?: string | null;
+  /** Workspace-chat visibility: ``"private"`` (creator-only) or
+   *  ``"workspace"`` (members can read; sending stays creator-only). The
+   *  creator toggles it; drives the share control + read-only banner. */
+  visibility?: "private" | "workspace";
   /** Chat folders (0148). Non-null when this personal chat lives in a
    *  user-created sidebar folder. Mutually exclusive with ``workspace_id``. */
   folder_id?: string | null;

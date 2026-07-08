@@ -25,7 +25,7 @@ from typing import Literal
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -128,13 +128,13 @@ async def get_accessible_conversation(
     if conv.user_id == user.id:
         return conv, "owner"
 
-    # 0031 — workspace-level sharing. If the chat lives in a workspace
-    # the caller has accepted a share on (or owns outright), they
-    # inherit collaborator access to every conversation under that
-    # workspace. The ``owner`` role is reserved for the literal
-    # conversation creator so the send path can still reject edits
-    # on someone else's messages.
-    if await _has_workspace_access(conv.workspace_id, user, db):
+    # 0031 — workspace-level sharing. A member of the chat's workspace can
+    # read it *only* when the creator marked it ``visibility="workspace"``;
+    # private chats (the default) stay creator-only. Collaborators are
+    # read-only — the send path rejects any non-``owner`` role.
+    if conv.visibility == "workspace" and await _has_workspace_access(
+        conv.workspace_id, user, db
+    ):
         return conv, "collaborator"
 
     raise HTTPException(
@@ -160,7 +160,14 @@ async def list_accessible_conversation_ids(
 
     conds = [Conversation.user_id == user.id]
     if accessible_workspace_ids:
-        conds.append(Conversation.workspace_id.in_(accessible_workspace_ids))
+        # Other members' workspace chats are only reachable when shared to
+        # the workspace — private chats stay creator-only (owned branch above).
+        conds.append(
+            and_(
+                Conversation.workspace_id.in_(accessible_workspace_ids),
+                Conversation.visibility == "workspace",
+            )
+        )
 
     res = await db.execute(select(Conversation.id).where(or_(*conds)))
     return list({row[0] for row in res.all()})

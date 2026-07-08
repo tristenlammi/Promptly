@@ -19,6 +19,7 @@ import { ContextWarningBanner } from "@/components/chat/ContextWarningBanner";
 import { ContextWindowPill } from "@/components/chat/ContextWindowPill";
 import { SummariseToWorkspaceButton } from "@/components/chat/SummariseToWorkspaceButton";
 import { WorkspaceFilesToggle } from "@/components/chat/WorkspaceFilesToggle";
+import { ChatVisibilityToggle } from "@/components/chat/ChatVisibilityToggle";
 import type { RegenerateOverride } from "@/components/chat/MessageBubble";
 import { EditableTitle } from "@/components/chat/EditableTitle";
 import { EmptyState } from "@/components/chat/EmptyState";
@@ -1138,6 +1139,16 @@ export function ChatPage({
               !effectiveTemporaryMode &&
               conversation?.workspace_id && (
                 <WorkspaceFilesToggle conversationId={id} compact={isMobile} />
+              )}
+            {id &&
+              isOwner &&
+              !effectiveTemporaryMode &&
+              conversation?.workspace_id && (
+                <ChatVisibilityToggle
+                  conversationId={id}
+                  visibility={conversation?.visibility ?? "private"}
+                  compact={isMobile}
+                />
               )}
             {id && isOwner && (
               <ConversationInstructionsButton

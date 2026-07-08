@@ -1214,6 +1214,21 @@ async def update_conversation(
         conv.pinned = payload.pinned
     if payload.starred is not None:
         conv.starred = payload.starred
+    # Workspace-chat visibility (creator-only, enforced by the owned-conv
+    # guard above). "workspace" lets members read it; sharing a non-workspace
+    # chat is meaningless.
+    if "visibility" in payload.model_fields_set and payload.visibility is not None:
+        if payload.visibility not in ("private", "workspace"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="visibility must be 'private' or 'workspace'.",
+            )
+        if payload.visibility == "workspace" and conv.workspace_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only a workspace chat can be shared with a workspace.",
+            )
+        conv.visibility = payload.visibility
     if payload.web_search_mode is not None:
         conv.web_search_mode = payload.web_search_mode
     if payload.reasoning_effort is not None:

@@ -50,6 +50,7 @@ from app.config import get_settings
 from app.files.schemas import CollabTokenResponse, CollabTokenUser
 from app.chat.models import (
     Conversation,
+    Roster,
     Spreadsheet,
     Workspace,
     WorkspaceCanvas,
@@ -67,6 +68,8 @@ from app.workspaces.canvas_router import (
     create_canvas_with_item,
 )
 from app.workspaces.schemas import (
+    RosterResponse,
+    RosterSaveRequest,
     SpreadsheetResponse,
     SpreadsheetSaveRequest,
     WorkspaceFileContext,
@@ -91,6 +94,7 @@ _DEFAULT_FOLDER_TITLE = "New folder"
 _DEFAULT_CANVAS_TITLE = "Untitled canvas"
 _DEFAULT_BOARD_TITLE = "Board"
 _DEFAULT_NOTEBOOK_TITLE = "Notebook"
+_DEFAULT_ROSTER_TITLE = "Untitled roster"
 
 
 def _strip_doc_ext(name: str) -> str:
@@ -188,29 +192,22 @@ async def _validate_parent(
     parent_id: uuid.UUID | None,
     child_kind: str | None = None,
 ) -> None:
-    """A parent (when given) must be a *folder* or a *notebook* (container)
-    in this workspace. Folders organise the tree; a notebook holds pages
-    (its child items render as tabs). A notebook can't hold folders or
-    nested notebooks (v1: no recursion)."""
+    """A parent (when given) must be a *notebook* (container) in this
+    workspace — a notebook holds pages (its child items render as tabs).
+    Notebooks can't nest (no notebook-in-notebook). Folders were removed,
+    so a notebook is the only thing that can hold children."""
     if parent_id is None:
         return
     parent = await _load_item(db, workspace_id, parent_id)
-    if parent.kind == "container":
-        if child_kind == "container":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A notebook can't contain another notebook.",
-            )
-        if child_kind == "folder":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A notebook holds pages, not folders.",
-            )
-        return
-    if parent.kind != "folder":
+    if parent.kind != "container":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Items can only be nested inside folders or notebooks.",
+            detail="Items can only be nested inside a notebook.",
+        )
+    if child_kind == "container":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A notebook can't contain another notebook.",
         )
 
 
@@ -380,6 +377,8 @@ async def get_workspace_tree(
             )
         ).scalars()
         if c.id not in page_chat_ids
+        # Creator sees their own chats; everyone else only the shared ones.
+        and (c.user_id == user.id or c.visibility == "workspace")
     ]
     for idx, c in enumerate(convs):
         _place(
@@ -401,6 +400,10 @@ async def get_workspace_tree(
                 context_enabled=c.context_enabled,
                 indexing_status=c.context_index_status,
                 pinned=bool(c.pinned),
+                # Lets the rail badge a creator's own private chats and hide
+                # the toggle affordance from non-creators.
+                visibility=c.visibility,
+                created_by=str(c.user_id),
                 children=[],
             ),
             c.ws_parent_id,
@@ -475,13 +478,12 @@ async def create_workspace_item(
     position = await _next_position(db, ws.id, payload.parent_id)
     title = (payload.title or "").strip()
 
-    if payload.kind in ("folder", "board", "container"):
-        # All three are tree-only nodes with no backing Drive entity. A
-        # board's tasks reference it via ``workspace_tasks.board_item_id``; a
+    if payload.kind in ("board", "container"):
+        # Both are tree-only nodes with no backing Drive entity. A board's
+        # tasks reference it via ``workspace_tasks.board_item_id``; a
         # container (notebook) holds its pages as child items. Deleting the
         # row cascades its children/tasks via the self/board FKs.
         default_title = {
-            "folder": _DEFAULT_FOLDER_TITLE,
             "board": _DEFAULT_BOARD_TITLE,
             "container": _DEFAULT_NOTEBOOK_TITLE,
         }[payload.kind]
@@ -545,6 +547,25 @@ async def create_workspace_item(
             kind="sheet",
             ref_id=sheet.id,
             title=sheet_title,
+            position=position,
+        )
+        db.add(item)
+    elif payload.kind == "roster":
+        # A shift roster — backing entity is a ``Roster`` row (mirrors sheet).
+        # ``content_text`` feeds RAG once saved, so the item indexes like a
+        # note/canvas; ``queued`` until the first save flattens the schedule.
+        roster_title = title or await _dedupe_default_title(
+            db, ws.id, payload.parent_id, _DEFAULT_ROSTER_TITLE
+        )
+        roster = Roster(workspace_id=ws.id, title=roster_title)
+        db.add(roster)
+        await db.flush()  # assign roster.id before the item links to it
+        item = WorkspaceItem(
+            workspace_id=ws.id,
+            parent_id=payload.parent_id,
+            kind="roster",
+            ref_id=roster.id,
+            title=roster_title,
             position=position,
         )
         db.add(item)
@@ -951,6 +972,97 @@ async def save_spreadsheet(
 
         background.add_task(index_sheet_for_workspace, ws.id, sheet_item.id)
     return SpreadsheetResponse.model_validate(sheet)
+
+
+# --------------------------------------------------------------------
+# Rosters — the shift-schedule item (mirrors the spreadsheet endpoints).
+# --------------------------------------------------------------------
+async def _load_workspace_roster(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    roster_id: uuid.UUID,
+    user: User | None = None,
+) -> Roster:
+    roster = await db.get(Roster, roster_id)
+    if roster is None or roster.workspace_id != workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Roster not found"
+        )
+    if user is not None:
+        item = (
+            await db.execute(
+                select(WorkspaceItem).where(
+                    WorkspaceItem.ref_id == roster.id,
+                    WorkspaceItem.kind == "roster",
+                )
+            )
+        ).scalars().first()
+        if item is not None:
+            require_item_visible(item, user)
+    return roster
+
+
+@router.get(
+    "/{workspace_id}/rosters/{roster_id}",
+    response_model=RosterResponse,
+)
+async def get_roster(
+    workspace_id: uuid.UUID,
+    roster_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RosterResponse:
+    """Load a roster's schedule. Read access (any member)."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    roster = await _load_workspace_roster(db, ws.id, roster_id, user)
+    return RosterResponse.model_validate(roster)
+
+
+@router.put(
+    "/{workspace_id}/rosters/{roster_id}",
+    response_model=RosterResponse,
+)
+async def save_roster(
+    workspace_id: uuid.UUID,
+    roster_id: uuid.UUID,
+    payload: RosterSaveRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RosterResponse:
+    """Persist a roster's schedule (debounced save). Re-indexes the flattened
+    schedule text so a chat can answer "who's on Friday?" via workspace RAG."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    roster = await _load_workspace_roster(db, ws.id, roster_id, user)
+    roster.data = payload.data
+    text_changed = (
+        payload.content_text is not None
+        and payload.content_text != roster.content_text
+    )
+    if payload.content_text is not None:
+        roster.content_text = payload.content_text
+    roster_item = (
+        await db.execute(
+            select(WorkspaceItem).where(
+                WorkspaceItem.ref_id == roster.id,
+                WorkspaceItem.kind == "roster",
+            )
+        )
+    ).scalars().first()
+    if payload.title is not None and payload.title.strip():
+        new_title = payload.title.strip()
+        roster.title = new_title
+        if roster_item is not None:
+            roster_item.title = new_title
+    ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(roster)
+    if text_changed and roster_item is not None:
+        from app.workspaces.knowledge import index_roster_for_workspace
+
+        background.add_task(index_roster_for_workspace, ws.id, roster_item.id)
+    return RosterResponse.model_validate(roster)
 
 
 # Match the document/canvas collab token lifetime so the frontend's refresh

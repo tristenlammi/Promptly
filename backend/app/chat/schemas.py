@@ -176,6 +176,10 @@ class ConversationSummary(BaseModel):
     # under a :class:`Workspace`; surfaced so the sidebar can group
     # chats by workspace and the breadcrumb can render "Workspace → Chat".
     workspace_id: uuid.UUID | None = None
+    # Workspace-chat visibility: "private" (creator-only) | "workspace"
+    # (members can read). Drives the creator's share toggle + the read-only
+    # banner shown to members. Always "private" for personal chats.
+    visibility: Literal["private", "workspace"] = "private"
     # Chat folders (0148) — non-NULL when this personal chat lives in a
     # user-created folder. Drives the sidebar grouping. Mutually exclusive
     # with ``workspace_id`` (a chat in a workspace is never in a folder).
@@ -239,6 +243,9 @@ class ConversationUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     pinned: bool | None = None
     starred: bool | None = None
+    # Workspace-chat visibility toggle (creator-only). "workspace" shares it
+    # read-only with members; "private" makes it creator-only again.
+    visibility: Literal["private", "workspace"] | None = None
     web_search_mode: WebSearchMode | None = None
     # ``None`` here means "leave unchanged" (consistent with every
     # other field on this PATCH). The frontend dropdown only writes
