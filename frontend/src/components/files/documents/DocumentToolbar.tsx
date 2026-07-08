@@ -37,6 +37,7 @@ import { documentsApi } from "@/api/documents";
 
 import { EmojiPicker } from "./EmojiPicker";
 import { LinkEditorPopover } from "./LinkEditorPopover";
+import { SpellCheckControl } from "./SpellCheckControl";
 import { INSERT_ASSET_EVENT } from "./SlashCommandExtension";
 
 /**
@@ -400,6 +401,13 @@ export function DocumentToolbar({
         >
           <Redo2 className="h-4 w-4" />
         </ToolButton>
+      </ToolbarGroup>
+
+      <Divider />
+
+      {/* Spell-check toggle + language picker (nspell / Hunspell). */}
+      <ToolbarGroup>
+        <SpellCheckControl />
       </ToolbarGroup>
 
       {/* Mobile overflow sheet trigger. On small screens we collapse

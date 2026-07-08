@@ -1,11 +1,50 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+
+/**
+ * Bundle Hunspell spell-check dictionaries (``dictionary-*`` packages) as
+ * code-split virtual modules.
+ *
+ * The ``dictionary-*`` v4 packages are Node-only (their ``index.js`` reads
+ * the ``.aff``/``.dic`` files via ``node:fs``) and lock down subpath access
+ * with an ``exports`` map, so we can neither import them at runtime in the
+ * browser nor ``?raw``-import their data files directly. Instead this plugin
+ * reads each dictionary's ``.aff``/``.dic`` off disk at build time and emits
+ * them as a tiny ES module (``export const aff``/``dic``). Because the
+ * consumer imports them dynamically (``import("virtual:hunspell/…")``),
+ * Rollup gives each language its own async chunk — so the ~0.5–4 MB of
+ * dictionary text only loads when a user actually turns spell-check on for
+ * that language, and never touches the main bundle. All data is inlined, so
+ * there's no runtime ``fetch`` (keeps us clean under the strict CSP).
+ */
+function hunspellDictionaries(): Plugin {
+  const PREFIX = "virtual:hunspell/";
+  const RESOLVED = "\0" + PREFIX;
+  const require = createRequire(path.resolve(__dirname, "package.json"));
+  return {
+    name: "promptly-hunspell-dictionaries",
+    resolveId(id) {
+      return id.startsWith(PREFIX) ? "\0" + id : null;
+    },
+    load(id) {
+      if (!id.startsWith(RESOLVED)) return null;
+      const pkg = id.slice(RESOLVED.length); // e.g. "dictionary-en"
+      const dir = path.dirname(require.resolve(pkg)); // …/dictionary-en
+      const aff = fs.readFileSync(path.join(dir, "index.aff"), "utf8");
+      const dic = fs.readFileSync(path.join(dir, "index.dic"), "utf8");
+      return `export const aff = ${JSON.stringify(aff)};\nexport const dic = ${JSON.stringify(dic)};`;
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
     react(),
+    hunspellDictionaries(),
     VitePWA({
       // We need a handwritten service worker for the Web Push hooks
       // (``push`` + ``notificationclick`` events) — Workbox's
@@ -89,7 +128,17 @@ export default defineConfig({
         // a canvas is opened (which requires the network for collab
         // anyway), so precaching them would bloat first install and negate
         // the lazy-load. They're fetched on demand instead.
-        globIgnores: ["**/excalidraw-assets/**", "**/excalidraw-*.js"],
+        globIgnores: [
+          "**/excalidraw-assets/**",
+          "**/excalidraw-*.js",
+          // Spell-check dictionaries: large (up to ~5.5 MB for pt) and only
+          // loaded when the user turns spell-check on for a language. Keep them
+          // out of the precache so first install stays lean (same rationale as
+          // Excalidraw). The emitted chunks are named after the virtual module's
+          // last segment — ``virtual:hunspell/dictionary-en`` → ``dictionary-en-*.js``
+          // — so the ignore must match ``dictionary-*``, not ``hunspell-*``.
+          "**/dictionary-*.js",
+        ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
 
@@ -122,6 +171,16 @@ export default defineConfig({
         // it lets us match by substring across both flat and nested
         // dependency paths (Vite hands us absolute module IDs).
         manualChunks(id: string): string | undefined {
+          // Hunspell dictionary virtual modules (see hunspellDictionaries).
+          // Name each after the virtual module's last segment
+          // (``virtual:hunspell/dictionary-en`` → ``dictionary-en-*.js``) so the
+          // SW precache can glob-exclude them via ``**/dictionary-*.js`` — they're
+          // 0.5–5.5 MB and only fetched on demand when a user turns spell-check
+          // on. Checked BEFORE the node_modules guard since virtual ids aren't
+          // under node_modules.
+          if (id.includes("virtual:hunspell/")) {
+            return id.split("/").pop();
+          }
           if (!id.includes("node_modules")) return undefined;
           // The whiteboard editor is large and only loaded on the
           // (lazily mounted) workspace canvas — keep it out of the main

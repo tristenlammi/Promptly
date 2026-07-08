@@ -37,6 +37,14 @@ import { EditorAiEnhance } from "./EditorAiEnhance";
 import { LinkHoverPreview } from "./LinkHoverPreview";
 import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
+import {
+  spellCheckPluginKey,
+  SPELLCHECK_WORD_EVENT,
+  type SpellCheckWordClick,
+} from "./SpellCheckExtension";
+import { SpellCheckPopover } from "./SpellCheckPopover";
+import { loadSpell } from "./spellDictionaries";
+import { useSpellcheckStore } from "@/store/spellcheckStore";
 
 /**
  * Full-screen Document editor.
@@ -235,13 +243,12 @@ export function DocumentEditorModal({
       editable: canEdit,
       editorProps: {
         attributes: {
-          // Native browser spell-check — red squiggles + right-click
-          // "correct spelling" suggestions. (True type-time autocorrect
-          // isn't a browser primitive for contenteditable; this is the
-          // open-source, zero-dependency spell-checking path.)
-          spellcheck: "true",
-          // Pin the spell-check language so it doesn't depend on the
-          // browser's default locale.
+          // Our own nspell-based checker (SpellCheckExtension) owns spelling
+          // now — it draws styled squiggles + a suggestion popover with real
+          // language selection. Disable the browser's native check so the two
+          // don't double-underline. When the user toggles our checker off,
+          // the sync effect below leaves this off too (off means off).
+          spellcheck: "false",
           lang: "en",
           // Tell Grammarly / LanguageTool browser extensions to leave the
           // editor alone. They inject nodes into the contenteditable that
@@ -353,6 +360,69 @@ export function DocumentEditorModal({
       editor.setEditable(canEdit);
     }
   }, [editor, canEdit]);
+
+  // ------------------------------------------------------------------
+  // Spell-check — sync the persisted preference into the editor plugin
+  // ------------------------------------------------------------------
+  const spellEnabled = useSpellcheckStore((s) => s.enabled);
+  const spellLang = useSpellcheckStore((s) => s.lang);
+  const personalWords = useSpellcheckStore((s) => s.personalWords);
+  const addPersonalWord = useSpellcheckStore((s) => s.addPersonalWord);
+
+  // Words ignored just for this note (the popover's "Ignore in this note").
+  // Resets when a different file opens.
+  const [sessionIgnores, setSessionIgnores] = useState<Set<string>>(
+    () => new Set()
+  );
+  useEffect(() => {
+    setSessionIgnores(new Set());
+  }, [file.id]);
+
+  // The word the user clicked a squiggle on → drives the suggestion popover.
+  const [spellTarget, setSpellTarget] = useState<SpellCheckWordClick | null>(
+    null
+  );
+  useEffect(() => {
+    const onWord = (e: Event) => {
+      const detail = (e as CustomEvent<SpellCheckWordClick>).detail;
+      if (detail) setSpellTarget(detail);
+    };
+    document.addEventListener(SPELLCHECK_WORD_EVENT, onWord);
+    return () => document.removeEventListener(SPELLCHECK_WORD_EVENT, onWord);
+  }, []);
+
+  // Push spell-check config into the plugin. Loading a dictionary is async
+  // (code-split chunk), so gate the enabled push on the instance resolving.
+  // ``ignored`` = personal dictionary ∪ this-note ignores, lower-cased.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const push = (config: {
+      enabled: boolean;
+      spell: Awaited<ReturnType<typeof loadSpell>> | null;
+      ignored: Set<string>;
+    }) => {
+      if (editor.isDestroyed) return;
+      editor.view.dispatch(
+        editor.view.state.tr.setMeta(spellCheckPluginKey, config)
+      );
+    };
+    if (!spellEnabled) {
+      push({ enabled: false, spell: null, ignored: new Set() });
+      return;
+    }
+    let cancelled = false;
+    void loadSpell(spellLang).then((spell) => {
+      if (cancelled) return;
+      const ignored = new Set<string>([
+        ...personalWords,
+        ...Array.from(sessionIgnores, (w) => w.toLowerCase()),
+      ]);
+      push({ enabled: true, spell, ignored });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editor, spellEnabled, spellLang, personalWords, sessionIgnores]);
 
   // ------------------------------------------------------------------
   // Offline fallback — seed the editor from the saved HTML blob
@@ -1025,6 +1095,20 @@ export function DocumentEditorModal({
             (see EditorAiEnhance) to avoid the insertBefore reconciliation
             error entirely. */}
         {editor && !error && canEdit && <EditorAiEnhance editor={editor} />}
+        {/* Spell-check suggestion popover — opens when a squiggle is clicked
+            (the SpellCheckExtension fires a DOM event caught above). */}
+        {editor && !error && canEdit && spellTarget && (
+          <SpellCheckPopover
+            editor={editor}
+            target={spellTarget}
+            lang={spellLang}
+            onAddWord={(w) => addPersonalWord(w)}
+            onIgnore={(w) =>
+              setSessionIgnores((prev) => new Set(prev).add(w.toLowerCase()))
+            }
+            onClose={() => setSpellTarget(null)}
+          />
+        )}
       </div>
 
       {historyOpen && (

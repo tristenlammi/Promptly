@@ -30,6 +30,7 @@ import { CalloutExtension } from "./CalloutExtension";
 import { Column, Columns } from "./ColumnsExtension";
 import { MentionMark } from "./MentionMark";
 import { SlashCommandExtension } from "./SlashCommandExtension";
+import { SpellCheckExtension, SPELLCHECK_WORD_EVENT } from "./SpellCheckExtension";
 import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 
 /**
@@ -219,6 +220,17 @@ export function buildExtensions({
     // via a CustomEvent (see SlashCommandExtension for why).
     SlashCommandExtension.configure({
       hasWikiLink: Boolean(wikiLink),
+    }),
+    // Real-time spell-checking (nspell + Hunspell dictionaries). The plugin
+    // only decorates once the editor host loads a dictionary and pushes the
+    // config in; registered always so every note/document can use it. Clicking
+    // a squiggle fires a DOM CustomEvent the host listens for to open the
+    // suggestion popover (keeps this factory free of React state).
+    SpellCheckExtension.configure({
+      onWordClick: (info) =>
+        document.dispatchEvent(
+          new CustomEvent(SPELLCHECK_WORD_EVENT, { detail: info })
+        ),
     }),
   ];
 

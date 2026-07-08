@@ -438,6 +438,17 @@ body {
      user expects when they hit the toolbar buttons. */
 }
 
+/* Spell-check misspelling underline (SpellCheckExtension decoration). A red
+   wavy underline that reads like the native browser check, but styled by us
+   and clickable for suggestions. ``text-decoration-skip-ink`` keeps the wave
+   off descenders so it stays legible; the cursor hint signals it's clickable. */
+.promptly-doc .spellcheck-error {
+  text-decoration: underline wavy var(--danger, #ef4444);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .promptly-doc :where(h1, h2, h3, h4, h5, h6) {
   font-weight: 700;
   line-height: 1.25;
