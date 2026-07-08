@@ -386,6 +386,25 @@ export function ToolActivityCard({
 
   if (steps.length === 0) return null;
 
+  // When the whole turn was just successful workspace-item reads (each
+  // produced a pill), the "ran 1 tool call" box is pure noise — the pill
+  // already names what was opened and links to it. Drop the box and let
+  // the pills stand alone. This only fires in workspace chats (the pill
+  // tools are gated there); web searches, mixed turns, and any failure
+  // still render the full card so nothing is silently hidden.
+  const pillsOnly =
+    !inProgress &&
+    linkedItems.length > 0 &&
+    steps.every(
+      (s) =>
+        s.status === "ok" &&
+        Array.isArray(s.meta?.items) &&
+        (s.meta.items as unknown[]).length > 0,
+    );
+  if (pillsOnly) {
+    return <ItemPillRow items={linkedItems} standalone />;
+  }
+
   // ---- Live run_agents fan-out (the rich per-agent view) ----
   if (liveAgents) {
     return <AgentFanout agents={liveAgents} />;
@@ -557,7 +576,15 @@ const ITEM_KIND_ICON: Record<string, LucideIcon> = {
   canvas: PenLine,
 };
 
-function ItemPillRow({ items }: { items: LinkedItem[] }) {
+function ItemPillRow({
+  items,
+  standalone,
+}: {
+  items: LinkedItem[];
+  /** True when the pills replace the tool card entirely (no box above),
+   *  so they take the card's own top margin instead of hugging it. */
+  standalone?: boolean;
+}) {
   const preview = useItemPreview();
   const navigate = useNavigate();
   if (items.length === 0) return null;
@@ -591,7 +618,12 @@ function ItemPillRow({ items }: { items: LinkedItem[] }) {
   };
 
   return (
-    <div className="mt-1.5 flex flex-wrap gap-1.5">
+    <div
+      className={cn(
+        "flex flex-wrap gap-1.5",
+        standalone ? "mt-2" : "mt-1.5",
+      )}
+    >
       {items.map((item) => {
         const Icon = ITEM_KIND_ICON[item.kind] ?? FileText;
         return (

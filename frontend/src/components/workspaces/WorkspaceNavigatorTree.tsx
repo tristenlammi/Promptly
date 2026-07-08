@@ -1645,7 +1645,8 @@ function TreeRow({
           // the dnd-kit drag handle spreads a ``tabIndex`` onto this row, so a
           // click focuses it and Chromium would otherwise draw its default
           // outline. Selection + keyboard focus get their own styles below.
-          "group flex items-center gap-1 rounded-md pr-1 text-sm outline-none transition-colors",
+          // ``relative`` anchors the selected-row accent bar (below).
+          "group relative flex items-center gap-1 rounded-md pr-1 text-sm outline-none transition-colors",
           // Match the chat sidebar's selected row: a neutral filled background
           // (not an outline), with the accent reserved for the icon (P1).
           isSelected
@@ -1669,6 +1670,14 @@ function TreeRow({
         )}
         style={{ paddingLeft: depth * INDENT + 2 }}
       >
+        {/* Selected-row accent bar — the little terracotta module pinned to
+            the row's left edge, independent of indent depth. */}
+        {isSelected && !overlay && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--accent)]"
+          />
+        )}
         <button
           type="button"
           onClick={handleClick}
@@ -1714,11 +1723,7 @@ function TreeRow({
             <span className="w-3 shrink-0" aria-hidden />
           )}
 
-          <NodeIcon
-            node={node}
-            expanded={expanded || !!isDropParent}
-            selected={isSelected}
-          />
+          <NodeIcon node={node} expanded={expanded || !!isDropParent} />
 
           {renaming ? (
             <input
@@ -1863,55 +1868,68 @@ function TreeRow({
   );
 }
 
+// Per-kind pastel tile: a translucent tint behind a saturated glyph, so each
+// item type reads at a glance from its colour AND shape. Same values in light
+// + dark — the tint sits over the surface and the strokes stay legible on
+// both grounds. (Reinstated after the P1 monochrome pass; the tinted tiles
+// tested better in the marketing mock and the user asked to try them live.)
+const KIND_TILE: Record<string, { tile: string; ink: string }> = {
+  folder: { tile: "bg-[var(--accent-soft)]", ink: "text-[var(--accent)]" },
+  chat: { tile: "bg-[rgba(217,119,87,0.16)]", ink: "text-[#D97757]" },
+  note: { tile: "bg-[rgba(245,158,11,0.16)]", ink: "text-[#F59E0B]" },
+  canvas: { tile: "bg-[rgba(59,130,246,0.16)]", ink: "text-[#3B82F6]" },
+  board: { tile: "bg-[rgba(16,185,129,0.16)]", ink: "text-[#10B981]" },
+  sheet: { tile: "bg-[rgba(236,72,153,0.16)]", ink: "text-[#EC4899]" },
+  container: { tile: "bg-[rgba(139,92,246,0.16)]", ink: "text-[#8B5CF6]" },
+  task: { tile: "bg-[rgba(100,116,139,0.18)]", ink: "text-[#64748B]" },
+};
+
 function NodeIcon({
   node,
   expanded,
-  selected = false,
 }: {
   node: WorkspaceItemNode;
   expanded: boolean;
-  selected?: boolean;
 }) {
-  // Respect an explicit emoji icon if the node carries one. Lucide names
-  // would need a registry to resolve; emoji renders directly, which is
-  // the common case for user-set icons.
+  const tileBase = "grid h-5 w-5 shrink-0 place-items-center rounded-md";
+  // Respect an explicit emoji icon if the node carries one — render it inside
+  // the same tile footprint so rows stay aligned.
   if (node.icon && isEmoji(node.icon)) {
-    return <span className="shrink-0 text-sm leading-none">{node.icon}</span>;
+    return (
+      <span className={cn(tileBase, "text-[12px] leading-none")}>
+        {node.icon}
+      </span>
+    );
   }
-  const base = "h-4 w-4 shrink-0";
-  // Monochrome by kind — the item type is legible from the icon SHAPE, so
-  // colour is reserved to mean something: the accent marks folders (the
-  // structural anchor, echoing the Drive's accent folders) and the selected
-  // row. Kinds scanning as six saturated hues made the rail read as a
-  // different, busier product than the calm overview.
-  const tint =
-    node.kind === "folder" || selected
-      ? "text-[var(--accent)]"
-      : "text-[var(--text-muted)]";
-  switch (node.kind) {
-    case "folder":
-      return expanded ? (
-        <FolderOpen className={cn(base, tint)} />
-      ) : (
-        <Folder className={cn(base, tint)} />
-      );
-    case "chat":
-      return <MessageSquare className={cn(base, tint)} />;
-    case "canvas":
-      return <Shapes className={cn(base, tint)} />;
-    case "board":
-      return <Columns3 className={cn(base, tint)} />;
-    case "sheet":
-      return <Table2 className={cn(base, tint)} />;
-    case "container":
-      return <Layers className={cn(base, tint)} />;
-    case "task":
-      // A clock reads "scheduled"; reserve the bolt for the context flag.
-      return <Clock className={cn(base, tint)} />;
-    case "note":
-    default:
-      return <FileText className={cn(base, tint)} />;
-  }
+  const glyph = "h-3 w-3";
+  const { tile, ink } = KIND_TILE[node.kind] ?? KIND_TILE.note;
+  const Icon = (() => {
+    switch (node.kind) {
+      case "folder":
+        return expanded ? FolderOpen : Folder;
+      case "chat":
+        return MessageSquare;
+      case "canvas":
+        return Shapes;
+      case "board":
+        return Columns3;
+      case "sheet":
+        return Table2;
+      case "container":
+        return Layers;
+      case "task":
+        // A clock reads "scheduled"; reserve the bolt for the context flag.
+        return Clock;
+      case "note":
+      default:
+        return FileText;
+    }
+  })();
+  return (
+    <span className={cn(tileBase, tile)}>
+      <Icon className={cn(glyph, ink)} />
+    </span>
+  );
 }
 
 /** Crude emoji test — good enough to decide "render this string directly"
