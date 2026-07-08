@@ -67,6 +67,13 @@ interface DocumentEditorModalProps {
    *  passes the items fetcher straight through to ``buildExtensions``.
    *  Omitted for normal Drive documents so their editor is unchanged. */
   wikiLink?: { items: (query: string) => Promise<WikiTarget[]> };
+  /** Inline-only: a leading glyph rendered before the title (the note
+   *  kind-icon), so the note bar's left cluster matches the shared
+   *  ``ItemPaneHeader`` canvas/sheet/board use. */
+  titleIcon?: React.ReactNode;
+  /** Inline-only: a control rendered right after the title — the
+   *  workspace ``⚡`` context toggle, mirroring ``ItemPaneHeader``. */
+  titleAdornment?: React.ReactNode;
 }
 
 type SaveStatus = "idle" | "dirty" | "syncing" | "saved" | "offline";
@@ -87,6 +94,8 @@ export function DocumentEditorModal({
   onFileUpdated,
   inline = false,
   wikiLink,
+  titleIcon,
+  titleAdornment,
 }: DocumentEditorModalProps) {
   const queryClient = useQueryClient();
   const { ydoc, provider, status: collabStatus, user, error } =
@@ -651,20 +660,29 @@ export function DocumentEditorModal({
         className={cardClass}
         onMouseDown={inline ? undefined : (e) => e.stopPropagation()}
       >
-      {/* Header */}
+      {/* Header — inline (workspace note) matches the shared ItemPaneHeader
+          chrome (bg / height, plus a leading kind-icon + ⚡ toggle) so every
+          item bar lines up; modal (Drive) keeps its own surface + notch
+          padding + rounded top. */}
       <div
         className={cn(
-          "flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2",
-          // Respect the notch on both sides + top of the sheet so
-          // the close button never ends up under the status bar on
-          // iOS PWA installs.
-          "pl-[max(env(safe-area-inset-left,0),0.75rem)]",
-          "pr-[max(env(safe-area-inset-right,0),0.75rem)]",
-          "pt-[max(env(safe-area-inset-top,0),0.5rem)] md:px-4",
-          // Round the top corners to match the card radius.
-          "md:rounded-t-2xl md:pt-2"
+          "flex shrink-0 items-center gap-2 border-b border-[var(--border)]",
+          inline
+            ? "bg-[var(--bg)] px-3 py-1.5"
+            : cn(
+                "bg-[var(--surface)] px-3 py-2",
+                // Respect the notch on both sides + top of the sheet so
+                // the close button never ends up under the status bar on
+                // iOS PWA installs.
+                "pl-[max(env(safe-area-inset-left,0),0.75rem)]",
+                "pr-[max(env(safe-area-inset-right,0),0.75rem)]",
+                "pt-[max(env(safe-area-inset-top,0),0.5rem)] md:px-4",
+                // Round the top corners to match the card radius.
+                "md:rounded-t-2xl md:pt-2"
+              )
         )}
       >
+        {inline && titleIcon}
         <input
           id="document-editor-title"
           value={filename}
@@ -688,6 +706,8 @@ export function DocumentEditorModal({
           )}
           aria-label="Document title"
         />
+
+        {inline && titleAdornment}
 
         <SaveIndicator
           status={saveStatus}

@@ -1426,7 +1426,6 @@ function TreeRow({
   const remove = useDeleteWorkspaceItem(workspaceId);
   const archive = useArchiveWorkspaceItem(workspaceId);
   const setContext = useSetItemContext(workspaceId);
-  const setPinned = useSetItemPinned(workspaceId);
   const duplicateItem = useDuplicateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
   const [chatBusy, setChatBusy] = useState(false);
@@ -1448,22 +1447,6 @@ function TreeRow({
   const contextOn = isChat
     ? node.context_enabled === true
     : node.context_enabled !== false;
-  const isPinned = node.pinned === true;
-
-  const handleTogglePin = async () => {
-    if (isChat) {
-      if (!node.ref_id) return;
-      setChatBusy(true);
-      try {
-        await chatApi.update(node.ref_id, { pinned: !isPinned });
-        invalidateTreeAndArchive();
-      } finally {
-        setChatBusy(false);
-      }
-    } else {
-      setPinned.mutate({ itemId: node.id, pinned: !isPinned });
-    }
-  };
   // Every item gets a menu now (archive then delete). Chats are
   // synthesised, so their archive/delete go through the conversation
   // endpoints; folders/notes/canvases through the workspace_items ones.
@@ -1695,34 +1678,9 @@ function TreeRow({
             <span className="w-3 shrink-0" />
           )}
 
-          {/* Context state: the *excluded* glyph is permanent (it's the
-              exception worth flagging); the *included* glyph fades in on
-              row hover so the on-state is discoverable without turning the
-              rail into a wall of identical bolts. Toggle stays in ⋯.
-              Non-context rows (folders, automations) reserve the same column
-              with an empty spacer so every row's icon + title stay aligned. */}
-          {isContextItem ? (
-            contextOn ? (
-              <span
-                title="Included in this workspace's chat context. Toggle via the ⋯ menu."
-                aria-label="Included in workspace context"
-                className="inline-flex shrink-0 items-center text-[var(--accent)]/80 opacity-0 transition-opacity group-hover:opacity-100"
-              >
-                <Zap className="h-3 w-3 fill-current" />
-              </span>
-            ) : (
-              <span
-                title="Excluded from this workspace's chat context. Toggle via the ⋯ menu."
-                aria-label="Excluded from workspace context"
-                className="inline-flex shrink-0 items-center text-[var(--text-muted)]/70"
-              >
-                <ZapOff className="h-3 w-3" />
-              </span>
-            )
-          ) : (
-            <span className="w-3 shrink-0" aria-hidden />
-          )}
-
+          {/* Context state moved off the left rail (it padded every row) to
+              a hover toggle on the right, where the pin button used to sit —
+              see NodeActions. */}
           <NodeIcon node={node} expanded={expanded || !!isDropParent} />
 
           {renaming ? (
@@ -1773,8 +1731,6 @@ function TreeRow({
             }}
             onArchive={handleArchive}
             onDelete={handleDelete}
-            pinned={isPinned}
-            onTogglePin={handleTogglePin}
             onOpenToSide={
               !isFolder && onOpenToSide ? () => onOpenToSide(node) : undefined
             }
@@ -1944,8 +1900,6 @@ function NodeActions({
   onRename,
   onArchive,
   onDelete,
-  pinned,
-  onTogglePin,
   onOpenToSide,
   contextState,
   onToggleContext,
@@ -1966,8 +1920,6 @@ function NodeActions({
   onRename?: () => void;
   onArchive: () => void;
   onDelete: () => void;
-  pinned?: boolean;
-  onTogglePin?: () => void;
   /** Open this item alongside the current one (split-screen). */
   onOpenToSide?: () => void;
   /** "on" / "off" for note+canvas (workspace-context toggle); null otherwise. */
@@ -1996,24 +1948,40 @@ function NodeActions({
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="flex shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
-      {onTogglePin && (
-        <button
-          type="button"
-          title={pinned ? "Unpin" : "Pin to top"}
-          aria-label={pinned ? "Unpin" : "Pin to top"}
-          onClick={(e) => {
-            e.stopPropagation();
-            onTogglePin();
-          }}
-          className="rounded p-1 text-[var(--text-muted)] transition hover:bg-[var(--accent)]/10 hover:text-[var(--text)]"
+    <div className="flex shrink-0 items-center gap-0.5">
+      {/* Workspace-context *indicator* — sits where the pin button used to
+          (pin was dropped; drag-to-Pinned covers it). Read-only: the toggle
+          lives in the ⋯ menu. The *excluded* state stays visible at rest
+          because it's the exception worth flagging; the *included* zap fades
+          in on row hover so the rail isn't a wall of identical bolts. */}
+      {contextState && (
+        <span
+          title={
+            contextState === "on"
+              ? "In this workspace's chat context — toggle in the ⋯ menu"
+              : "Excluded from chat context — toggle in the ⋯ menu"
+          }
+          aria-label={
+            contextState === "on"
+              ? "In workspace context"
+              : "Excluded from workspace context"
+          }
+          className={cn(
+            "inline-flex items-center p-1",
+            contextState === "on"
+              ? "text-[var(--accent)]/80 opacity-0 group-hover:opacity-100"
+              : "text-[var(--text-muted)]"
+          )}
         >
-          <Pin
-            className={cn("h-3.5 w-3.5", pinned && "fill-current text-[var(--accent)]")}
-          />
-        </button>
+          {contextState === "on" ? (
+            <Zap className="h-3.5 w-3.5 fill-current" />
+          ) : (
+            <ZapOff className="h-3.5 w-3.5" />
+          )}
+        </span>
       )}
-      <div className="relative">
+      <div className="flex items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+        <div className="relative">
         <button
           type="button"
           title="More"
@@ -2220,6 +2188,7 @@ function NodeActions({
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   );

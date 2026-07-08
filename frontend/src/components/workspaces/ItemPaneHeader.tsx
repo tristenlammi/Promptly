@@ -74,12 +74,10 @@ export function ItemPaneHeader({
   const { data: tree } = useWorkspaceTree(workspaceId);
   const live = findNode(tree ?? [], itemId);
   const title = live?.title ?? fallbackTitle;
-  const contextOn = (live?.context_enabled ?? true) !== false;
   // Synthesised nodes (automations) aren't workspace items — no ⚡/PATCH.
   const isRealItem = kind !== "task";
 
   const updateItem = useUpdateWorkspaceItem(workspaceId);
-  const setContext = useSetItemContext(workspaceId);
   const duplicate = useDuplicateWorkspaceItem(workspaceId);
 
   const [editing, setEditing] = useState(false);
@@ -137,31 +135,11 @@ export function ItemPaneHeader({
       )}
 
       {isRealItem && (
-        <button
-          type="button"
-          disabled={!canEdit || setContext.isPending}
-          onClick={() =>
-            setContext.mutate({ itemId, enabled: !contextOn })
-          }
-          title={
-            contextOn
-              ? "Included in this workspace's chat context — click to exclude"
-              : "Excluded from this workspace's chat context — click to include"
-          }
-          aria-pressed={contextOn}
-          className={cn(
-            "shrink-0 rounded p-1 transition disabled:cursor-default disabled:opacity-60",
-            contextOn
-              ? "text-[var(--accent)] hover:bg-[var(--accent)]/10"
-              : "text-[var(--text-muted)]/70 hover:bg-[var(--hover)]"
-          )}
-        >
-          {contextOn ? (
-            <Zap className="h-3.5 w-3.5 fill-current" />
-          ) : (
-            <ZapOff className="h-3.5 w-3.5" />
-          )}
-        </button>
+        <ItemContextToggle
+          workspaceId={workspaceId}
+          itemId={itemId}
+          canEdit={canEdit}
+        />
       )}
 
       {canEdit && DUPLICABLE.includes(kind) && (
@@ -186,6 +164,52 @@ export function ItemPaneHeader({
         {extra}
       </span>
     </div>
+  );
+}
+
+/**
+ * The ⚡ "use this item as workspace chat context" toggle. Extracted so
+ * panes that don't use {@link ItemPaneHeader} (notes keep the document
+ * editor's own header) can drop in the identical control. Reads the live
+ * ``context_enabled`` from the tree so it stays in sync with the navigator.
+ */
+export function ItemContextToggle({
+  workspaceId,
+  itemId,
+  canEdit,
+}: {
+  workspaceId: string;
+  itemId: string;
+  canEdit: boolean;
+}) {
+  const { data: tree } = useWorkspaceTree(workspaceId);
+  const live = findNode(tree ?? [], itemId);
+  const contextOn = (live?.context_enabled ?? true) !== false;
+  const setContext = useSetItemContext(workspaceId);
+  return (
+    <button
+      type="button"
+      disabled={!canEdit || setContext.isPending}
+      onClick={() => setContext.mutate({ itemId, enabled: !contextOn })}
+      title={
+        contextOn
+          ? "Included in this workspace's chat context — click to exclude"
+          : "Excluded from this workspace's chat context — click to include"
+      }
+      aria-pressed={contextOn}
+      className={cn(
+        "shrink-0 rounded p-1 transition disabled:cursor-default disabled:opacity-60",
+        contextOn
+          ? "text-[var(--accent)] hover:bg-[var(--accent)]/10"
+          : "text-[var(--text-muted)]/70 hover:bg-[var(--hover)]"
+      )}
+    >
+      {contextOn ? (
+        <Zap className="h-3.5 w-3.5 fill-current" />
+      ) : (
+        <ZapOff className="h-3.5 w-3.5" />
+      )}
+    </button>
   );
 }
 

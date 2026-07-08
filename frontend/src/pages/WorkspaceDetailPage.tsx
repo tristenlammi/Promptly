@@ -77,6 +77,7 @@ import {
   recordRecentItem,
 } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
+import { ItemContextToggle } from "@/components/workspaces/ItemPaneHeader";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
@@ -1199,16 +1200,12 @@ function WorkspaceItemView({
   }
   if (node.kind === "board") {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl px-6 py-6">
-          <WorkspaceBoardPane
-            workspaceId={workspaceId}
-            boardItemId={node.id}
-            canEdit={canEdit}
-            onOpenItem={onOpenItem}
-          />
-        </div>
-      </div>
+      <WorkspaceBoardPane
+        workspaceId={workspaceId}
+        boardItemId={node.id}
+        canEdit={canEdit}
+        onOpenItem={onOpenItem}
+      />
     );
   }
   if (node.kind === "container") {
@@ -1433,6 +1430,18 @@ function WorkspaceNotePane({
             syncNoteTitle(f);
           }}
           wikiLink={wikiLink}
+          // Match the shared ItemPaneHeader's left cluster: note kind-icon
+          // + the ⚡ workspace-context toggle canvas/sheet/board all show.
+          titleIcon={
+            <StickyNote className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          }
+          titleAdornment={
+            <ItemContextToggle
+              workspaceId={workspaceId}
+              itemId={node.id}
+              canEdit={canEdit}
+            />
+          }
         />
       </div>
       <BacklinksPanel

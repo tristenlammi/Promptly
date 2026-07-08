@@ -470,19 +470,21 @@ export function WorkspaceBoardPane({
   };
 
   return (
-    <section>
-      {/* Header — unified item chrome (editable title / ⚡ / duplicate /
-          save feedback) on row one, the board's own view controls below. */}
-      <div className="mb-3 -mx-3">
-        <ItemPaneHeader
-          workspaceId={workspaceId}
-          itemId={boardItemId}
-          kind="board"
-          fallbackTitle={boardItem?.title ?? "Board"}
-          canEdit={canEdit}
-          status={<BoardSaveChip workspaceId={workspaceId} />}
-        />
-      </div>
+    <section className="flex min-h-0 flex-1 flex-col">
+      {/* Full-bleed header — the same unified item chrome (editable title /
+          ⚡ / duplicate / save feedback) canvas & sheet use, spanning the
+          pane edge-to-edge so all item bars line up. The board's own view
+          controls live in the centred body below. */}
+      <ItemPaneHeader
+        workspaceId={workspaceId}
+        itemId={boardItemId}
+        kind="board"
+        fallbackTitle={boardItem?.title ?? "Board"}
+        canEdit={canEdit}
+        status={<BoardSaveChip workspaceId={workspaceId} />}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-5xl px-6 py-6">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-[11px] text-[var(--text-muted)]">
@@ -872,6 +874,8 @@ export function WorkspaceBoardPane({
           })}
         </div>
       ) : null}
+        </div>
+      </div>
 
       {openTask && (
         <WorkspaceBoardCardDetail
