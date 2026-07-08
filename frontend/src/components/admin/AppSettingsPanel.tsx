@@ -14,7 +14,8 @@ import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
 import { cn } from "@/utils/cn";
 import type { AppSettings } from "@/api/types";
-import type { AppSettingsPatch } from "@/api/admin";
+import { adminApi, type AppSettingsPatch } from "@/api/admin";
+import { apiErrorMessage } from "@/utils/apiError";
 
 import { SettingsCard } from "./SettingsCard";
 
@@ -661,6 +662,15 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [clearPassword, setClearPassword] = useState(false);
+  // ISPDB autoconfig ("type your email, servers fill in") — same as the
+  // onboarding wizard, so an admin who skipped SMTP at setup gets the magic
+  // here too.
+  const [detecting, setDetecting] = useState(false);
+  const [providerNote, setProviderNote] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    { ok: boolean; msg: string } | null
+  >(null);
 
   // Resync if the source-of-truth changes (after a successful save or
   // a refetch). Don't blow away an in-progress edit by a stale fetch.
@@ -668,6 +678,58 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
     setForm(initial);
     setClearPassword(false);
   }, [initial]);
+
+  const isGmail = /@(gmail|googlemail)\.com$/i.test(
+    (form.smtp_from_address || form.smtp_username).trim()
+  );
+
+  // Look the address up in Mozilla's ISPDB and fill in the server fields.
+  // Non-destructive: only populates blanks, so it never clobbers settings an
+  // admin has already typed (or a stored config being edited).
+  const detect = async (addr: string) => {
+    const email = addr.trim();
+    if (!email.includes("@")) return;
+    setDetecting(true);
+    setProviderNote(null);
+    try {
+      const cfg = await adminApi.emailAutoconfig(email);
+      if (!cfg.found) return;
+      setForm((prev) => ({
+        ...prev,
+        smtp_host: prev.smtp_host || cfg.host || "",
+        smtp_port:
+          prev.smtp_port || (cfg.port != null ? String(cfg.port) : ""),
+        smtp_username: prev.smtp_username || cfg.username || email,
+        smtp_use_tls:
+          typeof cfg.use_tls === "boolean" ? cfg.use_tls : prev.smtp_use_tls,
+      }));
+      if (cfg.note) setProviderNote(cfg.note);
+      setSavedAt(null);
+    } catch {
+      // Best-effort — leave the fields for manual entry.
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      await adminApi.sendTestEmail();
+      setTestResult({
+        ok: true,
+        msg: "Test email sent — check your inbox.",
+      });
+    } catch (err) {
+      setTestResult({
+        ok: false,
+        msg: apiErrorMessage(err, "Couldn't send the test email."),
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const dirty = useMemo(() => {
     if (clearPassword) return true;
@@ -760,6 +822,22 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
               Saved
             </span>
           )}
+          {settings.smtp_configured && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={sendTest}
+              loading={testing}
+              disabled={busy}
+              title={
+                dirty
+                  ? "Tests the saved settings — save your changes first to test them"
+                  : "Send a test email to your own address"
+              }
+            >
+              Send test
+            </Button>
+          )}
           {dirty && (
             <Button
               variant="ghost"
@@ -786,12 +864,38 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
         </>
       }
     >
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
-        Used by 2FA email codes and any future transactional mail
-        (password resets, account notices). The password is encrypted at
-        rest with the same key used for provider API keys, and is never
-        returned by the API after it's been saved.
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Powers sign-in codes, notifications, automations, and feedback. Enter
+        your email in <span className="font-medium">From address</span> and the
+        server settings fill in automatically (via Mozilla's provider
+        database). The password is encrypted at rest with the same key used for
+        provider API keys, and is never returned by the API after it's saved.
       </p>
+
+      {detecting && (
+        <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+          Looking up your provider's settings…
+        </p>
+      )}
+      {isGmail && (
+        <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+          Using Gmail? You'll need an{" "}
+          <a
+            href="https://myaccount.google.com/apppasswords"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--accent)] underline"
+          >
+            App Password
+          </a>{" "}
+          (turn on 2-Step Verification first) — your normal password won't work.
+        </p>
+      )}
+      {providerNote && (
+        <div className="mb-3 rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          {providerNote}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field
@@ -813,6 +917,7 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
           label="Username"
           value={form.smtp_username}
           onChange={(v) => setField("smtp_username", v)}
+          onBlur={() => void detect(form.smtp_username)}
           placeholder="noreply@example.com"
           autoComplete="off"
           disabled={busy}
@@ -850,6 +955,7 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
           label="From address"
           value={form.smtp_from_address}
           onChange={(v) => setField("smtp_from_address", v)}
+          onBlur={() => void detect(form.smtp_from_address)}
           placeholder="noreply@example.com"
           type="email"
           disabled={busy}
@@ -878,6 +984,20 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
           disabled={busy}
         />
       </div>
+
+      {testResult && (
+        <div
+          role="status"
+          className={cn(
+            "mt-3 rounded-card border px-3 py-2 text-xs",
+            testResult.ok
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+          )}
+        >
+          {testResult.msg}
+        </div>
+      )}
     </SettingsCard>
   );
 }
@@ -890,6 +1010,7 @@ function Field({
   label,
   value,
   onChange,
+  onBlur,
   placeholder,
   type = "text",
   disabled,
@@ -900,6 +1021,7 @@ function Field({
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   type?: string;
   disabled?: boolean;
@@ -916,6 +1038,7 @@ function Field({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         disabled={disabled}
         autoComplete={autoComplete}
