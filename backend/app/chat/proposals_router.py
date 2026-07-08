@@ -116,7 +116,17 @@ async def dismiss_proposal(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ProposalRow:
-    p = await _load_owned_pending(db, proposal_id, user)
+    """Remove a proposal card from the chat. For a *pending* proposal this
+    rejects it (nothing was written). For an *already-applied* one it just
+    clears the banner — the change stays on the board/note; only the chat
+    trail is tidied."""
+    p = await db.get(WorkspaceProposal, proposal_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found"
+        )
+    if p.status == "dismissed":
+        return _to_row(p)  # already gone — idempotent
     p.status = "dismissed"
     p.resolved_at = datetime.now(timezone.utc)
     await db.commit()

@@ -211,14 +211,26 @@ function ProposalCard({
           Preview
         </button>
         {applied ? (
-          <button
-            type="button"
-            onClick={openApplied}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium text-[var(--success)] transition hover:bg-[var(--success-bg)]"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Open
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={openApplied}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium text-[var(--success)] transition hover:bg-[var(--success-bg)]"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open
+            </button>
+            <button
+              type="button"
+              onClick={onDismiss}
+              disabled={busy}
+              title="Clear this from the chat — the change stays applied"
+              aria-label="Clear applied proposal"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md p-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </>
         ) : (
           <>
             <button
