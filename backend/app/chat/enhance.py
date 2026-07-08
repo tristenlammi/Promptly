@@ -8,6 +8,7 @@ frontend shows a preview the user can accept or discard.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Final
 
 from app.chat.titler import _strip_think_blocks
@@ -31,18 +32,23 @@ _ENHANCE_SYSTEM_PROMPT: Final[str] = (
 )
 
 # Prose mode — improve a passage of a document (grammar/clarity/flow), not a
-# prompt. Used by the note editor's "AI enhance selection".
+# prompt. The note editor sends the selection as an HTML fragment so the model
+# preserves structure (headings stay headings, lists stay lists, etc.).
 _PROSE_SYSTEM_PROMPT: Final[str] = (
-    "You are a writing editor. Rewrite the passage the user gives you to be "
-    "clearer, tighter and better-flowing, fixing grammar and awkward "
-    "phrasing.\n\n"
+    "You are a copy editor. You are given an HTML fragment from a document. "
+    "Rewrite the TEXT to be clearer, tighter and better-flowing, fixing "
+    "grammar and awkward phrasing.\n\n"
     "Rules:\n"
+    "- PRESERVE the HTML structure and tags exactly: a heading keeps its same "
+    "heading tag, lists stay lists, each paragraph stays its own paragraph, "
+    "and inline tags (<strong>, <em>, <a>, <code>, <mark>, <s>, <u>) stay on "
+    "the right words. NEVER turn body text into a heading, and never merge "
+    "separate blocks into one.\n"
     "- Preserve the original meaning, intent, tone and language. Don't add "
-    "new facts, claims, or content the passage didn't have.\n"
-    "- Improve grammar, word choice, clarity and rhythm; cut redundancy.\n"
-    "- Keep roughly the same length and format (if it's a bullet, keep a "
-    "bullet; a sentence stays a sentence). Don't add headings or preamble.\n"
-    "- Output ONLY the rewritten passage as plain text — no quotes, no "
+    "new facts or content, and don't add tags, headings or sections that "
+    "weren't already there.\n"
+    "- Keep roughly the same length.\n"
+    "- Output ONLY the rewritten HTML fragment — no markdown code fences, no "
     "commentary, no 'Here is'."
 )
 
@@ -59,6 +65,11 @@ _MAX_OUTPUT_TOKENS: Final[int] = 1200
 
 def _sanitize(raw: str) -> str:
     cleaned = _strip_think_blocks(raw).strip()
+    # Peel a wrapping ```lang … ``` code fence the model sometimes adds
+    # around HTML/markdown despite the instruction.
+    fence = re.match(r"^```[a-zA-Z]*\s*\n?(.*?)\n?\s*```$", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1).strip()
     # Peel wrapping quotes/backticks a model sometimes adds despite the
     # instruction, without touching internal punctuation.
     for _ in range(3):
@@ -92,7 +103,9 @@ async def enhance_prompt(
 
     system = _SYSTEM_BY_MODE.get(mode, _ENHANCE_SYSTEM_PROMPT)
     user_lead = (
-        "Passage to improve:" if mode == "prose" else "Rough prompt to improve:"
+        "HTML fragment to improve:"
+        if mode == "prose"
+        else "Rough prompt to improve:"
     )
     messages = [ChatMessage(role="user", content=f"{user_lead}\n\n{draft}")]
 
