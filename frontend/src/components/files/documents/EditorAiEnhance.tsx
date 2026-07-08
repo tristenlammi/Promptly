@@ -59,28 +59,35 @@ export function EditorAiEnhance({ editor }: { editor: Editor }) {
     }
   };
 
-  if (!hasSelection && !busy) return null;
-
+  // IMPORTANT: the wrapper is ALWAYS mounted — we only toggle the button
+  // *inside* it. Mounting/unmounting this element as a sibling of the Tiptap
+  // DragHandle (whose DOM Tiptap repositions out from under React) makes
+  // React's insertBefore reference a node that's no longer a child of the
+  // container → "insertBefore … not a child of this node" on every
+  // selection. A stable wrapper never triggers that reconciliation.
+  const show = hasSelection || busy;
   return (
     <div className="absolute bottom-9 right-3 z-20 print:hidden">
-      <button
-        type="button"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={enhance}
-        disabled={busy}
-        title="Rewrite the selection with AI (clearer, tighter)"
-        className={cn(
-          "ai-enhance-ring inline-flex items-center gap-1.5 rounded-full bg-[var(--surface)] px-3 py-1.5",
-          "text-xs font-medium text-[var(--text)] shadow-lg transition disabled:opacity-80"
-        )}
-      >
-        {busy ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)]" />
-        ) : (
-          <Sparkles className="h-3.5 w-3.5 text-[var(--accent)]" />
-        )}
-        {busy ? "Enhancing…" : "Enhance"}
-      </button>
+      {show && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={enhance}
+          disabled={busy}
+          title="Rewrite the selection with AI (clearer, tighter)"
+          className={cn(
+            "ai-enhance-ring inline-flex items-center gap-1.5 rounded-full bg-[var(--surface)] px-3 py-1.5",
+            "text-xs font-medium text-[var(--text)] shadow-lg transition disabled:opacity-80"
+          )}
+        >
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)]" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5 text-[var(--accent)]" />
+          )}
+          {busy ? "Enhancing…" : "Enhance"}
+        </button>
+      )}
     </div>
   );
 }

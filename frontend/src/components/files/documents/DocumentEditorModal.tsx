@@ -1004,9 +1004,6 @@ export function DocumentEditorModal({
             </div>
           )}
         </div>
-        {/* AI "Enhance" the selection — a single-purpose selection button
-            (not a formatting bubble menu; the toolbar covers formatting). */}
-        {editor && !error && canEdit && <EditorAiEnhance editor={editor} />}
         {/* Block drag handle (MIT). Guarded on a live editor + no collab
             error. */}
         {editor && !error && canEdit && (
@@ -1022,6 +1019,12 @@ export function DocumentEditorModal({
         <DocumentOutline editor={editor} />
         <WordCountPill editor={editor} />
         <LinkHoverPreview containerRef={editorAreaRef} />
+        {/* AI "Enhance" the selection — rendered LAST (after the Tiptap
+            DragHandle) so its mount appends rather than inserting before the
+            DragHandle's Tiptap-moved DOM node; its wrapper is always mounted
+            (see EditorAiEnhance) to avoid the insertBefore reconciliation
+            error entirely. */}
+        {editor && !error && canEdit && <EditorAiEnhance editor={editor} />}
       </div>
 
       {historyOpen && (
