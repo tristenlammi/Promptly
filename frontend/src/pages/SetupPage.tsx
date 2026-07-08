@@ -4,6 +4,7 @@ import {
   Cloud,
   Globe,
   HardDrive,
+  Mail,
   ShieldCheck,
   Sparkles,
   Check,
@@ -38,8 +39,8 @@ import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
  * embedding provider is configured from the admin panel later, and
  * MFA stays available under Account → Security.
  */
-type Step = 1 | 2 | 3 | 4;
-const TOTAL_STEPS: Step = 4;
+type Step = 1 | 2 | 3 | 4 | 5;
+const TOTAL_STEPS: Step = 5;
 
 export function SetupPage() {
   const [step, setStep] = useState<Step>(1);
@@ -122,7 +123,9 @@ export function SetupPage() {
                   ? "Where will people reach Promptly?"
                   : step === 3
                     ? "How should knowledge libraries be embedded?"
-                    : "One last thing — protect your admin account."}
+                    : step === 4
+                      ? "Set up outgoing email (optional)."
+                      : "One last thing — protect your admin account."}
             </p>
           </div>
         </div>
@@ -149,7 +152,9 @@ export function SetupPage() {
 
         {step === 3 && <EmbeddingStep onDone={() => setStep(4)} />}
 
-        {step === 4 && <MfaStep email={email} onFinish={finish} />}
+        {step === 4 && <EmailStep onDone={() => setStep(5)} />}
+
+        {step === 5 && <MfaStep email={email} onFinish={finish} />}
       </div>
     </div>
   );
@@ -493,7 +498,7 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
         disabled={!done}
         onClick={onDone}
       >
-        Finish setup
+        Continue
       </Button>
     </div>
   );
@@ -557,6 +562,277 @@ function ProviderCard({
         </div>
       </div>
     </button>
+  );
+}
+
+// --------------------------------------------------------------------
+// Step 4 — outgoing email (SMTP)
+// --------------------------------------------------------------------
+
+function EmailStep({ onDone }: { onDone: () => void }) {
+  const [fromAddress, setFromAddress] = useState("");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  // Display name recipients see in the From header. Fixed here to keep the
+  // wizard compact; editable later under Admin → Settings.
+  const fromName = "Promptly";
+  const [useTls, setUseTls] = useState(true);
+
+  const [detecting, setDetecting] = useState(false);
+  const [providerNote, setProviderNote] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    { ok: boolean; msg: string } | null
+  >(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const isGmail = /@(gmail|googlemail)\.com$/i.test(fromAddress.trim());
+  const canSave =
+    fromAddress.trim() !== "" && host.trim() !== "" && port.trim() !== "";
+
+  // Type the address → look up the servers (Mozilla ISPDB). Best-effort:
+  // silently leaves the fields for manual entry if there's no match.
+  const detect = async (addr: string) => {
+    const email = addr.trim();
+    if (!email.includes("@")) return;
+    setDetecting(true);
+    setProviderNote(null);
+    try {
+      const cfg = await adminApi.emailAutoconfig(email);
+      if (cfg.found) {
+        if (cfg.host) setHost(cfg.host);
+        if (cfg.port) setPort(String(cfg.port));
+        if (typeof cfg.use_tls === "boolean") setUseTls(cfg.use_tls);
+        setUsername(cfg.username || email);
+        if (cfg.note) setProviderNote(cfg.note);
+      } else {
+        // No ISPDB entry — default the username to the address and let the
+        // operator fill the server in by hand.
+        setUsername((u) => u || email);
+      }
+    } catch {
+      setUsername((u) => u || email);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const save = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      await adminApi.updateAppSettings({
+        smtp_host: host.trim(),
+        smtp_port: Number(port),
+        smtp_username: username.trim() || null,
+        // Only send the password when the operator typed one (empty string
+        // would clear it server-side).
+        ...(password ? { smtp_password: password } : {}),
+        smtp_use_tls: useTls,
+        smtp_from_address: fromAddress.trim(),
+        smtp_from_name: fromName.trim() || null,
+      });
+      setSaved(true);
+      setTestResult(null);
+    } catch (err) {
+      setError(extractError(err, "Couldn't save the email settings."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      await adminApi.sendTestEmail();
+      setTestResult({
+        ok: true,
+        msg: `Test email sent to ${fromAddress.trim()}. Check your inbox.`,
+      });
+    } catch (err) {
+      setTestResult({
+        ok: false,
+        msg: extractError(err, "Couldn't send the test email."),
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2.5 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+        <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />
+        <div className="leading-relaxed">
+          Connect an email account so Promptly can send things like sign-in
+          codes, <span className="text-[var(--text)]">notifications</span>,{" "}
+          <span className="text-[var(--text)]">automations</span>, and{" "}
+          <span className="text-[var(--text)]">feedback</span>. Optional — you
+          can skip and set this up later in Admin → Settings.
+        </div>
+      </div>
+
+      <LabeledInput
+        label="Your email address"
+        type="email"
+        value={fromAddress}
+        onChange={(v) => {
+          setFromAddress(v);
+          setSaved(false);
+        }}
+        onBlur={() => void detect(fromAddress)}
+        placeholder="you@example.com"
+        autoFocus
+      />
+      {detecting && (
+        <p className="text-[11px] text-[var(--text-muted)]">
+          Looking up your provider's settings…
+        </p>
+      )}
+      {isGmail && (
+        <p className="text-[11px] text-[var(--text-muted)]">
+          Using Gmail? You'll need an{" "}
+          <a
+            href="https://myaccount.google.com/apppasswords"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--accent)] underline"
+          >
+            App Password
+          </a>{" "}
+          (turn on 2-Step Verification first) — your normal password won't work.
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <LabeledInput
+          label="SMTP host"
+          value={host}
+          onChange={(v) => {
+            setHost(v);
+            setSaved(false);
+          }}
+          placeholder="smtp.gmail.com"
+        />
+        <LabeledInput
+          label="Port"
+          value={port}
+          onChange={(v) => {
+            setPort(v.replace(/[^0-9]/g, ""));
+            setSaved(false);
+          }}
+          placeholder="587"
+          inputMode="numeric"
+        />
+      </div>
+      <LabeledInput
+        label="Username"
+        value={username}
+        onChange={(v) => {
+          setUsername(v);
+          setSaved(false);
+        }}
+        placeholder="you@example.com"
+        autoComplete="off"
+      />
+      <LabeledInput
+        label={isGmail ? "App password" : "Password"}
+        type="password"
+        value={password}
+        onChange={(v) => {
+          setPassword(v);
+          setSaved(false);
+        }}
+        autoComplete="new-password"
+      />
+      <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+        <input
+          type="checkbox"
+          checked={useTls}
+          onChange={(e) => {
+            setUseTls(e.target.checked);
+            setSaved(false);
+          }}
+        />
+        Use encryption (TLS / STARTTLS — recommended)
+      </label>
+
+      {providerNote && (
+        <div className="rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          {providerNote}
+        </div>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+        >
+          {error}
+        </div>
+      )}
+      {testResult && (
+        <div
+          role="status"
+          className={[
+            "rounded-card border px-3 py-2 text-xs",
+            testResult.ok
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400",
+          ].join(" ")}
+        >
+          {testResult.msg}
+        </div>
+      )}
+
+      {!saved ? (
+        <div className="flex gap-2 pt-1">
+          <Button
+            type="button"
+            variant="secondary"
+            className="flex-1"
+            onClick={onDone}
+            disabled={saving}
+          >
+            Skip for now
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            className="flex-1"
+            onClick={save}
+            disabled={!canSave}
+            loading={saving}
+          >
+            Save
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-2 pt-1">
+          <Button
+            type="button"
+            variant="secondary"
+            className="flex-1"
+            onClick={sendTest}
+            loading={testing}
+          >
+            Send test email
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            className="flex-1"
+            onClick={onDone}
+          >
+            Continue
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

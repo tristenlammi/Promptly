@@ -17,8 +17,11 @@ Security notes
 """
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
+from xml.etree import ElementTree as ET
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -522,3 +525,151 @@ async def preview_origin(
     canonical = _normalise_origin(payload.public_origin)
     warnings = get_settings().validate_wizard_safety(public_origin=canonical)
     return OriginPreviewResponse(canonical=canonical, warnings=warnings)
+
+
+# --------------------------------------------------------------------
+# Email autoconfig (Thunderbird-style "type your address, servers fill in")
+# --------------------------------------------------------------------
+# We look the domain up in Mozilla's public ISPDB — the same database
+# Thunderbird uses — which returns the SMTP host/port/security for Gmail,
+# Outlook, Yahoo, iCloud, Fastmail and thousands of ISPs. It only gives
+# *server settings*, never credentials, so the operator still enters their
+# username + password (an App Password for Gmail). Best-effort: if the
+# lookup fails (no ISPDB entry, or this box has no outbound internet), the
+# wizard just falls back to manual entry.
+_ISPDB_URL = "https://autoconfig.thunderbird.net/v1.1/{domain}"
+_DOMAIN_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9-]+)+$")
+
+
+class AutoconfigResponse(BaseModel):
+    found: bool
+    provider: str | None = None
+    host: str | None = None
+    port: int | None = None
+    # ``True`` for both SSL (implicit, port 465) and STARTTLS (587); the
+    # sender picks the exact mode by port. ``False`` only for plain relays.
+    use_tls: bool | None = None
+    username: str | None = None
+    # Set when the provider is known to require an app-specific password
+    # (e.g. Gmail with 2FA) rather than the plain account password.
+    note: str | None = None
+
+
+@router.get("/email-autoconfig", response_model=AutoconfigResponse)
+async def email_autoconfig(
+    email: str,
+    _: User = Depends(require_admin),
+) -> AutoconfigResponse:
+    """Best-effort SMTP settings for an email address, via Mozilla's ISPDB."""
+    domain = email.rsplit("@", 1)[-1].strip().lower()
+    # Guard the path segment: only a bare hostname ever reaches the URL, so a
+    # crafted "email" can't redirect the fetch anywhere but thunderbird.net.
+    if "@" not in email or not _DOMAIN_RE.match(domain):
+        return AutoconfigResponse(found=False)
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(_ISPDB_URL.format(domain=domain))
+        if resp.status_code != 200 or not resp.content:
+            return AutoconfigResponse(found=False)
+        # ISPDB is a fixed, trusted host serving small XML with no DTD; parse
+        # with the stdlib but cap the body so a surprise huge response can't
+        # blow up memory.
+        root = ET.fromstring(resp.content[: 256 * 1024])
+    except (httpx.HTTPError, ET.ParseError, ValueError):
+        return AutoconfigResponse(found=False)
+
+    smtp = root.find(".//outgoingServer[@type='smtp']")
+    if smtp is None:
+        return AutoconfigResponse(found=False)
+
+    def _text(tag: str) -> str | None:
+        el = smtp.find(tag)
+        return el.text.strip() if el is not None and el.text else None
+
+    host = _text("hostname")
+    port_raw = _text("port")
+    socket_type = (_text("socketType") or "").upper()
+    if not host or not port_raw:
+        return AutoconfigResponse(found=False)
+    try:
+        port = int(port_raw)
+    except ValueError:
+        return AutoconfigResponse(found=False)
+
+    # SSL / STARTTLS → encrypted; the sender picks implicit-vs-STARTTLS by
+    # port. Only an explicit "plain" means no encryption.
+    use_tls = socket_type != "PLAIN"
+
+    # Resolve the ISPDB username template against the real address.
+    localpart, _, _dom = email.partition("@")
+    username = _text("username") or "%EMAILADDRESS%"
+    username = (
+        username.replace("%EMAILADDRESS%", email)
+        .replace("%EMAILLOCALPART%", localpart)
+        .replace("%EMAILDOMAIN%", domain)
+    )
+
+    provider = None
+    prov_el = root.find(".//displayName")
+    if prov_el is not None and prov_el.text:
+        provider = prov_el.text.strip()
+
+    note = None
+    if domain in {"gmail.com", "googlemail.com"}:
+        note = (
+            "Gmail needs an App Password (turn on 2-Step Verification, then "
+            "create one) — your normal password won't work for SMTP."
+        )
+
+    return AutoconfigResponse(
+        found=True,
+        provider=provider,
+        host=host,
+        port=port,
+        use_tls=use_tls,
+        username=username,
+        note=note,
+    )
+
+
+@router.post("/test-email")
+async def send_test_email(
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> dict[str, bool]:
+    """Send a test email to the admin's own address to validate SMTP config."""
+    # Imported lazily to avoid pulling the SMTP stack into the module import
+    # graph before it's needed.
+    from app.mfa.smtp import (
+        SmtpNotConfiguredError,
+        SmtpSendError,
+        send_message,
+    )
+
+    try:
+        await send_message(
+            db,
+            to=actor.email,
+            subject="Promptly SMTP test",
+            text_body=(
+                "This is a test email from your Promptly install.\n\n"
+                "If you're reading this, outgoing email is working — "
+                "sign-in codes, notifications, automations, and feedback "
+                "will all be able to send.\n\n— Promptly\n"
+            ),
+        )
+    except SmtpNotConfiguredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="SMTP isn't configured yet — save your settings first.",
+        ) from e
+    except SmtpSendError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Couldn't send the test email. Double-check the host, port, "
+                "username and password (Gmail needs an App Password)."
+            ),
+        ) from e
+    return {"sent": True}

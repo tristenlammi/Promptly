@@ -84,6 +84,18 @@ export interface AuthEventsQuery {
  *   - ""        → clear the stored password
  *   - non-empty → encrypt + store
  */
+/** Result of the wizard's ISPDB email-autoconfig lookup. Server settings
+ *  only — never credentials. ``found: false`` = fall back to manual entry. */
+export interface EmailAutoconfig {
+  found: boolean;
+  provider?: string | null;
+  host?: string | null;
+  port?: number | null;
+  use_tls?: boolean | null;
+  username?: string | null;
+  note?: string | null;
+}
+
 export interface AppSettingsPatch {
   mfa_required?: boolean;
   smtp_host?: string | null;
@@ -287,6 +299,25 @@ export const adminApi = {
       { public_origin }
     );
     return data;
+  },
+
+  /**
+   * Wizard helper: look an email address up in Mozilla's ISPDB (the same DB
+   * Thunderbird uses) to prefill the SMTP host/port/security. Server settings
+   * only — the user still enters their username + password. Best-effort;
+   * ``found: false`` means "type it in manually".
+   */
+  async emailAutoconfig(email: string): Promise<EmailAutoconfig> {
+    const { data } = await apiClient.get<EmailAutoconfig>(
+      "/admin/app-settings/email-autoconfig",
+      { params: { email } }
+    );
+    return data;
+  },
+
+  /** Send a test email to the admin's own address to validate SMTP. */
+  async sendTestEmail(): Promise<void> {
+    await apiClient.post("/admin/app-settings/test-email");
   },
 
 

@@ -9,16 +9,13 @@ on a hot path (only fires when a user requests an OTP) and the
 
 TLS modes
 ---------
-We support two of aiosmtplib's three modes:
+Chosen per-port at send time so autoconfig-discovered providers work:
 
-* ``smtp_use_tls = True``  → STARTTLS upgrade (port 587, the modern
-  default for transactional mail).
-* ``smtp_use_tls = False`` → plain SMTP (port 25/2525, for self-hosted
-  relays inside trusted networks).
-
-Implicit-TLS (port 465) isn't exposed in the admin UI because the
-hosted SMTP services we expect operators to use (SES, SendGrid,
-Postmark, Mailgun, Brevo) all default to STARTTLS now.
+* port 465          → implicit TLS (Gmail's ISPDB entry, Yahoo, many others).
+* ``smtp_use_tls``  → STARTTLS upgrade (port 587, the modern default for
+  SES, SendGrid, Postmark, Mailgun, Brevo, …).
+* otherwise         → plain SMTP (port 25/2525, for self-hosted relays
+  inside trusted networks).
 """
 from __future__ import annotations
 
@@ -64,8 +61,13 @@ async def send_message(
     subject: str,
     text_body: str,
     html_body: str | None = None,
+    reply_to: str | None = None,
 ) -> None:
     """Send a single email.
+
+    ``reply_to`` sets the Reply-To header — used by the feedback mailer so a
+    reply lands with the person who submitted it, not the instance's SMTP
+    account.
 
     Raises
     ------
@@ -78,7 +80,7 @@ async def send_message(
     if not cfg.smtp_configured:
         raise SmtpNotConfiguredError(
             "SMTP is not configured. An administrator must set the SMTP "
-            "host, port, and from-address before email-based MFA can be used."
+            "host, port, and from-address before email can be sent."
         )
 
     msg = EmailMessage()
@@ -89,6 +91,8 @@ async def send_message(
         if cfg.smtp_from_name
         else cfg.smtp_from_address  # type: ignore[assignment]
     )
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
@@ -105,21 +109,29 @@ async def send_message(
                 "to re-save it after a SECRET_KEY rotation."
             ) from e
 
+    # Connection security, decided per-port so autoconfig-discovered
+    # providers "just work":
+    #   * port 465          → implicit TLS (``use_tls``). Gmail's ISPDB entry
+    #     and many providers list 465/SSL; the old code forced STARTTLS on it
+    #     and failed. Keying off the port fixes that without a schema change.
+    #   * ``smtp_use_tls``  → STARTTLS upgrade (port 587, the modern default).
+    #   * otherwise         → plain SMTP (port 25/2525, trusted relays).
+    if cfg.smtp_port == 465:
+        tls_kwargs = {"use_tls": True}
+    elif cfg.smtp_use_tls:
+        tls_kwargs = {"start_tls": True}
+    else:
+        tls_kwargs = {"start_tls": False}
+
     try:
-        # ``start_tls`` semantics:
-        #   True  → connect plain, then issue STARTTLS (port 587).
-        #   False → straight plain SMTP (port 25/2525). aiosmtplib still
-        #           supports it for self-hosted relays.
-        # Implicit TLS (port 465) is intentionally not surfaced in the
-        # admin UI, so we never set ``use_tls=True`` here.
         await aiosmtplib.send(
             msg,
             hostname=cfg.smtp_host,
             port=cfg.smtp_port,
             username=cfg.smtp_username or None,
             password=password,
-            start_tls=cfg.smtp_use_tls,
             timeout=15,
+            **tls_kwargs,
         )
     except Exception as e:  # noqa: BLE001 — must wrap; never bubble raw SMTP error
         logger.exception("SMTP send failed (host=%s port=%s)", cfg.smtp_host, cfg.smtp_port)

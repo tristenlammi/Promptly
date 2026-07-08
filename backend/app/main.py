@@ -333,6 +333,7 @@ from app.local_models.router import router as local_models_router  # noqa: E402
 from app.billing.router import router as billing_router  # noqa: E402
 from app.research.router import router as research_router  # noqa: E402
 from app.mfa.router import router as mfa_router  # noqa: E402
+from app.feedback.router import router as feedback_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
 from app.notifications.router import router as notifications_router  # noqa: E402
 from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
@@ -375,6 +376,8 @@ app.include_router(hooks_router, prefix="/api/hooks", tags=["hooks"])
 app.include_router(
     saved_prompts_router, prefix="/api/saved-prompts", tags=["saved-prompts"]
 )
+# In-app feedback → maintainer inbox via the instance's own SMTP.
+app.include_router(feedback_router, prefix="/api/feedback", tags=["feedback"])
 app.include_router(
     workspaces_router, prefix="/api/workspaces", tags=["workspaces"]
 )

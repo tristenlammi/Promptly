@@ -8,6 +8,7 @@ import {
   Folder,
   FolderPlus,
   LogOut,
+  MessageSquare,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -38,6 +39,7 @@ import { useWorkspaceInvites } from "@/hooks/useWorkspaces";
 import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
+import { FeedbackModal } from "@/components/feedback/FeedbackModal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
@@ -859,6 +861,7 @@ function UserFooter() {
   // automation results). Always rendered — unlike invites it's the
   // catch-up surface, so an empty state is still meaningful.
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const { data: inbox } = useInbox();
   const unreadCount = inbox?.unread_count ?? 0;
 
@@ -985,14 +988,26 @@ function UserFooter() {
         </button>
       </div>
       <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-[var(--text-muted)]">Theme</span>
-        <ThemeToggle />
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
+          title="Send feedback to the maintainer"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          Feedback
+        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[var(--text-muted)]">Theme</span>
+          <ThemeToggle />
+        </div>
       </div>
       <ShareInvitesPanel
         open={invitesOpen}
         onClose={() => setInvitesOpen(false)}
       />
       <InboxPanel open={inboxOpen} onClose={() => setInboxOpen(false)} />
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }
