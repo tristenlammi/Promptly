@@ -1,6 +1,11 @@
 import { apiClient } from "./client";
 
-export type SearchProviderType = "searxng" | "brave" | "tavily" | "google_pse";
+export type SearchProviderType =
+  | "searxng"
+  | "brave"
+  | "tavily"
+  | "google_pse"
+  | "openrouter";
 
 export interface SearchProviderRow {
   id: string;

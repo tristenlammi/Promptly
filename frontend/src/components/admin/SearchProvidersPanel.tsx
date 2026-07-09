@@ -32,6 +32,11 @@ const TYPE_INFO: Record<
   SearchProviderType,
   { label: string; hint: string; needsKey: boolean }
 > = {
+  openrouter: {
+    label: "OpenRouter",
+    hint: "Runs web search on OpenRouter (Exa) — the search happens on their infrastructure, so it dodges the CAPTCHA/rate-limit walls that block SearXNG. Paste an OpenRouter API key (create a dedicated one to cap search spend). Great primary.",
+    needsKey: true,
+  },
   tavily: {
     label: "Tavily",
     hint: "API key from tavily.com — 1,000 free searches/month, no card. Recommended fallback (or primary).",
@@ -395,7 +400,13 @@ function AddProviderModal({
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="tvly-…"
+              placeholder={
+                type === "openrouter"
+                  ? "sk-or-…"
+                  : type === "brave"
+                    ? "BSA…"
+                    : "tvly-…"
+              }
               autoComplete="off"
               className="w-full rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
             />

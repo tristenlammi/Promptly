@@ -40,7 +40,23 @@ SEARCH_MAX_BYTES = 4 * 1024 * 1024
 
 
 class SearchError(Exception):
-    """Raised when a search provider request fails."""
+    """Raised when a search provider request fails.
+
+    ``status_code`` carries the upstream HTTP status when the failure was an
+    error *response* (vs a transport error / timeout, where it's ``None``).
+    ``permanent`` marks failures that won't fix themselves on a retry — auth
+    (401/403), quota/billing (402/429) — so the failover layer can pause the
+    provider for a while and alert an admin rather than hammering it on every
+    search.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+    @property
+    def permanent(self) -> bool:
+        return self.status_code in (401, 402, 403, 429)
 
 
 def _api_key(provider: SearchProvider) -> str | None:
@@ -114,7 +130,8 @@ def _check_status(provider_label: str, resp: httpx.Response) -> None:
         return
     body_preview = resp.text[:200]
     raise SearchError(
-        f"{provider_label} error {resp.status_code}: {body_preview}"
+        f"{provider_label} error {resp.status_code}: {body_preview}",
+        status_code=resp.status_code,
     )
 
 
@@ -382,6 +399,102 @@ def _dedupe_results(results: list[SearchResult]) -> list[SearchResult]:
 
 
 # ------------------------------------------------------------------
+# OpenRouter web search
+# ------------------------------------------------------------------
+# OpenRouter has no standalone search endpoint — its web search is a *plugin*
+# on a chat completion (results powered by Exa, or native search for
+# Anthropic/OpenAI/Google/Perplexity/xAI models). So we run a minimal
+# completion with the ``web`` plugin forced on and harvest the ``url_citation``
+# annotations the model attaches. This runs the search on OpenRouter's
+# infrastructure (not the self-host's IP), which is the whole point: it isn't
+# subject to the CAPTCHA/rate-limit walls that block SearXNG's scraping.
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# ``openrouter/auto`` always resolves (OpenRouter routes it) so a stale model
+# slug can't break search; the token count here is tiny, and the Exa search
+# fee dominates cost, so the model choice barely matters. Admins can pin a
+# specific cheap model via ``config.model``.
+_OPENROUTER_DEFAULT_MODEL = "openrouter/auto"
+# The plugin call includes a model generation, so give it more room than the
+# snappy 10 s used for pure search APIs.
+_OPENROUTER_TIMEOUT_SECONDS = 30.0
+
+
+async def _search_openrouter(
+    provider: SearchProvider, query: str, count: int
+) -> list[SearchResult]:
+    api_key = _api_key(provider) or get_settings().OPENROUTER_API_KEY
+    if not api_key:
+        raise SearchError("OpenRouter search requires an API key")
+    model = (provider.config or {}).get("model") or _OPENROUTER_DEFAULT_MODEL
+
+    body = {
+        "model": model,
+        "plugins": [
+            {
+                "id": "web",
+                "engine": "exa",
+                "max_results": count,
+                "search_prompt": "Relevant, up-to-date web results:",
+            }
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"Search the web for: {query}\n"
+                    "Briefly list the most relevant, recent sources you find."
+                ),
+            }
+        ],
+        # Enough tokens for the model to actually cite several sources (that's
+        # what populates the annotations we harvest) without a long essay.
+        "max_tokens": 800,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        # OpenRouter asks integrators to identify themselves; also surfaces
+        # Promptly on the OpenRouter activity dashboard.
+        "HTTP-Referer": "https://chatpromptly.com",
+        "X-Title": "Promptly",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_OPENROUTER_TIMEOUT_SECONDS) as client:
+            resp = await client.post(_OPENROUTER_URL, json=body, headers=headers)
+    except httpx.HTTPError as e:
+        raise SearchError(f"OpenRouter request failed: {e}") from e
+    _check_status("OpenRouter", resp)
+
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise SearchError("OpenRouter returned non-JSON") from e
+
+    out: list[SearchResult] = []
+    seen: set[str] = set()
+    for choice in data.get("choices", []) or []:
+        message = (choice or {}).get("message") or {}
+        for ann in message.get("annotations") or []:
+            if not isinstance(ann, dict) or ann.get("type") != "url_citation":
+                continue
+            cite = ann.get("url_citation") or {}
+            url = str(cite.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            out.append(
+                SearchResult(
+                    title=str(cite.get("title") or url).strip(),
+                    url=url,
+                    snippet=str(cite.get("content") or "").strip(),
+                )
+            )
+            if len(out) >= count:
+                return out
+    return out
+
+
+# ------------------------------------------------------------------
 # Dispatcher
 # ------------------------------------------------------------------
 _ADAPTERS = {
@@ -389,6 +502,7 @@ _ADAPTERS = {
     "brave": _search_brave,
     "tavily": _search_tavily,
     "google_pse": _search_google_pse,
+    "openrouter": _search_openrouter,
 }
 
 

@@ -7,7 +7,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SearchProviderType = Literal["searxng", "brave", "tavily", "google_pse"]
+SearchProviderType = Literal[
+    "searxng", "brave", "tavily", "google_pse", "openrouter"
+]
 
 
 class SearchResult(BaseModel):
@@ -38,6 +40,9 @@ class SearchProviderCreate(BaseModel):
     #     secret; lives next to ``api_key`` in config)
     #   * ``safe`` — Google PSE SafeSearch level ("active" | "off")
     #   * ``search_depth`` — Tavily ("basic" | "advanced")
+    #   * ``model`` — OpenRouter: pin a specific cheap model for the search
+    #     completion (default ``openrouter/auto``). ``api_key`` is optional —
+    #     falls back to the instance ``OPENROUTER_API_KEY``.
     #   * ``result_count`` — int, optional per-provider override of the
     #     global ``SEARCH_RESULT_COUNT`` setting.
     config: dict[str, Any] = Field(default_factory=dict)
