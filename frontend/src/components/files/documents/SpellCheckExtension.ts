@@ -1,5 +1,5 @@
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -80,6 +80,8 @@ const SKIP_NODES = new Set(["codeBlock", "mention"]);
 // don't get flagged or corrected.
 const WORD_RE = /\p{L}[\p{L}'’-]*/gu;
 const WORD_TAIL_RE = /([\p{L}][\p{L}'’-]*)$/u;
+// A single word-constituent character (for expanding a click to its word).
+const WORD_CHAR_RE = /[\p{L}'’-]/u;
 // Characters that end a word for autocorrect purposes.
 const BOUNDARY_RE = /[\s.,;:!?)\]}"»]/;
 
@@ -94,6 +96,54 @@ function shouldSkip(node: PMNode, parent: PMNode | null): boolean {
 
 function trim(word: string): string {
   return word.replace(/^['’-]+|['’-]+$/g, "");
+}
+
+/**
+ * The misspelled word span at a document position, or null.
+ *
+ * Deliberately independent of the decoration set: the decorations skip the
+ * word the caret is inside (so it isn't underlined mid-typing), but clicking a
+ * squiggle moves the caret into that very word *before* ``handleClick`` runs —
+ * so reading the decoration set there would miss it (the "nothing happens
+ * unless I select it first" bug). Scanning the doc at the click position finds
+ * the word regardless of caret/selection. Uses the same per-text-node word
+ * semantics as ``buildDecorations`` so what's clickable matches what's flagged.
+ */
+function misspelledWordAt(
+  state: EditorState,
+  pos: number,
+  spell: NspellLike,
+  ignored: Set<string>
+): { from: number; to: number; word: string } | null {
+  const $pos = state.doc.resolve(pos);
+  const parent = $pos.parent;
+  if (SKIP_NODES.has(parent.type.name)) return null;
+  const contentStart = $pos.start();
+  let result: { from: number; to: number; word: string } | null = null;
+  let handled = false;
+  parent.descendants((node, offset) => {
+    if (handled || !node.isText || !node.text) return;
+    const nodeStart = contentStart + offset;
+    const nodeEnd = nodeStart + node.text.length;
+    if (pos < nodeStart || pos > nodeEnd) return;
+    handled = true;
+    if (node.marks.some((m) => SKIP_MARKS.has(m.type.name))) return false;
+    const text = node.text;
+    let a = pos - nodeStart;
+    let b = a;
+    while (a > 0 && WORD_CHAR_RE.test(text[a - 1])) a--;
+    while (b < text.length && WORD_CHAR_RE.test(text[b])) b++;
+    const clean = trim(text.slice(a, b));
+    if (
+      clean.length >= 2 &&
+      !ignored.has(clean.toLowerCase()) &&
+      !spell.correct(clean)
+    ) {
+      result = { from: nodeStart + a, to: nodeStart + b, word: clean };
+    }
+    return false;
+  });
+  return result;
 }
 
 function buildDecorations(
@@ -291,15 +341,13 @@ export const SpellCheckExtension = Extension.create<SpellCheckOptions>({
           },
           handleClick(view, pos, event) {
             const st = spellCheckPluginKey.getState(view.state);
-            if (!st?.enabled || st.deco === DecorationSet.empty) return false;
-            const hit = st.deco.find(pos, pos);
-            if (hit.length === 0) return false;
-            const { from, to } = hit[0];
-            const word = trim(view.state.doc.textBetween(from, to));
+            if (!st?.enabled || !st.spell) return false;
+            const hit = misspelledWordAt(view.state, pos, st.spell, st.ignored);
+            if (!hit) return false;
             options.onWordClick?.({
-              word,
-              from,
-              to,
+              word: hit.word,
+              from: hit.from,
+              to: hit.to,
               x: (event as MouseEvent).clientX,
               y: (event as MouseEvent).clientY,
             });
