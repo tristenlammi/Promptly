@@ -1166,7 +1166,6 @@ export const workspacesApi = {
     id: string;
     title: string;
     notes: number;
-    folders: number;
     skipped: number;
   }> {
     const form = new FormData();

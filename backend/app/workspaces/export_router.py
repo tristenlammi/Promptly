@@ -486,13 +486,13 @@ async def import_workspace(
     """Build a new workspace from a zip of Markdown files.
 
     Understands the folder layout of Obsidian vaults and Notion /
-    Confluence Markdown exports: directories become workspace folders,
-    ``.md`` files become collaborative notes. Non-Markdown entries
-    (images, attachments) are skipped and counted in the response.
+    Confluence Markdown exports: ``.md`` files become collaborative notes at
+    the top level (folders were removed as a grouping primitive, so the
+    directory path is folded into each note's title instead). Non-Markdown
+    entries (images, attachments) are skipped and counted in the response.
     """
     from app.files.system_folders import create_workspace_folder_tree
     from app.workspaces.content_seed import create_note_with_item
-    from app.workspaces.items_router import _next_position
     from app.workspaces.knowledge import index_note_for_workspace
 
     try:
@@ -545,36 +545,17 @@ async def import_workspace(
     ws_folder = await create_workspace_folder_tree(db, user, ws.title)
     ws.root_folder_id = ws_folder.id
 
-    # Directories → nested folder items. Created lazily so empty dirs
-    # (asset-only after filtering) don't leave hollow folders behind.
-    folder_ids: dict[str, uuid.UUID] = {}
-
-    async def _folder_for(dir_path: str) -> uuid.UUID | None:
-        if not dir_path:
-            return None
-        if dir_path in folder_ids:
-            return folder_ids[dir_path]
-        parent = await _folder_for(posixpath.dirname(dir_path))
-        pos = await _next_position(db, ws.id, parent)
-        folder = WorkspaceItem(
-            workspace_id=ws.id,
-            parent_id=parent,
-            kind="folder",
-            title=posixpath.basename(dir_path)[:200],
-            position=pos,
-            created_by=user.id,
-        )
-        db.add(folder)
-        await db.flush()
-        folder_ids[dir_path] = folder.id
-        return folder.id
-
+    # Folders were removed as a workspace grouping primitive, so a nested
+    # export can't be rebuilt as a folder tree (and notebooks can't nest).
+    # Import every note at the top level instead, folding the sub-directory
+    # path into the title so the original structure stays legible — e.g.
+    # "Specs/2024/API.md" becomes a note titled "Specs / 2024 / API".
     note_item_ids: list[uuid.UUID] = []
     for path, info in sorted(entries, key=lambda e: e[0]):
         raw = zf.read(info)
         markdown = raw.decode("utf-8", errors="replace")
-        parent_id = await _folder_for(posixpath.dirname(path))
-        note_title = posixpath.splitext(posixpath.basename(path))[0][:200]
+        stem = posixpath.splitext(path)[0]  # drop ".md", keep the dir path
+        note_title = stem.replace("/", " / ")[:200]
         item = await create_note_with_item(
             db,
             ws=ws,
@@ -582,7 +563,7 @@ async def import_workspace(
             creator_id=user.id,
             title=note_title,
             markdown=markdown,
-            parent_id=parent_id,
+            parent_id=None,
         )
         note_item_ids.append(item.id)
 
@@ -592,7 +573,7 @@ async def import_workspace(
         request=request,
         user_id=user.id,
         detail=f'"{ws.title}" (ws={ws.id}) — {len(note_item_ids)} note(s), '
-        f"{len(folder_ids)} folder(s), {skipped} entr(ies) skipped",
+        f"{skipped} entr(ies) skipped",
     )
     await db.commit()
 
@@ -604,7 +585,6 @@ async def import_workspace(
         "id": str(ws.id),
         "title": ws.title,
         "notes": len(note_item_ids),
-        "folders": len(folder_ids),
         "skipped": skipped,
     }
 

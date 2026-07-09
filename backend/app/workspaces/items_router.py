@@ -1534,20 +1534,23 @@ async def move_workspace_item(
 async def _validate_placement_parent(
     db: AsyncSession, workspace_id: uuid.UUID, parent_id: uuid.UUID | None
 ) -> None:
-    """A synthesised node may sit at root or inside a *folder* — not
-    inside a notebook (those hold backing item pages) or another leaf."""
+    """A synthesised node (chat / automation) lives at the top level of the
+    workspace. Folders — their only former nest target — were removed, and a
+    notebook holds backing-item *pages* (a synthesised node has no item row to
+    render as a page), so nesting isn't supported: the parent must be root.
+
+    ``db`` / ``workspace_id`` are retained for signature stability with the
+    ``/place`` callers even though the root-only rule no longer needs a lookup.
+    """
     if parent_id is None:
         return
-    parent = await db.get(WorkspaceItem, parent_id)
-    if (
-        parent is None
-        or parent.workspace_id != workspace_id
-        or parent.kind != "folder"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A chat or automation can only be filed into a folder.",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "Chats and automations can't be nested — they live at the top "
+            "level of the workspace."
+        ),
+    )
 
 
 @router.post(

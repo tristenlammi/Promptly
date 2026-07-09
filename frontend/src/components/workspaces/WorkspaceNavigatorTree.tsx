@@ -902,13 +902,21 @@ function getProjection(
   const next = without[insertAt];
   const dragDepth = Math.round(dragOffset / INDENT);
   const projectedDepth = active.depth + dragDepth;
+  // Chats + automations are synthesised nodes with no backing item row. Folders
+  // — their only former nest target — are gone, and notebooks hold item-backed
+  // pages (a synthesised node can't be a page), so they can only live at root.
+  // Pin their projected depth to 0 so a drag can only ever reorder them there.
+  const activeIsSynth =
+    active.node.kind === "chat" || active.node.kind === "task";
   // Can only nest one level under the previous row, and only if it's a folder.
-  const maxDepth = prev
-    ? prev.node.kind === "folder"
-      ? prev.depth + 1
-      : prev.depth
-    : 0;
-  const minDepth = next ? next.depth : 0;
+  const maxDepth = activeIsSynth
+    ? 0
+    : prev
+      ? prev.node.kind === "folder"
+        ? prev.depth + 1
+        : prev.depth
+      : 0;
+  const minDepth = activeIsSynth ? 0 : next ? next.depth : 0;
   const depth = Math.max(minDepth, Math.min(projectedDepth, maxDepth));
 
   const parentId = (() => {
