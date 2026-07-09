@@ -38,8 +38,8 @@ const TYPE_INFO: Record<
 > = {
   openrouter: {
     label: "OpenRouter",
-    hint: "Runs web search on OpenRouter (Exa) — the search happens on their infrastructure, so it dodges the CAPTCHA/rate-limit walls that block SearXNG. Paste an OpenRouter API key (create a dedicated one to cap search spend). Great primary.",
-    needsKey: true,
+    hint: "Runs web search on OpenRouter (Exa) — the search happens on their infrastructure, so it dodges the CAPTCHA/rate-limit walls that block SearXNG. Reuses the OpenRouter key from Admin → Models automatically; paste a separate key only if you want to cap search spend on its own budget. Great primary.",
+    needsKey: false,
   },
   tavily: {
     label: "Tavily",
@@ -364,11 +364,13 @@ function AddProviderModal({
   const submit = async () => {
     setErr(null);
     const config: Record<string, unknown> = {};
-    if (info.needsKey) {
-      if (!apiKey.trim()) {
-        setErr("An API key is required for this provider.");
-        return;
-      }
+    if (info.needsKey && !apiKey.trim()) {
+      setErr("An API key is required for this provider.");
+      return;
+    }
+    // Required for keyed providers; optional for OpenRouter (blank = reuse the
+    // Admin → Models key).
+    if (apiKey.trim()) {
       config.api_key = apiKey.trim();
     }
     if (type === "searxng") {
@@ -455,16 +457,18 @@ function AddProviderModal({
           />
         </label>
 
-        {info.needsKey && (
+        {(info.needsKey || type === "openrouter") && (
           <label className="block text-sm">
-            <span className="mb-1 block text-[var(--text-muted)]">API key</span>
+            <span className="mb-1 block text-[var(--text-muted)]">
+              {type === "openrouter" ? "API key (optional)" : "API key"}
+            </span>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={
                 type === "openrouter"
-                  ? "sk-or-…"
+                  ? "leave blank to reuse your Models key"
                   : type === "brave"
                     ? "BSA…"
                     : "tvly-…"

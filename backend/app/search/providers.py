@@ -418,11 +418,74 @@ _OPENROUTER_DEFAULT_MODEL = "openrouter/auto"
 # snappy 10 s used for pure search APIs.
 _OPENROUTER_TIMEOUT_SECONDS = 30.0
 
+# Small TTL cache for the instance's OpenRouter *model-provider* key so search
+# can reuse it (see _instance_openrouter_key) without a DB hit on every query.
+_OR_KEY_CACHE: dict[str, object] = {"key": None, "at": 0.0}
+_OR_KEY_TTL_SECONDS = 60.0
+
+
+async def _instance_openrouter_key() -> str | None:
+    """Reuse the OpenRouter key the admin already configured in Admin → Models
+    (a ``ModelProvider`` row) so search doesn't ask for it twice. Cached briefly
+    so a busy search path (Deep Research fans out many queries) doesn't re-query
+    + re-decrypt each time."""
+    import time
+
+    now = time.monotonic()
+    if (
+        _OR_KEY_CACHE["key"] is not None
+        and now - float(_OR_KEY_CACHE["at"]) < _OR_KEY_TTL_SECONDS  # type: ignore[arg-type]
+    ):
+        return str(_OR_KEY_CACHE["key"])
+
+    key: str | None = None
+    try:
+        # Local imports keep providers.py's import-time deps minimal.
+        from sqlalchemy import select
+
+        from app.database import SessionLocal
+        from app.models_config.models import ModelProvider
+
+        async with SessionLocal() as s:
+            row = (
+                (
+                    await s.execute(
+                        select(ModelProvider)
+                        .where(
+                            ModelProvider.type == "openrouter",
+                            ModelProvider.enabled.is_(True),
+                            ModelProvider.api_key.is_not(None),
+                        )
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+        if row and row.api_key:
+            key = decrypt_secret(row.api_key)
+    except Exception:  # noqa: BLE001 — best-effort reuse; caller falls back
+        key = None
+
+    # Only cache a hit — leaving a miss uncached means a freshly-added
+    # OpenRouter model provider is picked up on the next search, not in 60 s.
+    if key is not None:
+        _OR_KEY_CACHE["key"] = key
+        _OR_KEY_CACHE["at"] = now
+    return key
+
 
 async def _search_openrouter(
     provider: SearchProvider, query: str, count: int
 ) -> list[SearchResult]:
-    api_key = _api_key(provider) or get_settings().OPENROUTER_API_KEY
+    # Key precedence: this provider's own key → the OpenRouter key already set
+    # up in Admin → Models → the env var. So an admin who's using OpenRouter
+    # for chat can add search with no key at all.
+    api_key = (
+        _api_key(provider)
+        or await _instance_openrouter_key()
+        or get_settings().OPENROUTER_API_KEY
+    )
     if not api_key:
         raise SearchError("OpenRouter search requires an API key")
     model = (provider.config or {}).get("model") or _OPENROUTER_DEFAULT_MODEL
