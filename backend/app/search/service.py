@@ -246,6 +246,28 @@ def _fallback_query(user_message: str) -> str:
     return text[:200]
 
 
+# Time-sensitive intent words. When one of these is present and the query has
+# no explicit year, we append the current year so "latest AI models" doesn't
+# return last year's SEO-optimised comparison articles.
+_RECENCY_RE = re.compile(
+    r"\b(latest|newest|current|recent|upcoming|nowadays|today)\b", re.IGNORECASE
+)
+_HAS_YEAR_RE = re.compile(r"\b20\d\d\b")
+
+
+def _augment_recency(query: str, now: datetime) -> str:
+    """Append the current year to a clearly time-sensitive query that lacks one.
+
+    Applied to *every* distillation path — including the short-query
+    short-circuit, which is exactly what let "Latest AI Models" reach the
+    search engine year-less and pull back a pile of prior-year articles."""
+    if not query:
+        return query
+    if _RECENCY_RE.search(query) and not _HAS_YEAR_RE.search(query):
+        return f"{query} {now.year}"
+    return query
+
+
 async def distill_query(
     user_message: str,
     *,
@@ -261,30 +283,36 @@ async def distill_query(
     msg = user_message.strip()
     if not msg:
         return ""
+    now = datetime.now(timezone.utc)
 
-    # Short, keyword-y inputs don't need distillation.
+    # Short, keyword-y inputs don't need distillation — but still recency-augment.
     if len(msg) < 60 and "\n" not in msg:
-        return msg
+        return _augment_recency(msg, now)
 
     if llm_provider is None or not llm_model_id:
-        return _fallback_query(msg)
+        return _augment_recency(_fallback_query(msg), now)
 
     try:
+        system = (
+            f"{_QUERY_DISTILLATION_PROMPT}\n"
+            f"Today's date is {now.strftime('%d %B %Y')}. If the request is "
+            "time-sensitive, add the current year so results are fresh."
+        )
         chunks: list[str] = []
         async for token in model_router.stream_chat(
             provider=llm_provider,
             model_id=llm_model_id,
             messages=[ChatMessage(role="user", content=msg)],
-            system=_QUERY_DISTILLATION_PROMPT,
+            system=system,
             temperature=0.0,
             max_tokens=40,
         ):
             chunks.append(token)
         distilled = "".join(chunks).strip().strip('"').strip("'")
-        return distilled or _fallback_query(msg)
+        return _augment_recency(distilled or _fallback_query(msg), now)
     except ProviderError as e:
         logger.warning("Query distillation failed, falling back to raw message: %s", e)
-        return _fallback_query(msg)
+        return _augment_recency(_fallback_query(msg), now)
 
 
 # --------------------------------------------------------------------
@@ -309,7 +337,11 @@ def format_results_for_prompt(results: list[SearchResult], query: str) -> str:
         f"The user asked: {query}\n"
         "Use these search results to inform your answer. Cite the numbered "
         "sources inline with [1], [2], etc. wherever you rely on them. If the "
-        "results don't answer the question, say so."
+        "results don't answer the question, say so.\n"
+        "For anything recent or time-sensitive, TRUST these sources over your "
+        "own prior knowledge — your training data may be out of date. Prefer "
+        "the most recent sources, and reconcile against today's date rather "
+        "than defaulting to your training cutoff."
     )
     return "\n".join(lines)
 

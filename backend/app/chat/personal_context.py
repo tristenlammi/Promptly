@@ -14,7 +14,7 @@ users (no empty header, no wasted tokens).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -61,14 +61,17 @@ def _format_local_now(zone: ZoneInfo) -> tuple[str, str, str]:
     return date_str, time_str, abbr
 
 
-def build_personal_context_prompt(user: User) -> str | None:
-    """Return the ambient-context block for ``user`` or ``None``.
+def build_personal_context_prompt(user: User) -> str:
+    """Return the ambient-context block for ``user`` — always non-empty.
 
-    Reads ``user.settings`` for ``location`` and ``timezone``. If
-    neither is set, returns ``None`` and the caller leaves the system
-    prompt untouched. If only one is set, the block degrades
-    gracefully — e.g. a user who set a location but not a timezone
-    still gets the location line, just no local-time line.
+    The **current date/time is always included** (in the user's timezone if
+    they set one, otherwise UTC) — knowing what day it is is a universal system
+    fact, not a personal preference, and gating it on settings meant a user who
+    never filled them in got no temporal anchor at all and answered as if it
+    were still the model's training-cutoff year. Locale rules (currency, units,
+    spelling, date format) stay gated on ``location`` / ``timezone`` /
+    ``currency`` being set, since those genuinely are personal and shouldn't be
+    guessed.
     """
     settings: Mapping[str, object] = user.settings or {}
     raw_location = settings.get("location")
@@ -87,40 +90,40 @@ def build_personal_context_prompt(user: User) -> str | None:
         else ""
     )
 
-    if not location and zone is None and not currency:
-        return None
-
     lines: list[str] = []
-    # Lead with a meta line so the model parses the block as
-    # background rather than as user-supplied content. The phrasing is
-    # tuned over a few iterations:
-    #
-    #   * "treat as background knowledge" → the model parses it as
-    #     ambient context, not a user statement to acknowledge.
-    #   * "do not call attention / thank / repeat back" → kills the
-    #     "I see you're in Sunshine Coast — based on that…" tic.
-    #   * "actively apply local conventions" → the load-bearing
-    #     sentence. Without it the model "knew" the user was in
-    #     Australia but still quoted prices in USD, dates in MM/DD/
-    #     YYYY, distances in miles, etc. The explicit "currency,
-    #     units, spelling, date/time format" enumeration makes the
-    #     defaulting unambiguous instead of leaving it to taste.
     lines.append(
-        "Ambient personal context (background knowledge about the "
-        "user's locale — treat as facts you already know):"
+        "Ambient context (background facts you already know — treat as known, "
+        "don't repeat back to the user):"
     )
+    # Date/time — ALWAYS present. Local when we have a timezone, else UTC.
     if zone is not None:
         date_str, time_str, abbr = _format_local_now(zone)
-        lines.append(f"- Today: {date_str}")
+        lines.append(f"- Today's date: {date_str}")
         tz_label = f"{abbr}, " if abbr else ""
+        lines.append(f"- Local time: {time_str} ({tz_label}{zone.key})")
+    else:
+        utc_now = datetime.now(timezone.utc)
+        lines.append(f"- Today's date: {utc_now.strftime('%A, %d %B %Y')} (UTC)")
         lines.append(
-            f"- Local time: {time_str} ({tz_label}{zone.key})"
+            f"- Current time: {utc_now.strftime('%I:%M %p').lstrip('0')} UTC"
         )
     if location:
         lines.append(f"- User location: {location}")
     if currency:
         lines.append(f"- Preferred currency: {currency}")
     lines.append("")
+
+    # Locale-application rules only make sense when there's a locale to apply.
+    has_locale = bool(location or currency or zone is not None)
+    if not has_locale:
+        lines.append(
+            "When the user asks for the date/time or anything time-sensitive, "
+            "anchor on the values above — never say you don't know the current "
+            "date, and don't fall back to your training cutoff. Treat your own "
+            "knowledge as potentially out of date for recent events. Don't call "
+            "attention to having this context."
+        )
+        return "\n".join(lines)
     # When the user has set an explicit currency, that's authoritative —
     # it overrides whatever the locale would imply, which is the whole
     # point (a user in one country may want prices in another currency).

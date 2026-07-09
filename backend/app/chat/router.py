@@ -4848,9 +4848,10 @@ async def _stream_generator(
         # background knowledge with an explicit "do not call attention
         # to it" instruction so the model just *knows* the user is on
         # the Sunshine Coast without thanking them for sharing it
-        # every turn. Returns ``None`` for users who haven't filled
-        # any of these fields, so the existing prompt is untouched
-        # and there's zero token overhead for the default account.
+        # every turn. Always includes the current date/time (UTC when the
+        # user hasn't set a timezone) so the model has a temporal anchor even
+        # on a default account; locale rules only appear once the user fills
+        # in location / timezone / currency.
         personal_context = build_personal_context_prompt(user)
         if personal_context:
             system_prompt = merge_system_prompt(
