@@ -10,9 +10,7 @@ import {
 
 import { Button } from "@/components/shared/Button";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
-import { useIsMobile } from "@/hooks/useIsMobile";
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard";
-import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { NewWorkspaceModal } from "@/components/workspaces/NewWorkspaceModal";
 import { TopNav } from "@/components/layout/TopNav";
 import {
@@ -38,7 +36,6 @@ const SORT_LABELS: Record<SortKey, string> = {
  * layout so users don't need to relearn the pattern. */
 export function WorkspacesPage() {
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("active");
 
@@ -105,10 +102,6 @@ export function WorkspacesPage() {
     await archiveMutation.mutateAsync(archiveTarget.id);
     setArchiveTarget(null);
   };
-
-  // Desktop-only surface by design — direct links on a phone get a
-  // friendly explanation instead of a broken layout.
-  if (isMobile) return <WorkspaceMobileGate />;
 
   return (
     <>

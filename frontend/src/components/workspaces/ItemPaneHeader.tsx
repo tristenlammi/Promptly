@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import {
+  CalendarDays,
   Clock,
   Columns3,
   Copy,
+  FileText,
   Loader2,
-  PenTool,
-  StickyNote,
+  Shapes,
   Table2,
   Zap,
   ZapOff,
@@ -20,11 +21,14 @@ import {
 } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
 
-const KIND_ICONS: Partial<Record<WorkspaceItemKind, typeof StickyNote>> = {
-  note: StickyNote,
-  canvas: PenTool,
+// Icons must match the navigator rail's NodeIcon so an item shows the same
+// symbol in its pane title as in the nav.
+const KIND_ICONS: Partial<Record<WorkspaceItemKind, typeof FileText>> = {
+  note: FileText,
+  canvas: Shapes,
   board: Columns3,
   sheet: Table2,
+  roster: CalendarDays,
   task: Clock,
 };
 
@@ -98,7 +102,7 @@ export function ItemPaneHeader({
     else updateItem.mutate({ itemId, payload: { title: next } });
   };
 
-  const Icon = KIND_ICONS[kind] ?? StickyNote;
+  const Icon = KIND_ICONS[kind] ?? FileText;
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-3 py-1.5">

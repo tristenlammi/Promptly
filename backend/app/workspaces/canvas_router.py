@@ -167,7 +167,12 @@ async def create_canvas_with_item(
         ref_id=canvas.id,
         title=title,
         position=position,
-        indexing_status="queued",
+        # Born empty → terminal "empty", not "queued". The create path
+        # doesn't schedule the indexer (only the text-push / duplicate paths
+        # do), so a canvas that's never drawn on would otherwise sit at
+        # "queued" forever and misreport as "indexing". The first real text
+        # push flips it to embedding → ready via index_canvas_for_workspace.
+        indexing_status="empty",
     )
     db.add(item)
     await db.flush()

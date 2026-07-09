@@ -13,6 +13,7 @@ import {
   MessagesSquare,
   Brain,
   Check,
+  CornerDownLeft,
   Eye,
   File as FileIcon,
   FileText,
@@ -21,6 +22,7 @@ import {
   GlobeLock,
   Image as ImageIcon,
   Layers,
+  ListPlus,
   Loader2,
   Mic,
   Paperclip,
@@ -41,7 +43,8 @@ import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
 import { useDictation } from "@/hooks/useDictation";
-import { useComposerStore } from "@/store/composerStore";
+import { EMPTY_QUEUE, useComposerStore } from "@/store/composerStore";
+import type { QueuedPrompt } from "@/store/composerStore";
 import { useModelStore } from "@/store/modelStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -461,6 +464,73 @@ export function InputBar({
   }, [insertNonce]);
 
   // ----------------------------------------------------------------
+  // Prompt queue — stash the current message (text + attachments) to
+  // fire later in this same chat, then clear the composer so the user
+  // can carry on the current conversation. Injecting one loads it back
+  // into the composer (never auto-sends). Kept per-chat in the composer
+  // store; in-memory only, so it survives switching chats but not a
+  // full reload. The strip stays invisible until something is queued.
+  // ----------------------------------------------------------------
+  const queue = useComposerStore((s) => s.queues[draftKey]) ?? EMPTY_QUEUE;
+
+  const handleQueue = () => {
+    if (disabled || value.trim().length === 0) return;
+    // Don't stash a message whose attachments are still uploading.
+    if (pending.some((p) => !p.error)) return;
+    const item: QueuedPrompt = {
+      id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text: value,
+      attachments,
+    };
+    useComposerStore.getState().enqueuePrompt(loadedDraftKeyRef.current, item);
+    setValue("");
+    setAttachments([]);
+    setPending([]);
+    // Mirror submit(): clear synchronously so a remount doesn't restore
+    // the just-queued draft.
+    useComposerStore.getState().clearDraft(loadedDraftKeyRef.current);
+    requestAnimationFrame(() => {
+      try {
+        textareaRef.current?.focus({ preventScroll: true });
+      } catch {
+        textareaRef.current?.focus();
+      }
+    });
+  };
+
+  const injectQueued = (item: QueuedPrompt) => {
+    // Consume it from the queue and load it into the composer. If the
+    // user already has a draft going, append below it (blank-line
+    // separated) rather than clobbering their work; merge attachments,
+    // de-duped and within the 10-per-message cap.
+    useComposerStore.getState().dequeuePrompt(loadedDraftKeyRef.current, item.id);
+    setValue((prev) => (prev.trim() ? `${prev}\n\n${item.text}` : item.text));
+    setAttachments((prev) => {
+      const ids = new Set(prev.map((a) => a.id));
+      const merged = [...prev];
+      for (const a of item.attachments) {
+        if (!ids.has(a.id) && merged.length < 10) merged.push(a);
+      }
+      return merged;
+    });
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      try {
+        el.focus({ preventScroll: true });
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+      } catch {
+        el.focus();
+      }
+    });
+  };
+
+  const discardQueued = (id: string) => {
+    useComposerStore.getState().dequeuePrompt(loadedDraftKeyRef.current, id);
+  };
+
+  // ----------------------------------------------------------------
   // Upload helper — dropped files & paste-uploads share this path so the
   // chip lifecycle stays consistent.
   // ----------------------------------------------------------------
@@ -514,6 +584,15 @@ export function InputBar({
     },
     [invalidateFiles]
   );
+  // ``uploadDroppedFile`` gets a fresh identity every render (its
+  // ``invalidateFiles`` dep is an un-memoised closure from
+  // ``useInvalidateFiles``). Hold the latest version in a ref so the
+  // window-level drag effect below can depend only on ``dropAllowed`` and
+  // stay mounted across renders — otherwise it tore down and re-added its
+  // listeners (resetting ``dragDepth`` to 0) on the very ``setIsDragging``
+  // re-render a drag triggers, so the overlay flashed and vanished.
+  const uploadDroppedFileRef = useRef(uploadDroppedFile);
+  uploadDroppedFileRef.current = uploadDroppedFile;
 
   // ----------------------------------------------------------------
   // Clipboard paste — lets the user Ctrl/Cmd+V a screenshot (or any
@@ -630,7 +709,7 @@ export function InputBar({
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (files.length === 0) return;
       for (const f of files) {
-        void uploadDroppedFile(f);
+        void uploadDroppedFileRef.current(f);
       }
     };
 
@@ -644,7 +723,9 @@ export function InputBar({
       window.removeEventListener("dragover", onOver);
       window.removeEventListener("drop", onDrop);
     };
-  }, [dropAllowed, uploadDroppedFile]);
+    // Depends only on ``dropAllowed`` — see ``uploadDroppedFileRef`` above
+    // for why the upload callback is read through a ref instead.
+  }, [dropAllowed]);
 
   const submit = () => {
     const trimmed = value.trim();
@@ -1191,6 +1272,24 @@ export function InputBar({
               </div>
             </div>
           )}
+          {/* Queued prompts — invisible until the user stashes one. Click a
+              row to load it back into the composer; ✕ discards it. */}
+          {queue.length > 0 && (
+            <div className="flex flex-col gap-1 pb-1">
+              <div className="flex items-center gap-1.5 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                <ListPlus className="h-3 w-3" />
+                Queued · {queue.length}
+              </div>
+              {queue.map((q) => (
+                <QueuedPromptRow
+                  key={q.id}
+                  item={q}
+                  onInject={() => injectQueued(q)}
+                  onDiscard={() => discardQueued(q.id)}
+                />
+              ))}
+            </div>
+          )}
           {/* Mobile: single WhatsApp-style row — [+] [input] [mic] [send].
               Desktop: full-width textarea with the action row below. */}
           <div className={cn(isMobile && "flex items-end gap-1.5")}>
@@ -1354,6 +1453,33 @@ export function InputBar({
                   {!isMobile && <span className="font-medium">Subchat</span>}
                 </button>
               )}
+              {/* Queue for later — stash this prompt (+ attachments) to fire
+                  after the current conversation. Left of the More menu. */}
+              <button
+                type="button"
+                onClick={handleQueue}
+                disabled={
+                  disabled ||
+                  value.trim().length === 0 ||
+                  uploadingCount > 0
+                }
+                className={cn(
+                  "inline-flex items-center rounded-full border transition",
+                  "border-[var(--border)] text-[var(--text-muted)]",
+                  "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                  isMobile ? "h-9 w-9 justify-center" : "h-8 gap-1.5 px-2.5 text-xs"
+                )}
+                aria-label="Queue this prompt for later"
+                title={
+                  value.trim().length === 0
+                    ? "Queue for later — type a message first"
+                    : "Queue for later — stash this prompt and keep chatting"
+                }
+              >
+                <ListPlus className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+                {!isMobile && <span className="font-medium">Queue</span>}
+              </button>
               <ComposerMoreMenu
                 reasoningEffort={reasoningEffort}
                 onReasoningEffortChange={onReasoningEffortChange}
@@ -1755,6 +1881,56 @@ function ComposerMoreMenu({
 // Pointer-events:none so the underlying drag/drop logic still gets
 // the events; the overlay is purely visual.
 // ----------------------------------------------------------------
+// One row in the prompt-queue strip: a click-to-load preview plus a
+// discard ✕. The whole preview is the load button so it's a big target;
+// the ✕ is a sibling so it doesn't nest inside the button.
+function QueuedPromptRow({
+  item,
+  onInject,
+  onDiscard,
+}: {
+  item: QueuedPrompt;
+  onInject: () => void;
+  onDiscard: () => void;
+}) {
+  const preview = item.text.trim().replace(/\s+/g, " ");
+  return (
+    <div
+      className={cn(
+        "group flex items-center gap-2 rounded-md border px-2 py-1 text-xs transition",
+        "border-[var(--border)] bg-[var(--bg)] hover:border-[var(--accent)]/50"
+      )}
+    >
+      <button
+        type="button"
+        onClick={onInject}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        title="Load this queued prompt into the composer"
+      >
+        <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition group-hover:text-[var(--accent)]" />
+        <span className="min-w-0 flex-1 truncate text-[var(--text)]">
+          {preview || "(empty)"}
+        </span>
+        {item.attachments.length > 0 && (
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-[var(--text-muted)]">
+            <Paperclip className="h-3 w-3" />
+            {item.attachments.length}
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={onDiscard}
+        className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition hover:bg-[var(--hover-strong)] hover:text-[var(--text)]"
+        aria-label="Discard queued prompt"
+        title="Discard"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 function DropOverlay() {
   return (
     <div

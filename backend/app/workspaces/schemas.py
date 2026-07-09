@@ -357,14 +357,16 @@ class WorkspaceItemNode(BaseModel):
 class WorkspaceItemCreate(BaseModel):
     """Body for ``POST /workspaces/{wid}/items``.
 
-    ``kind='folder'`` makes a tree-only organisation node. ``kind='note'``
-    creates a blank Drive Document in the workspace's ``Notes`` folder;
-    ``kind='canvas'`` creates an Excalidraw board (+ backing text file in
-    ``Canvases``). ``kind='board'`` creates a Kanban board (tree-only; its
-    tasks reference it). ``title`` is optional (kind-specific default)."""
+    ``kind='container'`` makes a Notebook — a collapsible tree node whose
+    child items render as tabs. ``kind='note'`` creates a blank Drive
+    Document in the workspace's ``Notes`` folder; ``kind='canvas'`` creates
+    an Excalidraw board (+ backing text file in ``Canvases``);
+    ``kind='board'`` a Kanban board (tree-only; its tasks reference it).
+    ``title`` is optional (kind-specific default). (Folders were removed —
+    Notebooks are the single grouping primitive.)"""
 
     kind: Literal[
-        "folder", "note", "canvas", "board", "sheet", "container", "chat"
+        "note", "canvas", "board", "sheet", "container", "chat", "roster"
     ]
     parent_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)
@@ -434,6 +436,28 @@ class SpreadsheetSaveRequest(BaseModel):
     """Debounced save from the spreadsheet editor. ``data`` is the full
     Fortune-sheet workbook; ``content_text`` is the client-flattened cell
     text used for workspace RAG."""
+
+    data: Any
+    content_text: str | None = None
+    title: str | None = Field(default=None, max_length=255)
+
+
+class RosterResponse(BaseModel):
+    """A roster page's persisted state. ``data`` is the schedule JSON
+    (shifts + settings), NULL until the first save."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    data: Any | None
+
+
+class RosterSaveRequest(BaseModel):
+    """Debounced save from the roster editor. ``data`` is the full schedule;
+    ``content_text`` is the client-flattened, human-readable version used for
+    workspace RAG."""
 
     data: Any
     content_text: str | None = None

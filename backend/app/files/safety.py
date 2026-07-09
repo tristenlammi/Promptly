@@ -63,6 +63,25 @@ _ALLOWED_EXTS: dict[str, tuple[str, frozenset[str]]] = {
     ".gif": ("image/gif", frozenset()),
     ".webp": ("image/webp", frozenset()),
     ".bmp": ("image/bmp", frozenset({"image/x-bmp", "image/x-ms-bmp"})),
+    # ----- Audio (embedded inline in documents via <audio controls>) -----
+    # Without these, the document-asset endpoint's ``audio/`` MIME prefix is
+    # moot: sniff_and_validate rejects the extension first ("bad_extension"),
+    # so inserting audio in a note always 400'd. Each ext lists generous
+    # aliases because browsers and the magic-byte sniffer disagree on audio
+    # MIMEs; for container formats the sniffer reports ``video/*`` (webm) and
+    # sniff_and_validate's ``sniffed_ext == ext`` fallback lets them through,
+    # while we still persist the ``audio/*`` canonical the <audio> tag needs.
+    ".mp3": ("audio/mpeg", frozenset({"audio/mp3"})),
+    ".wav": ("audio/wav", frozenset({"audio/x-wav", "audio/wave", "audio/vnd.wave"})),
+    ".ogg": ("audio/ogg", frozenset({"application/ogg", "audio/vorbis"})),
+    # ``.m4a`` is an MP4 container; most encoders stamp the ftyp major brand
+    # ``isom``/``mp42`` (not Apple's ``M4A ``), so the magic-byte sniffer
+    # reports ``video/mp4``. Include it as an alias so both the declared-MIME
+    # and the sniff checks pass — we still persist the ``audio/mp4`` canonical.
+    ".m4a": ("audio/mp4", frozenset({"audio/x-m4a", "audio/m4a", "audio/aac", "video/mp4"})),
+    ".aac": ("audio/aac", frozenset({"audio/x-aac"})),
+    ".flac": ("audio/flac", frozenset({"audio/x-flac"})),
+    ".webm": ("audio/webm", frozenset({"video/webm"})),
     # ----- Documents (text extracted into the prompt) -----
     ".pdf": ("application/pdf", frozenset({"application/x-pdf"})),
     ".txt": ("text/plain", frozenset({"text/x-log"})),

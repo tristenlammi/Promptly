@@ -95,10 +95,9 @@ export const NAV_ITEMS: NavItem[] = [
     icon: LayoutGrid,
     label: "Workspaces",
     section: "chat",
-    // Workspaces are a desktop surface by design (multi-pane layout,
-    // drag-first navigator) — the route itself also renders a notice on
-    // phones for direct links.
-    desktopOnly: true,
+    // Editing is desktop-only, but phones get a read-only single-column
+    // view (item list → notes/chats render; heavier editors show a "best on
+    // desktop" notice), so the nav item is available on mobile too.
     optionalKey: "workspaces",
   },
   {

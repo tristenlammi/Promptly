@@ -36,11 +36,36 @@ export interface ComposerDraft {
   attachments: AttachedFile[];
 }
 
+/**
+ * A prompt (text + attachments) the user has stashed to fire later in
+ * this same chat. Distinct from the single {@link ComposerDraft}: a chat
+ * can hold several queued prompts, and unlike the draft they aren't the
+ * "current" message — the user injects one back into the composer when
+ * they're ready. Kept in memory only (never persisted — see the
+ * ``partialize`` note below), so the queue survives navigating between
+ * chats within a session but not a full reload, matching how draft
+ * attachments already behave.
+ */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  attachments: AttachedFile[];
+}
+
+/** Stable empty array so the queue selector doesn't churn renders when a
+ *  chat has nothing queued. */
+export const EMPTY_QUEUE: QueuedPrompt[] = [];
+
 interface ComposerState {
   drafts: Record<string, ComposerDraft>;
   getDraft: (key: string) => ComposerDraft | undefined;
   saveDraft: (key: string, draft: ComposerDraft) => void;
   clearDraft: (key: string) => void;
+  // Per-chat prompt queue, keyed like drafts ("__new__" for an unsaved
+  // chat). In-memory only (partialize writes drafts only).
+  queues: Record<string, QueuedPrompt[]>;
+  enqueuePrompt: (key: string, item: QueuedPrompt) => void;
+  dequeuePrompt: (key: string, id: string) => void;
   // Phase 3.3 — bumped to ask the mounted ``InputBar`` to focus its
   // textarea (e.g. from a global keyboard shortcut). Transient; never
   // persisted (partialize only writes ``drafts``).
@@ -79,6 +104,26 @@ export const useComposerStore = create<ComposerState>()(
           const next = { ...state.drafts };
           delete next[key];
           return { drafts: next };
+        }),
+      queues: {},
+      enqueuePrompt: (key, item) =>
+        set((state) => ({
+          queues: {
+            ...state.queues,
+            [key]: [...(state.queues[key] ?? []), item],
+          },
+        })),
+      dequeuePrompt: (key, id) =>
+        set((state) => {
+          const cur = state.queues[key];
+          if (!cur) return state;
+          const remaining = cur.filter((q) => q.id !== id);
+          const next = { ...state.queues };
+          // Drop the key entirely when empty so the strip goes invisible
+          // and we don't leak blank per-chat entries.
+          if (remaining.length) next[key] = remaining;
+          else delete next[key];
+          return { queues: next };
         }),
       focusNonce: 0,
       requestComposerFocus: () =>

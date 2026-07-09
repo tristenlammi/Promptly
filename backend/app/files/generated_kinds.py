@@ -69,6 +69,12 @@ class GeneratedKind(str, Enum):
     # Keyed off ``Spreadsheet.text_file_id``.
     SHEET_TEXT = "sheet_text"
 
+    # Backing text file for a workspace roster. Holds the client-flattened
+    # schedule text (who's on which day, hours, tags) so the roster feeds
+    # ``knowledge_chunks`` like a sheet. Lives in the workspace's ``Rosters/``
+    # Drive folder; re-written on save. Keyed off ``Roster.text_file_id``.
+    ROSTER_TEXT = "roster_text"
+
     # Backing text file for a workspace's *automations* index (Phase 10).
     # Holds a rendered summary of every scheduled Task homed in the
     # workspace (name / schedule / prompt / flow node summary) so chats can

@@ -43,6 +43,7 @@ import {
   Link2,
   Loader2,
   MessageSquare,
+  Monitor,
   Plus,
   Search,
   Shapes,
@@ -58,6 +59,7 @@ import {
 
 import { Button } from "@/components/shared/Button";
 import { ErrorState } from "@/components/shared/Callout";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
@@ -106,7 +108,6 @@ import { tasksApi } from "@/api/tasks";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { WorkspaceDrivePane } from "@/components/workspaces/WorkspaceDrivePane";
 import { WorkspaceSearchPane } from "@/components/workspaces/WorkspaceSearchPane";
-import { WorkspaceMobileGate } from "@/components/workspaces/WorkspaceMobileGate";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
@@ -407,9 +408,96 @@ export function WorkspaceDetailPage() {
     handleSelect(node);
   };
 
-  // Desktop-only surface by design — the fixed navigator + item panes
-  // don't fit a phone. Direct links get a friendly notice.
-  if (isMobile) return <WorkspaceMobileGate />;
+  // Mobile: a read-only single-column view. The desktop two-pane layout
+  // (navigator rail + main pane + split/drag) can't fit a phone, so mobile
+  // gets a tappable item list → full-screen pane. Everything is read-only
+  // (canEdit=false); notes + chats render, heavier editors show a "best on
+  // desktop" notice. Clicking an item-link in a note opens it here too.
+  if (isMobile) {
+    const activeNode = selected;
+    const readable = activeNode
+      ? MOBILE_READABLE_KINDS.has(activeNode.kind)
+      : false;
+    return (
+      <ItemPreviewContext.Provider value={(n) => setSelected(n)}>
+        <TopNav
+          title={
+            activeNode
+              ? activeNode.title || "Untitled"
+              : (workspace?.title ?? "Workspace")
+          }
+          actions={
+            <Button
+              variant="ghost"
+              leftIcon={<ArrowLeft className="h-4 w-4" />}
+              onClick={() =>
+                activeNode ? setSelected(null) : navigate("/workspaces")
+              }
+            >
+              Back
+            </Button>
+          }
+        />
+        {isLoading || !workspace ? (
+          <div className="flex flex-1 items-center gap-2 px-4 py-6 text-sm text-[var(--text-muted)]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading workspace…
+          </div>
+        ) : activeNode ? (
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {readable ? (
+              <WorkspaceItemView
+                key={activeNode.id}
+                node={activeNode}
+                workspaceId={id}
+                onOpenItem={(n) => setSelected(n)}
+                onClose={() => setSelected(null)}
+                canEdit={false}
+              />
+            ) : (
+              <div className="flex-1 overflow-y-auto px-4 py-10">
+                <EmptyState
+                  icon={<Monitor className="h-5 w-5" />}
+                  title={`${KIND_META[activeNode.kind]?.label ?? "This item"} is best on desktop`}
+                  description="Notes and chats are readable here on your phone. Canvases, boards, sheets, and rosters need the desktop layout — open this workspace on a computer to view it."
+                  action={
+                    <Button variant="primary" onClick={() => setSelected(null)}>
+                      Back to items
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+          </main>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {workspace.description && (
+              <p className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--text-muted)]">
+                {workspace.description}
+              </p>
+            )}
+            {tree && tree.length > 0 ? (
+              <MobileTreeList
+                nodes={tree}
+                onSelect={(n) => setSelected(n)}
+              />
+            ) : (
+              <div className="px-4 py-10">
+                <EmptyState
+                  icon={<Layers className="h-5 w-5" />}
+                  title="Nothing here yet"
+                  description="This workspace has no items yet. Add notes, boards, and more from the desktop app."
+                />
+              </div>
+            )}
+            <p className="px-4 py-4 text-center text-xs text-[var(--text-muted)]">
+              Viewing on mobile is read-only. Open on desktop to edit.
+            </p>
+          </div>
+        )}
+      </ItemPreviewContext.Provider>
+    );
+  }
 
   return (
     <ItemPreviewContext.Provider value={handlePreview}>
@@ -809,6 +897,85 @@ const KIND_META: Partial<
   roster: { icon: CalendarDays, label: "Roster" },
   task: { icon: Clock, label: "Automation" },
 };
+
+// Kinds that render usefully read-only on a phone (Lean mobile cut). Notes
+// and chats read beautifully in a single column; the heavier editors —
+// canvas / sheet / board / roster / automation — need the desktop layout,
+// so on mobile they show a "best on desktop" notice instead of squeezing a
+// broken editor onto the screen.
+const MOBILE_READABLE_KINDS = new Set<WorkspaceItemNode["kind"]>([
+  "note",
+  "chat",
+]);
+
+/**
+ * Read-only single-column item list for the mobile workspace view. Folders
+ * and notebooks render as structural group headers with their children
+ * nested; every other item is a tappable row. Kinds that can't render on a
+ * phone still tap through (to a "best on desktop" notice) but carry a
+ * "Desktop" badge so the limitation is visible up front.
+ */
+function MobileTreeList({
+  nodes,
+  onSelect,
+  depth = 0,
+}: {
+  nodes: WorkspaceItemNode[];
+  onSelect: (node: WorkspaceItemNode) => void;
+  depth?: number;
+}) {
+  return (
+    <ul className="flex flex-col">
+      {nodes.map((n) => {
+        const isGroup = n.kind === "folder" || n.kind === "container";
+        const pad = 12 + depth * 16;
+        if (isGroup) {
+          return (
+            <li key={n.id}>
+              <div
+                className="flex items-center gap-2 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]"
+                style={{ paddingLeft: pad }}
+              >
+                <Layers className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{n.title || "Untitled"}</span>
+              </div>
+              {n.children.length > 0 && (
+                <MobileTreeList
+                  nodes={n.children}
+                  onSelect={onSelect}
+                  depth={depth + 1}
+                />
+              )}
+            </li>
+          );
+        }
+        const Icon = KIND_META[n.kind]?.icon ?? FileText;
+        const readable = MOBILE_READABLE_KINDS.has(n.kind);
+        return (
+          <li key={n.id}>
+            <button
+              type="button"
+              onClick={() => onSelect(n)}
+              className="flex w-full items-center gap-2.5 border-b border-[var(--border)] px-3 py-3 text-left text-sm transition active:bg-[var(--hover)]"
+              style={{ paddingLeft: pad }}
+            >
+              <Icon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+              <span className="min-w-0 flex-1 truncate text-[var(--text)]">
+                {n.title || "Untitled"}
+              </span>
+              {!readable && (
+                <span className="shrink-0 rounded-full bg-[var(--hover)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                  Desktop
+                </span>
+              )}
+              <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 /**
  * Lightweight modal preview of a workspace item, opened by clicking an

@@ -84,8 +84,17 @@ from app.workspaces.schemas import (
 )
 from app.workspaces.shares import (
     get_accessible_workspace,
+    require_workspace_admin,
     require_workspace_write,
 )
+
+
+def _require_roster_admin(kind: str, access_role: str) -> None:
+    """Rosters are an owner/admin surface, not everyday editor content —
+    creating, editing, renaming or removing one requires admin. Call after
+    the normal write check with the item's kind."""
+    if kind == "roster":
+        require_workspace_admin(access_role)
 
 router = APIRouter()
 
@@ -473,6 +482,7 @@ async def create_workspace_item(
     or an orphan document/canvas."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
+    _require_roster_admin(payload.kind, access_role)
     await _validate_parent(db, ws.id, payload.parent_id, payload.kind)
 
     position = await _next_position(db, ws.id, payload.parent_id)
@@ -528,7 +538,12 @@ async def create_workspace_item(
             ref_id=doc.id,
             title=note_title,
             position=position,
-            indexing_status="queued",
+            # Born blank → terminal "empty", not "queued". This create path
+            # schedules no indexer, so a note that's never typed into would
+            # otherwise stay "queued" forever and misreport as "indexing".
+            # The first save flips it to embedding → ready via the document
+            # save hook (documents_router → index_note_for_workspace).
+            indexing_status="empty",
         )
         db.add(item)
     elif payload.kind == "sheet":
@@ -1033,7 +1048,7 @@ async def save_roster(
     """Persist a roster's schedule (debounced save). Re-indexes the flattened
     schedule text so a chat can answer "who's on Friday?" via workspace RAG."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
+    require_workspace_admin(access_role)
     roster = await _load_workspace_roster(db, ws.id, roster_id, user)
     roster.data = payload.data
     text_changed = (
@@ -1336,6 +1351,7 @@ async def update_workspace_item(
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     item = await _load_item(db, ws.id, item_id, user)
+    _require_roster_admin(item.kind, access_role)
 
     sent = payload.model_fields_set
     if "title" in sent:
@@ -1604,6 +1620,7 @@ async def archive_workspace_item(
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     item = await _load_item(db, ws.id, item_id, user)
+    _require_roster_admin(item.kind, access_role)
     now = datetime.now(timezone.utc)
     for it in await _collect_subtree(db, ws.id, item):
         it.archived_at = now
@@ -1800,6 +1817,7 @@ async def delete_workspace_item(
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
     item = await _load_item(db, ws.id, item_id, user)
+    _require_roster_admin(item.kind, access_role)
 
     now = datetime.now(timezone.utc)
     for it in await _collect_subtree(db, ws.id, item):

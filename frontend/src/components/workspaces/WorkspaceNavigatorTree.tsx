@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
@@ -26,6 +27,7 @@ import {
   Archive,
   ArchiveRestore,
   AudioLines,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -36,7 +38,6 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  FolderPlus,
   HardDrive,
   Search as SearchIcon,
   Home,
@@ -154,6 +155,10 @@ export function WorkspaceNavigatorTree({
   const create = useCreateWorkspaceItem(workspaceId);
   const qc = useQueryClient();
   const { data: workspace } = useWorkspace(workspaceId);
+  // Rosters are an owner/admin-only surface — hide "New roster" from plain
+  // editors (the create endpoint enforces the same, this just avoids a 403).
+  const canManageRoster =
+    workspace?.access_role === "owner" || workspace?.access_role === "admin";
   const [creatingChat, setCreatingChat] = useState(false);
   const move = useMoveWorkspaceItem(workspaceId);
   const setPinned = useSetItemPinned(workspaceId);
@@ -175,6 +180,31 @@ export function WorkspaceNavigatorTree({
       return next;
     });
   }, []);
+  // Notebooks start collapsed so the rail stays tidy — a notebook opens its
+  // pages as tabs when selected; the chevron reveals them in the rail on
+  // demand. Seed once per notebook id we haven't seen, so the user's manual
+  // expand/collapse is never overridden on later tree refetches.
+  const seededCollapseRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids: string[] = [];
+    const walk = (nodes: WorkspaceItemNode[]) => {
+      for (const n of nodes) {
+        if (n.kind === "container" && !seededCollapseRef.current.has(n.id)) {
+          seededCollapseRef.current.add(n.id);
+          ids.push(n.id);
+        }
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk(tree);
+    if (ids.length) {
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  }, [tree]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [offsetLeft, setOffsetLeft] = useState(0);
@@ -458,18 +488,19 @@ export function WorkspaceNavigatorTree({
   };
 
   const handleCreate = async (
-    kind: "folder" | "note" | "canvas" | "board" | "sheet" | "container",
+    kind: "note" | "canvas" | "board" | "sheet" | "container" | "roster",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
-    // A freshly-created note / canvas / sheet should open straight away.
-    // Folders just appear in place. We synthesise a node so the pane can
-    // open the editor without waiting for the tree refetch.
+    // A freshly-created note / canvas / sheet / notebook should open straight
+    // away. We synthesise a node so the pane can open the editor without
+    // waiting for the tree refetch.
     if (
       kind === "note" ||
       kind === "canvas" ||
       kind === "sheet" ||
-      kind === "container"
+      kind === "container" ||
+      kind === "roster"
     ) {
       onSelect({
         id: item.id,
@@ -602,8 +633,10 @@ export function WorkspaceNavigatorTree({
             onNewCanvas={() => handleCreate("canvas", null)}
             onNewBoard={() => handleCreate("board", null)}
             onNewSheet={() => handleCreate("sheet", null)}
+            onNewRoster={
+              canManageRoster ? () => handleCreate("roster", null) : undefined
+            }
             onNewNotebook={() => handleCreate("container", null)}
-            onNewFolder={() => handleCreate("folder", null)}
             onNewTask={onNewTask}
             onNewMeeting={onNewMeeting}
             onNewFromTemplate={() => setTemplatePickerOpen(true)}
@@ -1432,6 +1465,10 @@ function TreeRow({
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const isFolder = node.kind === "folder";
+  const isContainer = node.kind === "container";
+  // Notebooks (and any legacy folder) expand/collapse in the rail. Folders
+  // are being removed, so in practice this is the notebook.
+  const isExpandable = isFolder || isContainer;
   const isChat = node.kind === "chat";
   const isTask = node.kind === "task";
   // Notes, canvases, boards, sheets, and chats can feed the workspace RAG
@@ -1443,6 +1480,7 @@ function TreeRow({
     node.kind === "board" ||
     node.kind === "sheet" ||
     node.kind === "container" ||
+    node.kind === "roster" ||
     isChat;
   const contextOn = isChat
     ? node.context_enabled === true
@@ -1666,8 +1704,22 @@ function TreeRow({
           onClick={handleClick}
           className="flex min-w-0 flex-1 items-center gap-1 py-1.5 text-left"
         >
-          {isFolder ? (
-            <span className="flex w-3 shrink-0 items-center justify-center text-[var(--text-muted)]">
+          {isExpandable ? (
+            // Toggling collapse is a separate gesture from opening the item:
+            // clicking the chevron expands/collapses; clicking the rest of the
+            // row still opens the notebook's tabbed pane (stopPropagation keeps
+            // the two apart). ``role=button`` on a span avoids nesting a
+            // <button> inside the row's open-button.
+            <span
+              role="button"
+              tabIndex={-1}
+              aria-label={expanded ? "Collapse" : "Expand"}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleCollapse(node.id);
+              }}
+              className="flex w-3 shrink-0 items-center justify-center text-[var(--text-muted)] transition-colors hover:text-[var(--text)]"
+            >
               {expanded ? (
                 <ChevronDown className="h-3 w-3" />
               ) : (
@@ -1737,7 +1789,7 @@ function TreeRow({
             contextState={isContextItem ? (contextOn ? "on" : "off") : null}
             onToggleContext={isContextItem ? handleToggleContext : undefined}
             onCreateInside={
-              isFolder && onCreateInside
+              isContainer && onCreateInside
                 ? (kind) => onCreateInside(kind, node.id)
                 : undefined
             }
@@ -1837,6 +1889,7 @@ const KIND_TILE: Record<string, { tile: string; ink: string }> = {
   board: { tile: "bg-[rgba(16,185,129,0.16)]", ink: "text-[#10B981]" },
   sheet: { tile: "bg-[rgba(236,72,153,0.16)]", ink: "text-[#EC4899]" },
   container: { tile: "bg-[rgba(139,92,246,0.16)]", ink: "text-[#8B5CF6]" },
+  roster: { tile: "bg-[rgba(21,154,168,0.16)]", ink: "text-[#159AA8]" },
   task: { tile: "bg-[rgba(100,116,139,0.18)]", ink: "text-[#64748B]" },
 };
 
@@ -1873,6 +1926,8 @@ function NodeIcon({
         return Table2;
       case "container":
         return Layers;
+      case "roster":
+        return CalendarDays;
       case "task":
         // A clock reads "scheduled"; reserve the bolt for the context flag.
         return Clock;
@@ -2241,21 +2296,22 @@ function NewMenu({
   onNewCanvas,
   onNewBoard,
   onNewSheet,
+  onNewRoster,
   onNewNotebook,
-  onNewFolder,
   onNewTask,
   onNewMeeting,
   onNewFromTemplate,
   disabled,
 }: {
-  /** Top-level only — chats live at the workspace root, not in folders. */
+  /** Top-level only — chats live at the workspace root, not in notebooks. */
   onNewChat?: () => void;
   onNewNote: () => void;
   onNewCanvas: () => void;
   onNewBoard: () => void;
   onNewSheet: () => void;
+  /** Owner/admin only — rosters are an admin surface, hidden for editors. */
+  onNewRoster?: () => void;
   onNewNotebook: () => void;
-  onNewFolder: () => void;
   onNewTask?: () => void;
   /** Upload a meeting recording → transcribed + summarised note. */
   onNewMeeting?: () => void;
@@ -2350,6 +2406,16 @@ function NewMenu({
                 onNewSheet();
               }}
             />
+            {onNewRoster && (
+              <MenuItem
+                icon={<CalendarDays className="h-3.5 w-3.5" />}
+                label="New roster"
+                onClick={() => {
+                  setOpen(false);
+                  onNewRoster();
+                }}
+              />
+            )}
             {onNewMeeting && (
               <MenuItem
                 icon={<AudioLines className="h-3.5 w-3.5" />}
@@ -2367,14 +2433,6 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewNotebook();
-              }}
-            />
-            <MenuItem
-              icon={<FolderPlus className="h-3.5 w-3.5" />}
-              label="New folder"
-              onClick={() => {
-                setOpen(false);
-                onNewFolder();
               }}
             />
             {onNewTask && (
