@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, MessageSquare, X } from "lucide-react";
 
@@ -21,6 +21,23 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
   const [includeEmail, setIncludeEmail] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const hasEmail = Boolean(user?.email);
+  // The destination address (from the server, so a self-hoster's override is
+  // respected), shown as a direct-email link for anyone who'd rather email.
+  const [address, setAddress] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void feedbackApi
+      .getConfig()
+      .then((c) => {
+        if (!cancelled) setAddress(c.email);
+      })
+      .catch(() => {
+        /* non-fatal — the form still works without the direct link */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const openMailto = (to: string) => {
     const subject = encodeURIComponent("Promptly feedback");
@@ -81,7 +98,23 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-3 p-4">
           <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-            Found a bug or have an idea? Send it straight to the maintainer.
+            Found a bug or have an idea? Send it straight to the maintainer
+            {address ? (
+              <>
+                , or email{" "}
+                <a
+                  href={`mailto:${address}?subject=${encodeURIComponent(
+                    "Promptly feedback"
+                  )}`}
+                  className="text-[var(--accent)] underline"
+                >
+                  {address}
+                </a>{" "}
+                directly.
+              </>
+            ) : (
+              "."
+            )}
           </p>
           <textarea
             value={message}

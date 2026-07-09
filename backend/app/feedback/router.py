@@ -53,6 +53,20 @@ class FeedbackResponse(BaseModel):
     fallback_to: str | None = None
 
 
+class FeedbackConfig(BaseModel):
+    # The destination address, surfaced so the form can show a "prefer email?
+    # write to us directly" link. Read from FEEDBACK_EMAIL (overridable).
+    email: str
+
+
+@router.get("", response_model=FeedbackConfig)
+async def feedback_config(
+    _: User = Depends(get_current_user),
+) -> FeedbackConfig:
+    """The address feedback is delivered to (for the direct-email link)."""
+    return FeedbackConfig(email=_settings.FEEDBACK_EMAIL)
+
+
 def _compose_body(message: str, user: User, request: Request) -> str:
     origin = (
         request.headers.get("origin")

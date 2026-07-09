@@ -9,6 +9,13 @@ export interface FeedbackResult {
 }
 
 export const feedbackApi = {
+  /** The address feedback is delivered to — shown in the form so a user can
+   *  email directly instead. */
+  async getConfig(): Promise<{ email: string }> {
+    const { data } = await apiClient.get<{ email: string }>("/feedback");
+    return data;
+  },
+
   /**
    * Submit feedback. The server emails it to the maintainer via the
    * instance's own SMTP. If SMTP isn't configured (or the send fails) it
