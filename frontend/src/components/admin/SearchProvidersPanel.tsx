@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  ChevronDown,
+  ChevronUp,
   FlaskConical,
   Globe,
   Loader2,
+  PauseCircle,
+  Play,
   Plus,
   Star,
   Trash2,
@@ -59,6 +63,11 @@ const TYPE_INFO: Record<
   },
 };
 
+/** True while a provider is inside its auto-backoff window. */
+function isPaused(p: SearchProviderRow): boolean {
+  return !!p.cooldown_until && new Date(p.cooldown_until).getTime() > Date.now();
+}
+
 export function SearchProvidersPanel() {
   const [rows, setRows] = useState<SearchProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,10 +106,24 @@ export function SearchProvidersPanel() {
     }
   };
 
-  const onMakeDefault = async (p: SearchProviderRow) => {
+  const onMove = async (index: number, dir: "up" | "down") => {
+    const j = dir === "up" ? index - 1 : index + 1;
+    if (j < 0 || j >= rows.length) return;
+    const next = [...rows];
+    [next[index], next[j]] = [next[j], next[index]];
+    setRows(next); // optimistic
+    try {
+      setRows(await searchApi.reorder(next.map((r) => r.id)));
+    } catch (e) {
+      toast.error(extractError(e));
+      void load();
+    }
+  };
+
+  const onResume = async (p: SearchProviderRow) => {
     setBusyId(p.id);
     try {
-      await searchApi.update(p.id, { is_default: true });
+      await searchApi.resume(p.id);
       await load();
     } catch (e) {
       toast.error(extractError(e));
@@ -147,9 +170,11 @@ export function SearchProvidersPanel() {
       <div className="mb-4 flex items-center justify-between gap-3">
         <p className="max-w-xl text-sm text-[var(--text-muted)]">
           Providers that power <code>web_search</code> in chats, research
-          agents, and automations. With more than one enabled, searches
-          automatically fail over when the default errors or returns
-          nothing.
+          agents, and automations. Every search tries these{" "}
+          <span className="font-medium">top-to-bottom</span> — the next is used
+          only if one errors or returns nothing. A quota/auth failure pauses
+          that provider for a week (and pings admins) so a dead key isn't
+          retried on every search.
         </p>
         <Button
           variant="primary"
@@ -181,14 +206,45 @@ export function SearchProvidersPanel() {
               )}
             >
               <div className="flex flex-wrap items-center gap-2">
+                {/* Reorder handles — move up/down the failover chain. */}
+                <div className="flex shrink-0 flex-col">
+                  <button
+                    type="button"
+                    aria-label="Move up"
+                    title="Move up (tried earlier)"
+                    disabled={i === 0}
+                    onClick={() => void onMove(i, "up")}
+                    className="text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-30"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Move down"
+                    title="Move down (tried later)"
+                    disabled={i === rows.length - 1}
+                    onClick={() => void onMove(i, "down")}
+                    className="text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-30"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <span className="w-4 shrink-0 text-center text-xs tabular-nums text-[var(--text-muted)]">
+                  {i + 1}
+                </span>
                 <Globe className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
                 <span className="text-sm font-medium">{p.name}</span>
                 <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
                   {TYPE_INFO[p.type]?.label ?? p.type}
                 </span>
-                {p.is_default && (
+                {i === 0 && p.enabled && (
                   <span className="inline-flex items-center gap-1 rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
-                    <Star className="h-2.5 w-2.5" /> default
+                    <Star className="h-2.5 w-2.5" /> primary
+                  </span>
+                )}
+                {isPaused(p) && (
+                  <span className="inline-flex items-center gap-1 rounded bg-[var(--warning)]/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--warning)]">
+                    <PauseCircle className="h-2.5 w-2.5" /> paused
                   </span>
                 )}
                 {!p.enabled && (
@@ -198,6 +254,17 @@ export function SearchProvidersPanel() {
                 )}
 
                 <div className="ml-auto flex items-center gap-1">
+                  {isPaused(p) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busyId === p.id}
+                      leftIcon={<Play className="h-3.5 w-3.5" />}
+                      onClick={() => void onResume(p)}
+                    >
+                      Resume
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -213,16 +280,6 @@ export function SearchProvidersPanel() {
                   >
                     Test
                   </Button>
-                  {!p.is_default && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busyId === p.id}
-                      onClick={() => void onMakeDefault(p)}
-                    >
-                      Make default
-                    </Button>
-                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -243,6 +300,14 @@ export function SearchProvidersPanel() {
                   </button>
                 </div>
               </div>
+              {isPaused(p) && (
+                <p className="mt-2 text-xs text-[var(--warning)]">
+                  Auto-paused until{" "}
+                  {new Date(p.cooldown_until as string).toLocaleString()}
+                  {p.last_error ? ` — ${p.last_error}` : ""}. Fix the key/quota,
+                  then Resume.
+                </p>
+              )}
               {testResult?.id === p.id && (
                 <p
                   className={cn(
@@ -286,7 +351,6 @@ function AddProviderModal({
   const [apiKey, setApiKey] = useState("");
   const [url, setUrl] = useState("");
   const [cx, setCx] = useState("");
-  const [makeDefault, setMakeDefault] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -330,7 +394,6 @@ function AddProviderModal({
         name: name.trim() || info.label,
         type,
         config,
-        is_default: makeDefault,
         enabled: true,
         scope: "system",
       });
@@ -338,7 +401,6 @@ function AddProviderModal({
       setApiKey("");
       setUrl("");
       setCx("");
-      setMakeDefault(false);
       onCreated();
     } catch (e) {
       setErr(extractError(e));
@@ -442,20 +504,10 @@ function AddProviderModal({
           </label>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={makeDefault}
-            onChange={(e) => setMakeDefault(e.target.checked)}
-            className="accent-[var(--accent)]"
-          />
-          <span>
-            Make this the default provider{" "}
-            <span className="text-[var(--text-muted)]">
-              (others stay available as automatic fallbacks)
-            </span>
-          </span>
-        </label>
+        <p className="text-xs text-[var(--text-muted)]">
+          New providers are added to the bottom of the failover chain — use the
+          up/down arrows in the list to set the order.
+        </p>
 
         {err && (
           <p className="text-sm text-red-600 dark:text-red-400">{err}</p>

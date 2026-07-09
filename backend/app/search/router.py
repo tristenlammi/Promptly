@@ -5,7 +5,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -15,6 +15,7 @@ from app.search.models import SearchProvider
 from app.search.providers import SearchError, run_search
 from app.search.schemas import (
     SearchProviderCreate,
+    SearchProviderReorder,
     SearchProviderResponse,
     SearchProviderUpdate,
     SearchResponse,
@@ -38,6 +39,9 @@ def _to_response(provider: SearchProvider) -> SearchProviderResponse:
         config=masked_config(provider.config or {}),
         is_default=provider.is_default,
         enabled=provider.enabled,
+        position=provider.position,
+        cooldown_until=provider.cooldown_until,
+        last_error=provider.last_error,
         created_at=provider.created_at,
     )
 
@@ -82,7 +86,9 @@ async def list_providers(
     result = await db.execute(
         select(SearchProvider)
         .where(or_(SearchProvider.user_id == user.id, SearchProvider.user_id.is_(None)))
-        .order_by(SearchProvider.is_default.desc(), SearchProvider.created_at.desc())
+        # Failover order: position first (the admin-arranged chain), then
+        # created_at as a stable tiebreak for equal positions.
+        .order_by(SearchProvider.position.asc(), SearchProvider.created_at.asc())
     )
     return [_to_response(p) for p in result.scalars().all()]
 
@@ -112,6 +118,20 @@ async def create_provider(
             )
         owner_id = None
 
+    # New providers land at the bottom of the failover chain (highest
+    # position); the admin reorders from there.
+    max_pos = (
+        await db.execute(
+            select(func.max(SearchProvider.position)).where(
+                or_(
+                    SearchProvider.user_id == user.id,
+                    SearchProvider.user_id.is_(None),
+                )
+            )
+        )
+    ).scalar()
+    next_pos = (max_pos + 1) if max_pos is not None else 0
+
     sp = SearchProvider(
         user_id=owner_id,
         name=payload.name,
@@ -119,6 +139,7 @@ async def create_provider(
         config=encrypt_config_secrets(payload.config),
         is_default=payload.is_default,
         enabled=payload.enabled,
+        position=next_pos,
     )
     db.add(sp)
     await db.flush()
@@ -194,6 +215,75 @@ async def delete_provider(
     await db.delete(sp)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------
+# Reorder the failover chain (admin)
+# --------------------------------------------------------------------
+@router.post("/providers/reorder", response_model=list[SearchProviderResponse])
+async def reorder_providers(
+    payload: SearchProviderReorder,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[SearchProviderResponse]:
+    """Set the failover order — providers get ``position`` by list index."""
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can reorder the search chain.",
+        )
+    rows = (
+        (
+            await db.execute(
+                select(SearchProvider).where(
+                    or_(
+                        SearchProvider.user_id == user.id,
+                        SearchProvider.user_id.is_(None),
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {sp.id: sp for sp in rows}
+    for index, pid in enumerate(payload.order):
+        sp = by_id.get(pid)
+        if sp is not None:
+            sp.position = index
+            # The top of the chain is the effective default; keep the badge
+            # in sync (and clear it elsewhere) so is_default never contradicts
+            # the order.
+            sp.is_default = index == 0
+    await db.commit()
+    result = await db.execute(
+        select(SearchProvider)
+        .where(or_(SearchProvider.user_id == user.id, SearchProvider.user_id.is_(None)))
+        .order_by(SearchProvider.position.asc(), SearchProvider.created_at.asc())
+    )
+    return [_to_response(p) for p in result.scalars().all()]
+
+
+# --------------------------------------------------------------------
+# Resume a paused provider (admin) — clears the auto-backoff
+# --------------------------------------------------------------------
+@router.post("/providers/{provider_id}/resume", response_model=SearchProviderResponse)
+async def resume_provider(
+    provider_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SearchProviderResponse:
+    sp = await _get_visible(provider_id, user, db)
+    if sp.user_id is None and not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can resume a system provider.",
+        )
+    sp.cooldown_until = None
+    sp.last_error = None
+    await db.commit()
+    await db.refresh(sp)
+    return _to_response(sp)
 
 
 # --------------------------------------------------------------------

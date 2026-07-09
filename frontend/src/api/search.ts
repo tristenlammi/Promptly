@@ -15,6 +15,13 @@ export interface SearchProviderRow {
   config: Record<string, unknown>;
   is_default: boolean;
   enabled: boolean;
+  /** Failover order — lower is tried first. */
+  position: number;
+  /** Auto-backoff: if set and in the future, the provider is paused
+   *  (skipped) until then after a quota/auth failure. */
+  cooldown_until: string | null;
+  /** Short description of the failure that triggered the current pause. */
+  last_error: string | null;
   created_at: string;
 }
 
@@ -70,6 +77,23 @@ export const searchApi = {
   },
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/search/providers/${id}`);
+  },
+  /** Set the full failover order (admin). ``order`` is provider ids,
+   *  first = tried first. Returns the reordered list. */
+  async reorder(order: string[]): Promise<SearchProviderRow[]> {
+    const { data } = await apiClient.post<SearchProviderRow[]>(
+      "/search/providers/reorder",
+      { order }
+    );
+    return data;
+  },
+  /** Clear an auto-backoff pause after fixing the key/quota (admin). */
+  async resume(id: string): Promise<SearchProviderRow> {
+    const { data } = await apiClient.post<SearchProviderRow>(
+      `/search/providers/${id}/resume`,
+      {}
+    );
+    return data;
   },
   /** Diagnostic search against one provider — powers the "Test" button. */
   async test(providerId: string, query: string): Promise<SearchTestResult> {

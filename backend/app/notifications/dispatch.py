@@ -66,6 +66,9 @@ Category = Literal[
     # ``email_action`` — instant alert for high-priority / VIP / deadline mail.
     "email_brief",
     "email_action",
+    # Admin-facing operational alerts (0153) — e.g. a search provider was
+    # auto-paused after a quota/auth failure. Only sent to admins.
+    "system_alert",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -83,6 +86,7 @@ CATEGORIES: tuple[str, ...] = (
     "invite",
     "email_brief",
     "email_action",
+    "system_alert",
     "test",
 )
 

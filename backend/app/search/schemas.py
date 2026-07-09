@@ -71,7 +71,18 @@ class SearchProviderResponse(BaseModel):
     config: dict[str, Any]
     is_default: bool
     enabled: bool
+    # Failover order (lower = tried first) + auto-backoff state (0153).
+    position: int = 0
+    cooldown_until: datetime | None = None
+    last_error: str | None = None
     created_at: datetime
+
+
+class SearchProviderReorder(BaseModel):
+    """Admin sets the full failover order — providers are assigned
+    ``position`` by their index in this list (first = tried first)."""
+
+    order: list[uuid.UUID] = Field(min_length=1)
 
 
 class SearchRunRequest(BaseModel):
