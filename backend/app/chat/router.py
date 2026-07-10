@@ -3065,15 +3065,25 @@ def _classify_upstream_error(
 # reply (a wall of broken XML instead of an answer). We strip it at the
 # persistence boundary; when stripping empties a reply that *did* run tools,
 # the synthesis-retry net regenerates a real answer from what was gathered.
+# Some models wrap every tag in a special-token delimiter — e.g. the
+# ``<|DSML|tool_calls>`` / ``<|DSML|invoke name=…>`` form (and fullwidth
+# ``<｜…｜>`` variants from Chinese-model tokenizers). This optional fragment
+# lets the strip match the tag whether it's bare (``<tool_calls>``) or wrapped
+# (``<|DSML|tool_calls>``), so a new model's delimiter can't smuggle the markup
+# past the sanitizer into the visible reply. Bounded by ``>`` and the pipes, so
+# no catastrophic backtracking.
+_TAG_DELIM = r"(?:\s*[|｜][^|｜>]*[|｜])?\s*"
+
 _LEAKED_TOOL_XML_RES: tuple[re.Pattern[str], ...] = (
-    # Whole ``<tool_calls>…</tool_calls>`` block (closed or cut off at EOS).
+    # Whole ``<tool_calls>…</tool_calls>`` block (closed or cut off at EOS),
+    # bare or delimiter-wrapped.
     re.compile(
-        r"<\s*tool_calls\s*>.*?(?:</\s*tool_calls\s*>|$)",
+        rf"<{_TAG_DELIM}tool_calls\s*>.*?(?:</{_TAG_DELIM}tool_calls\s*>|$)",
         re.DOTALL | re.IGNORECASE,
     ),
     # Stray ``<invoke name=…>…</invoke>`` block with no wrapper.
     re.compile(
-        r"<\s*invoke\b[^>]*>.*?(?:</\s*invoke\s*>|$)",
+        rf"<{_TAG_DELIM}invoke\b[^>]*>.*?(?:</{_TAG_DELIM}invoke\s*>|$)",
         re.DOTALL | re.IGNORECASE,
     ),
 )

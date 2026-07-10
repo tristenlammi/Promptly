@@ -53,4 +53,13 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh \
     && mkdir -p /app/uploads /app/whiteboard
 EXPOSE 8000
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Single worker on purpose. The SSE streaming layer (app/chat/stream_runner.py)
+# keeps each in-flight generation's event buffer in *process memory* so a
+# client can navigate away and reconnect to the live tail. With >1 uvicorn
+# worker the background task + its buffer live in one worker while reconnect
+# requests load-balance across all of them, so ~half land on a worker that has
+# no session and error out ("Stream not found"). One async worker handles a
+# self-hosted team's concurrency fine (the work is I/O-bound — awaiting the LLM
+# provider, DB, Redis). Multi-worker/multi-container scaling would need a
+# Redis-backed event log instead.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
