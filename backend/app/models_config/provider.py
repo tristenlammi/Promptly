@@ -22,8 +22,12 @@ Supported provider types
                       request fields when the conversation has reasoning
                       enabled, and so the Add Provider UI can pre-fill
                       the base URL.
+``atlascloud``        Atlas Cloud's hosted aggregator API
+                      (``api.atlascloud.ai/v1``). OpenAI-compatible at
+                      the wire level; the dedicated type exists purely so
+                      the Add Provider UI can pre-fill the base URL.
 
-All six non-openrouter types are driven through the OpenAI SDK because
+All seven non-openrouter types are driven through the OpenAI SDK because
 they all expose an OpenAI-shaped ``/v1/chat/completions`` endpoint.
 Only the catalog (``list_models``) and credential check
 (``test_connection``) branches need per-type logic — the streaming and
@@ -105,6 +109,13 @@ DEFAULT_BASE_URLS: dict[str, str | None] = {
     # through the OpenAI-compat shape because that's what every other
     # provider in this file does.
     "deepseek": "https://api.deepseek.com",
+    # Atlas Cloud — an OpenAI-compatible aggregator (300+ models across
+    # DeepSeek/Qwen/Kimi/GLM/GPT/Claude…) at a single endpoint. Wire-shape
+    # is a drop-in OpenAI ``/v1`` base; the dedicated type just pre-fills
+    # this URL in the Add Provider UI. ``GET /models`` returns the standard
+    # ``{"data": [{"id": ...}]}`` shape, so catalog + streaming both go
+    # through the shared OpenAI-compat path.
+    "atlascloud": "https://api.atlascloud.ai/v1",
 }
 
 SUPPORTED_PROVIDER_TYPES: frozenset[str] = frozenset(DEFAULT_BASE_URLS)
@@ -1419,6 +1430,8 @@ class ModelRouter:
             # DeepSeek's ``GET /models`` returns the standard
             # ``{"data": [{"id": ...}]}`` shape used by everyone else.
             "deepseek",
+            # Atlas Cloud is OpenAI-compatible incl. its ``/models`` list.
+            "atlascloud",
         }:
             return await self._list_models_openai_compat(provider)
         raise ProviderError(

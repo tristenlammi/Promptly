@@ -24,6 +24,10 @@ ProviderType = Literal[
     # DeepSeek-specific request shaping (``thinking`` + ``reasoning_effort``
     # — see ``ChatRouter.stream_chat_events``).
     "deepseek",
+    # Atlas Cloud — OpenAI-compatible aggregator (api.atlascloud.ai/v1).
+    # Wire-compatible with ``openai_compatible``; the dedicated type just
+    # pre-fills the base URL in the Add Provider UI.
+    "atlascloud",
 ]
 
 

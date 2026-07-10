@@ -532,7 +532,10 @@ export type ProviderType =
   // the dedicated tile in AddProviderModal pre-fills the base URL,
   // and the chat client attaches DeepSeek's `thinking` +
   // `reasoning_effort` request fields when reasoning is enabled.
-  | "deepseek";
+  | "deepseek"
+  // First-class Atlas Cloud. OpenAI-compatible aggregator — the tile in
+  // AddProviderModal pre-fills its `api.atlascloud.ai/v1` base URL.
+  | "atlascloud";
 
 /**
  * Compact summary of the model's upstream endpoint data policies.

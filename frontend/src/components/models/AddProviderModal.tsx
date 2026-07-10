@@ -79,6 +79,15 @@ export const PROVIDER_SPECS: ProviderSpec[] = [
     keyUrl: "https://platform.deepseek.com/api_keys",
   },
   {
+    value: "atlascloud",
+    label: "Atlas Cloud",
+    defaultName: "Atlas Cloud",
+    baseUrlHint: "https://api.atlascloud.ai/v1",
+    apiKeyPlaceholder: "sk-...",
+    hint: "One key, 300+ models",
+    keyUrl: "https://www.atlascloud.ai/",
+  },
+  {
     value: "openai_compatible",
     label: "OpenAI-compatible",
     defaultName: "Custom",
