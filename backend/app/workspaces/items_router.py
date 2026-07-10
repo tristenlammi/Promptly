@@ -2359,6 +2359,25 @@ async def _purge_item(
                         tf.trashed_at = now
                     chunk_file_ids.add(canvas.text_file_id)
                 await db.delete(canvas)
+        elif it.kind in ("roster", "chart", "dataview") and it.ref_id is not None:
+            # Sheet-style backing rows (Roster / Chart / DataView): drop the
+            # backing row and trash its RAG text file, so a deleted item stops
+            # surfacing in retrieval. Especially important for a data view —
+            # its text file caches DB query results that mustn't linger in the
+            # workspace pool after the view is gone.
+            backing_model = {
+                "roster": Roster,
+                "chart": Chart,
+                "dataview": DataView,
+            }[it.kind]
+            backing = await db.get(backing_model, it.ref_id)
+            if backing is not None:
+                if backing.text_file_id is not None:
+                    bf = await db.get(UserFile, backing.text_file_id)
+                    if bf is not None and bf.trashed_at is None:
+                        bf.trashed_at = now
+                    chunk_file_ids.add(backing.text_file_id)
+                await db.delete(backing)
 
     # Purge the RAG chunks for every backing file we just retired so a
     # deleted item stops contributing to retrieval (and to the indexed-token
