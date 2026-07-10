@@ -5,7 +5,13 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl  # noqa: F401
+from pydantic import (  # noqa: F401
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    field_validator,
+)
 
 ProviderType = Literal[
     "openrouter",
@@ -62,6 +68,23 @@ class ModelInfo(BaseModel):
     context_window: int | None = None
     pricing: dict[str, Any] | None = None
     description: str | None = None
+
+    @field_validator("pricing", mode="before")
+    @classmethod
+    def _coerce_pricing(cls, v: Any) -> dict[str, Any] | None:
+        """Tolerate providers that wrap the pricing dict in a list.
+
+        Most catalogs (OpenRouter, OpenAI) expose ``pricing`` as a plain
+        dict, but some OpenAI-compatible aggregators (e.g. Atlas Cloud)
+        return a single-element ``[{...}]`` list. The raw upstream shape
+        is persisted verbatim in ``provider.models``, so a legacy row
+        written before the write-side fix would otherwise 500 the entire
+        providers list on read. Unwrap the first dict; drop anything we
+        can't interpret rather than fail the whole response.
+        """
+        if isinstance(v, list):
+            return next((item for item in v if isinstance(item, dict)), None)
+        return v if isinstance(v, dict) else None
     # True if the model accepts image input (per the upstream catalog's
     # `architecture.input_modalities`). Defaults False so legacy DB rows
     # written before Phase 3 deserialize cleanly.

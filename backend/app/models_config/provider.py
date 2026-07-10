@@ -126,6 +126,21 @@ SUPPORTED_PROVIDER_TYPES: frozenset[str] = frozenset(DEFAULT_BASE_URLS)
 KEYLESS_PROVIDER_TYPES: frozenset[str] = frozenset({"ollama"})
 
 
+def _coerce_pricing(value: Any) -> dict[str, Any] | None:
+    """Normalise a catalog ``pricing`` field to a dict (or ``None``).
+
+    OpenRouter/OpenAI expose ``pricing`` as a plain dict, but some
+    OpenAI-compatible aggregators (e.g. Atlas Cloud) wrap it in a
+    single-element ``[{...}]`` list. We persist the catalog verbatim, and
+    ``ModelInfo.pricing`` is typed ``dict | None`` — so storing a list
+    would 500 the providers list on the next read. Unwrap the first dict;
+    discard anything else.
+    """
+    if isinstance(value, list):
+        return next((item for item in value if isinstance(item, dict)), None)
+    return value if isinstance(value, dict) else None
+
+
 class ProviderError(Exception):
     """Raised when a provider request fails (auth, network, model unavailable).
 
@@ -1478,7 +1493,7 @@ class ModelRouter:
                 "id": m["id"],
                 "display_name": m.get("name") or m["id"],
                 "context_window": m.get("context_length"),
-                "pricing": m.get("pricing"),
+                "pricing": _coerce_pricing(m.get("pricing")),
                 "description": m.get("description"),
                 "supports_vision": _detect_vision(m),
                 "supports_image_output": _detect_image_output(m),
@@ -1546,7 +1561,7 @@ class ModelRouter:
                     ),
                     "context_window": m.get("context_length")
                     or m.get("context_window"),
-                    "pricing": m.get("pricing"),
+                    "pricing": _coerce_pricing(m.get("pricing")),
                     "description": m.get("description"),
                     "supports_vision": _detect_vision_by_id(
                         provider.type, model_id
