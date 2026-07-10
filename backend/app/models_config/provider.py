@@ -604,6 +604,23 @@ def _detect_reasoning_by_id(provider_type: str, model_id: str) -> bool:
     return False
 
 
+def _model_tool_support(provider: "ModelProvider", model_id: str) -> bool | None:
+    """Does this model expose native function-calling?
+
+    Returns ``True`` / ``False`` from the cached catalog's ``supports_tools``
+    flag, or ``None`` when unknown — either the model isn't in the catalog or
+    the catalog predates the flag (hasn't been refreshed since it shipped).
+    Callers gate conservatively: only *drop* tools on an explicit ``False`` and
+    only tighten OpenRouter routing on an explicit ``True``, so a stale catalog
+    can't regress a model that actually works.
+    """
+    for row in provider.models or []:
+        if isinstance(row, dict) and row.get("id") == model_id:
+            val = row.get("supports_tools")
+            return val if isinstance(val, bool) else None
+    return None
+
+
 def _known_context_window(provider_type: str, model_id: str) -> int | None:
     """Best-effort context-window lookup for providers that don't
     return ``context_length`` on their ``/models`` endpoint.
@@ -1010,6 +1027,19 @@ class ModelRouter:
         # long replies stop getting truncated mid-sentence.
         if max_tokens is not None:
             create_kwargs["max_tokens"] = max_tokens
+        # Gate tools on native support. A model with no native function-calling
+        # can't run tools cleanly — OpenRouter fakes it via prompting and leaks
+        # the tool-call markup into the reply — so don't offer tools we KNOW it
+        # can't use. Unknown (stale catalog) → leave as-is and lean on the
+        # sanitizer. ``None`` here also skips the require_parameters tightening.
+        tool_support = _model_tool_support(provider, model_id)
+        if tools and tool_support is False:
+            logger.info(
+                "Dropping tools for %s/%s — no native function-calling support",
+                provider.type,
+                model_id,
+            )
+            tools = None
         if tools:
             create_kwargs["tools"] = tools
             if tool_choice is not None:
@@ -1066,6 +1096,19 @@ class ModelRouter:
         # Native reasoning models on providers we don't have a param for
         # just use their built-in default; non-native models were already
         # handled via the system-prompt directive above.
+
+        # OpenRouter routes each model across several underlying endpoints, and
+        # some don't parse tool calls into structured ``tool_calls`` — they leak
+        # the markup into content (intermittent, even on tool-capable models —
+        # the DeepSeek-v4 "<|DSML|…>" leak). ``require_parameters`` forces
+        # routing to endpoints that support every requested param (incl.
+        # ``tools``), killing those leaks at the source. Gated on *known* tool
+        # support so a stale-catalog non-tool model can't hit an unroutable
+        # request. Merged so it doesn't clobber the ``reasoning`` extra_body.
+        if provider.type == "openrouter" and tools and tool_support is True:
+            eb = create_kwargs.setdefault("extra_body", {})
+            if isinstance(eb, dict):
+                eb.setdefault("provider", {})["require_parameters"] = True
 
         try:
             stream = await client.chat.completions.create(**create_kwargs)
@@ -1427,6 +1470,11 @@ class ModelRouter:
                 "supports_vision": _detect_vision(m),
                 "supports_image_output": _detect_image_output(m),
                 "supports_native_reasoning": _detect_reasoning(m),
+                # Whether this model exposes native function-calling. Models
+                # without it can't do tools cleanly — OpenRouter fakes it via
+                # prompting, which leaks the tool-call markup into content — so
+                # the chat path drops tools for them (see _model_tool_support).
+                "supports_tools": "tools" in (m.get("supported_parameters") or []),
             }
             # Only include the privacy key when we actually fetched
             # endpoint data — an explicit ``null`` would look like
