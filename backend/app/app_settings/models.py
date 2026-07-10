@@ -55,6 +55,28 @@ class AppSettings(Base):
     smtp_from_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
     smtp_from_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # ----- SSO (OIDC single sign-on) -----
+    # Off by default — local username/password login is unchanged unless an
+    # admin turns this on. SSO authenticates INVITED users only: the IdP's
+    # verified email is matched to an existing account (no auto-provisioning),
+    # so it never widens access beyond the admin's user list.
+    oidc_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Issuer base URL (e.g. https://accounts.google.com) OR a full
+    # .well-known/openid-configuration URL — discovery accepts both.
+    oidc_issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    oidc_client_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Fernet-encrypted at rest (mirrors ``smtp_password_encrypted``). NULL
+    # when SSO isn't configured.
+    oidc_client_secret_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    # Login-button label ("Sign in with Google"); a default is applied in
+    # code when NULL. Scopes default to "openid email profile" when NULL.
+    oidc_button_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    oidc_scopes: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
     # ----- Org-wide quota defaults (Phase 3) -----
     # Applied to any user whose own override on ``users`` is NULL.
     # NULL here too means "no limit at all" — so a fresh deploy keeps

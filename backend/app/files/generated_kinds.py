@@ -75,6 +75,18 @@ class GeneratedKind(str, Enum):
     # Drive folder; re-written on save. Keyed off ``Roster.text_file_id``.
     ROSTER_TEXT = "roster_text"
 
+    # Backing text file for a workspace chart. Holds a flattened text table of
+    # the chart's data so it feeds ``knowledge_chunks`` like a sheet. Lives in
+    # the workspace's ``Charts/`` Drive folder; re-written on save. Keyed off
+    # ``Chart.text_file_id``.
+    CHART_TEXT = "chart_text"
+
+    # Backing text file for a workspace data-view. Holds a flattened text table
+    # of the last query result so it feeds ``knowledge_chunks``. Lives in the
+    # workspace's ``Data/`` Drive folder; re-written on each run. Keyed off
+    # ``DataView.text_file_id``.
+    DATAVIEW_TEXT = "dataview_text"
+
     # Backing text file for a workspace's *automations* index (Phase 10).
     # Holds a rendered summary of every scheduled Task homed in the
     # workspace (name / schedule / prompt / flow node summary) so chats can

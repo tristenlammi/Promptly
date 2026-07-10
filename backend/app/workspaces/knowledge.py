@@ -43,7 +43,9 @@ from sqlalchemy.orm import aliased
 
 from app.auth.models import User
 from app.chat.models import (
+    Chart,
     Conversation,
+    DataView,
     Message,
     Roster,
     Spreadsheet,
@@ -890,6 +892,230 @@ async def index_roster_for_workspace(
                 pass
 
 
+async def index_chart_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed a chart's flattened data-table text into the workspace pool.
+
+    The exact roster analogue: the client pushes ``content_text`` on save, we
+    mirror it onto a backing Drive file (``Chart.text_file_id``) and embed that
+    so a chat can answer questions about the numbers. Owns its own session;
+    no-ops without an embedding provider.
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "chart" or item.ref_id is None:
+                return
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+            chart = await db.get(Chart, item.ref_id)
+            if chart is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            text = (chart.content_text or "").strip()
+            if not text:
+                if chart.text_file_id is not None:
+                    await delete_existing_chunks(
+                        db,
+                        scope_kind="workspace",
+                        scope_id=workspace_id,
+                        user_file_id=chart.text_file_id,
+                    )
+                    uf = await db.get(UserFile, chart.text_file_id)
+                    if uf is not None and uf.trashed_at is None:
+                        uf.content_text = None
+                        try:
+                            abs_path = absolute_path(uf.storage_path)
+                            abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            with open(abs_path, "w", encoding="utf-8") as fh:
+                                fh.write("")
+                            uf.size_bytes = 0
+                        except OSError:
+                            pass
+                await _set_note_index_status(db, item_id=item_id, status="empty")
+                return
+
+            current_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(db, item_id=item_id, status="embedding")
+            uf = await _ensure_chart_backing_file(db, ws=ws, chart=chart, text=text)
+            if uf is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="workspace owner missing",
+                )
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    text,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db, item_id=item_id, status="ready", indexed_hash=current_hash
+            )
+        except Exception:  # noqa: BLE001 - last-line catch
+            logger.exception("index_chart_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error="indexing error"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
+async def index_dataview_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed a data-view's flattened last-result text into the workspace pool.
+
+    The chart analogue: the run endpoint writes ``content_text`` (a text table
+    of the query result); we mirror it onto a backing Drive file
+    (``DataView.text_file_id``) and embed that so a chat can answer from the
+    latest data. Owns its own session; no-ops without an embedding provider.
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "dataview" or item.ref_id is None:
+                return
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+            dv = await db.get(DataView, item.ref_id)
+            if dv is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return
+
+            text = (dv.content_text or "").strip()
+            if not text:
+                if dv.text_file_id is not None:
+                    await delete_existing_chunks(
+                        db,
+                        scope_kind="workspace",
+                        scope_id=workspace_id,
+                        user_file_id=dv.text_file_id,
+                    )
+                    uf = await db.get(UserFile, dv.text_file_id)
+                    if uf is not None and uf.trashed_at is None:
+                        uf.content_text = None
+                        try:
+                            abs_path = absolute_path(uf.storage_path)
+                            abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            with open(abs_path, "w", encoding="utf-8") as fh:
+                                fh.write("")
+                            uf.size_bytes = 0
+                        except OSError:
+                            pass
+                await _set_note_index_status(db, item_id=item_id, status="empty")
+                return
+
+            current_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(db, item_id=item_id, status="embedding")
+            uf = await _ensure_dataview_backing_file(db, ws=ws, dv=dv, text=text)
+            if uf is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="workspace owner missing",
+                )
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    text,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db, item_id=item_id, status="ready", indexed_hash=current_hash
+            )
+        except Exception:  # noqa: BLE001 - last-line catch
+            logger.exception("index_dataview_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error="indexing error"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
 # ---------------------------------------------------------------------
 # Chat ingestion (opt-in chat-as-context — 0090)
 # ---------------------------------------------------------------------
@@ -1436,6 +1662,124 @@ async def _ensure_roster_backing_file(
     db.add(uf)
     await db.flush()
     roster.text_file_id = uf.id
+    return uf
+
+
+async def _ensure_chart_backing_file(
+    db: AsyncSession, *, ws: Workspace, chart: Chart, text: str
+) -> UserFile | None:
+    """Create or update the Drive file backing a chart's RAG text — the chart
+    analogue of :func:`_ensure_roster_backing_file`. File id is stored on
+    ``Chart.text_file_id`` so re-indexes update it in place."""
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    title = chart.title or "Chart"
+
+    if chart.text_file_id is not None:
+        uf = await db.get(UserFile, chart.text_file_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            uf.filename = f"{title}.md"
+            uf.size_bytes = len(text.encode("utf-8"))
+            uf.content_text = text
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db, user_id=owner.id, parent_id=ws.root_folder_id, name="Charts"
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=f"{title}.md",
+        original_filename=f"{title}.md",
+        mime_type="text/markdown",
+        size_bytes=len(text.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.CHART_TEXT.value,
+        content_text=text,
+    )
+    db.add(uf)
+    await db.flush()
+    chart.text_file_id = uf.id
+    return uf
+
+
+async def _ensure_dataview_backing_file(
+    db: AsyncSession, *, ws: Workspace, dv: DataView, text: str
+) -> UserFile | None:
+    """Create or update the Drive file backing a data-view's RAG text — the
+    data-view analogue of :func:`_ensure_chart_backing_file`. File id is stored
+    on ``DataView.text_file_id`` so re-runs update it in place."""
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    title = dv.title or "Data view"
+
+    if dv.text_file_id is not None:
+        uf = await db.get(UserFile, dv.text_file_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            uf.filename = f"{title}.md"
+            uf.size_bytes = len(text.encode("utf-8"))
+            uf.content_text = text
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db, user_id=owner.id, parent_id=ws.root_folder_id, name="Data"
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=f"{title}.md",
+        original_filename=f"{title}.md",
+        mime_type="text/markdown",
+        size_bytes=len(text.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.DATAVIEW_TEXT.value,
+        content_text=text,
+    )
+    db.add(uf)
+    await db.flush()
+    dv.text_file_id = uf.id
     return uf
 
 

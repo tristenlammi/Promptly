@@ -366,7 +366,15 @@ class WorkspaceItemCreate(BaseModel):
     Notebooks are the single grouping primitive.)"""
 
     kind: Literal[
-        "note", "canvas", "board", "sheet", "container", "chat", "roster"
+        "note",
+        "canvas",
+        "board",
+        "sheet",
+        "container",
+        "chat",
+        "roster",
+        "chart",
+        "dataview",
     ]
     parent_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)
@@ -461,6 +469,54 @@ class RosterSaveRequest(BaseModel):
 
     data: Any
     content_text: str | None = None
+    title: str | None = Field(default=None, max_length=255)
+
+
+class ChartResponse(BaseModel):
+    """A chart page's persisted state. ``data`` is the chart JSON
+    (type + rows + column config), NULL until the first save."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    data: Any | None
+
+
+class ChartSaveRequest(BaseModel):
+    """Debounced save from the chart editor. ``data`` is the full chart;
+    ``content_text`` is the client-flattened text table used for workspace
+    RAG."""
+
+    data: Any
+    content_text: str | None = None
+    title: str | None = Field(default=None, max_length=255)
+
+
+class DataViewResponse(BaseModel):
+    """A data-view's config + last cached result. ``data`` is
+    ``{columns, rows, truncated, row_count}`` from the last run (NULL until
+    first run)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    title: str
+    data_source_id: uuid.UUID | None
+    sql: str | None
+    data: Any | None
+    last_run_at: datetime | None
+    last_error: str | None
+
+
+class DataViewSaveRequest(BaseModel):
+    """Save a data-view's config (source + query). Running is a separate
+    endpoint so a bad query can't block saving."""
+
+    data_source_id: uuid.UUID | None = None
+    sql: str | None = None
     title: str | None = Field(default=None, max_length=255)
 
 

@@ -118,6 +118,8 @@ export type WorkspaceItemKind =
   | "sheet"
   | "container"
   | "roster"
+  | "chart"
+  | "dataview"
   | "task";
 
 /** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
@@ -228,6 +230,54 @@ export interface RosterData {
   workspace_id: string;
   title: string;
   data: RosterDoc | null;
+}
+
+// --- Chart (visualisation) -------------------------------------------
+export type ChartType = "bar" | "line" | "area" | "pie";
+
+/** A chart's persisted config + data rows. ``rows`` are plain records keyed by
+ *  column name; ``labelKey`` is the category/x-axis column and ``valueKeys``
+ *  the numeric series to plot. ``sourceSheetId`` remembers an optional Sheet
+ *  the rows were imported (snapshotted) from. */
+export interface ChartDoc {
+  chartType: ChartType;
+  labelKey: string;
+  valueKeys: string[];
+  rows: Record<string, string | number>[];
+  sourceSheetId?: string | null;
+}
+
+export interface ChartData {
+  id: string;
+  workspace_id: string;
+  title: string;
+  data: ChartDoc | null;
+}
+
+// --- Data view (read-only DB query) ----------------------------------
+/** A data source an editor can pick (no credentials — from the picker API). */
+export interface DataSourceOption {
+  id: string;
+  name: string;
+  driver: string;
+}
+
+export interface DataViewResult {
+  columns: string[];
+  rows: (string | number | boolean | null)[][];
+  truncated: boolean;
+  row_count: number;
+}
+
+export interface DataViewData {
+  id: string;
+  workspace_id: string;
+  title: string;
+  data_source_id: string | null;
+  sql: string | null;
+  data: DataViewResult | null;
+  last_run_at: string | null;
+  last_error: string | null;
 }
 
 // ---------------------------------------------------------------------
@@ -537,7 +587,9 @@ export interface CreateWorkspaceItemPayload {
     | "sheet"
     | "container"
     | "chat"
-    | "roster";
+    | "roster"
+    | "chart"
+    | "dataview";
   parent_id?: string | null;
   title?: string;
 }
@@ -994,6 +1046,56 @@ export const workspacesApi = {
     const { data } = await apiClient.put<RosterData>(
       `/workspaces/${id}/rosters/${rosterId}`,
       payload
+    );
+    return data;
+  },
+
+  // --- Chart pages (single-user persistence) ---------------------------
+  async getChart(id: string, chartId: string): Promise<ChartData> {
+    const { data } = await apiClient.get<ChartData>(
+      `/workspaces/${id}/charts/${chartId}`
+    );
+    return data;
+  },
+
+  async saveChart(
+    id: string,
+    chartId: string,
+    payload: { data: unknown; content_text?: string; title?: string }
+  ): Promise<ChartData> {
+    const { data } = await apiClient.put<ChartData>(
+      `/workspaces/${id}/charts/${chartId}`,
+      payload
+    );
+    return data;
+  },
+
+  // --- Data views (read-only DB query) ---------------------------------
+  /** List enabled data sources (id + name only) for the pane's picker. */
+  async listDataSources(): Promise<DataSourceOption[]> {
+    const { data } = await apiClient.get<DataSourceOption[]>("/data-sources");
+    return data;
+  },
+  async getDataView(id: string, dvId: string): Promise<DataViewData> {
+    const { data } = await apiClient.get<DataViewData>(
+      `/workspaces/${id}/dataviews/${dvId}`
+    );
+    return data;
+  },
+  async saveDataView(
+    id: string,
+    dvId: string,
+    payload: { data_source_id?: string | null; sql?: string; title?: string }
+  ): Promise<DataViewData> {
+    const { data } = await apiClient.put<DataViewData>(
+      `/workspaces/${id}/dataviews/${dvId}`,
+      payload
+    );
+    return data;
+  },
+  async runDataView(id: string, dvId: string): Promise<DataViewData> {
+    const { data } = await apiClient.post<DataViewData>(
+      `/workspaces/${id}/dataviews/${dvId}/run`
     );
     return data;
   },

@@ -107,6 +107,18 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         smtp_from_name=row.smtp_from_name,
         smtp_password_set=bool(row.smtp_password_encrypted),
         smtp_configured=row.smtp_configured,
+        oidc_enabled=row.oidc_enabled,
+        oidc_issuer=row.oidc_issuer,
+        oidc_client_id=row.oidc_client_id,
+        oidc_button_label=row.oidc_button_label,
+        oidc_scopes=row.oidc_scopes,
+        oidc_client_secret_set=bool(row.oidc_client_secret_encrypted),
+        oidc_configured=bool(
+            row.oidc_enabled
+            and row.oidc_issuer
+            and row.oidc_client_id
+            and row.oidc_client_secret_encrypted
+        ),
         default_storage_cap_bytes=row.default_storage_cap_bytes,
         default_daily_token_budget=row.default_daily_token_budget,
         default_monthly_token_budget=row.default_monthly_token_budget,
@@ -226,6 +238,34 @@ async def update_app_settings(
         if row.smtp_from_name != payload.smtp_from_name:
             diff["smtp_from_name"] = payload.smtp_from_name
         row.smtp_from_name = payload.smtp_from_name
+
+    # ----- SSO (OIDC) -----
+    if "oidc_enabled" in fields and payload.oidc_enabled is not None:
+        if row.oidc_enabled != payload.oidc_enabled:
+            diff["oidc_enabled"] = payload.oidc_enabled
+        row.oidc_enabled = payload.oidc_enabled
+
+    for field_name in ("oidc_issuer", "oidc_client_id", "oidc_button_label", "oidc_scopes"):
+        if field_name in fields:
+            new_val = getattr(payload, field_name)
+            # Normalise empty strings to NULL so "cleared" reads cleanly.
+            if isinstance(new_val, str) and new_val.strip() == "":
+                new_val = None
+            if getattr(row, field_name) != new_val:
+                diff[field_name] = new_val
+            setattr(row, field_name, new_val)
+
+    if "oidc_client_secret" in fields:
+        # Same tri-state as smtp_password: None/"" clears, non-empty encrypts.
+        if payload.oidc_client_secret is None or payload.oidc_client_secret == "":
+            if row.oidc_client_secret_encrypted is not None:
+                diff["oidc_client_secret"] = "<cleared>"
+            row.oidc_client_secret_encrypted = None
+        else:
+            row.oidc_client_secret_encrypted = encrypt_secret(
+                payload.oidc_client_secret
+            )
+            diff["oidc_client_secret"] = "<set>"
 
     # ----- Phase 3 quota defaults -----
     # Same tri-state as everywhere else: omitted = unchanged, explicit
@@ -475,7 +515,7 @@ async def update_app_settings(
             # smtp_password is already redacted to "<set>" / "<cleared>"
             # before reaching here, but pass the field through ``redact``
             # too as defence-in-depth in case someone refactors.
-            detail=safe_dict(diff, redact=("smtp_password",)),
+            detail=safe_dict(diff, redact=("smtp_password", "oidc_client_secret")),
         )
     await db.commit()
     await db.refresh(row)

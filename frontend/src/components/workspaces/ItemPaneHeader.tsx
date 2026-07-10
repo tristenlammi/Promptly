@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  BarChart3,
   CalendarDays,
   Clock,
   Columns3,
   Copy,
+  Database,
   FileText,
   Loader2,
   Shapes,
@@ -29,6 +31,8 @@ const KIND_ICONS: Partial<Record<WorkspaceItemKind, typeof FileText>> = {
   board: Columns3,
   sheet: Table2,
   roster: CalendarDays,
+  chart: BarChart3,
+  dataview: Database,
   task: Clock,
 };
 

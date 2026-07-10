@@ -106,6 +106,16 @@ export interface AppSettingsPatch {
   smtp_from_address?: string | null;
   smtp_from_name?: string | null;
   /**
+   * SSO (OIDC). ``oidc_client_secret`` follows the ``smtp_password`` idiom:
+   * omit = unchanged, "" = clear, non-empty = encrypt + store.
+   */
+  oidc_enabled?: boolean;
+  oidc_issuer?: string | null;
+  oidc_client_id?: string | null;
+  oidc_client_secret?: string;
+  oidc_button_label?: string | null;
+  oidc_scopes?: string | null;
+  /**
    * Org-wide quota defaults. Omit = unchanged; `null` = revert to
    * "no default" (uncapped); number = new default for users without
    * a per-user override.

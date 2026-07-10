@@ -11,6 +11,11 @@ export interface SetupStatus {
   requires_setup: boolean;
 }
 
+export interface SsoStatus {
+  enabled: boolean;
+  button_label: string | null;
+}
+
 /** Minimal user payload returned by ``GET /auth/users/directory``.
  *  Mirrors ``ShareUserBrief`` on the backend so share-create payloads
  *  can send ``username`` straight through after the picker resolves
@@ -34,6 +39,11 @@ export const authApi = {
   },
   async setupStatus(): Promise<SetupStatus> {
     const { data } = await apiClient.get<SetupStatus>("/auth/setup-status");
+    return data;
+  },
+  /** Public probe so the login page knows whether to show an SSO button. */
+  async ssoStatus(): Promise<SsoStatus> {
+    const { data } = await apiClient.get<SsoStatus>("/auth/sso-status");
     return data;
   },
   async setup(

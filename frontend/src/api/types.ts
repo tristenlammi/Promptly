@@ -251,6 +251,20 @@ export interface AppSettings {
   smtp_password_set: boolean;
   smtp_configured: boolean;
   /**
+   * SSO (OIDC). Off by default; when enabled, an invited user can sign in
+   * via the configured identity provider (matched by verified email — no
+   * auto-provisioning). ``oidc_client_secret_set`` mirrors the SMTP-password
+   * idiom (the secret itself is never returned); ``oidc_configured`` = enabled
+   * AND issuer/client-id/secret all present.
+   */
+  oidc_enabled: boolean;
+  oidc_issuer: string | null;
+  oidc_client_id: string | null;
+  oidc_button_label: string | null;
+  oidc_scopes: string | null;
+  oidc_client_secret_set: boolean;
+  oidc_configured: boolean;
+  /**
    * Org-wide quota defaults. `null` on any field means "no default —
    * users without their own override are uncapped".
    */

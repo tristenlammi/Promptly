@@ -19,8 +19,10 @@ Phase 1 hardening (2026-04-19):
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
@@ -31,6 +33,8 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import RedirectResponse
+from jose import jwt as jose_jwt
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -58,9 +62,17 @@ from app.auth.schemas import (
     RegisterRequest,
     SetupRequest,
     SetupStatusResponse,
+    SsoStatusResponse,
     TokenResponse,
     UserPreferencesUpdate,
     UserResponse,
+)
+from app.auth.oidc import (
+    OidcError,
+    build_authorize_url,
+    exchange_and_verify,
+    load_oidc_config,
+    verified_email_from_claims,
 )
 from app.auth.utils import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -205,6 +217,173 @@ async def setup_status(db: AsyncSession = Depends(get_db)) -> SetupStatusRespons
         # Legacy mode provisions its own admin unconditionally.
         return SetupStatusResponse(requires_setup=False)
     return SetupStatusResponse(requires_setup=not await _admin_exists(db))
+
+
+# --------------------------------------------------------------------
+# SSO (OIDC single sign-on) — optional, off by default. Authenticates
+# INVITED users only: the IdP's verified email must match an existing,
+# active account (no auto-provisioning). Local password login is
+# unaffected whether or not SSO is configured.
+# --------------------------------------------------------------------
+_OIDC_TX_COOKIE = "promptly_oidc_tx"
+_OIDC_TX_TTL_MINUTES = 10
+
+
+def _safe_next(nxt: str | None) -> str:
+    """Only allow same-origin relative paths as a post-login destination —
+    never an absolute/scheme URL (open-redirect guard)."""
+    if not nxt or not nxt.startswith("/") or nxt.startswith("//"):
+        return "/"
+    return nxt
+
+
+def _oidc_redirect_uri(request: Request) -> str:
+    """The callback URL, built from the public host/proto the browser used so
+    it matches what's registered at the IdP. Computed identically in the login
+    and callback routes so the two OIDC ``redirect_uri`` values agree."""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    )
+    return f"{proto}://{host}".rstrip("/") + "/api/auth/oidc/callback"
+
+
+def _sign_oidc_tx(state: str, nonce: str, next_path: str) -> str:
+    payload = {
+        "state": state,
+        "nonce": nonce,
+        "next": next_path,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=_OIDC_TX_TTL_MINUTES),
+    }
+    return jose_jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+
+
+def _read_oidc_tx(token: str | None) -> dict | None:
+    if not token:
+        return None
+    try:
+        return jose_jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+    except Exception:  # noqa: BLE001 — expired/tampered tx → treat as absent
+        return None
+
+
+def _sso_fail(reason: str) -> RedirectResponse:
+    """Bounce back to the login screen with a short error code the SPA turns
+    into a friendly message. Clears the transaction cookie."""
+    resp = RedirectResponse(f"/login?sso_error={quote(reason)}", status_code=302)
+    resp.delete_cookie(_OIDC_TX_COOKIE, path="/api/auth")
+    return resp
+
+
+@router.get("/sso-status", response_model=SsoStatusResponse)
+async def sso_status(db: AsyncSession = Depends(get_db)) -> SsoStatusResponse:
+    """Public probe: is SSO enabled, and what should the button say?"""
+    cfg = await load_oidc_config(db)
+    if cfg is None:
+        return SsoStatusResponse(enabled=False)
+    return SsoStatusResponse(enabled=True, button_label=cfg.button_label)
+
+
+@router.get("/oidc/login")
+async def oidc_login(
+    request: Request,
+    next: str = "/",
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Kick off the OIDC flow: redirect the browser to the identity provider."""
+    cfg = await load_oidc_config(db)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="SSO is not enabled.")
+    state = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(24)
+    try:
+        url = await build_authorize_url(
+            cfg,
+            redirect_uri=_oidc_redirect_uri(request),
+            state=state,
+            nonce=nonce,
+        )
+    except OidcError:
+        return _sso_fail("provider_unreachable")
+    resp = RedirectResponse(url, status_code=302)
+    resp.set_cookie(
+        key=_OIDC_TX_COOKIE,
+        value=_sign_oidc_tx(state, nonce, _safe_next(next)),
+        max_age=_OIDC_TX_TTL_MINUTES * 60,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        # Lax (not Strict) so the cookie survives the top-level redirect back
+        # from the IdP; the callback needs it to check state/nonce.
+        samesite="lax",
+        path="/api/auth",
+    )
+    return resp
+
+
+@router.get("/oidc/callback")
+async def oidc_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Handle the IdP redirect: verify the id_token, match an invited user,
+    log them in by setting the refresh cookie and bouncing into the app."""
+    if error:
+        return _sso_fail("provider_denied")
+    tx = _read_oidc_tx(request.cookies.get(_OIDC_TX_COOKIE))
+    if not tx or not code or not state or state != tx.get("state"):
+        return _sso_fail("bad_state")
+
+    cfg = await load_oidc_config(db)
+    if cfg is None:
+        return _sso_fail("sso_disabled")
+
+    try:
+        claims = await exchange_and_verify(
+            cfg,
+            code=code,
+            redirect_uri=_oidc_redirect_uri(request),
+            nonce=tx.get("nonce", ""),
+        )
+    except OidcError:
+        return _sso_fail("verify_failed")
+
+    email = verified_email_from_claims(claims)
+    if not email:
+        return _sso_fail("no_verified_email")
+
+    user = (
+        await db.execute(select(User).where(func.lower(User.email) == email))
+    ).scalar_one_or_none()
+    # Invite-only: SSO logs in EXISTING, active accounts only. An unknown or
+    # disabled email is refused — SSO never creates or re-enables an account.
+    if user is None or user.disabled:
+        return _sso_fail("no_account")
+
+    user.last_login_at = datetime.now(timezone.utc)
+    await record_event(
+        db,
+        request=request,
+        event_type=EVENT_LOGIN_SUCCESS,
+        user_id=user.id,
+        identifier=email,
+    )
+    await db.commit()
+    await db.refresh(user)
+
+    # Set the refresh cookie on the redirect and bounce into the app; the SPA
+    # exchanges it for an access token on load (same as a normal page refresh).
+    redirect = RedirectResponse(_safe_next(tx.get("next")), status_code=302)
+    _set_refresh_cookie(
+        redirect,
+        create_refresh_token(user.id, token_version=user.token_version),
+    )
+    redirect.delete_cookie(_OIDC_TX_COOKIE, path="/api/auth")
+    return redirect
 
 
 @router.post("/setup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

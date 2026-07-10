@@ -53,6 +53,17 @@ class SetupStatusResponse(BaseModel):
     requires_setup: bool
 
 
+class SsoStatusResponse(BaseModel):
+    """Public probe so the login screen knows whether to show an SSO button.
+
+    Exposes only whether OIDC is enabled and the button label — never any
+    client id/secret or issuer detail.
+    """
+
+    enabled: bool
+    button_label: str | None = None
+
+
 class ChangePasswordRequest(BaseModel):
     """Self-service password change (``POST /api/auth/me/password``).
 

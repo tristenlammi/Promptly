@@ -144,6 +144,18 @@ class AppSettingsResponse(BaseModel):
     smtp_password_set: bool
     smtp_configured: bool
 
+    # ----- SSO (OIDC single sign-on) -----
+    # Client secret is never echoed; ``oidc_client_secret_set`` flags whether
+    # one is stored. ``oidc_configured`` = enabled AND all three of
+    # issuer/client-id/secret present, so the UI can show a clear status.
+    oidc_enabled: bool = False
+    oidc_issuer: str | None = None
+    oidc_client_id: str | None = None
+    oidc_button_label: str | None = None
+    oidc_scopes: str | None = None
+    oidc_client_secret_set: bool = False
+    oidc_configured: bool = False
+
     # ----- Phase 3 org-wide quota defaults -----
     # NULL on any of these means "no default — users without a
     # personal override are uncapped".
@@ -227,6 +239,15 @@ class AppSettingsUpdate(BaseModel):
     smtp_use_tls: bool | None = None
     smtp_from_address: EmailStr | None = None
     smtp_from_name: str | None = Field(default=None, max_length=128)
+
+    # ----- SSO (OIDC) — client secret follows the smtp_password idiom
+    # (omitted = unchanged, "" = clear, value = encrypt + store). -----
+    oidc_enabled: bool | None = None
+    oidc_issuer: str | None = Field(default=None, max_length=512)
+    oidc_client_id: str | None = Field(default=None, max_length=512)
+    oidc_client_secret: str | None = Field(default=None, max_length=1024)
+    oidc_button_label: str | None = Field(default=None, max_length=64)
+    oidc_scopes: str | None = Field(default=None, max_length=256)
 
     # ge=0 (not ge=1) so an admin can park the org at "0 tokens for
     # everyone unless overridden" during a kill-switch incident.

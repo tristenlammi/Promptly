@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Gauge,
   Globe,
+  KeyRound,
   Loader2,
   Mail,
   ShieldAlert,
@@ -74,6 +75,11 @@ export function AppSettingsPanel() {
         busy={update.isPending}
       />
       <SmtpCard
+        settings={data}
+        onSubmit={(patch) => update.mutateAsync(patch)}
+        busy={update.isPending}
+      />
+      <OidcCard
         settings={data}
         onSubmit={(patch) => update.mutateAsync(patch)}
         busy={update.isPending}
@@ -1061,6 +1067,192 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
 // Tiny presentational helpers — local to this file (the shared
 // ``SettingsCard`` is imported from ``./SettingsCard``).
 // --------------------------------------------------------------------
+// --------------------------------------------------------------------
+// SSO (OIDC) card — optional single sign-on for invited accounts.
+// --------------------------------------------------------------------
+
+function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
+  const [enabled, setEnabled] = useState(settings.oidc_enabled);
+  const [issuer, setIssuer] = useState(settings.oidc_issuer ?? "");
+  const [clientId, setClientId] = useState(settings.oidc_client_id ?? "");
+  const [secret, setSecret] = useState("");
+  const [clearSecret, setClearSecret] = useState(false);
+  const [label, setLabel] = useState(settings.oidc_button_label ?? "");
+  const [scopes, setScopes] = useState(settings.oidc_scopes ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEnabled(settings.oidc_enabled);
+    setIssuer(settings.oidc_issuer ?? "");
+    setClientId(settings.oidc_client_id ?? "");
+    setLabel(settings.oidc_button_label ?? "");
+    setScopes(settings.oidc_scopes ?? "");
+    setSecret("");
+    setClearSecret(false);
+  }, [
+    settings.oidc_enabled,
+    settings.oidc_issuer,
+    settings.oidc_client_id,
+    settings.oidc_button_label,
+    settings.oidc_scopes,
+  ]);
+
+  // The exact callback URL the operator must register at their IdP — shown so
+  // they can copy it verbatim (built from the browser's current origin).
+  const redirectUri = `${window.location.origin}/api/auth/oidc/callback`;
+
+  const patch: AppSettingsPatch = {};
+  if (enabled !== settings.oidc_enabled) patch.oidc_enabled = enabled;
+  if (issuer.trim() !== (settings.oidc_issuer ?? ""))
+    patch.oidc_issuer = issuer.trim() || null;
+  if (clientId.trim() !== (settings.oidc_client_id ?? ""))
+    patch.oidc_client_id = clientId.trim() || null;
+  if (label.trim() !== (settings.oidc_button_label ?? ""))
+    patch.oidc_button_label = label.trim() || null;
+  if (scopes.trim() !== (settings.oidc_scopes ?? ""))
+    patch.oidc_scopes = scopes.trim() || null;
+  if (clearSecret) patch.oidc_client_secret = "";
+  else if (secret) patch.oidc_client_secret = secret;
+  const dirty = Object.keys(patch).length > 0;
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      await onSubmit(patch);
+      setSecret("");
+      setClearSecret(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't save SSO settings."));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Single sign-on (OIDC)"
+      icon={<KeyRound className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">
+              {error}
+            </span>
+          )}
+          {settings.oidc_configured && !error && (
+            <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Configured
+            </span>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={!dirty || busy}
+            loading={busy}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium text-[var(--text)]">
+            Enable single sign-on
+          </span>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Optional. When on, invited users can sign in with your identity
+            provider. SSO only logs in accounts an admin has already created
+            (matched by verified email) — it never creates new accounts, so it
+            can't widen access beyond your user list. Local password login
+            keeps working.
+          </p>
+        </div>
+        <Toggle
+          id="oidc-enabled-toggle"
+          checked={enabled}
+          onChange={setEnabled}
+          disabled={busy}
+        />
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <Field
+          label="Discovery / issuer URL"
+          value={issuer}
+          onChange={setIssuer}
+          placeholder="https://accounts.google.com"
+          disabled={busy}
+        />
+        <Field
+          label="Client ID"
+          value={clientId}
+          onChange={setClientId}
+          placeholder="…apps.googleusercontent.com"
+          disabled={busy}
+        />
+        <div>
+          <Field
+            label="Client secret"
+            type="password"
+            value={secret}
+            onChange={(v) => {
+              setSecret(v);
+              if (v) setClearSecret(false);
+            }}
+            placeholder={
+              settings.oidc_client_secret_set
+                ? "•••••••• (stored — leave blank to keep)"
+                : "Paste the client secret"
+            }
+            autoComplete="new-password"
+            disabled={busy || clearSecret}
+          />
+          {settings.oidc_client_secret_set && (
+            <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+              <input
+                type="checkbox"
+                checked={clearSecret}
+                onChange={(e) => {
+                  setClearSecret(e.target.checked);
+                  if (e.target.checked) setSecret("");
+                }}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+                disabled={busy}
+              />
+              Clear the stored client secret
+            </label>
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="Button label"
+            value={label}
+            onChange={setLabel}
+            placeholder="Sign in with Google"
+            disabled={busy}
+          />
+          <Field
+            label="Scopes"
+            value={scopes}
+            onChange={setScopes}
+            placeholder="openid email profile"
+            disabled={busy}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
+        <span className="font-medium text-[var(--text)]">
+          Redirect URI to register at your provider:
+        </span>
+        <code className="mt-1 block break-all font-mono text-[11px] text-[var(--text)]">
+          {redirectUri}
+        </code>
+      </div>
+    </SettingsCard>
+  );
+}
+
 function Field({
   label,
   value,
