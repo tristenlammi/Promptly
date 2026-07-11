@@ -17,12 +17,17 @@ Output shape:
 * ``sources`` — a single citation row using the page's ``<title>`` and
   the *final* URL (post-redirect) so the inline ``[n]`` chip points
   the user at what was actually read, not what was requested.
-* ``meta``    — the URL, original character count, and truncation
-  flag, surfaced on the chip for transparency.
+* ``meta``    — the URL, original character count, truncation flag, and
+  the ``links`` list (in-content outbound links) surfaced on the chip.
 
-Per-turn cap: 4 fetches. Same rationale as ``web_search`` — three
-"search → fetch → re-search" cycles is plenty; more usually means the
-model is stuck in a loop.
+In-content links are appended to ``content`` and returned in ``meta`` so
+the model can follow a citation chain — read the page, then fetch a
+source it links to — which is what makes multi-hop research feel agentic
+rather than one-shot. Every followed link is re-checked by ``safe_fetch``.
+
+Per-turn cap: 6 fetches — enough for a search → fetch → follow → follow
+chain. Same rationale as ``web_search``; beyond that the model is usually
+stuck in a loop.
 """
 from __future__ import annotations
 
@@ -70,12 +75,20 @@ _TITLE_RE = re.compile(
 )
 
 
-def _extract_with_trafilatura(html: str, url: str) -> tuple[str, str | None]:
+def _extract_with_trafilatura(
+    html: str, url: str
+) -> tuple[str, str | None, list[dict[str, str]]]:
     """Run trafilatura's main-content extractor in a worker thread.
 
-    Returns ``(text, title)``. ``trafilatura.extract`` is CPU-bound
-    (HTML parsing), so callers ``await asyncio.to_thread`` this to
-    keep the event loop responsive on big pages.
+    Returns ``(text, title, links)``. ``trafilatura.extract`` is CPU-bound
+    (HTML parsing), so callers ``await asyncio.to_thread`` this to keep the
+    event loop responsive on big pages.
+
+    ``links`` are in-content outbound links discovered during a second
+    extraction pass (main content only — nav / ads / boilerplate already
+    stripped). Surfacing them lets the model follow a citation chain
+    ("read the linked spec / source") by calling ``fetch_url`` again,
+    which is what turns a one-hop fetch into agentic browsing.
     """
     # Imported lazily so a missing wheel surfaces only when the tool
     # is actually invoked, not at module import time. Should never
@@ -101,7 +114,93 @@ def _extract_with_trafilatura(html: str, url: str) -> tuple[str, str | None]:
     if meta is not None:
         title = (getattr(meta, "title", None) or "").strip() or None
 
-    return text, title
+    # Second pass keeping links, rendered as Markdown so anchor text +
+    # href come back as [text](url). Best-effort: if this trafilatura
+    # version rejects the kwargs, we simply surface no links.
+    links: list[dict[str, str]] = []
+    try:
+        md = trafilatura.extract(
+            html,
+            url=url,
+            include_links=True,
+            output_format="markdown",
+            include_comments=False,
+            include_tables=False,
+            favor_recall=False,
+            no_fallback=False,
+        ) or ""
+        for m in re.finditer(r"\[([^\]]{1,120})\]\((https?://[^\s)]+)\)", md):
+            anchor = re.sub(r"\s+", " ", m.group(1)).strip()
+            href = m.group(2).strip()
+            if href:
+                links.append({"title": anchor, "url": href})
+    except Exception:  # noqa: BLE001 — link pass is best-effort
+        links = []
+
+    return text, title, links
+
+
+# --- In-content link surfacing (agentic "follow the source") -----------------
+# How many discovered links to hand back. Enough to give the model real
+# choice of where to dig next without bloating the tool result.
+_LINK_LIMIT = 10
+# Social / auth / commerce endpoints are never worth following as a source.
+_LINK_SKIP_HOSTS = frozenset({
+    "facebook.com", "twitter.com", "x.com", "linkedin.com", "instagram.com",
+    "youtube.com", "youtu.be", "pinterest.com", "reddit.com", "t.co",
+    "tiktok.com", "threads.net", "whatsapp.com",
+})
+_LINK_SKIP_SUBSTR = (
+    "/login", "/signin", "/sign-in", "/register", "/signup", "/sign-up",
+    "/subscribe", "/cart", "/checkout", "/privacy", "/terms", "/cookie",
+)
+
+
+def _norm_link(u: str) -> str:
+    """Drop the fragment + a trailing slash so a followed link matches the
+    dispatcher's cross-hop dedup cache key on the model's next fetch_url."""
+    u = u.split("#", 1)[0].strip()
+    if len(u) > 1 and u.endswith("/"):
+        u = u[:-1]
+    return u
+
+
+def _filter_discovered_links(
+    links: list[dict[str, str]], page_url: str, request_url: str
+) -> list[dict[str, str]]:
+    """Clean, de-junk, and dedupe the harvested links, bounded to _LINK_LIMIT.
+
+    Drops the page's own URL, non-http(s) links, obvious social/auth/commerce
+    endpoints, and duplicates (first occurrence wins so the ordering the model
+    sees is stable).
+    """
+    from urllib.parse import urlparse
+
+    seen: set[str] = {_norm_link(page_url), _norm_link(request_url)}
+    out: list[dict[str, str]] = []
+    for link in links:
+        url = _norm_link(str(link.get("url") or ""))
+        if not url.lower().startswith(("http://", "https://")):
+            continue
+        if url in seen:
+            continue
+        low = url.lower()
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except Exception:  # noqa: BLE001 — malformed URL
+            continue
+        if host.startswith("www."):
+            host = host[4:]
+        if host in _LINK_SKIP_HOSTS:
+            continue
+        if any(s in low for s in _LINK_SKIP_SUBSTR):
+            continue
+        seen.add(url)
+        title = (str(link.get("title") or "")).strip()[:120] or url
+        out.append({"title": title, "url": url})
+        if len(out) >= _LINK_LIMIT:
+            break
+    return out
 
 
 def _fallback_title(html: str) -> str:
@@ -160,7 +259,10 @@ class FetchUrlTool(Tool):
         "Refuses non-public addresses (localhost, RFC1918, etc.) and "
         "caps the page size — if you get back a truncation marker, the "
         "rest of the page is unavailable, do not invent it. Returns the "
-        "URL as a citation row so the chip stays in sync with `web_search`."
+        "URL as a citation row so the chip stays in sync with `web_search`, "
+        "and lists other links found on the page — call `fetch_url` again on "
+        "one of those to follow a source deeper when the page cites or links "
+        "the detail you actually need."
     )
     prompt_hint = (
         "Read a single web page and get its cleaned-up main text back. "
@@ -184,7 +286,10 @@ class FetchUrlTool(Tool):
         "required": ["url"],
         "additionalProperties": False,
     }
-    max_per_turn = 4
+    # Raised from 4 to 6 to accommodate a citation chain: search → fetch →
+    # follow a discovered link → follow again. Each fetch is still SSRF-
+    # guarded and size-capped, so the extra budget only costs latency/quota.
+    max_per_turn = 6
     # The fetch itself is capped at 12s; the margin covers redirects
     # plus trafilatura extraction on a large page.
     timeout_seconds = 30.0
@@ -207,6 +312,7 @@ class FetchUrlTool(Tool):
         final_url = url
         block_reason: str | None = None
         via_tavily = False
+        discovered_links: list[dict[str, str]] = []
 
         try:
             response = await safe_fetch(
@@ -259,7 +365,7 @@ class FetchUrlTool(Tool):
                 except Exception:  # noqa: BLE001 — broken encoding etc.
                     html = ""
                 if html:
-                    text, title = await asyncio.to_thread(
+                    text, title, discovered_links = await asyncio.to_thread(
                         _extract_with_trafilatura, html, final_url
                     )
                     if not title:
@@ -320,6 +426,21 @@ class FetchUrlTool(Tool):
             f"{text}"
         )
 
+        # Surface in-content links so the model can follow a source deeper
+        # (a fresh fetch_url call). Each is still re-guarded by safe_fetch,
+        # so this only widens *choice*, not trust.
+        followable = _filter_discovered_links(discovered_links, final_url, url)
+        if followable:
+            link_lines = "\n".join(
+                f"[L{i}] {link['title']} — {link['url']}"
+                for i, link in enumerate(followable, start=1)
+            )
+            body = (
+                f"{body}\n\n----\n"
+                "Links found on this page (call fetch_url on any you want to "
+                f"read next):\n{link_lines}"
+            )
+
         snippet = re.sub(r"\s+", " ", text[:240]).strip()
 
         logger.info(
@@ -340,6 +461,7 @@ class FetchUrlTool(Tool):
                 "original_chars": original_chars,
                 "truncated": truncated,
                 "via_tavily": via_tavily,
+                "links": followable,
             },
         )
 

@@ -16,6 +16,8 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -363,6 +365,266 @@ def is_research_worthy(query: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Evidence gathering (shared core — no side effects)
+# ---------------------------------------------------------------------------
+@dataclass
+class ResearchEvidence:
+    """Structured output of the investigation phase.
+
+    Everything a synthesis step (or a chat tool that wants to synthesise
+    inline) needs, with ZERO side effects — no messages persisted, no PDF
+    rendered, no stream emitted. Progress is observed through the
+    ``on_progress`` callback while gathering; the collected evidence is
+    returned here for the caller to do with as it likes.
+    """
+
+    evidence: list[dict[str, Any]]
+    sources: list[dict[str, Any]]      # flattened [{title,url,snippet}] for a ToolResult
+    evidence_doc: str                  # rendered, ≤_MAX_EVIDENCE_CHARS
+    source_count: int
+    angle_count: int
+
+
+async def gather_research_evidence(
+    *,
+    query: str,
+    db: AsyncSession,
+    user: User,
+    conversation_id: uuid.UUID,
+    user_message_id: uuid.UUID,
+    provider: ModelProvider,
+    model_id: str,
+    refinement: str | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+) -> ResearchEvidence:
+    """Run decompose → parallel search+read → gap-check and return evidence.
+
+    This is the reusable heart of Deep Research, split out from
+    :func:`run_research` so BOTH the user-triggered research endpoint and
+    the ``deep_research`` chat tool call the exact same investigation
+    logic. It has no side effects: progress is reported through
+    ``on_progress`` (each call receives the same event dicts the endpoint
+    turns into SSE), and the evidence is returned for the caller to
+    synthesise however it likes.
+
+    When ``refinement`` is set, the decomposition targets that follow-up
+    instruction instead of the whole topic.
+    """
+    is_refine = bool(refinement)
+
+    def _emit(ev: dict[str, Any]) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(ev)
+            except Exception:  # noqa: BLE001 — progress is best-effort
+                logger.debug("research on_progress callback failed", exc_info=True)
+
+    # --- Step 1: Decompose ---
+    _emit({"event": "research_start", "query": query, "refine": is_refine})
+    if is_refine:
+        subquestions = await _decompose_refine(
+            query, refinement or "", provider, model_id
+        )
+    else:
+        subquestions = await _decompose(query, provider, model_id)
+    _emit({
+        "event": "research_decomposed",
+        "subquestions": [
+            {"question": sq["question"], "search_query": sq["search_query"]}
+            for sq in subquestions
+        ],
+    })
+
+    # --- Step 2: Search + Read (parallel angles) ---
+    search_provider = await pick_search_provider(db, user)
+    placeholder_msg_id = user_message_id
+
+    # Every sub-question is an independent research angle, so run them as
+    # PARALLEL tasks — one per sub-question, each on its own DB session
+    # (concurrent tasks must never share one), searching + reading its top
+    # URLs at the same time as the others. Events are pushed to a queue we
+    # drain into ``on_progress``; citation numbers are assigned in a
+    # deterministic post-pass so they don't depend on finish order.
+    event_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    all_seen_urls: set[str] = set()
+
+    async def _investigate(idx: int, sq: dict[str, Any]) -> dict[str, Any]:
+        # Small stagger so five searches don't hit the provider in the
+        # same instant (the burst signature that trips search rate limits).
+        if idx:
+            await asyncio.sleep(idx * 0.3)
+        items: list[dict[str, Any]] = []
+        async with SessionLocal() as tdb:
+            tuser = await tdb.get(User, user.id)
+            if tuser is None:
+                return {"subquestion": sq["question"], "items": items}
+            tctx = ToolContext(
+                db=tdb,
+                user=tuser,
+                conversation_id=conversation_id,
+                user_message_id=placeholder_msg_id,
+            )
+            tfetch = FetchUrlTool()
+            event_q.put_nowait({
+                "event": "research_searching",
+                "index": idx,
+                "question": sq["question"],
+            })
+            try:
+                results, _used = await run_search_with_failover(
+                    tdb, tuser, sq["search_query"],
+                    count=_SEARCH_RESULTS_PER_SQ,
+                )
+            except Exception:
+                results = []
+            event_q.put_nowait({
+                "event": "research_searched",
+                "index": idx,
+                "sources_found": len(results),
+            })
+
+            reads = 0
+            for result in results[:_SEARCH_RESULTS_PER_SQ]:
+                url = (result.url or "").strip()
+                if not url:
+                    continue
+                can_read = (
+                    reads < _READS_PER_SQ
+                    and url not in all_seen_urls
+                    and url.startswith("http")
+                )
+                if can_read:
+                    all_seen_urls.add(url)
+                    event_q.put_nowait({
+                        "event": "research_reading",
+                        "index": idx,
+                        "url": url,
+                    })
+                    try:
+                        fr = await tfetch.run(tctx, {"url": url})
+                        items.append({
+                            "index": 0,  # assigned post-gather
+                            "title": result.title or url,
+                            "url": url,
+                            "content": fr.content[:_MAX_CONTENT_CHARS],
+                            "is_full": True,
+                        })
+                        reads += 1
+                    except Exception:
+                        items.append({
+                            "index": 0,
+                            "title": result.title or url,
+                            "url": url,
+                            "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
+                            "is_full": False,
+                        })
+                else:
+                    items.append({
+                        "index": 0,
+                        "title": result.title or url,
+                        "url": url,
+                        "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
+                        "is_full": False,
+                    })
+                if len(items) >= _READS_PER_SQ + 2:
+                    break
+        event_q.put_nowait({"event": "research_question_done", "index": idx})
+        return {"subquestion": sq["question"], "items": items}
+
+    tasks = [
+        asyncio.ensure_future(_investigate(i, sq))
+        for i, sq in enumerate(subquestions)
+    ]
+
+    async def _sentinel() -> None:
+        await asyncio.gather(*tasks, return_exceptions=True)
+        event_q.put_nowait(None)
+
+    sentinel = asyncio.ensure_future(_sentinel())
+    try:
+        while True:
+            ev = await event_q.get()
+            if ev is None:
+                break
+            _emit(ev)
+    finally:
+        sentinel.cancel()
+
+    # Collect evidence in sub-question order and assign stable citation
+    # numbers, regardless of which task finished first.
+    evidence: list[dict[str, Any]] = []
+    source_index = 1
+    for t in tasks:
+        if t.cancelled() or t.exception() is not None:
+            continue
+        angle = t.result()
+        for it in angle["items"]:
+            it["index"] = source_index
+            source_index += 1
+        evidence.append(angle)
+
+    # --- Step 3: Gap check + follow-up searches ---
+    _emit({"event": "research_gap_start"})
+    gap_queries = await _gap_check(query, evidence, provider, model_id)
+    extra_sources = 0
+
+    for gap in gap_queries[:2]:
+        try:
+            if search_provider is not None:
+                gap_results, _gused = await run_search_with_failover(
+                    db,
+                    user,
+                    gap["search_query"],
+                    count=4,
+                    primary=search_provider,
+                )
+            else:
+                gap_results = []
+        except Exception:
+            gap_results = []
+
+        gap_items: list[dict[str, Any]] = []
+        for r in gap_results[:3]:
+            url = (r.url or "").strip()
+            if not url:
+                continue
+            gap_items.append({
+                "index": source_index,
+                "title": r.title or url,
+                "url": url,
+                "content": (r.snippet or "")[:_MAX_SNIPPET_CHARS],
+                "is_full": False,
+            })
+            source_index += 1
+            extra_sources += 1
+
+        if gap_items:
+            evidence.append({
+                "subquestion": gap["gap"],
+                "items": gap_items,
+            })
+
+    _emit({"event": "research_gap_done", "extra_sources": extra_sources})
+
+    all_sources = [item for angle in evidence for item in angle["items"]]
+    sources_list = [
+        {
+            "title": s["title"],
+            "url": s["url"],
+            "snippet": (s["content"] or "")[:200],
+        }
+        for s in all_sources
+    ]
+    return ResearchEvidence(
+        evidence=evidence,
+        sources=sources_list,
+        evidence_doc=_build_evidence_doc(evidence),
+        source_count=len(all_sources),
+        angle_count=len(evidence),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main research generator
 # ---------------------------------------------------------------------------
 async def run_research(
@@ -387,205 +649,57 @@ async def run_research(
 
     async def _gen() -> AsyncGenerator[str, None]:  # noqa: C901 (complexity OK here)
         try:
-            # ------------------------------------------------------------------
-            # Step 1: Decompose
-            # ------------------------------------------------------------------
-            yield _sse(
-                {"event": "research_start", "query": query, "refine": is_refine}
-            )
-            if is_refine:
-                subquestions = await _decompose_refine(
-                    query, refinement or "", provider, model_id
+            # --- Steps 1-3: gather evidence via the shared core ---
+            # ``gather_research_evidence`` runs decompose → parallel
+            # search+read → gap-check with no side effects, reporting each
+            # event through ``on_progress``. Run it as a task and drain its
+            # progress queue into the SSE stream so the frontend keeps
+            # receiving the exact same event dicts it always has.
+            progress_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+            gather_task = asyncio.ensure_future(
+                gather_research_evidence(
+                    query=query,
+                    db=db,
+                    user=user,
+                    conversation_id=conv.id,
+                    user_message_id=uuid.uuid4(),
+                    provider=provider,
+                    model_id=model_id,
+                    refinement=refinement if is_refine else None,
+                    on_progress=progress_q.put_nowait,
                 )
-            else:
-                subquestions = await _decompose(query, provider, model_id)
-            yield _sse({
-                "event": "research_decomposed",
-                "subquestions": [
-                    {"question": sq["question"], "search_query": sq["search_query"]}
-                    for sq in subquestions
-                ],
-            })
+            )
 
-            # ------------------------------------------------------------------
-            # Step 2: Search + Read
-            # ------------------------------------------------------------------
-            search_provider = await pick_search_provider(db, user)
-            placeholder_msg_id = uuid.uuid4()
+            async def _drain_sentinel() -> None:
+                # Await the gather (swallowing its error — re-surfaced
+                # after the drain) then unblock the drain loop.
+                try:
+                    await gather_task
+                except Exception:  # noqa: BLE001 — reported below
+                    pass
+                finally:
+                    progress_q.put_nowait(None)
 
-            # Every sub-question is an independent research angle, so run
-            # them as PARALLEL agents — one task per sub-question, each on
-            # its own DB session (concurrent tasks must never share one),
-            # searching + reading its top URLs at the same time as the
-            # others. The frontend already keys progress by sub-question
-            # ``index``, so the interleaved events render as every angle
-            # advancing at once. Events are pushed to a queue the
-            # generator drains; source-citation numbers are assigned in a
-            # deterministic post-pass so they don't depend on which task
-            # finished first.
-            event_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-            all_seen_urls: set[str] = set()
-
-            async def _investigate(idx: int, sq: dict[str, Any]) -> dict[str, Any]:
-                # Small stagger so five searches don't hit the provider in
-                # the same instant (the burst signature that trips search
-                # rate limits).
-                if idx:
-                    await asyncio.sleep(idx * 0.3)
-                items: list[dict[str, Any]] = []
-                async with SessionLocal() as tdb:
-                    tuser = await tdb.get(User, user.id)
-                    if tuser is None:
-                        return {"subquestion": sq["question"], "items": items}
-                    tctx = ToolContext(
-                        db=tdb,
-                        user=tuser,
-                        conversation_id=conv.id,
-                        user_message_id=placeholder_msg_id,
-                    )
-                    tfetch = FetchUrlTool()
-                    event_q.put_nowait({
-                        "event": "research_searching",
-                        "index": idx,
-                        "question": sq["question"],
-                    })
-                    try:
-                        results, _used = await run_search_with_failover(
-                            tdb, tuser, sq["search_query"],
-                            count=_SEARCH_RESULTS_PER_SQ,
-                        )
-                    except Exception:
-                        results = []
-                    event_q.put_nowait({
-                        "event": "research_searched",
-                        "index": idx,
-                        "sources_found": len(results),
-                    })
-
-                    reads = 0
-                    for result in results[:_SEARCH_RESULTS_PER_SQ]:
-                        url = (result.url or "").strip()
-                        if not url:
-                            continue
-                        can_read = (
-                            reads < _READS_PER_SQ
-                            and url not in all_seen_urls
-                            and url.startswith("http")
-                        )
-                        if can_read:
-                            all_seen_urls.add(url)
-                            event_q.put_nowait({
-                                "event": "research_reading",
-                                "index": idx,
-                                "url": url,
-                            })
-                            try:
-                                fr = await tfetch.run(tctx, {"url": url})
-                                items.append({
-                                    "index": 0,  # assigned post-gather
-                                    "title": result.title or url,
-                                    "url": url,
-                                    "content": fr.content[:_MAX_CONTENT_CHARS],
-                                    "is_full": True,
-                                })
-                                reads += 1
-                            except Exception:
-                                items.append({
-                                    "index": 0,
-                                    "title": result.title or url,
-                                    "url": url,
-                                    "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
-                                    "is_full": False,
-                                })
-                        else:
-                            items.append({
-                                "index": 0,
-                                "title": result.title or url,
-                                "url": url,
-                                "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
-                                "is_full": False,
-                            })
-                        if len(items) >= _READS_PER_SQ + 2:
-                            break
-                event_q.put_nowait({"event": "research_question_done", "index": idx})
-                return {"subquestion": sq["question"], "items": items}
-
-            tasks = [
-                asyncio.ensure_future(_investigate(i, sq))
-                for i, sq in enumerate(subquestions)
-            ]
-
-            async def _sentinel() -> None:
-                await asyncio.gather(*tasks, return_exceptions=True)
-                event_q.put_nowait(None)
-
-            sentinel = asyncio.ensure_future(_sentinel())
+            drain_sentinel = asyncio.ensure_future(_drain_sentinel())
             try:
                 while True:
-                    ev = await event_q.get()
+                    ev = await progress_q.get()
                     if ev is None:
                         break
                     yield _sse(ev)
             finally:
-                sentinel.cancel()
+                drain_sentinel.cancel()
 
-            # Collect evidence in sub-question order and assign stable
-            # citation numbers, regardless of which task finished first.
-            evidence: list[dict[str, Any]] = []
-            source_index = 1
-            for t in tasks:
-                if t.cancelled() or t.exception() is not None:
-                    continue
-                angle = t.result()
-                for it in angle["items"]:
-                    it["index"] = source_index
-                    source_index += 1
-                evidence.append(angle)
-
-            # ------------------------------------------------------------------
-            # Step 3: Gap check + follow-up searches
-            # ------------------------------------------------------------------
-            yield _sse({"event": "research_gap_start"})
-            gap_queries = await _gap_check(query, evidence, provider, model_id)
-            extra_sources = 0
-
-            for gap in gap_queries[:2]:
-                try:
-                    if search_provider is not None:
-                        gap_results, _gused = await run_search_with_failover(
-                            db,
-                            user,
-                            gap["search_query"],
-                            count=4,
-                            primary=search_provider,
-                        )
-                    else:
-                        gap_results = []
-                except Exception:
-                    gap_results = []
-
-                gap_items: list[dict[str, Any]] = []
-                for r in gap_results[:3]:
-                    url = (r.url or "").strip()
-                    if not url:
-                        continue
-                    gap_items.append({
-                        "index": source_index,
-                        "title": r.title or url,
-                        "url": url,
-                        "content": (r.snippet or "")[:_MAX_SNIPPET_CHARS],
-                        "is_full": False,
-                    })
-                    source_index += 1
-                    extra_sources += 1
-
-                if gap_items:
-                    evidence.append({
-                        "subquestion": gap["gap"],
-                        "items": gap_items,
-                    })
-
-            yield _sse({"event": "research_gap_done", "extra_sources": extra_sources})
+            if gather_task.cancelled():
+                yield _sse({"error": "Research was cancelled."})
+                return
+            gather_exc = gather_task.exception()
+            if gather_exc is not None:
+                logger.error("Research gather failed", exc_info=gather_exc)
+                yield _sse({"error": str(gather_exc)})
+                return
+            research_evidence = gather_task.result()
+            evidence = research_evidence.evidence
 
             # ------------------------------------------------------------------
             # Step 4: Synthesize (streaming)

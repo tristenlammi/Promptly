@@ -13,6 +13,7 @@ from typing import Any
 
 from app.chat.tools.base import Tool
 from app.chat.tools.code_interpreter import CodeInterpreterTool
+from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
@@ -49,6 +50,10 @@ REGISTRY: list[Tool] = [
     # when Tools AND web search are both on, since each sub-agent's tool
     # set is search-only.
     RunAgentsTool(),
+    # Full multi-angle web investigation (category "agents") — the model
+    # can launch the Deep Research pipeline itself and synthesise inline
+    # from the returned cited evidence.
+    DeepResearchTool(),
     # Workspace write-back proposals (Batch 4.1) — category "workspace",
     # only advertised in workspace chats.
     ProposeWorkspaceNoteTool(),
