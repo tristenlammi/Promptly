@@ -579,6 +579,29 @@ def _detect_image_output(raw_model: dict[str, Any]) -> bool:
     return False
 
 
+def _detect_image_only(raw_model: dict[str, Any]) -> bool:
+    """True when a model emits images but *not* text (image-only).
+
+    Dedicated image generators like ``openai/gpt-image-2`` list
+    ``output_modalities == ["image"]`` (no ``"text"``). They must be
+    called with ``modalities: ["image"]`` — passing the usual
+    ``["image", "text"]`` makes them reject the request since they can't
+    produce text. Dual-output models (Gemini Image, ``gpt-5.4-image-2``)
+    return False here and keep the ``["image", "text"]`` default.
+    """
+    arch = raw_model.get("architecture")
+    if isinstance(arch, dict):
+        out = arch.get("output_modalities")
+        if isinstance(out, list):
+            return "image" in out and "text" not in out
+        modality = arch.get("modality")
+        if isinstance(modality, str):
+            parts = modality.split("->")
+            if len(parts) > 1:
+                return "image" in parts[1] and "text" not in parts[1]
+    return False
+
+
 def _detect_reasoning(raw_model: dict[str, Any]) -> bool:
     """Decide whether an OpenRouter catalog row has *native* reasoning.
 
@@ -1474,6 +1497,34 @@ class ModelRouter:
                 if isinstance(m, dict) and "id" in m
             ]
 
+            # Image-*only* generators (``openai/gpt-image-2``,
+            # ``gpt-image-1``, some Flux) are omitted from the default
+            # ``/models`` chat catalog — OpenRouter only returns them
+            # under the ``output_modalities=image`` slice. Fetch that
+            # slice too and merge any ids we don't already have, so
+            # dedicated image models are pickable in Admin → Models →
+            # Defaults. Best-effort: a failure here must not sink the
+            # whole catalog refresh (the chat models already fetched are
+            # far more important than the handful of image-only ones).
+            try:
+                img_resp = await client.get(
+                    list_url,
+                    headers=headers,
+                    params={"output_modalities": "image"},
+                )
+                img_resp.raise_for_status()
+                seen_ids = {m["id"] for m in raw_models}
+                for m in (img_resp.json().get("data", []) or []):
+                    if (
+                        isinstance(m, dict)
+                        and m.get("id")
+                        and m["id"] not in seen_ids
+                    ):
+                        raw_models.append(m)
+                        seen_ids.add(m["id"])
+            except httpx.HTTPError as e:
+                logger.info("image-only model slice fetch failed: %s", e)
+
             # Fan out per-model endpoint metadata in parallel so we can
             # surface privacy/data-policy badges in the model picker.
             # The ``/endpoints`` API is free (metadata only, no tokens)
@@ -1497,6 +1548,9 @@ class ModelRouter:
                 "description": m.get("description"),
                 "supports_vision": _detect_vision(m),
                 "supports_image_output": _detect_image_output(m),
+                # Image-only generators need ``modalities: ["image"]`` at
+                # call time — see generate_image._modalities_for.
+                "image_only": _detect_image_only(m),
                 "supports_native_reasoning": _detect_reasoning(m),
                 # Whether this model exposes native function-calling. Models
                 # without it can't do tools cleanly — OpenRouter fakes it via

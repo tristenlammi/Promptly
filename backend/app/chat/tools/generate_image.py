@@ -204,7 +204,9 @@ class GenerateImageTool(Tool):
                 source_image, source_filename = auto
 
         # ---- Pick an image-capable model the user actually has ----
-        provider, model_id = await _pick_image_model(ctx.db, ctx.user)
+        provider, model_id, modalities = await _pick_image_model(
+            ctx.db, ctx.user
+        )
 
         # ---- Call OpenRouter ----
         try:
@@ -213,6 +215,7 @@ class GenerateImageTool(Tool):
                 model_id=model_id,
                 prompt=prompt,
                 source_image=source_image,
+                modalities=modalities,
             )
         except ProviderError as e:
             logger.info(
@@ -398,9 +401,24 @@ async def _auto_attach_source(
     return None
 
 
+def _modalities_for(provider_row: ModelProvider, model_id: str) -> list[str]:
+    """OpenRouter ``modalities`` to request for ``model_id``.
+
+    Image-*only* models (``gpt-image-2`` etc., tagged ``image_only`` in
+    the catalog) must be called with ``["image"]`` — asking for text too
+    makes them reject the request. Dual-output models (Gemini Image,
+    ``gpt-5.4-image-2``) keep the ``["image", "text"]`` default so their
+    caption still comes back.
+    """
+    for m in provider_row.models or []:
+        if m.get("id") == model_id:
+            return ["image"] if m.get("image_only") else ["image", "text"]
+    return ["image", "text"]
+
+
 async def _pick_image_model(
     db: AsyncSession, user: User
-) -> tuple[ModelProvider, str]:
+) -> tuple[ModelProvider, str, list[str]]:
     """Resolve the model the ``generate_image`` tool renders with.
 
     Precedence:
@@ -425,7 +443,8 @@ async def _pick_image_model(
         # off) falls through to the catalog scan rather than hard-failing
         # — the fallback still finds a usable image model in most setups.
         if provider_row is not None and provider_row.enabled:
-            return provider_row, defaults.image_gen_model_id  # type: ignore[return-value]
+            mid: str = defaults.image_gen_model_id  # type: ignore[assignment]
+            return provider_row, mid, _modalities_for(provider_row, mid)
 
     available = await list_available_models_for(user, db)
     image_models = [m for m in available if m.supports_image_output]
@@ -441,7 +460,9 @@ async def _pick_image_model(
         raise ToolError(
             f"Provider for model {chosen.model_id!r} disappeared mid-call"
         )
-    return provider_row, chosen.model_id
+    return provider_row, chosen.model_id, _modalities_for(
+        provider_row, chosen.model_id
+    )
 
 
 __all__ = ["GenerateImageTool"]
