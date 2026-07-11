@@ -171,6 +171,9 @@ export interface AdminUser {
   username: string;
   role: UserRole;
   allowed_models: string[] | null;
+  /** Whether the `generate_image` chat tool is available to this user.
+   *  Admins are never gated (effectively always true for them). */
+  can_generate_images: boolean;
   /** Groups this user belongs to (role bundles — grant connectors + models). */
   group_ids: string[];
   created_at: string;
@@ -342,6 +345,15 @@ export interface AppSettings {
   memory_provider_id: string | null;
   memory_model_id: string | null;
   memory_configured: boolean;
+  /**
+   * Admin-selected model the `generate_image` chat tool renders with.
+   * Image-output models are never user-selectable — the tool fires when
+   * a user asks for a picture and uses this one model. Both fields NULL
+   * = fall back to the first image-capable model in the catalog.
+   */
+  image_gen_provider_id: string | null;
+  image_gen_model_id: string | null;
+  image_gen_configured: boolean;
   updated_at: string;
 }
 
@@ -592,6 +604,10 @@ export interface AvailableModel {
   display_name: string;
   context_window?: number | null;
   supports_vision?: boolean;
+  /** True when the model can *emit* images (used by the Defaults →
+   *  Image generation picker, and hidden from the chat model picker
+   *  since image-output models aren't conversational). */
+  supports_image_output?: boolean;
   /** True when the model has a native reasoning/effort knob; false → the
    *  Effort control falls back to a guided chain-of-thought prompt. */
   supports_native_reasoning?: boolean;

@@ -390,6 +390,9 @@ async def update_user(
     if "monthly_token_budget" in fields:
         target.monthly_token_budget = payload.monthly_token_budget
 
+    if "can_generate_images" in fields and payload.can_generate_images is not None:
+        target.can_generate_images = payload.can_generate_images
+
     if "group_ids" in fields and payload.group_ids is not None:
         await _sync_user_groups(db, target.id, payload.group_ids)
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, BookOpen, Brain, CheckCircle2, Eye, FlaskConical, GraduationCap } from "lucide-react";
+import { Bot, BookOpen, Brain, CheckCircle2, Eye, FlaskConical, GraduationCap, ImagePlus } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -75,6 +75,11 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <VisionRelayDefaultCard
+        settings={data}
+        onSubmit={submit}
+        busy={update.isPending}
+      />
+      <ImageGenModelCard
         settings={data}
         onSubmit={submit}
         busy={update.isPending}
@@ -501,6 +506,193 @@ function VisionRelayDefaultCard({ settings, onSubmit, busy }: CardProps) {
             No vision-capable models in the catalog yet. Add a provider
             with a vision model (Gemini, GPT-4o, llava, …) to enable the
             relay.
+          </span>
+        )}
+      </label>
+    </SettingsCard>
+  );
+}
+
+// --------------------------------------------------------------------
+// Image generation model — filtered to models that can *emit* images.
+// This is the model the `generate_image` chat tool renders with; users
+// never pick an image model themselves.
+// --------------------------------------------------------------------
+
+function ImageGenModelCard({ settings, onSubmit, busy }: CardProps) {
+  const OFF = "";
+
+  const initialKey =
+    settings.image_gen_configured &&
+    settings.image_gen_provider_id &&
+    settings.image_gen_model_id
+      ? `${settings.image_gen_provider_id}::${settings.image_gen_model_id}`
+      : OFF;
+
+  const [value, setValue] = useState(initialKey);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const { data: models, isLoading: modelsLoading } = useAvailableModels();
+
+  useEffect(() => {
+    setValue(initialKey);
+  }, [initialKey]);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  // Only models that can actually emit images. Custom Models that wrap
+  // an image-output base are included for parity with the other cards.
+  const imageModels: AvailableModel[] = (models ?? []).filter(
+    (m) => m.supports_image_output === true,
+  );
+
+  const grouped = useMemo(() => {
+    const byProvider = new Map<string, AvailableModel[]>();
+    for (const m of imageModels) {
+      const existing = byProvider.get(m.provider_name) ?? [];
+      existing.push(m);
+      byProvider.set(m.provider_name, existing);
+    }
+    return Array.from(byProvider.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+  }, [imageModels]);
+
+  const dirty = value !== initialKey;
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      if (value === OFF) {
+        await onSubmit({
+          image_gen_provider_id: null,
+          image_gen_model_id: null,
+        });
+      } else {
+        const [provider_id, ...rest] = value.split("::");
+        const model_id = rest.join("::");
+        if (!provider_id || !model_id) {
+          setError("Pick an image model from the list, or choose Off.");
+          return;
+        }
+        await onSubmit({
+          image_gen_provider_id: provider_id,
+          image_gen_model_id: model_id,
+        });
+      }
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Image generation model"
+      icon={<ImagePlus className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">
+              {error}
+            </span>
+          )}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setValue(initialKey);
+                setError(null);
+              }}
+              disabled={busy}
+            >
+              Discard
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={!dirty || busy}
+            loading={busy}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        The model used whenever a user asks the chat to make a picture,
+        illustration, logo, or edit an attached image — the assistant
+        calls the image tool and renders with this model. Users don't
+        select image models themselves, so this one applies to everyone
+        who has image generation enabled on their account.
+      </p>
+      <ul className="mb-4 space-y-1 text-xs text-[var(--text-muted)]">
+        <li>
+          <strong>Per-user access:</strong> toggle who can generate images
+          under <span className="font-medium">Users → edit user</span>.
+        </li>
+        <li>
+          <strong>Off:</strong> falls back to the first image-capable model
+          in the catalog (historical behaviour).
+        </li>
+      </ul>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-xs font-medium text-[var(--text-muted)]">
+          Image model
+        </span>
+        <select
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+            setSavedAt(null);
+          }}
+          disabled={busy || modelsLoading}
+          className={cn(
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <option value={OFF}>
+            Off — use the catalog's first image-capable model
+          </option>
+          {grouped.map(([providerName, entries]) => (
+            <optgroup key={providerName} label={providerName}>
+              {entries.map((m) => (
+                <option
+                  key={`${m.provider_id}::${m.model_id}`}
+                  value={`${m.provider_id}::${m.model_id}`}
+                >
+                  {m.display_name || m.model_id}
+                  {m.is_custom ? " (custom)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        {modelsLoading && (
+          <span className="text-xs text-[var(--text-muted)]">
+            Loading image-capable models…
+          </span>
+        )}
+        {!modelsLoading && imageModels.length === 0 && (
+          <span className="text-xs text-amber-700 dark:text-amber-300">
+            No image-capable models in the catalog yet. Enable one (e.g.
+            google/gemini-2.5-flash-image) on the Connections tab first.
           </span>
         )}
       </label>

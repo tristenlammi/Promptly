@@ -50,8 +50,13 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
   // one out without hunting through OpenRouter's 100+ rows. Raw
   // provider groups follow in their natural list order.
   const grouped = useMemo(() => {
-    const customs = available.filter((m) => m.is_custom);
-    const raws = available.filter((m) => !m.is_custom);
+    // Image-output models (e.g. gemini-*-image) aren't conversational —
+    // they're plumbing for the `generate_image` tool, which the admin
+    // configures under Models → Defaults. Hide them from the chat
+    // picker so users can't select one as their chat model.
+    const selectable = available.filter((m) => !m.supports_image_output);
+    const customs = selectable.filter((m) => m.is_custom);
+    const raws = selectable.filter((m) => !m.is_custom);
 
     const byProvider = new Map<
       string,

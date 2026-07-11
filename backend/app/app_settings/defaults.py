@@ -42,6 +42,8 @@ class EffectiveDefaults:
     study_assessor_model_id: str | None = None
     memory_provider_id: uuid.UUID | None = None
     memory_model_id: str | None = None
+    image_gen_provider_id: uuid.UUID | None = None
+    image_gen_model_id: str | None = None
 
     @property
     def default_chat_configured(self) -> bool:
@@ -69,6 +71,10 @@ class EffectiveDefaults:
     def memory_configured(self) -> bool:
         return bool(self.memory_provider_id and self.memory_model_id)
 
+    @property
+    def image_gen_configured(self) -> bool:
+        return bool(self.image_gen_provider_id and self.image_gen_model_id)
+
 
 _PAIR_FIELDS = (
     ("default_chat_provider_id", "default_chat_model_id"),
@@ -77,6 +83,7 @@ _PAIR_FIELDS = (
     ("study_provider_id", "study_model_id"),
     ("study_assessor_provider_id", "study_assessor_model_id"),
     ("memory_provider_id", "memory_model_id"),
+    ("image_gen_provider_id", "image_gen_model_id"),
 )
 
 

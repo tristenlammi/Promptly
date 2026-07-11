@@ -21,6 +21,8 @@ export interface UserFormValues {
   role: UserRole;
   /** `null` = full access to the admin-curated pool. */
   allowed_models: string[] | null;
+  /** Whether the user can use the `generate_image` chat tool. */
+  can_generate_images: boolean;
   /** Group memberships (role bundles — grant connectors + models). */
   group_ids: string[];
   /**
@@ -71,6 +73,7 @@ export function UserFormModal({
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("user");
   const [fullAccess, setFullAccess] = useState(true);
+  const [canGenerateImages, setCanGenerateImages] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -102,6 +105,7 @@ export function UserFormModal({
       setPassword("");
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
+      setCanGenerateImages(user.can_generate_images ?? true);
       setPicked(new Set(user.allowed_models ?? []));
       setGroupIds(new Set(user.group_ids ?? []));
       setStorageCapGb(
@@ -125,6 +129,7 @@ export function UserFormModal({
       setPassword("");
       setRole("user");
       setFullAccess(true);
+      setCanGenerateImages(true);
       setPicked(new Set());
       setGroupIds(new Set());
       setStorageCapGb("");
@@ -196,6 +201,7 @@ export function UserFormModal({
         // for UI clarity. Non-admin + full access → null; otherwise a list.
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
+        can_generate_images: canGenerateImages,
         group_ids: Array.from(groupIds),
         storage_cap_bytes: storageBytes,
         daily_token_budget: parseQuota(dailyTokens),
@@ -335,6 +341,32 @@ export function UserFormModal({
             />
           </div>
         </div>
+
+        {/* Capabilities — hidden for admins (they're never gated) */}
+        {role === "user" && (
+          <div>
+            <span className="mb-2 block text-xs font-medium text-[var(--text-muted)]">
+              Capabilities
+            </span>
+            <label className="flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={canGenerateImages}
+                onChange={(e) => setCanGenerateImages(e.target.checked)}
+              />
+              <span className="text-xs">
+                <span className="font-medium text-[var(--text)]">
+                  Image generation
+                </span>
+                <span className="block text-[11px] text-[var(--text-muted)]">
+                  Let this user ask the chat to generate or edit images. Off =
+                  the image tool is withheld entirely for them.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
 
         {/* Model access — hidden for admins */}
         {role === "user" && (

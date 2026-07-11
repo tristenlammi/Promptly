@@ -52,6 +52,8 @@ export interface UpdateUserPayload {
    * to leave unchanged.
    */
   allowed_models?: string[] | null;
+  /** Toggle image-gen access. Omit to leave unchanged. */
+  can_generate_images?: boolean;
   /** Omit to leave membership unchanged; send a list to replace it. */
   group_ids?: string[];
   /**
@@ -177,6 +179,12 @@ export interface AppSettingsPatch {
    */
   memory_provider_id?: string | null;
   memory_model_id?: string | null;
+  /**
+   * Admin-selected default image-generation model. Paired: send both
+   * together to set, null+null to clear, omit to leave unchanged.
+   */
+  image_gen_provider_id?: string | null;
+  image_gen_model_id?: string | null;
 }
 
 export interface OriginPreview {

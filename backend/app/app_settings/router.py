@@ -142,6 +142,9 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         memory_provider_id=row.memory_provider_id,
         memory_model_id=row.memory_model_id,
         memory_configured=row.memory_configured,
+        image_gen_provider_id=row.image_gen_provider_id,
+        image_gen_model_id=row.image_gen_model_id,
+        image_gen_configured=row.image_gen_configured,
         updated_at=row.updated_at,
     )
 
@@ -485,6 +488,36 @@ async def update_app_settings(
             diff["memory_model_id"] = new_mid
         row.memory_provider_id = new_pid
         row.memory_model_id = new_mid
+
+    # ----- Image generation model -----
+    igpid_set = "image_gen_provider_id" in fields
+    igmid_set = "image_gen_model_id" in fields
+    if igpid_set != igmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "image_gen_provider_id and image_gen_model_id must be sent "
+                "together — pass both to set the image model, or both as "
+                "null to clear."
+            ),
+        )
+    if igpid_set and igmid_set:
+        new_pid = payload.image_gen_provider_id
+        new_mid = payload.image_gen_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "image_gen_provider_id and image_gen_model_id must both "
+                    "be set or both be null."
+                ),
+            )
+        if row.image_gen_provider_id != new_pid:
+            diff["image_gen_provider_id"] = str(new_pid) if new_pid else None
+        if row.image_gen_model_id != new_mid:
+            diff["image_gen_model_id"] = new_mid
+        row.image_gen_provider_id = new_pid
+        row.image_gen_model_id = new_mid
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

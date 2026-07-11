@@ -34,6 +34,15 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
         JSONB, nullable=True, default=None
     )
 
+    # Per-user capability gate for the ``generate_image`` chat tool.
+    # TRUE (default) = the tool is advertised to the model and fires when
+    # the user asks for a picture. FALSE = the tool is withheld entirely
+    # so image generation is unavailable for this user. Admins toggle it
+    # from the user editor. Admins themselves are never gated by it.
+    can_generate_images: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+
     # User settings: default_model, default_search_on, preferred_search_provider, theme, ...
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"

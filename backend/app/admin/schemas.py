@@ -32,6 +32,9 @@ class AdminUserResponse(BaseModel):
     # NULL = full access to the admin-curated pool. Admins always have
     # full access regardless of this field.
     allowed_models: list[str] | None = None
+    # Whether the ``generate_image`` chat tool is available to this user.
+    # Admins are never gated by it (always effectively True for them).
+    can_generate_images: bool = True
     # Groups this user belongs to (role bundles — grant connectors + models).
     group_ids: list[uuid.UUID] = []
     created_at: datetime
@@ -214,6 +217,13 @@ class AppSettingsResponse(BaseModel):
     memory_model_id: str | None = None
     memory_configured: bool
 
+    # ----- Image generation model -----
+    # Admin-selected model the ``generate_image`` tool renders with.
+    # Frontend filters the picker to ``supports_image_output`` entries.
+    image_gen_provider_id: uuid.UUID | None = None
+    image_gen_model_id: str | None = None
+    image_gen_configured: bool
+
     updated_at: datetime
 
 
@@ -312,6 +322,13 @@ class AppSettingsUpdate(BaseModel):
     memory_provider_id: uuid.UUID | None = None
     memory_model_id: str | None = Field(default=None, max_length=255)
 
+    # ----- Image generation model -----
+    # Same paired semantics as the other model pairs: both halves move
+    # together (value+value to set, null+null to clear, omit both to
+    # leave unchanged). Pick a model that can actually emit images.
+    image_gen_provider_id: uuid.UUID | None = None
+    image_gen_model_id: str | None = Field(default=None, max_length=255)
+
 
 class AdminUserCreate(BaseModel):
     email: EmailStr
@@ -368,6 +385,8 @@ class AdminUserUpdate(BaseModel):
             validate_password_strength(v)
         return v
     allowed_models: list[str] | None = None
+    # Omit to leave unchanged; send a bool to toggle image-gen access.
+    can_generate_images: bool | None = None
     # Omit to leave membership unchanged; send a (possibly empty) list to
     # replace the user's group set.
     group_ids: list[uuid.UUID] | None = None

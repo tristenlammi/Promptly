@@ -4584,9 +4584,25 @@ async def _stream_generator(
             if ctx.get("tools_enabled"):
                 enabled_categories.add("agents")
 
+        # Per-user capability gate: withhold ``generate_image`` from users
+        # who don't have image-gen access so the model is never even
+        # offered it (the tool also re-checks on dispatch). Admins are
+        # never gated.
+        excluded_tools: set[str] = set()
+        if user.role != "admin" and not getattr(
+            user, "can_generate_images", True
+        ):
+            excluded_tools.add("generate_image")
+
         tools_payload: list[dict[str, Any]] | None = (
             list_openai_tools(enabled_categories) if enabled_categories else None
         )
+        if tools_payload and excluded_tools:
+            tools_payload = [
+                t
+                for t in tools_payload
+                if t.get("function", {}).get("name") not in excluded_tools
+            ] or None
 
         # Phase 10 — external MCP connector tools, gated on the Tools toggle.
         # Resolve the connectors available this turn (global + this chat's
@@ -4850,7 +4866,7 @@ async def _stream_generator(
         # artefacts even with a valid tools[] payload in scope.
         if enabled_categories:
             system_prompt = merge_system_prompt(
-                build_tools_system_prompt(enabled_categories),
+                build_tools_system_prompt(enabled_categories, excluded_tools),
                 system_prompt or "",
             )
 

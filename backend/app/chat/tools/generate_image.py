@@ -39,6 +39,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.app_settings.defaults import load_effective_defaults
 from app.auth.models import User
 from app.chat.models import Message
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
@@ -159,6 +160,16 @@ class GenerateImageTool(Tool):
     }
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+        # Defense-in-depth: the chat router already withholds this tool
+        # from users without image-gen access, so a well-behaved model
+        # never reaches here when gated. Re-check anyway so a replayed /
+        # forged call can't bypass the gate. Admins are never gated.
+        if not _user_can_generate_images(ctx.user):
+            raise ToolError(
+                "Image generation isn't enabled for your account. Ask an "
+                "admin to enable it in your user settings."
+            )
+
         prompt = args.get("prompt")
         source_file_id_raw = args.get("source_file_id")
 
@@ -274,6 +285,13 @@ _FILENAME_FALLBACK = "image"
 _FILENAME_MAX = 60
 
 
+def _user_can_generate_images(user: User) -> bool:
+    """Whether ``user`` may use the image tool. Admins are never gated."""
+    return user.role == "admin" or bool(
+        getattr(user, "can_generate_images", True)
+    )
+
+
 def _build_filename(prompt: str, ext: str) -> str:
     """Derive a friendly filename from the prompt + a timestamp suffix.
 
@@ -383,22 +401,39 @@ async def _auto_attach_source(
 async def _pick_image_model(
     db: AsyncSession, user: User
 ) -> tuple[ModelProvider, str]:
-    """Pick the first image-capable model the user can actually invoke.
+    """Resolve the model the ``generate_image`` tool renders with.
 
-    We deliberately don't honour the user's currently selected chat
-    model here — chat models (Gemini Pro / Claude / GPT-4o) usually
-    *don't* support image *output*. Instead we walk the user's full
-    available pool, filter by ``supports_image_output``, and take the
-    first match. Admins control the order by curating the provider's
-    ``enabled_models`` list.
+    Precedence:
+      1. The admin-selected **default image model** in Admin → Models →
+         Defaults (``app_settings.image_gen_*``). This is a *system
+         role* — it's used regardless of the user's chat-model pick or
+         their per-user ``allowed_models`` list, exactly like the vision
+         relay / research / memory defaults. Image-output models aren't
+         user-selectable, so gating them through the chat allow-list
+         would make no sense.
+      2. Fallback (no admin default configured): the first
+         ``supports_image_output`` model in the user's available pool —
+         the historical behaviour, kept so installs that never set a
+         default keep working.
     """
+    defaults = await load_effective_defaults(db)
+    if defaults.image_gen_configured:
+        provider_row = await db.get(
+            ModelProvider, defaults.image_gen_provider_id
+        )
+        # A disabled/deleted provider (FK went NULL, or admin turned it
+        # off) falls through to the catalog scan rather than hard-failing
+        # — the fallback still finds a usable image model in most setups.
+        if provider_row is not None and provider_row.enabled:
+            return provider_row, defaults.image_gen_model_id  # type: ignore[return-value]
+
     available = await list_available_models_for(user, db)
     image_models = [m for m in available if m.supports_image_output]
     if not image_models:
         raise ToolError(
-            "No image-capable models are enabled. Ask an admin to "
-            "enable an image model (e.g. google/gemini-2.5-flash-image) "
-            "in the Models tab."
+            "No image-capable model is configured. Ask an admin to pick "
+            "a default image model in Admin → Models → Defaults (e.g. "
+            "google/gemini-2.5-flash-image)."
         )
     chosen = image_models[0]
     provider_row = await db.get(ModelProvider, chosen.provider_id)

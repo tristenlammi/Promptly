@@ -159,6 +159,10 @@ export function UsersPanel() {
         password: values.password ? values.password : undefined,
         role: values.role !== target.role ? values.role : undefined,
         allowed_models: values.allowed_models,
+        can_generate_images:
+          values.can_generate_images !== target.can_generate_images
+            ? values.can_generate_images
+            : undefined,
         group_ids: sameStringSet(values.group_ids, target.group_ids)
           ? undefined
           : values.group_ids,

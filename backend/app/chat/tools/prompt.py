@@ -28,7 +28,9 @@ from __future__ import annotations
 from app.chat.tools.registry import tools_in
 
 
-def build_tools_system_prompt(categories: set[str]) -> str:
+def build_tools_system_prompt(
+    categories: set[str], exclude_tools: set[str] | None = None
+) -> str:
     """Return a system message that primes the model to use tools.
 
     ``categories`` selects which tools appear in the bullet list and
@@ -36,11 +38,17 @@ def build_tools_system_prompt(categories: set[str]) -> str:
     need the "if the user asks for a PDF, call generate_pdf" guideline,
     and vice versa. An empty set returns an empty string (caller skips
     injection entirely).
+
+    ``exclude_tools`` drops specific tools by name even when their
+    category is active — used to withhold ``generate_image`` from users
+    who don't have image-gen access, so the prompt never advertises a
+    capability the model can't actually call this turn.
     """
     if not categories:
         return ""
 
-    tools = tools_in(categories)
+    exclude = exclude_tools or set()
+    tools = [t for t in tools_in(categories) if t.name not in exclude]
     if not tools:
         return ""
 
@@ -58,11 +66,12 @@ def build_tools_system_prompt(categories: set[str]) -> str:
             "offer, suggest, or auto-generate PDFs for ordinary answers, "
             "summaries, or code. Return those inline. Wait for a clear request."
         )
-        guidelines.append(
-            "- If the user asks for an image, illustration, picture, "
-            "diagram, or wants to edit an attached image, call "
-            "`generate_image`. Don't say you can't generate images."
-        )
+        if "generate_image" not in exclude:
+            guidelines.append(
+                "- If the user asks for an image, illustration, picture, "
+                "diagram, or wants to edit an attached image, call "
+                "`generate_image`. Don't say you can't generate images."
+            )
         # Without this explicit steer, models that have an artefact
         # tool advertised will try to use it for HTML / code too —
         # they'll save a ``.txt`` file with HTML inside (confusing
