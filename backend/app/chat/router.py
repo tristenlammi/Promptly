@@ -3234,10 +3234,13 @@ MAX_TOOL_HOPS = 8
 
 # Token backstop for voice-mode turns when the client didn't set its own
 # cap. The brevity system prompt does the real work (replies end
-# naturally); this is just a guard so a model that ignores the steer
-# can't read a 1,000-word essay aloud. Generous enough that a normal
-# 2–4 sentence spoken reply is never truncated mid-word.
-VOICE_MAX_TOKENS = 400
+# naturally); this is a guard so a model that ignores the steer can't read
+# an essay aloud. A normal 1–2 sentence spoken reply is ~30–60 tokens, so
+# 240 leaves generous headroom (incl. an "if asked, go a bit deeper" turn)
+# while still cutting off a genuine runaway long before it becomes a
+# monologue. Lowered from 400 — that allowed ~300 words, which never
+# actually bit on the over-long replies this is meant to prevent.
+VOICE_MAX_TOKENS = 240
 
 
 def _build_tool_calls_payload(
