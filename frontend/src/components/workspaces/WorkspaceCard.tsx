@@ -1,10 +1,8 @@
 import {
   Archive,
   ArchiveRestore,
-  BarChart3,
   Clock,
   Columns3,
-  Database,
   FileText,
   LayoutGrid,
   MessageSquare,
@@ -260,8 +258,6 @@ function buildStats(ws: WorkspaceSummary) {
     { key: "board", one: "board", many: "boards", icon: Columns3 },
     { key: "sheet", one: "sheet", many: "sheets", icon: Table2 },
     { key: "canvas", one: "canvas", many: "canvases", icon: PenTool },
-    { key: "chart", one: "chart", many: "charts", icon: BarChart3 },
-    { key: "dataview", one: "data view", many: "data views", icon: Database },
     { key: "task", one: "automation", many: "automations", icon: Clock },
   ] as const;
   const stats: { label: string; count: number; icon: typeof StickyNote }[] = [];

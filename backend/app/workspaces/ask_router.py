@@ -259,7 +259,7 @@ async def _visible_item_file_map(
     into a hard filter for text + semantic hits."""
     from sqlalchemy import or_ as sa_or
 
-    from app.chat.models import Chart, DataView, Spreadsheet, WorkspaceFile
+    from app.chat.models import Spreadsheet, WorkspaceFile
 
     out: dict[uuid.UUID, tuple[uuid.UUID | None, uuid.UUID | None, str, str]] = {}
     visible = sa_or(
@@ -300,22 +300,6 @@ async def _visible_item_file_map(
             )
         ).scalars()
     }
-    chart_files = {
-        c.id: c.text_file_id
-        for c in (
-            await db.execute(
-                select(Chart).where(Chart.workspace_id == workspace_id)
-            )
-        ).scalars()
-    }
-    dataview_files = {
-        d.id: d.text_file_id
-        for d in (
-            await db.execute(
-                select(DataView).where(DataView.workspace_id == workspace_id)
-            )
-        ).scalars()
-    }
     for it in items:
         if it.kind in ("note", "board") and it.ref_id is not None:
             out[it.ref_id] = (it.id, it.ref_id, it.kind, it.title)
@@ -327,14 +311,6 @@ async def _visible_item_file_map(
             fid = sheet_files[it.ref_id]
             if fid is not None:
                 out[fid] = (it.id, it.ref_id, "sheet", it.title)
-        elif it.kind == "chart" and it.ref_id in chart_files:
-            fid = chart_files[it.ref_id]
-            if fid is not None:
-                out[fid] = (it.id, it.ref_id, "chart", it.title)
-        elif it.kind == "dataview" and it.ref_id in dataview_files:
-            fid = dataview_files[it.ref_id]
-            if fid is not None:
-                out[fid] = (it.id, it.ref_id, "dataview", it.title)
     from app.workspaces.knowledge import WORKSPACE_MEMORY_SOURCE_KIND
 
     pins = (

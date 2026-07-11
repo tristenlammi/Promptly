@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { BarChart3, Database, Plug, ScrollText, Settings, Settings2, Terminal, Users, Users2 } from "lucide-react";
+import { BarChart3, Plug, ScrollText, Settings, Settings2, Terminal, Users, Users2 } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
@@ -8,7 +8,6 @@ import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
 import { GroupsPanel } from "@/components/admin/GroupsPanel";
 import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
-import { DataSourcesPanel } from "@/components/admin/DataSourcesPanel";
 import { ModelsPanel } from "@/components/admin/ModelsPanel";
 import { SearchProvidersPanel } from "@/components/admin/SearchProvidersPanel";
 import { UsersPanel } from "@/components/admin/UsersPanel";
@@ -23,8 +22,7 @@ type TabId =
   | "audit"
   | "settings"
   | "models"
-  | "connectors"
-  | "data-sources";
+  | "connectors";
 
 interface TabDef {
   id: TabId;
@@ -60,13 +58,6 @@ const TABS: TabDef[] = [
     icon: <Plug className="h-3.5 w-3.5" />,
     subtitle:
       "Web-search providers and remote MCP servers the AI can use in chat.",
-  },
-  {
-    id: "data-sources",
-    label: "Data sources",
-    icon: <Database className="h-3.5 w-3.5" />,
-    subtitle:
-      "Read-only database connections that back workspace Data-view items.",
   },
   {
     id: "analytics",
@@ -153,7 +144,6 @@ export function AdminPage() {
                 </section>
               </div>
             )}
-            {tab === "data-sources" && <DataSourcesPanel />}
             {tab === "analytics" && <AnalyticsPanel />}
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}

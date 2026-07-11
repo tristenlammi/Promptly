@@ -33,9 +33,7 @@ import {
   ArchiveRestore,
   ArrowLeft,
   ArrowUpRight,
-  BarChart3,
   CalendarDays,
-  Database,
   FileText,
   FolderX,
   ChevronRight,
@@ -98,8 +96,6 @@ import {
 } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { WorkspaceRosterPane } from "@/components/workspaces/WorkspaceRosterPane";
-import { WorkspaceChartPane } from "@/components/workspaces/WorkspaceChartPane";
-import { WorkspaceDataViewPane } from "@/components/workspaces/WorkspaceDataViewPane";
 import { ItemContextToggle } from "@/components/workspaces/ItemPaneHeader";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -899,8 +895,6 @@ const KIND_META: Partial<
   chat: { icon: MessageSquare, label: "Chat" },
   container: { icon: Layers, label: "Notebook" },
   roster: { icon: CalendarDays, label: "Roster" },
-  chart: { icon: BarChart3, label: "Chart" },
-  dataview: { icon: Database, label: "Data view" },
   task: { icon: Clock, label: "Automation" },
 };
 
@@ -912,10 +906,6 @@ const KIND_META: Partial<
 const MOBILE_READABLE_KINDS = new Set<WorkspaceItemNode["kind"]>([
   "note",
   "chat",
-  // Charts render fine read-only on a phone (recharts is responsive).
-  "chart",
-  // Data views are a scrollable table — readable read-only on a phone.
-  "dataview",
 ]);
 
 /**
@@ -1451,26 +1441,6 @@ function WorkspaceItemView({
       />
     );
   }
-  if (node.kind === "chart" && node.ref_id) {
-    return (
-      <WorkspaceChartPane
-        workspaceId={workspaceId}
-        chartId={node.ref_id}
-        node={node}
-        canEdit={canEdit}
-      />
-    );
-  }
-  if (node.kind === "dataview" && node.ref_id) {
-    return (
-      <WorkspaceDataViewPane
-        workspaceId={workspaceId}
-        dataViewId={node.ref_id}
-        node={node}
-        canEdit={canEdit}
-      />
-    );
-  }
   if (node.kind === "container") {
     return (
       <WorkspaceNotebookPane
@@ -1800,17 +1770,13 @@ type NotebookPageKind =
   | "canvas"
   | "board"
   | "chat"
-  | "roster"
-  | "chart"
-  | "dataview";
+  | "roster";
 
 const NOTEBOOK_ADD_KINDS: { kind: NotebookPageKind; label: string }[] = [
   { kind: "note", label: "Note" },
   { kind: "sheet", label: "Sheet" },
   { kind: "canvas", label: "Canvas" },
   { kind: "board", label: "Board" },
-  { kind: "chart", label: "Chart" },
-  { kind: "dataview", label: "Data view" },
   { kind: "roster", label: "Roster" },
   { kind: "chat", label: "Chat" },
 ];
@@ -1827,10 +1793,6 @@ function notebookPageIcon(kind: string) {
       return MessageSquare;
     case "roster":
       return CalendarDays;
-    case "chart":
-      return BarChart3;
-    case "dataview":
-      return Database;
     default:
       return FileText;
   }
@@ -1846,8 +1808,6 @@ const PAGE_TILE: Record<string, { tile: string; ink: string }> = {
   sheet: { tile: "bg-[rgba(236,72,153,0.16)]", ink: "text-[#EC4899]" },
   chat: { tile: "bg-[rgba(217,119,87,0.16)]", ink: "text-[#D97757]" },
   roster: { tile: "bg-[rgba(21,154,168,0.16)]", ink: "text-[#159AA8]" },
-  chart: { tile: "bg-[rgba(99,102,241,0.16)]", ink: "text-[#6366F1]" },
-  dataview: { tile: "bg-[rgba(8,145,178,0.16)]", ink: "text-[#0891B2]" },
 };
 
 /** Recursive lookup of a tree node by id (the selected snapshot can go stale

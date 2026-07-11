@@ -27,9 +27,7 @@ import {
   Archive,
   ArchiveRestore,
   AudioLines,
-  BarChart3,
   CalendarDays,
-  Database,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -496,9 +494,7 @@ export function WorkspaceNavigatorTree({
       | "board"
       | "sheet"
       | "container"
-      | "roster"
-      | "chart"
-      | "dataview",
+      | "roster",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
@@ -510,9 +506,7 @@ export function WorkspaceNavigatorTree({
       kind === "canvas" ||
       kind === "sheet" ||
       kind === "container" ||
-      kind === "roster" ||
-      kind === "chart" ||
-      kind === "dataview"
+      kind === "roster"
     ) {
       onSelect({
         id: item.id,
@@ -645,8 +639,6 @@ export function WorkspaceNavigatorTree({
             onNewCanvas={() => handleCreate("canvas", null)}
             onNewBoard={() => handleCreate("board", null)}
             onNewSheet={() => handleCreate("sheet", null)}
-            onNewChart={() => handleCreate("chart", null)}
-            onNewDataView={() => handleCreate("dataview", null)}
             onNewRoster={
               canManageRoster ? () => handleCreate("roster", null) : undefined
             }
@@ -1503,8 +1495,6 @@ function TreeRow({
     node.kind === "sheet" ||
     node.kind === "container" ||
     node.kind === "roster" ||
-    node.kind === "chart" ||
-    node.kind === "dataview" ||
     isChat;
   const contextOn = isChat
     ? node.context_enabled === true
@@ -1914,8 +1904,6 @@ const KIND_TILE: Record<string, { tile: string; ink: string }> = {
   sheet: { tile: "bg-[rgba(236,72,153,0.16)]", ink: "text-[#EC4899]" },
   container: { tile: "bg-[rgba(139,92,246,0.16)]", ink: "text-[#8B5CF6]" },
   roster: { tile: "bg-[rgba(21,154,168,0.16)]", ink: "text-[#159AA8]" },
-  chart: { tile: "bg-[rgba(99,102,241,0.16)]", ink: "text-[#6366F1]" },
-  dataview: { tile: "bg-[rgba(8,145,178,0.16)]", ink: "text-[#0891B2]" },
   task: { tile: "bg-[rgba(100,116,139,0.18)]", ink: "text-[#64748B]" },
 };
 
@@ -1954,10 +1942,6 @@ function NodeIcon({
         return Layers;
       case "roster":
         return CalendarDays;
-      case "chart":
-        return BarChart3;
-      case "dataview":
-        return Database;
       case "task":
         // A clock reads "scheduled"; reserve the bolt for the context flag.
         return Clock;
@@ -2326,8 +2310,6 @@ function NewMenu({
   onNewCanvas,
   onNewBoard,
   onNewSheet,
-  onNewChart,
-  onNewDataView,
   onNewRoster,
   onNewNotebook,
   onNewTask,
@@ -2341,8 +2323,6 @@ function NewMenu({
   onNewCanvas: () => void;
   onNewBoard: () => void;
   onNewSheet: () => void;
-  onNewChart: () => void;
-  onNewDataView: () => void;
   /** Owner/admin only — rosters are an admin surface, hidden for editors. */
   onNewRoster?: () => void;
   onNewNotebook: () => void;
@@ -2438,22 +2418,6 @@ function NewMenu({
               onClick={() => {
                 setOpen(false);
                 onNewSheet();
-              }}
-            />
-            <MenuItem
-              icon={<BarChart3 className="h-3.5 w-3.5" />}
-              label="New chart"
-              onClick={() => {
-                setOpen(false);
-                onNewChart();
-              }}
-            />
-            <MenuItem
-              icon={<Database className="h-3.5 w-3.5" />}
-              label="New data view"
-              onClick={() => {
-                setOpen(false);
-                onNewDataView();
               }}
             />
             {onNewRoster && (

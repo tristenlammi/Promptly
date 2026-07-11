@@ -49,9 +49,7 @@ from app.auth.utils import JWT_ALGORITHM
 from app.config import get_settings
 from app.files.schemas import CollabTokenResponse, CollabTokenUser
 from app.chat.models import (
-    Chart,
     Conversation,
-    DataView,
     Roster,
     Spreadsheet,
     Workspace,
@@ -70,10 +68,6 @@ from app.workspaces.canvas_router import (
     create_canvas_with_item,
 )
 from app.workspaces.schemas import (
-    ChartResponse,
-    ChartSaveRequest,
-    DataViewResponse,
-    DataViewSaveRequest,
     RosterResponse,
     RosterSaveRequest,
     SpreadsheetResponse,
@@ -110,8 +104,6 @@ _DEFAULT_CANVAS_TITLE = "Untitled canvas"
 _DEFAULT_BOARD_TITLE = "Board"
 _DEFAULT_NOTEBOOK_TITLE = "Notebook"
 _DEFAULT_ROSTER_TITLE = "Untitled roster"
-_DEFAULT_CHART_TITLE = "Untitled chart"
-_DEFAULT_DATAVIEW_TITLE = "Untitled data view"
 
 
 def _strip_doc_ext(name: str) -> str:
@@ -589,43 +581,6 @@ async def create_workspace_item(
             kind="roster",
             ref_id=roster.id,
             title=roster_title,
-            position=position,
-        )
-        db.add(item)
-    elif payload.kind == "chart":
-        # A chart / graph — backing entity is a ``Chart`` row (mirrors roster).
-        # ``content_text`` feeds RAG once saved so a chat can answer questions
-        # about the numbers; born empty until the first save.
-        chart_title = title or await _dedupe_default_title(
-            db, ws.id, payload.parent_id, _DEFAULT_CHART_TITLE
-        )
-        chart = Chart(workspace_id=ws.id, title=chart_title)
-        db.add(chart)
-        await db.flush()  # assign chart.id before the item links to it
-        item = WorkspaceItem(
-            workspace_id=ws.id,
-            parent_id=payload.parent_id,
-            kind="chart",
-            ref_id=chart.id,
-            title=chart_title,
-            position=position,
-        )
-        db.add(item)
-    elif payload.kind == "dataview":
-        # A read-only DB view — backing entity is a ``DataView`` row. Empty
-        # until an editor picks a source + writes a query and hits Run.
-        dv_title = title or await _dedupe_default_title(
-            db, ws.id, payload.parent_id, _DEFAULT_DATAVIEW_TITLE
-        )
-        dataview = DataView(workspace_id=ws.id, title=dv_title)
-        db.add(dataview)
-        await db.flush()  # assign dataview.id before the item links to it
-        item = WorkspaceItem(
-            workspace_id=ws.id,
-            parent_id=payload.parent_id,
-            kind="dataview",
-            ref_id=dataview.id,
-            title=dv_title,
             position=position,
         )
         db.add(item)
@@ -1123,259 +1078,6 @@ async def save_roster(
 
         background.add_task(index_roster_for_workspace, ws.id, roster_item.id)
     return RosterResponse.model_validate(roster)
-
-
-# --------------------------------------------------------------------
-# Charts — the visualization item (mirrors the roster endpoints). Unlike
-# rosters, charts are everyday editor content (not admin-gated).
-# --------------------------------------------------------------------
-async def _load_workspace_chart(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    chart_id: uuid.UUID,
-    user: User | None = None,
-) -> Chart:
-    chart = await db.get(Chart, chart_id)
-    if chart is None or chart.workspace_id != workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Chart not found"
-        )
-    if user is not None:
-        item = (
-            await db.execute(
-                select(WorkspaceItem).where(
-                    WorkspaceItem.ref_id == chart.id,
-                    WorkspaceItem.kind == "chart",
-                )
-            )
-        ).scalars().first()
-        if item is not None:
-            require_item_visible(item, user)
-    return chart
-
-
-@router.get(
-    "/{workspace_id}/charts/{chart_id}",
-    response_model=ChartResponse,
-)
-async def get_chart(
-    workspace_id: uuid.UUID,
-    chart_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> ChartResponse:
-    """Load a chart's config + data. Read access (any member)."""
-    ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    chart = await _load_workspace_chart(db, ws.id, chart_id, user)
-    return ChartResponse.model_validate(chart)
-
-
-@router.put(
-    "/{workspace_id}/charts/{chart_id}",
-    response_model=ChartResponse,
-)
-async def save_chart(
-    workspace_id: uuid.UUID,
-    chart_id: uuid.UUID,
-    payload: ChartSaveRequest,
-    background: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> ChartResponse:
-    """Persist a chart (debounced save). Re-indexes the flattened data table so
-    a chat can answer questions about the numbers via workspace RAG."""
-    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
-    chart = await _load_workspace_chart(db, ws.id, chart_id, user)
-    chart.data = payload.data
-    text_changed = (
-        payload.content_text is not None
-        and payload.content_text != chart.content_text
-    )
-    if payload.content_text is not None:
-        chart.content_text = payload.content_text
-    chart_item = (
-        await db.execute(
-            select(WorkspaceItem).where(
-                WorkspaceItem.ref_id == chart.id,
-                WorkspaceItem.kind == "chart",
-            )
-        )
-    ).scalars().first()
-    if payload.title is not None and payload.title.strip():
-        new_title = payload.title.strip()
-        chart.title = new_title
-        if chart_item is not None:
-            chart_item.title = new_title
-    ws.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(chart)
-    if text_changed and chart_item is not None:
-        from app.workspaces.knowledge import index_chart_for_workspace
-
-        background.add_task(index_chart_for_workspace, ws.id, chart_item.id)
-    return ChartResponse.model_validate(chart)
-
-
-# --------------------------------------------------------------------
-# Data views — a read-only DB query item. Config (source + SQL) saved via
-# PUT; the query runs on a separate POST /run so a bad query can't block
-# saving, and each run caches its result + re-indexes for RAG.
-# --------------------------------------------------------------------
-def _dataview_content_text(title: str, result: dict) -> str:
-    """Flatten a query result into a text table for workspace RAG (capped)."""
-    cols = result.get("columns") or []
-    rows = result.get("rows") or []
-    if not cols or not rows:
-        return ""
-    lines = [
-        f"Data view: {title}.",
-        "Columns: " + ", ".join(str(c) for c in cols) + ".",
-    ]
-    for row in rows[:200]:
-        lines.append(" · ".join(f"{c}: {v}" for c, v in zip(cols, row)))
-    if len(rows) > 200:
-        lines.append(f"… and {len(rows) - 200} more rows.")
-    return "\n".join(lines)
-
-
-async def _load_workspace_dataview(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    dataview_id: uuid.UUID,
-    user: User | None = None,
-) -> DataView:
-    dv = await db.get(DataView, dataview_id)
-    if dv is None or dv.workspace_id != workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Data view not found"
-        )
-    if user is not None:
-        item = (
-            await db.execute(
-                select(WorkspaceItem).where(
-                    WorkspaceItem.ref_id == dv.id,
-                    WorkspaceItem.kind == "dataview",
-                )
-            )
-        ).scalars().first()
-        if item is not None:
-            require_item_visible(item, user)
-    return dv
-
-
-async def _dataview_item(db: AsyncSession, dv: DataView) -> WorkspaceItem | None:
-    return (
-        await db.execute(
-            select(WorkspaceItem).where(
-                WorkspaceItem.ref_id == dv.id,
-                WorkspaceItem.kind == "dataview",
-            )
-        )
-    ).scalars().first()
-
-
-@router.get(
-    "/{workspace_id}/dataviews/{dataview_id}",
-    response_model=DataViewResponse,
-)
-async def get_dataview(
-    workspace_id: uuid.UUID,
-    dataview_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> DataViewResponse:
-    """Load a data-view's config + last cached result. Read access."""
-    ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    dv = await _load_workspace_dataview(db, ws.id, dataview_id, user)
-    return DataViewResponse.model_validate(dv)
-
-
-@router.put(
-    "/{workspace_id}/dataviews/{dataview_id}",
-    response_model=DataViewResponse,
-)
-async def save_dataview(
-    workspace_id: uuid.UUID,
-    dataview_id: uuid.UUID,
-    payload: DataViewSaveRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> DataViewResponse:
-    """Save a data-view's source + query (not the result — that's /run)."""
-    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
-    dv = await _load_workspace_dataview(db, ws.id, dataview_id, user)
-    fields = payload.model_fields_set
-    if "data_source_id" in fields:
-        dv.data_source_id = payload.data_source_id
-    if "sql" in fields:
-        dv.sql = payload.sql
-    if payload.title is not None and payload.title.strip():
-        new_title = payload.title.strip()
-        dv.title = new_title
-        item = await _dataview_item(db, dv)
-        if item is not None:
-            item.title = new_title
-    ws.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(dv)
-    return DataViewResponse.model_validate(dv)
-
-
-@router.post(
-    "/{workspace_id}/dataviews/{dataview_id}/run",
-    response_model=DataViewResponse,
-)
-async def run_dataview(
-    workspace_id: uuid.UUID,
-    dataview_id: uuid.UUID,
-    background: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> DataViewResponse:
-    """Execute the query read-only, cache the result, and re-index for RAG."""
-    from app.data_sources.models import DataSource
-    from app.data_sources.service import DataSourceError, run_query
-
-    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
-    dv = await _load_workspace_dataview(db, ws.id, dataview_id, user)
-    if dv.data_source_id is None or not (dv.sql or "").strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Pick a data source and write a query first.",
-        )
-    source = await db.get(DataSource, dv.data_source_id)
-    if source is None or not source.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="That data source is unavailable.",
-        )
-
-    now = datetime.now(timezone.utc)
-    try:
-        result = await run_query(source, dv.sql or "")
-    except DataSourceError as exc:
-        dv.last_error = str(exc)[:500]
-        dv.last_run_at = now
-        await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
-
-    dv.data = result
-    dv.last_error = None
-    dv.last_run_at = now
-    dv.content_text = _dataview_content_text(dv.title or "Data view", result)
-    item = await _dataview_item(db, dv)
-    await db.commit()
-    await db.refresh(dv)
-    if item is not None:
-        from app.workspaces.knowledge import index_dataview_for_workspace
-
-        background.add_task(index_dataview_for_workspace, ws.id, item.id)
-    return DataViewResponse.model_validate(dv)
 
 
 # Match the document/canvas collab token lifetime so the frontend's refresh
@@ -2359,16 +2061,11 @@ async def _purge_item(
                         tf.trashed_at = now
                     chunk_file_ids.add(canvas.text_file_id)
                 await db.delete(canvas)
-        elif it.kind in ("roster", "chart", "dataview") and it.ref_id is not None:
-            # Sheet-style backing rows (Roster / Chart / DataView): drop the
-            # backing row and trash its RAG text file, so a deleted item stops
-            # surfacing in retrieval. Especially important for a data view —
-            # its text file caches DB query results that mustn't linger in the
-            # workspace pool after the view is gone.
+        elif it.kind == "roster" and it.ref_id is not None:
+            # Sheet-style backing row (Roster): drop the backing row and trash
+            # its RAG text file, so a deleted item stops surfacing in retrieval.
             backing_model = {
                 "roster": Roster,
-                "chart": Chart,
-                "dataview": DataView,
             }[it.kind]
             backing = await db.get(backing_model, it.ref_id)
             if backing is not None:

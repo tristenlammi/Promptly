@@ -313,10 +313,6 @@ from app.workspaces.export_router import router as workspace_export_router  # no
 from app.secrets.router import router as secrets_router  # noqa: E402
 from app.mcp.router import router as mcp_admin_router  # noqa: E402
 from app.mcp.workspace_router import router as mcp_workspace_router  # noqa: E402
-from app.data_sources.router import (  # noqa: E402
-    admin_router as data_sources_admin_router,
-    picker_router as data_sources_picker_router,
-)
 from app.groups.router import router as groups_admin_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.chat.folders_router import router as chat_folders_router  # noqa: E402
@@ -431,14 +427,6 @@ app.include_router(
 # Workspace owners attach workspace-scoped connectors to their workspace.
 app.include_router(
     mcp_workspace_router, prefix="/api/workspaces", tags=["mcp"]
-)
-# Data sources — admin-configured read-only DB connections backing Data-view
-# items. Admin CRUD + an editor-facing picker (no credentials).
-app.include_router(
-    data_sources_admin_router, prefix="/api/admin/data-sources", tags=["data-sources"]
-)
-app.include_router(
-    data_sources_picker_router, prefix="/api/data-sources", tags=["data-sources"]
 )
 # User groups (admin-managed teams; scope connectors by identity).
 app.include_router(

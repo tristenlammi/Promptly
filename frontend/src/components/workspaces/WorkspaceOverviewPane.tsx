@@ -2,9 +2,7 @@ import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
-  BarChart3,
   Brain,
-  Database,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -812,10 +810,6 @@ function KindIcon({ kind, className }: { kind: string; className?: string }) {
       return <Columns3 className={cls} />;
     case "sheet":
       return <Table2 className={cls} />;
-    case "chart":
-      return <BarChart3 className={cls} />;
-    case "dataview":
-      return <Database className={cls} />;
     default:
       return <FileText className={cls} />;
   }
