@@ -163,6 +163,10 @@ export function UsersPanel() {
           values.can_generate_images !== target.can_generate_images
             ? values.can_generate_images
             : undefined,
+        can_execute_code:
+          values.can_execute_code !== target.can_execute_code
+            ? values.can_execute_code
+            : undefined,
         group_ids: sameStringSet(values.group_ids, target.group_ids)
           ? undefined
           : values.group_ids,

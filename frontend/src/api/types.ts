@@ -162,6 +162,10 @@ export interface User {
   /** Enrolled MFA method or null. Mirrored from the user_mfa_secrets row. */
   mfa_enrolled_method?: "totp" | "email" | null;
   mfa_enrolled_at?: string | null;
+  /** Whether the user can run code via the "Run" affordance on code
+   *  artifacts. Admins are never gated. Optional for backward-compat with
+   *  older cached sessions; treated as allowed unless explicitly `false`. */
+  can_execute_code?: boolean;
 }
 
 /** Expanded row used by the admin users table. */
@@ -174,6 +178,9 @@ export interface AdminUser {
   /** Whether the `generate_image` chat tool is available to this user.
    *  Admins are never gated (effectively always true for them). */
   can_generate_images: boolean;
+  /** Whether user-invoked code execution (the "Run" button on code
+   *  artifacts) is allowed. Admins are never gated. */
+  can_execute_code: boolean;
   /** Groups this user belongs to (role bundles — grant connectors + models). */
   group_ids: string[];
   created_at: string;

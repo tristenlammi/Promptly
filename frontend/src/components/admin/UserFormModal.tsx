@@ -23,6 +23,8 @@ export interface UserFormValues {
   allowed_models: string[] | null;
   /** Whether the user can use the `generate_image` chat tool. */
   can_generate_images: boolean;
+  /** Whether the user can run code via the "Run" button on code artifacts. */
+  can_execute_code: boolean;
   /** Group memberships (role bundles — grant connectors + models). */
   group_ids: string[];
   /**
@@ -74,6 +76,7 @@ export function UserFormModal({
   const [role, setRole] = useState<UserRole>("user");
   const [fullAccess, setFullAccess] = useState(true);
   const [canGenerateImages, setCanGenerateImages] = useState(true);
+  const [canExecuteCode, setCanExecuteCode] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -106,6 +109,7 @@ export function UserFormModal({
       setRole(user.role);
       setFullAccess(user.allowed_models === null);
       setCanGenerateImages(user.can_generate_images ?? true);
+      setCanExecuteCode(user.can_execute_code ?? true);
       setPicked(new Set(user.allowed_models ?? []));
       setGroupIds(new Set(user.group_ids ?? []));
       setStorageCapGb(
@@ -130,6 +134,7 @@ export function UserFormModal({
       setRole("user");
       setFullAccess(true);
       setCanGenerateImages(true);
+      setCanExecuteCode(true);
       setPicked(new Set());
       setGroupIds(new Set());
       setStorageCapGb("");
@@ -202,6 +207,7 @@ export function UserFormModal({
         allowed_models:
           role === "admin" || fullAccess ? null : Array.from(picked),
         can_generate_images: canGenerateImages,
+        can_execute_code: canExecuteCode,
         group_ids: Array.from(groupIds),
         storage_cap_bytes: storageBytes,
         daily_token_budget: parseQuota(dailyTokens),
@@ -362,6 +368,23 @@ export function UserFormModal({
                 <span className="block text-[11px] text-[var(--text-muted)]">
                   Let this user ask the chat to generate or edit images. Off =
                   the image tool is withheld entirely for them.
+                </span>
+              </span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={canExecuteCode}
+                onChange={(e) => setCanExecuteCode(e.target.checked)}
+              />
+              <span className="text-xs">
+                <span className="font-medium text-[var(--text)]">
+                  Code execution
+                </span>
+                <span className="block text-[11px] text-[var(--text-muted)]">
+                  Let this user run code with the “Run” button on code
+                  artifacts. Off = the Run button is hidden for them.
                 </span>
               </span>
             </label>

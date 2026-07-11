@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2, Play } from "lucide-react";
 
 import { ArtifactCodeEditor } from "./ArtifactCodeEditor";
 import { HtmlPreview } from "./previews/HtmlPreview";
@@ -6,26 +7,30 @@ import { SvgPreview } from "./previews/SvgPreview";
 import { MarkdownPreview } from "./previews/MarkdownPreview";
 import { JsonPreview } from "./previews/JsonPreview";
 import { CsvPreview } from "./previews/CsvPreview";
+import { RunOutputPane, type RunStatus } from "./RunOutputPane";
 import {
   type ArtifactLanguage,
   humanLanguageLabel,
   isPreviewableLanguage,
 } from "./previewable";
+import { codeApi, type CodeRunResult } from "@/api/code";
 import { cn } from "@/utils/cn";
 
+type ArtifactTab = "preview" | "code" | "output";
+
 /**
- * Body of the Code Artifact experience — the Preview / Code tab
- * switcher plus the two tab contents. Rendered standalone by:
+ * Body of the Code Artifact experience — the Preview / Code (/ Output)
+ * tab switcher plus the tab contents. Rendered standalone by:
  *
  * 1. The ``CodeArtifactPanel`` (over-chat side panel with header
- *    + footer). It owns edit state and Save-to-Drive.
+ *    + footer). It owns edit state and Save-to-Drive, and enables the
+ *    Run affordance for runnable languages when the user is permitted.
  * 2. The Drive ``FilePreviewModal`` — which loads a file's body,
- *    wraps it in this view, and makes the Code tab read-only
- *    (edits in Drive don't round-trip to the file without an
- *    explicit save, which we don't build in this MVP).
+ *    wraps it in this view, and makes the Code tab read-only.
  *
- * Debouncing the editor -> preview sync (250 ms) keeps the HTML
- * iframe from reloading on every keystroke.
+ * When ``runnable`` is set, an "Output" tab + a "Run" button appear:
+ * clicking Run executes the source in the server-side sandbox
+ * (``POST /api/code/run``) and shows stdout / stderr / produced files.
  */
 export function CodeArtifactView({
   source,
@@ -34,35 +39,62 @@ export function CodeArtifactView({
   onChange,
   activeTab,
   onActiveTabChange,
+  runnable = false,
+  conversationId = null,
 }: {
   source: string;
   language: ArtifactLanguage;
   readOnly?: boolean;
   onChange?: (next: string) => void;
   /** Controlled active tab. If omitted we manage state locally. */
-  activeTab?: "preview" | "code";
-  onActiveTabChange?: (tab: "preview" | "code") => void;
+  activeTab?: ArtifactTab;
+  onActiveTabChange?: (tab: ArtifactTab) => void;
+  /** Show the Run button + Output tab (caller gates on permission +
+   *  language). */
+  runnable?: boolean;
+  /** Conversation whose sandbox session a Run should share, if any. */
+  conversationId?: string | null;
 }) {
   const canPreview = isPreviewableLanguage(language);
 
-  // Internal state when the parent doesn't control it (e.g. used
-  // from FilePreviewModal where the modal chrome has no tabs).
-  const [internalTab, setInternalTab] = useState<"preview" | "code">(
+  const [internalTab, setInternalTab] = useState<ArtifactTab>(
     canPreview ? "preview" : "code"
   );
   const tab = activeTab ?? internalTab;
-  const setTab = (next: "preview" | "code") => {
-    if (onActiveTabChange) onActiveTabChange(next);
-    else setInternalTab(next);
-  };
+  const setTab = useCallback(
+    (next: ArtifactTab) => {
+      if (onActiveTabChange) onActiveTabChange(next);
+      else setInternalTab(next);
+    },
+    [onActiveTabChange]
+  );
 
-  // Force Code tab whenever preview is unavailable (prevents a
-  // stale "preview" tab selection after the user opens an artifact
-  // in a non-previewable language from the store).
+  // Redirect away from a preview tab only when preview is unavailable —
+  // never clobber a valid "output" selection.
   useEffect(() => {
-    if (!canPreview && tab !== "code") setTab("code");
+    if (!canPreview && tab === "preview") setTab("code");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canPreview]);
+
+  // ---- Run state (only meaningful when runnable) ----
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [runResult, setRunResult] = useState<CodeRunResult | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const doRun = useCallback(async () => {
+    if (runStatus === "running") return;
+    setTab("output");
+    setRunStatus("running");
+    setRunError(null);
+    try {
+      const res = await codeApi.run(source, { language, conversationId });
+      setRunResult(res);
+      setRunStatus("done");
+    } catch (e) {
+      setRunError(runErrorText(e));
+      setRunStatus("error");
+    }
+  }, [runStatus, source, language, conversationId, setTab]);
 
   // Debounce what the preview sees so an iframe isn't recreated on
   // every keystroke. The editor is always in sync with ``source``.
@@ -79,19 +111,53 @@ export function CodeArtifactView({
         >
           Preview
         </TabButton>
-        <TabButton
-          active={tab === "code"}
-          onClick={() => setTab("code")}
-          label="Code"
-        >
+        <TabButton active={tab === "code"} onClick={() => setTab("code")} label="Code">
           Code
         </TabButton>
-        <div className="ml-auto text-xs text-[var(--text-muted)]">
-          {humanLanguageLabel(language)}
+        {runnable && (
+          <TabButton
+            active={tab === "output"}
+            onClick={() => setTab("output")}
+            label="Run output"
+          >
+            Output
+          </TabButton>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {runnable && (
+            <button
+              type="button"
+              onClick={() => void doRun()}
+              disabled={runStatus === "running"}
+              title="Run this code in a secure sandbox"
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition",
+                "bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]",
+                "disabled:cursor-not-allowed disabled:opacity-60"
+              )}
+            >
+              {runStatus === "running" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {runStatus === "running" ? "Running…" : "Run"}
+            </button>
+          )}
+          <span className="text-xs text-[var(--text-muted)]">
+            {humanLanguageLabel(language)}
+          </span>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden p-2">
-        {tab === "preview" && canPreview ? (
+        {tab === "output" && runnable ? (
+          <RunOutputPane
+            status={runStatus}
+            result={runResult}
+            error={runError}
+            onRun={() => void doRun()}
+          />
+        ) : tab === "preview" && canPreview ? (
           <PreviewForLanguage language={language} source={debouncedSource} />
         ) : (
           <ArtifactCodeEditor
@@ -104,6 +170,14 @@ export function CodeArtifactView({
       </div>
     </div>
   );
+}
+
+function runErrorText(e: unknown): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data
+    ?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (e instanceof Error) return e.message;
+  return "Couldn't run the code.";
 }
 
 function TabButton({
@@ -130,7 +204,8 @@ function TabButton({
         active
           ? "bg-[var(--bg)] text-[var(--text)] shadow-sm"
           : "text-[var(--text-muted)] hover:bg-[var(--bg)] hover:text-[var(--text)]",
-        disabled && "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-[var(--text-muted)]"
+        disabled &&
+          "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-[var(--text-muted)]"
       )}
     >
       {children}

@@ -20,20 +20,18 @@ working directory under their original filename so ``pd.read_csv(
 """
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import uuid
 from typing import Any
 
-import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.auth.models import User
 from app.chat.models import Message
+from app.chat.sandbox_exec import (
+    SandboxError,
+    SandboxNotConfigured,
+    run_python_in_sandbox,
+)
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
-from app.config import get_settings
-from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.models import UserFile
 from app.files.storage import absolute_path
 
@@ -63,42 +61,6 @@ _DATA_MIMES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/x-parquet",
 }
-
-# Output-file gate. The sandbox is trusted-ish (our own container) but
-# defence-in-depth says we don't persist arbitrary blobs a compromised
-# or buggy sandbox hands back: no executables / scripts land in the
-# user's Drive with a download button on them. MIME is whitelisted
-# (prefixes + exact types) and the extension is deny-listed as a second
-# gate because ``application/octet-stream`` is a legitimate fallback
-# for e.g. parquet output.
-_ALLOWED_OUTPUT_MIME_PREFIXES = ("text/", "image/", "audio/", "video/")
-_ALLOWED_OUTPUT_MIMES = {
-    "application/json",
-    "application/pdf",
-    "application/zip",
-    "application/gzip",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/x-parquet",
-    "application/octet-stream",
-}
-_BLOCKED_OUTPUT_EXTS = {
-    ".exe", ".dll", ".so", ".dylib", ".msi", ".bat", ".cmd", ".ps1",
-    ".sh", ".com", ".scr", ".vbs", ".jar", ".apk", ".deb", ".rpm",
-    ".pyc",
-}
-
-
-def _output_allowed(name: str, mime: str) -> bool:
-    ext = os.path.splitext(name or "")[1].lower()
-    if ext in _BLOCKED_OUTPUT_EXTS:
-        return False
-    m = (mime or "").lower().split(";")[0].strip()
-    if any(m.startswith(p) for p in _ALLOWED_OUTPUT_MIME_PREFIXES):
-        return True
-    return m in _ALLOWED_OUTPUT_MIMES
-
 
 def _looks_like_data(f: UserFile) -> bool:
     ext = os.path.splitext(f.filename or "")[1].lower()
@@ -189,30 +151,9 @@ class CodeInterpreterTool(Tool):
         if len(code) > _MAX_CODE_CHARS:
             raise ToolError(f"`code` exceeds {_MAX_CODE_CHARS:,}-char limit")
 
-        settings = get_settings()
-        base_url = (settings.CODE_SANDBOX_URL or "").rstrip("/")
-        if not base_url:
-            raise ToolError(
-                "The code interpreter isn't configured on this server. "
-                "Ask an admin to enable the sandbox service."
-            )
-        # The sandbox fails closed without a shared secret, so an empty
-        # value here can only ever produce a confusing 503 from it.
-        # Surface the misconfiguration as a clear, actionable error
-        # instead. (Config normally mirrors SECRET_KEY into this at
-        # boot, so this should never fire on a healthy install.)
-        sandbox_secret = (settings.CODE_SANDBOX_SECRET or "").strip()
-        if not sandbox_secret:
-            raise ToolError(
-                "The code interpreter is disabled: no sandbox secret is "
-                "configured. Ask an admin to set CODE_SANDBOX_SECRET."
-            )
-
-        # ---- Resolve input files (explicit ∪ auto-attached) ----
+        # ---- Resolve input files (explicit ∪ auto-attached) → (name, bytes) ----
         files = await self._gather_input_files(ctx, args.get("input_file_ids"))
-
-        payload_files: list[dict[str, str]] = []
-        total = 0
+        input_files: list[tuple[str, bytes]] = []
         for row in files:
             try:
                 data = await self._read_bytes(row)
@@ -220,124 +161,59 @@ class CodeInterpreterTool(Tool):
                 # Best-effort: skip an unreadable input rather than aborting
                 # the whole run. The model still sees what loaded via stdout.
                 continue
-            total += len(data)
-            if total > _MAX_INPUT_FILE_BYTES * _MAX_INPUT_FILES:
-                break
-            payload_files.append(
-                {
-                    "name": row.filename,
-                    "content_b64": base64.b64encode(data).decode("ascii"),
-                }
-            )
+            input_files.append((row.filename, data))
 
-        timeout_s = max(1, int(settings.CODE_SANDBOX_TIMEOUT_S or 30))
-
-        # ---- Ship the job to the sandbox ----
-        headers = {"X-Sandbox-Secret": sandbox_secret}
+        # ---- Run in the shared sandbox (persists produced files) ----
         try:
-            async with httpx.AsyncClient(timeout=timeout_s + 15) as client:
-                resp = await client.post(
-                    f"{base_url}/execute",
-                    headers=headers,
-                    json={
-                        "code": code,
-                        "files": payload_files,
-                        "timeout_s": timeout_s,
-                        # Persist the working dir across calls within this
-                        # conversation so the model can build a file in one
-                        # run and read it in the next.
-                        "session_id": str(ctx.conversation_id),
-                    },
-                )
-        except httpx.HTTPError as e:
-            logger.warning("code_interpreter: sandbox unreachable: %s", e)
-            raise ToolError(
-                "Couldn't reach the code sandbox. It may be starting up — "
-                "try again in a moment."
-            ) from e
-
-        if resp.status_code != 200:
-            detail = resp.text[:500]
-            raise ToolError(f"Sandbox rejected the job ({resp.status_code}): {detail}")
-
-        result = resp.json()
-        stdout = str(result.get("stdout") or "")
-        stderr = str(result.get("stderr") or "")
-        exit_code = result.get("exit_code")
-        timed_out = bool(result.get("timed_out"))
-        outputs = result.get("outputs") or []
-
-        # ---- Persist produced files → attachment chips ----
-        attachment_ids: list[uuid.UUID] = []
-        produced_names: list[str] = []
-        skipped_names: list[str] = []
-        chart_count = 0
-        for out in outputs:
-            name = str(out.get("name") or "output")
-            mime = str(out.get("mime") or "application/octet-stream")
-            content_b64 = out.get("content_b64") or ""
-            if not _output_allowed(name, mime):
-                logger.warning(
-                    "code_interpreter: refusing output %r (mime=%s) user=%s",
-                    name,
-                    mime,
-                    ctx.user.id,
-                )
-                skipped_names.append(name)
-                continue
-            try:
-                blob = base64.b64decode(content_b64)
-            except Exception:
-                continue
-            if not blob:
-                continue
-            try:
-                row = await persist_generated_file(
-                    ctx.db,
-                    user=ctx.user,
-                    filename=name,
-                    mime_type=mime,
-                    content=blob,
-                )
-            except GeneratedFileError as e:
-                logger.info("code_interpreter: couldn't persist %s: %s", name, e)
-                continue
-            attachment_ids.append(row.id)
-            produced_names.append(row.filename)
-            if mime.startswith("image/"):
-                chart_count += 1
+            result = await run_python_in_sandbox(
+                ctx.db,
+                user=ctx.user,
+                code=code,
+                input_files=input_files,
+                # Persist the working dir across calls within this conversation
+                # so the model can build a file in one run and read it in the next.
+                session_id=str(ctx.conversation_id),
+                persist_outputs=True,
+            )
+        except SandboxNotConfigured as e:
+            raise ToolError(f"{e} Ask an admin to enable the sandbox service.") from e
+        except SandboxError as e:
+            raise ToolError(str(e)) from e
 
         # ---- Build the model-facing result string ----
         content = self._build_feedback(
-            exit_code=exit_code,
-            timed_out=timed_out,
-            stdout=stdout,
-            stderr=stderr,
-            produced_names=produced_names,
-            skipped_names=skipped_names,
+            exit_code=result.exit_code,
+            timed_out=result.timed_out,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            produced_names=result.produced_names,
+            skipped_names=result.skipped_names,
         )
 
-        errored = timed_out or (exit_code is not None and exit_code != 0)
         meta: dict[str, Any] = {
-            "exit_code": exit_code,
-            "timed_out": timed_out,
-            "file_count": len(produced_names),
-            "chart_count": chart_count,
-            "errored": errored,
+            "exit_code": result.exit_code,
+            "timed_out": result.timed_out,
+            "file_count": len(result.produced_names),
+            "chart_count": result.chart_count,
+            "errored": result.errored,
         }
-        if produced_names:
-            meta["produced"] = produced_names
+        if result.produced_names:
+            meta["produced"] = result.produced_names
 
         logger.info(
             "code_interpreter: user=%s exit=%s timed_out=%s inputs=%d outputs=%d",
             ctx.user.id,
-            exit_code,
-            timed_out,
-            len(payload_files),
-            len(produced_names),
+            result.exit_code,
+            result.timed_out,
+            len(input_files),
+            len(result.produced_names),
         )
 
-        return ToolResult(content=content, attachment_ids=attachment_ids, meta=meta)
+        return ToolResult(
+            content=content,
+            attachment_ids=[f.id for f in result.attachments],
+            meta=meta,
+        )
 
     # ================================================================
     # Helpers

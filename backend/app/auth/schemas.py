@@ -123,6 +123,10 @@ class UserResponse(BaseModel):
     # NULL = full access to the admin's curated pool. Admins effectively
     # ignore this field (they always see everything).
     allowed_models: list[str] | None = None
+    # Whether the user may run code via the "Run" affordance on code
+    # artifacts (POST /api/code/run). The frontend uses this to show/hide
+    # the button; admins are effectively always True. Server re-checks.
+    can_execute_code: bool = True
     settings: dict[str, Any]
     # Profile appearance: signed picture URL (None = initials chip; a
     # model property, so it serializes from anywhere) and the chosen

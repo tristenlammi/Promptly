@@ -170,6 +170,14 @@ export function isPreviewableLanguage(lang: ArtifactLanguage): boolean {
   return PREVIEWABLE.has(lang);
 }
 
+/** Languages the server-side sandbox can execute via the Run button.
+ *  Phase 1 is Python-only; the set is the single place to widen it. */
+const RUNNABLE: ReadonlySet<ArtifactLanguage> = new Set(["python"]);
+
+export function isRunnableLanguage(lang: ArtifactLanguage): boolean {
+  return RUNNABLE.has(lang);
+}
+
 export function countLines(source: string): number {
   if (!source) return 0;
   // trimEnd so a single trailing newline (common in fenced code) doesn't

@@ -35,6 +35,8 @@ class AdminUserResponse(BaseModel):
     # Whether the ``generate_image`` chat tool is available to this user.
     # Admins are never gated by it (always effectively True for them).
     can_generate_images: bool = True
+    # Whether the user may run code via the "Run" button on code artifacts.
+    can_execute_code: bool = True
     # Groups this user belongs to (role bundles — grant connectors + models).
     group_ids: list[uuid.UUID] = []
     created_at: datetime
@@ -384,6 +386,8 @@ class AdminUserUpdate(BaseModel):
     allowed_models: list[str] | None = None
     # Omit to leave unchanged; send a bool to toggle image-gen access.
     can_generate_images: bool | None = None
+    # Omit to leave unchanged; send a bool to toggle code-execution access.
+    can_execute_code: bool | None = None
     # Omit to leave membership unchanged; send a (possibly empty) list to
     # replace the user's group set.
     group_ids: list[uuid.UUID] | None = None

@@ -43,6 +43,15 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # Per-user capability gate for user-invoked code execution (the "Run"
+    # button on code artifacts → ``POST /api/code/run``). TRUE (default) =
+    # the user can run code in the sandbox; FALSE = the Run affordance is
+    # hidden and the endpoint refuses. Admins are never gated by it. This
+    # is independent of the ``code_interpreter`` chat tool (model-driven).
+    can_execute_code: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+
     # User settings: default_model, default_search_on, preferred_search_provider, theme, ...
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"

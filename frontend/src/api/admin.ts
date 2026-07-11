@@ -54,6 +54,8 @@ export interface UpdateUserPayload {
   allowed_models?: string[] | null;
   /** Toggle image-gen access. Omit to leave unchanged. */
   can_generate_images?: boolean;
+  /** Toggle code-execution (Run button) access. Omit to leave unchanged. */
+  can_execute_code?: boolean;
   /** Omit to leave membership unchanged; send a list to replace it. */
   group_ids?: string[];
   /**

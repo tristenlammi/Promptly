@@ -393,6 +393,9 @@ async def update_user(
     if "can_generate_images" in fields and payload.can_generate_images is not None:
         target.can_generate_images = payload.can_generate_images
 
+    if "can_execute_code" in fields and payload.can_execute_code is not None:
+        target.can_execute_code = payload.can_execute_code
+
     if "group_ids" in fields and payload.group_ids is not None:
         await _sync_user_groups(db, target.id, payload.group_ids)
 

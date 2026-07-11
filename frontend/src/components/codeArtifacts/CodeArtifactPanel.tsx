@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Check,
   Copy,
@@ -17,6 +17,7 @@ import { useCodeArtifactStore } from "@/stores/codeArtifactStore";
 import { filesApi } from "@/api/files";
 import { chatApi } from "@/api/chat";
 import { useModelStore } from "@/store/modelStore";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 import { CodeArtifactView } from "./CodeArtifactView";
@@ -25,6 +26,7 @@ import {
   driveArtifactMeta,
   humanLanguageLabel,
   isPreviewableLanguage,
+  isRunnableLanguage,
 } from "./previewable";
 
 /**
@@ -59,6 +61,13 @@ export function CodeArtifactPanel() {
   const resetDraft = useCodeArtifactStore((s) => s.resetDraft);
   const setActiveTab = useCodeArtifactStore((s) => s.setActiveTab);
   const closeArtifact = useCodeArtifactStore((s) => s.closeArtifact);
+
+  // Run affordance is gated on the per-user flag (admins always allowed) and
+  // only shown for sandbox-runnable languages. The conversation id (from the
+  // chat route) lets a run share that chat's sandbox session.
+  const user = useAuthStore((s) => s.user);
+  const canExecuteCode = !!user && (user.role === "admin" || user.can_execute_code !== false);
+  const { id: routeConversationId } = useParams<{ id?: string }>();
 
   const [widthPx, setWidthPx] = useState<number>(() => {
     if (typeof window === "undefined") return DEFAULT_WIDTH_PX;
@@ -127,6 +136,8 @@ export function CodeArtifactPanel() {
             onChange={setDraft}
             activeTab={activeTab}
             onActiveTabChange={setActiveTab}
+            runnable={canExecuteCode && isRunnableLanguage(language)}
+            conversationId={routeConversationId ?? null}
           />
         </div>
 
