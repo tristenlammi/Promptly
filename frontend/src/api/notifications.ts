@@ -10,7 +10,6 @@ export interface SubscriptionSummary {
 
 export interface NotificationPreferences {
   enabled: boolean;
-  study_graded: boolean;
   export_ready: boolean;
   import_done: boolean;
   shared_message: boolean;

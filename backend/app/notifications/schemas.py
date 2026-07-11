@@ -40,7 +40,6 @@ class PreferencesSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     enabled: bool
-    study_graded: bool
     export_ready: bool
     import_done: bool
     shared_message: bool
@@ -56,7 +55,6 @@ class PreferencesUpdate(BaseModel):
     ignored."""
 
     enabled: bool | None = None
-    study_graded: bool | None = None
     export_ready: bool | None = None
     import_done: bool | None = None
     shared_message: bool | None = None

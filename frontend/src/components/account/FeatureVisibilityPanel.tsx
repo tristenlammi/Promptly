@@ -13,8 +13,8 @@ import { cn } from "@/utils/cn";
 
 /** Per-user interface curation (Phase 2 — feature visibility).
  *
- * Lets each user hide optional top-level surfaces (Workspaces, Tasks,
- * Study) from their sidebar so they can keep their nav as clean or as
+ * Lets each user hide optional top-level surfaces (Workspaces, Tasks)
+ * from their sidebar so they can keep their nav as clean or as
  * full as they like. Hiding a section is purely cosmetic — it never
  * disables the underlying feature or its routes, and the section can be
  * re-enabled here at any time. Persists to ``users.settings.hidden_nav``
@@ -39,7 +39,7 @@ export function FeatureVisibilityPanel() {
     setBusy(key);
     // Opt-in surfaces toggle the ``enabled_nav`` allowlist; opt-out surfaces
     // toggle the ``hidden_nav`` denylist. Kept separate so a fresh install
-    // starts with Study hidden without a per-key default table.
+    // can start opt-in surfaces hidden without a per-key default table.
     const optIn = OPT_IN_NAV_KEYS.has(key);
     const field = optIn ? "enabled_nav" : "hidden_nav";
     const previous = (user?.settings?.[field] ?? []) as string[];

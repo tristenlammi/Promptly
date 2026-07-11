@@ -54,11 +54,3 @@ from app.search.models import SearchProvider  # noqa: F401
 from app.secrets.models import UserSecret  # noqa: F401
 from app.tasks.models import Task, TaskConnector, TaskRun  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401
-from app.study.models import (  # noqa: F401
-    StudyExam,
-    StudyMessage,
-    StudyProject,
-    StudySession,
-    StudyUnit,
-    WhiteboardExercise,
-)

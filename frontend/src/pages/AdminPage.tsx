@@ -52,7 +52,7 @@ const TABS: TabDef[] = [
     label: "Models",
     icon: <Settings2 className="h-3.5 w-3.5" />,
     subtitle:
-      "Connect LLM providers and pick which models are available in Chat and Study.",
+      "Connect LLM providers and pick which models are available in Chat.",
   },
   {
     id: "connectors",

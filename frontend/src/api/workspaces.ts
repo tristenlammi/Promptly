@@ -1,9 +1,7 @@
 /**
  * Workspaces API client.
  *
- * Mirrors the Study API shape intentionally — the workspaces UI re-uses
- * the list/detail/archive patterns wholesale so the two features feel
- * like siblings in the sidebar.
+ * Uses the standard list/detail/archive patterns wholesale.
  */
 
 import { apiClient } from "./client";

@@ -366,33 +366,6 @@ async def retrieve_conversation_context(
     )
 
 
-async def retrieve_study_context(
-    db: AsyncSession,
-    *,
-    study_project_id: uuid.UUID,
-    query: str,
-    top_k: int = 6,
-) -> list[RetrievedChunk]:
-    """Top-K chunks most similar to ``query`` among a study project's indexed
-    materials. Same graceful-degradation contract as
-    :func:`retrieve_workspace_context`."""
-    query = (query or "").strip()
-    if not query:
-        return []
-    resolved = await _resolve_query_vector(db, query)
-    if resolved is None:
-        return []
-    qvec_literal, dim = resolved
-    return await _similarity_search(
-        db,
-        scope_col="study_project_id",
-        scope_id=study_project_id,
-        qvec_literal=qvec_literal,
-        dim=dim,
-        k=top_k,
-    )
-
-
 def format_retrieved_block(chunks: list[RetrievedChunk]) -> str:
     """Render retrieved chunks as a system-prompt "Knowledge" block.
 

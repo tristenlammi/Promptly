@@ -63,7 +63,7 @@ import { Button } from "@/components/shared/Button";
 import { ErrorState } from "@/components/shared/Callout";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { confirm } from "@/components/shared/ConfirmDialog";
-import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
+import { ConfirmDoubleModal } from "@/components/shared/ConfirmDoubleModal";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";

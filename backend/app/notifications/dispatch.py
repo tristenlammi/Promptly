@@ -50,7 +50,6 @@ logger = logging.getLogger("promptly.notifications")
 # labels in ``NotificationsPanel.tsx`` — mismatches produce a
 # notification the user can't mute from settings.
 Category = Literal[
-    "study_graded",
     "export_ready",
     "import_done",
     "shared_message",
@@ -76,7 +75,6 @@ Category = Literal[
 ]
 
 CATEGORIES: tuple[str, ...] = (
-    "study_graded",
     "export_ready",
     "import_done",
     "shared_message",

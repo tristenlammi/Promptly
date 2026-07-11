@@ -35,7 +35,6 @@ import {
   PanelRight as PanelRightIcon,
   Pencil,
   Plug,
-  Puzzle,
   RefreshCw,
   Square,
   ThumbsDown,
@@ -186,17 +185,6 @@ interface MessageBubbleProps {
     rating: "up" | "down" | null,
     reason?: string
   ) => Promise<void> | void;
-  /** Study module — when this assistant turn produced a whiteboard
-   *  exercise, the parent passes a handler that re-opens it in the
-   *  right-hand pane. Renders a "Open exercise" action below the reply
-   *  so the student always has an escape hatch if the auto-route
-   *  didn't flip them to the whiteboard. Undefined for non-study
-   *  messages and for assistant turns with no exercise. */
-  onOpenExercise?: () => void | Promise<void>;
-  /** Whether the exercise has already been submitted and graded. Used
-   *  to relabel the action button ("Revisit exercise" vs "Open
-   *  exercise") so the student knows they're re-opening an old one. */
-  exerciseReviewed?: boolean;
   /** Phase 2.6 — in-thread regeneration versioning. When this message
    *  has more than one sibling version, ``versionIndex`` (1-based) and
    *  ``versionCount`` drive a compact ``‹ 2/3 ›`` pager; ``siblingIds``
@@ -805,8 +793,6 @@ function MessageBubbleImpl({
   feedback,
   feedbackReason,
   onFeedback,
-  onOpenExercise,
-  exerciseReviewed,
   versionIndex,
   versionCount,
   siblingIds,
@@ -1200,8 +1186,7 @@ function MessageBubbleImpl({
           canRemember ||
           canReadAloud ||
           canFeedback ||
-          (showVersionPager && !streaming) ||
-          (onOpenExercise && !streaming)) && (
+          (showVersionPager && !streaming)) && (
           <div className="mt-1.5 flex items-center gap-1">
             {showVersionPager && !streaming && (
               <VersionPager
@@ -1210,32 +1195,6 @@ function MessageBubbleImpl({
                 siblingIds={siblingIds!}
                 onSelectVersion={onSelectVersion!}
               />
-            )}
-            {onOpenExercise && !streaming && (
-              <button
-                type="button"
-                onClick={() => void onOpenExercise()}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--accent)] transition",
-                  "hover:bg-[var(--accent)]/[0.08]"
-                )}
-                title={
-                  exerciseReviewed
-                    ? "Re-open this exercise in the whiteboard"
-                    : "Open this exercise in the whiteboard"
-                }
-                aria-label={
-                  exerciseReviewed ? "Revisit exercise" : "Open exercise"
-                }
-              >
-                <Puzzle className="h-3 w-3" />
-                {!isMobile && (
-                  <span>
-                    {exerciseReviewed ? "Revisit exercise" : "Open exercise"}
-                  </span>
-                )}
-              </button>
             )}
             {canCopy && (
               <button

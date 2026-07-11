@@ -56,7 +56,7 @@ Tool calling (Phase A1 of the AI-artefacts plan)
 **structured stream events** (text deltas, tool-call deltas, usage). The
 chat router consumes these directly so the model can call registered
 tools mid-stream. ``stream_chat`` is kept as a thin text-only wrapper so
-every other caller (titler, search distiller, study chat) keeps the
+every other caller (titler, search distiller) keeps the
 exact wire shape they had before.
 """
 from __future__ import annotations
@@ -1262,7 +1262,7 @@ class ModelRouter:
         """Yield content tokens from the provider's streaming endpoint.
 
         Backwards-compatible wrapper around :meth:`stream_chat_events` so
-        the titler / search distiller / study chat keep their text-only
+        the titler / search distiller keep their text-only
         contract. New code that needs tool calls or richer events should
         use ``stream_chat_events`` directly.
 

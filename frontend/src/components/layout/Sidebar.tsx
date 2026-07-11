@@ -71,10 +71,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Per-user feature visibility (Phase 2): optional nav surfaces the
   // user chose to hide from their sidebar. Purely cosmetic.
   const hiddenNav = useAuthStore((s) => s.user?.settings?.hidden_nav);
-  // Opt-in surfaces (Study) ship hidden and appear only once enabled here.
+  // Opt-in surfaces ship hidden and appear only once enabled here.
   const enabledNav = useAuthStore((s) => s.user?.settings?.enabled_nav);
-  // Study is desktop/tablet only — the chat/whiteboard split and the
-  // interactive exercises are too cramped below the md breakpoint (<768px).
   const isMobile = useIsMobile();
   const { isLoading: convLoading } = useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
@@ -150,7 +148,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     if (it.desktopOnly && isMobile) return false;
     if (it.adminOnly && !isAdmin) return false;
     if (it.optionalKey) {
-      // Opt-in surfaces (Study): shown only when explicitly enabled.
+      // Opt-in surfaces: shown only when explicitly enabled.
       // Opt-out surfaces: shown unless the user hid them.
       if (OPT_IN_NAV_KEYS.has(it.optionalKey))
         return enabledSet.has(it.optionalKey);
@@ -237,7 +235,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Nav — Models management lives inside Settings now (admin-only
           tab); keeping the top-level nav focused on the day-to-day
-          surfaces (Chat / Study / Files) reduces visual clutter. The
+          surfaces (Chat / Files) reduces visual clutter. The
           list itself is driven by the shared ``NAV_ITEMS`` config
           so stage-3's Drive-only PWA can filter by ``section``. */}
       <nav className="mt-4 flex flex-col gap-0.5 px-2">

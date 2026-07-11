@@ -1,7 +1,7 @@
 """Effective model-role defaults, resolved per caller.
 
 Every runtime site that asks "which model fills role X (chat / vision-relay /
-research / study / assessor)?" resolves it through :func:`load_effective_defaults`
+research / memory)?" resolves it through :func:`load_effective_defaults`
 so the lookup lives in exactly one place and the call sites stay a one-line swap
 from the old ``db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)``.
 
@@ -36,10 +36,6 @@ class EffectiveDefaults:
     vision_relay_model_id: str | None = None
     research_provider_id: uuid.UUID | None = None
     research_model_id: str | None = None
-    study_provider_id: uuid.UUID | None = None
-    study_model_id: str | None = None
-    study_assessor_provider_id: uuid.UUID | None = None
-    study_assessor_model_id: str | None = None
     memory_provider_id: uuid.UUID | None = None
     memory_model_id: str | None = None
     image_gen_provider_id: uuid.UUID | None = None
@@ -60,16 +56,6 @@ class EffectiveDefaults:
         return bool(self.research_provider_id and self.research_model_id)
 
     @property
-    def study_configured(self) -> bool:
-        return bool(self.study_provider_id and self.study_model_id)
-
-    @property
-    def study_assessor_configured(self) -> bool:
-        return bool(
-            self.study_assessor_provider_id and self.study_assessor_model_id
-        )
-
-    @property
     def memory_configured(self) -> bool:
         return bool(self.memory_provider_id and self.memory_model_id)
 
@@ -86,8 +72,6 @@ _PAIR_FIELDS = (
     ("default_chat_provider_id", "default_chat_model_id"),
     ("vision_relay_provider_id", "vision_relay_model_id"),
     ("research_provider_id", "research_model_id"),
-    ("study_provider_id", "study_model_id"),
-    ("study_assessor_provider_id", "study_assessor_model_id"),
     ("memory_provider_id", "memory_model_id"),
     ("image_gen_provider_id", "image_gen_model_id"),
     ("voice_provider_id", "voice_model_id"),

@@ -2,7 +2,7 @@
 
 A user's effective allow-set (their own ``allowed_models`` UNIONed with the
 models granted by every group they belong to) and the per-model
-authorization check used by every chat/study send path. Kept in ONE place so
+authorization check used by every chat send path. Kept in ONE place so
 the picker (``list_available_models_for``) and the send-time guards can never
 diverge — otherwise a group-granted model shows in the dropdown but 403s on
 use.

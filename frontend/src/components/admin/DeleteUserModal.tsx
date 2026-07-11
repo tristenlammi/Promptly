@@ -115,8 +115,8 @@ export function DeleteUserModal({
             <span className="font-semibold">“{username}”</span>?
           </p>
           <p className="mt-1 text-[var(--text-muted)]">
-            Their conversations, study projects and any model providers they
-            configured will be removed. This action can&apos;t be undone.
+            Their conversations and any model providers they configured will be
+            removed. This action can&apos;t be undone.
           </p>
         </div>
       </div>

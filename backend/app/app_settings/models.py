@@ -215,34 +215,6 @@ class AppSettings(Base):
     )
     research_model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # ----- Study / Teaching model -----
-    # When set, every Study unit session and exam uses this model
-    # instead of the user's chat model. The teaching model directly
-    # affects experience quality — this is an admin decision, not a
-    # per-user one. Favor the frontier reasoning tier (Claude Opus /
-    # Sonnet, Gemini Pro, GPT-5.x). Both fields nullable: NULL = fall
-    # back to the workspace default chat model.
-    study_provider_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("model_providers.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    study_model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
-    # ----- Study / Assessor model (Phase 1 prep) -----
-    # Optional cheaper model for the independent assessor pass: grades
-    # practice reps against a rubric without needing to be the teacher.
-    # Favor the fast/cheap tier (Haiku, Gemini Flash, GPT-5-mini).
-    # NULL = use the study model for grading too.
-    study_assessor_provider_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("model_providers.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    study_assessor_model_id: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )
-
     # ----- Memory extraction model -----
     # Optional dedicated model for cross-chat memory work: the post-turn
     # capture pass and the on-demand consolidation pass. Both are small,
@@ -345,16 +317,6 @@ class AppSettings(Base):
     def research_configured(self) -> bool:
         """True when the admin has designated a research model."""
         return bool(self.research_provider_id and self.research_model_id)
-
-    @property
-    def study_configured(self) -> bool:
-        """True when the admin has designated a teaching model for Study."""
-        return bool(self.study_provider_id and self.study_model_id)
-
-    @property
-    def study_assessor_configured(self) -> bool:
-        """True when the admin has designated a separate assessor model."""
-        return bool(self.study_assessor_provider_id and self.study_assessor_model_id)
 
     @property
     def memory_configured(self) -> bool:

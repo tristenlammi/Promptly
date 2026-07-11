@@ -1,7 +1,7 @@
 /**
  * TanStack Query hooks for the Workspaces API.
  *
- * Key conventions (mirror ``useStudy``):
+ * Key conventions:
  * - ``["workspaces"]`` is the root key.
  * - Active vs archived use ``["workspaces", "list", archived]``.
  * - Detail uses ``["workspaces", "detail", id]``.

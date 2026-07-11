@@ -1,7 +1,7 @@
 """Hard-delete a user + all their content — used by the admin delete-user path.
 
 DB-level ``ON DELETE CASCADE`` removes almost everything a user owns
-(conversations, messages, file rows, workspaces, study data, tasks, custom
+(conversations, messages, file rows, workspaces, tasks, custom
 models, knowledge/vector chunks, providers, MFA, push, usage rollups). The ONE
 thing that doesn't cascade is the file BYTES on disk — removed explicitly here.
 """

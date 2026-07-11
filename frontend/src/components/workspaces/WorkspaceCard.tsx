@@ -28,10 +28,8 @@ interface WorkspaceCardProps {
   onUnarchive?: () => void;
 }
 
-/** Card for a single workspace — deliberately mirrors
- * ``StudyTopicCard`` so the two features feel like siblings on the
- * sidebar. Shows title, description excerpt, conv/file counts, and
- * hover-only quick actions. */
+/** Card for a single workspace. Shows title, description excerpt,
+ * conv/file counts, and hover-only quick actions. */
 export function WorkspaceCard({
   workspace,
   onOpen,

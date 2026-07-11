@@ -343,12 +343,11 @@ class CompareGroup(UUIDPKMixin, TimestampMixin, Base):
 
 
 class Workspace(UUIDPKMixin, TimestampMixin, Base):
-    """A generic workspace bundle for non-Study conversations.
+    """A workspace bundle grouping related conversations.
 
     Holds the shared instructions + pinned files + default model used
-    by every chat inside it. Distinct from :class:`StudyProject` —
-    Study projects are learning paths with units/exams, workspaces
-    are ChatGPT/Claude-style bundles for arbitrary ongoing work.
+    by every chat inside it — a ChatGPT/Claude-style bundle for
+    arbitrary ongoing work.
     """
 
     __tablename__ = "workspaces"
@@ -369,7 +368,7 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
         ForeignKey("model_providers.id", ondelete="SET NULL"), nullable=True
     )
     # NULL = active. A non-NULL timestamp is the single source of
-    # truth for "in archive" — same pattern as study_projects.
+    # truth for "in archive".
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -1151,8 +1150,9 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
         JSONB, nullable=True
     )
 
-    # Reserved for study-style messages that embed whiteboard actions; in
-    # regular chats this stays null.
+    # Legacy: was populated by the removed Study whiteboard feature. Always
+    # null in regular chats. Kept (nullable) because the regenerate/branch
+    # path still copies the field across message versions.
     whiteboard_actions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     # Per-message performance metrics. Populated only on assistant rows

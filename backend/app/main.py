@@ -79,11 +79,6 @@ async def lifespan(_: FastAPI):
     # can blend keyword + meaning-based recall. No-op when embeddings
     # aren't configured.
     indexer_task = start_semantic_indexer()
-    # Team Learning (Study L3) — hourly due-date reminder sweep for
-    # assigned courses (one-shot due-soon + overdue notices).
-    from app.study.reminders import start_study_reminders
-
-    study_reminders_task = start_study_reminders()
     # D4 — backstop sweeper that trashes Chat Uploads files no live
     # message still references (the delete-conversation hook covers the
     # common case in real time; this catches edits / stragglers).
@@ -96,7 +91,6 @@ async def lifespan(_: FastAPI):
             sweeper_task,
             scheduler_task,
             indexer_task,
-            study_reminders_task,
             chat_upload_sweeper_task,
         ):
             bg.cancel()
@@ -342,8 +336,6 @@ from app.models_config.router import router as models_router  # noqa: E402
 from app.notifications.router import router as notifications_router  # noqa: E402
 from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
-from app.study.router import router as study_router  # noqa: E402
-from app.study.courses_router import router as study_courses_router  # noqa: E402
 from app.memory.router import router as memory_router  # noqa: E402
 from app.tasks.router import router as tasks_router  # noqa: E402
 from app.voice.router import router as voice_router  # noqa: E402
@@ -485,11 +477,6 @@ app.include_router(
     local_models_router,
     prefix="/api/admin/local-models",
     tags=["local-models"],
-)
-app.include_router(study_router, prefix="/api/study", tags=["study"])
-# Team Learning (Study L1): workspace courses + enrollments.
-app.include_router(
-    study_courses_router, prefix="/api/study", tags=["study-courses"]
 )
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(memory_router, prefix="/api/memory", tags=["memory"])

@@ -18,11 +18,6 @@ import { SearchResultsPage } from "@/pages/SearchResultsPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { ShareLinkLandingPage } from "@/pages/ShareLinkLandingPage";
 import { StarredFilesPage } from "@/pages/StarredFilesPage";
-import { StudyDesktopOnly } from "@/components/study/StudyDesktopOnly";
-import { StudyPage } from "@/pages/StudyPage";
-import { ReviewPage } from "@/pages/ReviewPage";
-import { StudySessionPage } from "@/pages/StudySessionPage";
-import { StudyTopicPage } from "@/pages/StudyTopicPage";
 import { ArchivePage } from "@/pages/ArchivePage";
 import { TaskDetailPage } from "@/pages/TaskDetailPage";
 import { TasksPage } from "@/pages/TasksPage";
@@ -212,19 +207,6 @@ export default function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/work" element={<MyWorkPage />} />
-        {/* Study home + topic detail are fully mobile-friendly. */}
-        <Route path="/study" element={<StudyPage />} />
-        <Route path="/study/topics/:id" element={<StudyTopicPage />} />
-        {/* Review page: mobile-first by design (daily habit use case). */}
-        <Route path="/study/topics/:id/review" element={<ReviewPage />} />
-        <Route
-          path="/study/sessions/:id"
-          element={
-            <StudyDesktopOnly>
-              <StudySessionPage />
-            </StudyDesktopOnly>
-          }
-        />
         {/* Models management lives inside the Settings (admin) tabs
             now. Keep the legacy ``/models`` URL working by redirecting
             straight to the relevant tab so old bookmarks don't 404. */}

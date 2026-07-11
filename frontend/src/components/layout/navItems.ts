@@ -1,5 +1,4 @@
 import {
-  GraduationCap,
   LayoutGrid,
   FolderOpen,
   ListTodo,
@@ -22,15 +21,15 @@ import {
  *
  * ``section`` is what the stage-3 Drive PWA will filter on: the
  * Drive-only layout keeps ``section === "drive"`` items and drops
- * every chat / study / admin surface. Until then nothing consumes
+ * every chat / admin surface. Until then nothing consumes
  * this.
  */
-export type NavSection = "chat" | "drive" | "study" | "admin";
+export type NavSection = "chat" | "drive" | "admin";
 
 /** Stable identifiers for the *optional* nav surfaces a user can hide
  *  from their sidebar (Phase 2 — per-user feature visibility). Chat and
  *  Files are core and intentionally absent. */
-export type OptionalNavKey = "workspaces" | "study" | "tasks";
+export type OptionalNavKey = "workspaces" | "tasks";
 
 export const OPTIONAL_NAV_KEYS: {
   key: OptionalNavKey;
@@ -51,13 +50,6 @@ export const OPTIONAL_NAV_KEYS: {
     description:
       "One page listing every automation you own — personal and across all your workspaces — with pause/run controls.",
   },
-  {
-    key: "study",
-    label: "Study",
-    description:
-      "Interactive study mode with a whiteboard and exercises. Off by default — a solo-learning tool that sits apart from the collaboration features.",
-    defaultHidden: true,
-  },
 ];
 
 /** Opt-in nav keys: hidden until the user turns them on (stored in
@@ -73,7 +65,7 @@ export interface NavItem {
   section: NavSection;
   /** Restrict matching to exact pathname (``NavLink`` ``end``). */
   exact?: boolean;
-  /** Hide on mobile — mirrors the current Sidebar rule for Study. */
+  /** Hide on mobile. */
   desktopOnly?: boolean;
   /** Hide unless the viewer is an admin. */
   adminOnly?: boolean;
@@ -119,14 +111,6 @@ export const NAV_ITEMS: NavItem[] = [
     // open inside the (desktop-gated) workspace shell.
     desktopOnly: true,
     optionalKey: "tasks",
-  },
-  {
-    to: "/study",
-    icon: GraduationCap,
-    label: "Study",
-    section: "study",
-    desktopOnly: true,
-    optionalKey: "study",
   },
   {
     to: "/files",

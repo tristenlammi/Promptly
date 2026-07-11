@@ -8,8 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
  * we can give untrusted HTML while still letting the snippet run
  * client-side scripts (which is the whole point of a live
  * preview). No cookie access, no fetching same-origin APIs, no
- * top-level navigation. Mirrors the posture the study whiteboard
- * already uses successfully.
+ * top-level navigation.
  *
  * The iframe reloads when ``source`` changes, debounced by the
  * parent (the ``draft`` field only updates on editor idle, so

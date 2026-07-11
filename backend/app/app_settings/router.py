@@ -133,12 +133,6 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         research_provider_id=row.research_provider_id,
         research_model_id=row.research_model_id,
         research_configured=row.research_configured,
-        study_provider_id=row.study_provider_id,
-        study_model_id=row.study_model_id,
-        study_configured=row.study_configured,
-        study_assessor_provider_id=row.study_assessor_provider_id,
-        study_assessor_model_id=row.study_assessor_model_id,
-        study_assessor_configured=row.study_assessor_configured,
         memory_provider_id=row.memory_provider_id,
         memory_model_id=row.memory_model_id,
         memory_configured=row.memory_configured,
@@ -407,61 +401,6 @@ async def update_app_settings(
             diff["research_model_id"] = new_mid
         row.research_provider_id = new_pid
         row.research_model_id = new_mid
-
-    # ----- Study / Teaching model -----
-    spid_set = "study_provider_id" in fields
-    smid_set = "study_model_id" in fields
-    if spid_set != smid_set:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "study_provider_id and study_model_id must be sent together — "
-                "pass both to set a study teaching model, or both as null to clear."
-            ),
-        )
-    if spid_set and smid_set:
-        new_pid = payload.study_provider_id
-        new_mid = payload.study_model_id
-        if (new_pid is None) != (new_mid is None):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="study_provider_id and study_model_id must both be set or both be null.",
-            )
-        if row.study_provider_id != new_pid:
-            diff["study_provider_id"] = str(new_pid) if new_pid else None
-        if row.study_model_id != new_mid:
-            diff["study_model_id"] = new_mid
-        row.study_provider_id = new_pid
-        row.study_model_id = new_mid
-
-    # ----- Study / Assessor model -----
-    sapid_set = "study_assessor_provider_id" in fields
-    samid_set = "study_assessor_model_id" in fields
-    if sapid_set != samid_set:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "study_assessor_provider_id and study_assessor_model_id must be sent "
-                "together — pass both to set an assessor model, or both as null to clear."
-            ),
-        )
-    if sapid_set and samid_set:
-        new_pid = payload.study_assessor_provider_id
-        new_mid = payload.study_assessor_model_id
-        if (new_pid is None) != (new_mid is None):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "study_assessor_provider_id and study_assessor_model_id must "
-                    "both be set or both be null."
-                ),
-            )
-        if row.study_assessor_provider_id != new_pid:
-            diff["study_assessor_provider_id"] = str(new_pid) if new_pid else None
-        if row.study_assessor_model_id != new_mid:
-            diff["study_assessor_model_id"] = new_mid
-        row.study_assessor_provider_id = new_pid
-        row.study_assessor_model_id = new_mid
 
     # ----- Memory extraction model -----
     mpid_set = "memory_provider_id" in fields

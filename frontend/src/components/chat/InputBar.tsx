@@ -77,8 +77,7 @@ interface InputBarProps {
   onCancel?: () => void;
   placeholder?: string;
   /** Three-mode web-search picker (Phase D1). When omitted the picker
-   *  stays hidden — used by surfaces (e.g. study sessions) that don't
-   *  expose web search at all. */
+   *  stays hidden — used by surfaces that don't expose web search at all. */
   webSearchMode?: WebSearchMode;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   /** DeepSeek-only reasoning picker. Both props must be present for the
@@ -90,12 +89,12 @@ interface InputBarProps {
   onToolsChange?: (enabled: boolean) => void;
   footer?: React.ReactNode;
   /**
-   * Set to false to hide the paperclip button (used e.g. by the study
-   * session view where attachments don't apply yet).
+   * Set to false to hide the paperclip button (used by surfaces where
+   * attachments don't apply).
    */
   allowAttachments?: boolean;
   /** Phase 11 — open the deep-research confirmation dialog. Only provided
-   *  on the main chat surface; study/task views omit it. */
+   *  on the main chat surface; task views omit it. */
   onResearch?: () => void;
   /** Voice mode (Phase 2) — open the hands-free voice conversation
    *  overlay. Only provided on the main chat surface. */
@@ -105,8 +104,8 @@ interface InputBarProps {
    *  surface once the conversation has at least one message. */
   onSubchat?: () => void;
   /**
-   * Focus the textarea on mount. Use on surfaces where the student's
-   * primary intent is to type — chat / study pages — so the user can
+   * Focus the textarea on mount. Use on surfaces where the user's
+   * primary intent is to type — chat pages — so the user can
    * start typing immediately without having to click into the field.
    * Uses ``preventScroll`` so we don't jerk the page when focus lands
    * on a long chat history.
@@ -119,11 +118,10 @@ interface InputBarProps {
   currentConversationId?: string | null;
   workspaceId?: string | null;
   /** When true, Enter inserts a newline instead of sending. The send
-   *  button is the only submission path. Used by the study session
-   *  page where students write multi-line answers. */
+   *  button is the only submission path. Used by surfaces where users
+   *  write multi-line answers. */
   newlineOnEnter?: boolean;
-  /** Hide the Enhance prompt button. Study sessions omit it so student
-   *  answers stay authentic and unassisted. */
+  /** Hide the Enhance prompt button. */
   showEnhance?: boolean;
 }
 
@@ -404,7 +402,7 @@ export function InputBar({
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [value]);
 
-  // One-shot focus on mount so new chats / study sessions land the
+  // One-shot focus on mount so new chats land the
   // cursor in the composer without the user having to click first.
   // ``preventScroll`` keeps long chat histories from jumping to the
   // bottom when focus lands.
@@ -770,7 +768,7 @@ export function InputBar({
         return;
       }
     }
-    // On mobile, or when newlineOnEnter is set (e.g. study sessions),
+    // On mobile, or when newlineOnEnter is set,
     // Enter inserts a newline. Submit only via the send button.
     if (isMobile || newlineOnEnter) return;
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1376,7 +1374,7 @@ export function InputBar({
                   {!isMobile && <span className="font-medium">Attach</span>}
                 </button>
               )}
-              {/* Phase 10 — Enhance visible in the main bar (hidden in study sessions). */}
+              {/* Phase 10 — Enhance visible in the main bar. */}
               {showEnhance && <button
                 type="button"
                 onClick={() => void handleEnhance()}

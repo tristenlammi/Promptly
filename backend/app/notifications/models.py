@@ -94,9 +94,6 @@ class PushPreferences(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
-    study_graded: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default="true"
-    )
     export_ready: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )

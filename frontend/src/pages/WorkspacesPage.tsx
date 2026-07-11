@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
-import { ConfirmDoubleModal } from "@/components/study/ConfirmDoubleModal";
+import { ConfirmDoubleModal } from "@/components/shared/ConfirmDoubleModal";
 import { WorkspaceCard } from "@/components/workspaces/WorkspaceCard";
 import { NewWorkspaceModal } from "@/components/workspaces/NewWorkspaceModal";
 import { TopNav } from "@/components/layout/TopNav";
@@ -32,8 +32,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   content: "Most content",
 };
 
-/** Workspaces home — tabbed (Active / Archive), mirrors the Study page
- * layout so users don't need to relearn the pattern. */
+/** Workspaces home — tabbed (Active / Archive). */
 export function WorkspacesPage() {
   const navigate = useNavigate();
   const [wizardOpen, setWizardOpen] = useState(false);

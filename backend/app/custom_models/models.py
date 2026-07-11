@@ -195,10 +195,10 @@ class KnowledgeChunk(Base):
     )
 
     # Scope: exactly one of ``custom_model_id`` / ``workspace_id`` /
-    # ``study_project_id`` is set (enforced by a CHECK constraint,
-    # migration 0080). The chunk store is shared between Custom Models,
-    # Workspaces, and Study projects — all reuse the same
-    # ``embedding_<dim>`` vector columns + HNSW indexes.
+    # ``conversation_id`` is set (enforced by a CHECK constraint). The chunk
+    # store is shared between Custom Models, Workspaces, and per-chat
+    # attachment RAG — all reuse the same ``embedding_<dim>`` vector columns
+    # + HNSW indexes.
     custom_model_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("custom_models.id", ondelete="CASCADE"),
@@ -208,12 +208,6 @@ class KnowledgeChunk(Base):
     workspace_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-    study_project_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("study_projects.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )

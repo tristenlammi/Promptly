@@ -237,14 +237,6 @@ export function NotificationsPanel() {
               />
               <div className="h-px bg-[var(--border)]" />
               <CategoryRow
-                title="Study results"
-                subtitle="Exam graded, unit complete, or a prerequisite unit was inserted."
-                checked={prefs.study_graded}
-                busy={prefsBusy === "study_graded"}
-                onChange={(v) => toggle("study_graded", v)}
-                dimmed={!prefs.enabled}
-              />
-              <CategoryRow
                 title="Exports ready"
                 subtitle="PDFs or conversation exports finished rendering."
                 checked={prefs.export_ready}
