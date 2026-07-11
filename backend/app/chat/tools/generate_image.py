@@ -204,18 +204,18 @@ class GenerateImageTool(Tool):
                 source_image, source_filename = auto
 
         # ---- Pick an image-capable model the user actually has ----
-        provider, model_id, modalities = await _pick_image_model(
+        provider, model_id, image_only = await _pick_image_model(
             ctx.db, ctx.user
         )
 
-        # ---- Call OpenRouter ----
+        # ---- Call OpenRouter (chat path, or /images for image-only) ----
         try:
             result: GeneratedImage = await model_router.generate_image(
                 provider=provider,
                 model_id=model_id,
                 prompt=prompt,
                 source_image=source_image,
-                modalities=modalities,
+                use_images_api=image_only,
             )
         except ProviderError as e:
             logger.info(
@@ -401,24 +401,24 @@ async def _auto_attach_source(
     return None
 
 
-def _modalities_for(provider_row: ModelProvider, model_id: str) -> list[str]:
-    """OpenRouter ``modalities`` to request for ``model_id``.
+def _is_image_only(provider_row: ModelProvider, model_id: str) -> bool:
+    """Whether ``model_id`` is an image-*only* generator.
 
-    Image-*only* models (``gpt-image-2`` etc., tagged ``image_only`` in
-    the catalog) must be called with ``["image"]`` — asking for text too
-    makes them reject the request. Dual-output models (Gemini Image,
-    ``gpt-5.4-image-2``) keep the ``["image", "text"]`` default so their
-    caption still comes back.
+    Image-only models (``gpt-image-2`` etc., tagged ``image_only`` in the
+    catalog) are rejected by ``/chat/completions`` and must go through
+    OpenRouter's dedicated ``/images`` endpoint. Dual-output models
+    (Gemini Image, ``gpt-5.4-image-2``) return False and use the chat
+    path.
     """
     for m in provider_row.models or []:
         if m.get("id") == model_id:
-            return ["image"] if m.get("image_only") else ["image", "text"]
-    return ["image", "text"]
+            return bool(m.get("image_only"))
+    return False
 
 
 async def _pick_image_model(
     db: AsyncSession, user: User
-) -> tuple[ModelProvider, str, list[str]]:
+) -> tuple[ModelProvider, str, bool]:
     """Resolve the model the ``generate_image`` tool renders with.
 
     Precedence:
@@ -444,7 +444,7 @@ async def _pick_image_model(
         # — the fallback still finds a usable image model in most setups.
         if provider_row is not None and provider_row.enabled:
             mid: str = defaults.image_gen_model_id  # type: ignore[assignment]
-            return provider_row, mid, _modalities_for(provider_row, mid)
+            return provider_row, mid, _is_image_only(provider_row, mid)
 
     available = await list_available_models_for(user, db)
     image_models = [m for m in available if m.supports_image_output]
@@ -460,7 +460,7 @@ async def _pick_image_model(
         raise ToolError(
             f"Provider for model {chosen.model_id!r} disappeared mid-call"
         )
-    return provider_row, chosen.model_id, _modalities_for(
+    return provider_row, chosen.model_id, _is_image_only(
         provider_row, chosen.model_id
     )
 

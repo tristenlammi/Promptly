@@ -62,6 +62,8 @@ exact wire shape they had before.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -1303,45 +1305,30 @@ class ModelRouter:
         prompt: str,
         source_image: tuple[bytes, str] | None = None,
         modalities: list[str] | None = None,
+        use_images_api: bool = False,
         timeout: float = 120.0,
     ) -> "GeneratedImage":
         """Generate (or edit) an image via OpenRouter's image-capable models.
 
-        Bypasses the OpenAI SDK on purpose: image generation lives on
-        ``/chat/completions`` but uses two OpenAI-incompatible fields —
-        a top-level ``modalities`` request parameter and an ``images``
-        array on the assistant response message. The SDK silently
-        strips both, so we hit the HTTP API directly.
+        Two wire paths, selected by ``use_images_api``:
 
-        Args:
-            provider:      OpenRouter ``ModelProvider`` row (encrypted
-                           api_key, base_url override).
-            model_id:      Image-capable model id (e.g.
-                           ``google/gemini-2.5-flash-image``).
-            prompt:        Free-form text instruction.
-            source_image:  Optional ``(bytes, mime)`` tuple. When
-                           provided, the prompt is treated as an *edit*
-                           instruction and the bytes are inlined as a
-                           ``data:`` URL in the user content array.
-            modalities:    OpenRouter's ``modalities`` field. Defaults
-                           to ``["image", "text"]`` which works for
-                           dual-output models like Gemini Image; pass
-                           ``["image"]`` for image-only models like
-                           Flux.
-            timeout:       Per-request HTTP timeout. Image generation
-                           can take 10-30s, so this is much higher than
-                           the chat default.
+        * **False (default)** — dual-output models (Gemini Image,
+          ``gpt-5.4-image-2``) that emit image *and* text run through
+          ``/chat/completions`` with a ``modalities`` field; the image
+          comes back on ``message.images``.
+        * **True** — dedicated image-*only* generators
+          (``openai/gpt-image-2``, ``gpt-image-1``) are **rejected** by
+          ``/chat/completions`` (404 "use the /images endpoint"), so they
+          go through OpenRouter's Unified Image API at ``/images`` and the
+          image comes back base64-encoded on ``data[].b64_json``.
 
-        Returns:
-            :class:`GeneratedImage` with raw image bytes, mime type, the
-            assistant's accompanying caption (if any), and usage stats
-            for cost reporting.
+        Bypasses the OpenAI SDK on purpose (chat path): image generation
+        uses two OpenAI-incompatible fields — a top-level ``modalities``
+        request parameter and an ``images`` array on the response — which
+        the SDK silently strips, so we hit the HTTP API directly.
 
-        Raises:
-            ProviderError: For network failures, non-2xx responses, or
-                           a 200 response that nonetheless contained no
-                           image (model refused, returned text-only,
-                           etc.).
+        Raises :class:`ProviderError` for network failures, non-2xx
+        responses, or a 200 that contained no image.
         """
         if provider.type != "openrouter":
             raise ProviderError(
@@ -1352,12 +1339,25 @@ class ModelRouter:
 
         api_key = _api_key_for(provider)
         base = _resolve_base_url(provider)
-        url = f"{base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             **OPENROUTER_HEADERS,
         }
+
+        # Image-only generators reject /chat/completions — route them to
+        # OpenRouter's Unified Image API instead.
+        if use_images_api:
+            return await self._generate_image_via_images_api(
+                base=base,
+                headers=headers,
+                model_id=model_id,
+                prompt=prompt,
+                source_image=source_image,
+                timeout=timeout,
+            )
+
+        url = f"{base}/chat/completions"
 
         # Build the user message content. Pure-prompt → string content;
         # editing → array with the image first then the instruction
@@ -1441,6 +1441,85 @@ class ModelRouter:
             content=img_bytes,
             mime_type=img_mime,
             caption=message.get("content") or None,
+            prompt_tokens=_safe_int(usage.get("prompt_tokens")),
+            completion_tokens=_safe_int(usage.get("completion_tokens")),
+            total_tokens=_safe_int(usage.get("total_tokens")),
+            cost_usd=_safe_float(usage.get("cost")),
+        )
+
+    async def _generate_image_via_images_api(
+        self,
+        *,
+        base: str,
+        headers: dict[str, str],
+        model_id: str,
+        prompt: str,
+        source_image: tuple[bytes, str] | None,
+        timeout: float,
+    ) -> "GeneratedImage":
+        """Call OpenRouter's Unified Image API for image-only models.
+
+        ``POST {base}/images`` with ``{model, prompt}`` (plus
+        ``input_references`` for edits). The image comes back
+        base64-encoded on ``data[0].b64_json`` with a ``media_type``.
+        """
+        url = f"{base}/images"
+        payload: dict[str, Any] = {"model": model_id, "prompt": prompt}
+        if source_image is not None:
+            img_bytes, img_mime = source_image
+            data_url = _bytes_to_data_url(img_bytes, img_mime)
+            payload["input_references"] = [
+                {"type": "image_url", "image_url": {"url": data_url}}
+            ]
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            try:
+                resp = await client.post(url, headers=headers, json=payload)
+            except httpx.HTTPError as e:
+                raise ProviderError(f"Network error generating image: {e}") from e
+
+        if resp.status_code >= 400:
+            detail = resp.text[:400]
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    err = body.get("error")
+                    if isinstance(err, dict) and err.get("message"):
+                        detail = str(err["message"])
+                    elif isinstance(err, str):
+                        detail = err
+            except ValueError:
+                pass
+            raise ProviderError(
+                f"Image generation failed (HTTP {resp.status_code}): {detail}"
+            )
+
+        try:
+            body = resp.json()
+        except ValueError as e:
+            raise ProviderError(
+                f"Image generation returned non-JSON body: {e}"
+            ) from e
+
+        data = body.get("data") or []
+        if not data or not isinstance(data[0], dict):
+            raise ProviderError("Image generation returned no image data")
+        first = data[0]
+        b64 = first.get("b64_json")
+        if not isinstance(b64, str) or not b64:
+            raise ProviderError(
+                "Image generation returned an entry without b64_json bytes"
+            )
+        try:
+            img_bytes = base64.b64decode(b64)
+        except (binascii.Error, ValueError) as e:
+            raise ProviderError(f"Could not decode generated image: {e}") from e
+
+        usage = body.get("usage") or {}
+        return GeneratedImage(
+            content=img_bytes,
+            mime_type=first.get("media_type") or "image/png",
+            caption=None,
             prompt_tokens=_safe_int(usage.get("prompt_tokens")),
             completion_tokens=_safe_int(usage.get("completion_tokens")),
             total_tokens=_safe_int(usage.get("total_tokens")),
