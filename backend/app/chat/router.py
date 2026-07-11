@@ -4567,25 +4567,35 @@ async def _stream_generator(
             ctx["max_tokens"] = VOICE_MAX_TOKENS
 
         enabled_categories: set[str] = set()
-        if ctx.get("tools_enabled"):
-            enabled_categories.add("artefact")
-            # Phase 4 — the code interpreter rides on the same Tools
-            # toggle as the artefact generators.
-            enabled_categories.add("code")
-            # Batch 4.1 — workspace write-back *proposals*. Only in
-            # workspace chats. The tools never write; they file a
-            # pending proposal the user applies from a preview card,
-            # so chats stay read-only until a human approves.
-            if conv.workspace_id is not None:
-                enabled_categories.add("workspace")
-        if web_search_mode != "off":
-            enabled_categories.add("search")
-            # Parallel research sub-agents ride on both toggles: they
-            # need the Tools toggle (they're a heavyweight capability)
-            # and only make sense when web search is on, since each
-            # sub-agent's tool set is search-only.
+        # Real-time voice turns skip tools + web search entirely. A spoken
+        # conversation needs a fast, direct reply, and letting the model
+        # fire a web search or tool call mid-turn injects a 2–5s external
+        # round-trip of dead air — fatal to the real-time feel. The brevity
+        # prompt already steers voice toward short, direct answers, so tools
+        # rarely help here anyway. (Users who want to look something up can
+        # do it as an explicit text turn.)
+        if voice_turn:
+            pass  # no tool/search categories on voice
+        else:
             if ctx.get("tools_enabled"):
-                enabled_categories.add("agents")
+                enabled_categories.add("artefact")
+                # Phase 4 — the code interpreter rides on the same Tools
+                # toggle as the artefact generators.
+                enabled_categories.add("code")
+                # Batch 4.1 — workspace write-back *proposals*. Only in
+                # workspace chats. The tools never write; they file a
+                # pending proposal the user applies from a preview card,
+                # so chats stay read-only until a human approves.
+                if conv.workspace_id is not None:
+                    enabled_categories.add("workspace")
+            if web_search_mode != "off":
+                enabled_categories.add("search")
+                # Parallel research sub-agents ride on both toggles: they
+                # need the Tools toggle (they're a heavyweight capability)
+                # and only make sense when web search is on, since each
+                # sub-agent's tool set is search-only.
+                if ctx.get("tools_enabled"):
+                    enabled_categories.add("agents")
 
         # Per-user capability gate: withhold ``generate_image`` from users
         # who don't have image-gen access so the model is never even

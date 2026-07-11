@@ -51,8 +51,11 @@ const VAD_SILENCE_RMS = 0.012;
 // Above this counts as speech (hysteresis vs. the silence floor so room
 // noise doesn't read as talking).
 const VAD_SPEECH_RMS = 0.03;
-// Sustained silence after speech that ends the turn.
-const VAD_SILENCE_HOLD_MS = 1100;
+// Sustained silence after speech that ends the turn. Kept fairly tight so
+// voice mode feels responsive — every extra 100ms here is dead air the user
+// waits through after they've stopped talking. 800ms still tolerates the
+// natural mid-sentence pauses in normal speech without ending the turn early.
+const VAD_SILENCE_HOLD_MS = 800;
 // Hard cap on a single auto-stop turn, so a stuck-open mic (or a user who
 // never speaks) can't record forever.
 const VAD_MAX_MS = 20_000;
