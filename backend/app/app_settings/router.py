@@ -145,6 +145,9 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         image_gen_provider_id=row.image_gen_provider_id,
         image_gen_model_id=row.image_gen_model_id,
         image_gen_configured=row.image_gen_configured,
+        voice_provider_id=row.voice_provider_id,
+        voice_model_id=row.voice_model_id,
+        voice_configured=row.voice_configured,
         updated_at=row.updated_at,
     )
 
@@ -518,6 +521,35 @@ async def update_app_settings(
             diff["image_gen_model_id"] = new_mid
         row.image_gen_provider_id = new_pid
         row.image_gen_model_id = new_mid
+
+    # ----- Voice model -----
+    vpid_set = "voice_provider_id" in fields
+    vmid_set = "voice_model_id" in fields
+    if vpid_set != vmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "voice_provider_id and voice_model_id must be sent together "
+                "— pass both to set the voice model, or both as null to clear."
+            ),
+        )
+    if vpid_set and vmid_set:
+        new_pid = payload.voice_provider_id
+        new_mid = payload.voice_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "voice_provider_id and voice_model_id must both be set "
+                    "or both be null."
+                ),
+            )
+        if row.voice_provider_id != new_pid:
+            diff["voice_provider_id"] = str(new_pid) if new_pid else None
+        if row.voice_model_id != new_mid:
+            diff["voice_model_id"] = new_mid
+        row.voice_provider_id = new_pid
+        row.voice_model_id = new_mid
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

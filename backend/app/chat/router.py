@@ -4077,6 +4077,29 @@ async def _stream_generator(
             provider = resolved.base_provider
             ctx["model_id"] = resolved.base_model_id
 
+        # ------------------------------------------------------------------
+        # Voice-mode model override.
+        #
+        # Real-time voice turns want the *fastest* model, not necessarily the
+        # smartest — model latency dominates the spoken round-trip. When this
+        # turn was spoken (``ctx["voice"]``) and the admin has pinned a voice
+        # model (Admin → Models → Defaults), swap it in for this turn only.
+        # The text conversation's model is untouched. Same in-place mutation
+        # as the custom-model swap above so all downstream helpers pick it up.
+        #
+        # Skipped for custom-model turns — a custom assistant's whole point is
+        # its base model + personality + RAG; don't silently swap it out.
+        # ------------------------------------------------------------------
+        if ctx.get("voice") and custom_assistant is None:
+            _voice_defaults = await load_effective_defaults(db)
+            if _voice_defaults.voice_configured:
+                _voice_provider = await db.get(
+                    ModelProvider, _voice_defaults.voice_provider_id
+                )
+                if _voice_provider is not None and _voice_provider.enabled:
+                    provider = _voice_provider
+                    ctx["model_id"] = _voice_defaults.voice_model_id
+
         # Build message history from DB. Phase 2.6 — follow the lineage
         # from the triggering user message back to the root rather than
         # taking every row in ``created_at`` order. Now that regenerate /

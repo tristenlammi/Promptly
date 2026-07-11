@@ -27,6 +27,41 @@ interface SpeakOptions {
   onDone?: () => void;
 }
 
+/** Controller for a *streaming* utterance — feed text as it arrives (e.g.
+ *  from an LLM stream) and it synthesises + plays complete sentences in
+ *  order, overlapping speech with generation. */
+export interface TtsStream {
+  /** Push the full reply text accumulated so far; newly-complete sentences
+   *  are enqueued for speech, the trailing partial is held back. */
+  push: (fullTextSoFar: string) => void;
+  /** No more text coming; flush the final partial and fire ``onDone`` once
+   *  everything has played. Pass the final (possibly cleaned) full text. */
+  end: (finalText?: string) => void;
+}
+
+/** Extract sentences that are *definitely* complete from ``full`` beyond
+ *  ``committed`` chars. A sentence counts as complete only when terminal
+ *  punctuation is followed by whitespace, so we never speak a half-word
+ *  mid-stream; the trailing partial stays uncommitted until it terminates
+ *  (or the stream ends). Returns the new sentences + the advanced offset. */
+function nextCompleteSentences(
+  full: string,
+  committed: number
+): { sentences: string[]; consumed: number } {
+  const tail = full.slice(committed);
+  const re = /[.!?…][)"'”’\]]?\s/g;
+  const sentences: string[] = [];
+  let lastEnd = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(tail)) !== null) {
+    const end = m.index + m[0].length;
+    const s = tail.slice(lastEnd, end).trim();
+    if (s) sentences.push(s);
+    lastEnd = end;
+  }
+  return { sentences, consumed: committed + lastEnd };
+}
+
 interface UseTextToSpeechReturn {
   /** Whether playback is possible (Audio element available). */
   supported: boolean;
@@ -36,6 +71,8 @@ interface UseTextToSpeechReturn {
   loading: boolean;
   error: string | null;
   speak: (text: string, opts?: SpeakOptions) => Promise<void>;
+  /** Begin a streaming utterance; returns a controller to push text into. */
+  speakStream: (opts?: SpeakOptions) => TtsStream;
   stop: () => void;
 }
 
@@ -232,6 +269,141 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
     [supported, stop, cleanupUrls]
   );
 
+  const speakStream = useCallback(
+    (opts?: SpeakOptions): TtsStream => {
+      if (!supported) return { push: () => {}, end: () => {} };
+      // Claim the single global playback slot, same as speak().
+      stop();
+      if (activeStopper && activeTtsId !== idRef.current) activeStopper();
+      activeTtsId = idRef.current;
+      activeStopper = stop;
+      const run = (runRef.current += 1);
+
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      const prefVoice =
+        useAuthStore.getState().user?.settings?.tts_voice || null;
+      const voice = opts?.voice ?? prefVoice;
+      const speed = opts?.speed ?? 1.0;
+
+      setError(null);
+      setSpeaking(true);
+      setLoading(true);
+
+      // Growing queue of sentence chunks + a waker so the consumer sleeps
+      // when it's drained and wakes when push()/end() adds work.
+      const queue: string[] = [];
+      let committed = 0;
+      let ended = false;
+      let wake: (() => void) | null = null;
+      const waitForMore = () =>
+        new Promise<void>((r) => {
+          wake = r;
+        });
+      const nudge = () => {
+        const w = wake;
+        wake = null;
+        w?.();
+      };
+
+      const fetchChunk = async (text: string): Promise<string | null> => {
+        try {
+          const blob = await voiceApi.synthesize(text, {
+            voice,
+            speed,
+            signal: ac.signal,
+          });
+          if (run !== runRef.current) return null;
+          const url = URL.createObjectURL(blob);
+          urlsRef.current.push(url);
+          return url;
+        } catch (err) {
+          if (run !== runRef.current) return null;
+          if ((err as { code?: string })?.code === "ERR_CANCELED") return null;
+          setError(apiErrorMessage(err, "Couldn't play that. Try again."));
+          return null;
+        }
+      };
+
+      // Consumer: synth + play each chunk in order. Sequential (no
+      // prefetch) — the win here is starting sentence 1 while the model is
+      // still generating sentence 2, not overlapping synth with playback.
+      void (async () => {
+        let idx = 0;
+        let started = false;
+        for (;;) {
+          if (run !== runRef.current) return;
+          if (idx >= queue.length) {
+            if (ended) break;
+            await waitForMore();
+            continue;
+          }
+          const url = await fetchChunk(queue[idx]);
+          if (run !== runRef.current) return;
+          if (!started) {
+            setLoading(false);
+            started = true;
+          }
+          if (url) {
+            const ok = await new Promise<boolean>((resolve) => {
+              const audio = new Audio(url);
+              audioRef.current = audio;
+              audio.onended = () => resolve(true);
+              audio.onerror = () => resolve(false);
+              void audio.play().catch(() => resolve(false));
+            });
+            if (run !== runRef.current) return;
+            if (!ok) {
+              setSpeaking(false);
+              return;
+            }
+          }
+          idx++;
+        }
+        if (run === runRef.current) {
+          setSpeaking(false);
+          setLoading(false);
+          cleanupUrls();
+          if (activeTtsId === idRef.current) {
+            activeTtsId = 0;
+            activeStopper = null;
+          }
+          opts?.onDone?.();
+        }
+      })();
+
+      return {
+        push(fullText: string) {
+          if (run !== runRef.current) return;
+          const { sentences, consumed } = nextCompleteSentences(
+            fullText,
+            committed
+          );
+          if (sentences.length) {
+            committed = consumed;
+            queue.push(...sentences);
+            nudge();
+          }
+        },
+        end(finalText?: string) {
+          if (run !== runRef.current) return;
+          const full = finalText ?? "";
+          if (full.length > committed) {
+            const rest = full.slice(committed).trim();
+            if (rest) {
+              queue.push(rest);
+              committed = full.length;
+            }
+          }
+          ended = true;
+          nudge();
+        },
+      };
+    },
+    [supported, stop, cleanupUrls]
+  );
+
   // Stop + free everything on unmount.
   useEffect(() => {
     return () => {
@@ -253,5 +425,5 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
     };
   }, []);
 
-  return { supported, speaking, loading, error, speak, stop };
+  return { supported, speaking, loading, error, speak, speakStream, stop };
 }

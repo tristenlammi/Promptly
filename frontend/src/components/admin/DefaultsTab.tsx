@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, BookOpen, Brain, CheckCircle2, Eye, FlaskConical, GraduationCap, ImagePlus } from "lucide-react";
+import { AudioLines, Bot, BookOpen, Brain, CheckCircle2, Eye, FlaskConical, GraduationCap, ImagePlus } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -80,6 +80,11 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <ImageGenModelCard
+        settings={data}
+        onSubmit={submit}
+        busy={update.isPending}
+      />
+      <VoiceModelCard
         settings={data}
         onSubmit={submit}
         busy={update.isPending}
@@ -693,6 +698,177 @@ function ImageGenModelCard({ settings, onSubmit, busy }: CardProps) {
           <span className="text-xs text-amber-700 dark:text-amber-300">
             No image-capable models in the catalog yet. Enable one (e.g.
             google/gemini-2.5-flash-image) on the Connections tab first.
+          </span>
+        )}
+      </label>
+    </SettingsCard>
+  );
+}
+
+// --------------------------------------------------------------------
+// Voice model — used for real-time voice-mode turns. Any model is valid,
+// but a fast/low-latency tier is strongly preferred (latency dominates
+// the spoken round-trip).
+// --------------------------------------------------------------------
+
+function VoiceModelCard({ settings, onSubmit, busy }: CardProps) {
+  const OFF = "";
+
+  const initialKey =
+    settings.voice_configured &&
+    settings.voice_provider_id &&
+    settings.voice_model_id
+      ? `${settings.voice_provider_id}::${settings.voice_model_id}`
+      : OFF;
+
+  const [value, setValue] = useState(initialKey);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const { data: models, isLoading: modelsLoading } = useAvailableModels();
+
+  useEffect(() => {
+    setValue(initialKey);
+  }, [initialKey]);
+
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const eligible: AvailableModel[] = models ?? [];
+
+  const grouped = useMemo(() => {
+    const byProvider = new Map<string, AvailableModel[]>();
+    for (const m of eligible) {
+      const existing = byProvider.get(m.provider_name) ?? [];
+      existing.push(m);
+      byProvider.set(m.provider_name, existing);
+    }
+    return Array.from(byProvider.entries()).sort((a, b) =>
+      a[0].localeCompare(b[0]),
+    );
+  }, [eligible]);
+
+  const dirty = value !== initialKey;
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      if (value === OFF) {
+        await onSubmit({ voice_provider_id: null, voice_model_id: null });
+      } else {
+        const [provider_id, ...rest] = value.split("::");
+        const model_id = rest.join("::");
+        if (!provider_id || !model_id) {
+          setError("Pick a model from the list, or choose Off.");
+          return;
+        }
+        await onSubmit({ voice_provider_id: provider_id, voice_model_id: model_id });
+      }
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Voice model"
+      icon={<AudioLines className="h-4 w-4" />}
+      footer={
+        <>
+          {error && (
+            <span className="mr-auto text-xs text-red-600 dark:text-red-400">
+              {error}
+            </span>
+          )}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setValue(initialKey);
+                setError(null);
+              }}
+              disabled={busy}
+            >
+              Discard
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={!dirty || busy}
+            loading={busy}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        The model used for real-time <span className="font-medium">voice
+        mode</span> turns. In a spoken conversation, model latency is what
+        the user feels most — so this overrides each user's chat model on
+        voice turns only, letting you pin a fast model without changing how
+        text chat behaves.{" "}
+        <span className="font-medium">Off</span> = voice turns use the
+        user's current chat model.
+      </p>
+      <ul className="mb-4 space-y-1 text-xs text-[var(--text-muted)]">
+        <li>
+          <strong>Recommended:</strong> fast/low-latency tier — DeepSeek V4
+          Flash, Gemini Flash, Claude Haiku. Speed beats depth here.
+        </li>
+        <li>
+          <strong>Avoid:</strong> reasoning models — the "thinking" delay
+          makes a live conversation feel sluggish.
+        </li>
+      </ul>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-xs font-medium text-[var(--text-muted)]">
+          Voice model
+        </span>
+        <select
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+            setSavedAt(null);
+          }}
+          disabled={busy || modelsLoading}
+          className={cn(
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <option value={OFF}>Off — use each user's current chat model</option>
+          {grouped.map(([providerName, entries]) => (
+            <optgroup key={providerName} label={providerName}>
+              {entries.map((m) => (
+                <option
+                  key={`${m.provider_id}::${m.model_id}`}
+                  value={`${m.provider_id}::${m.model_id}`}
+                >
+                  {m.display_name || m.model_id}
+                  {m.is_custom ? " (custom)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        {modelsLoading && (
+          <span className="text-xs text-[var(--text-muted)]">
+            Loading models…
           </span>
         )}
       </label>

@@ -185,6 +185,12 @@ export interface AppSettingsPatch {
    */
   image_gen_provider_id?: string | null;
   image_gen_model_id?: string | null;
+  /**
+   * Dedicated low-latency voice model. Paired: both together to set,
+   * null+null to clear, omit to leave unchanged.
+   */
+  voice_provider_id?: string | null;
+  voice_model_id?: string | null;
 }
 
 export interface OriginPreview {

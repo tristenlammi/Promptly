@@ -224,6 +224,13 @@ class AppSettingsResponse(BaseModel):
     image_gen_model_id: str | None = None
     image_gen_configured: bool
 
+    # ----- Voice model -----
+    # Low-latency model used for real-time voice-mode turns; overrides the
+    # user's chat model on spoken turns only.
+    voice_provider_id: uuid.UUID | None = None
+    voice_model_id: str | None = None
+    voice_configured: bool
+
     updated_at: datetime
 
 
@@ -328,6 +335,12 @@ class AppSettingsUpdate(BaseModel):
     # leave unchanged). Pick a model that can actually emit images.
     image_gen_provider_id: uuid.UUID | None = None
     image_gen_model_id: str | None = Field(default=None, max_length=255)
+
+    # ----- Voice model -----
+    # Same paired semantics. Favor a fast/low-latency model — voice turns
+    # value responsiveness over raw capability.
+    voice_provider_id: uuid.UUID | None = None
+    voice_model_id: str | None = Field(default=None, max_length=255)
 
 
 class AdminUserCreate(BaseModel):

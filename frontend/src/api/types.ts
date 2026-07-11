@@ -354,6 +354,14 @@ export interface AppSettings {
   image_gen_provider_id: string | null;
   image_gen_model_id: string | null;
   image_gen_configured: boolean;
+  /**
+   * Low-latency model used for real-time voice-mode turns. Overrides the
+   * user's chat model on spoken turns only. Both fields NULL = voice turns
+   * use the user's current chat model.
+   */
+  voice_provider_id: string | null;
+  voice_model_id: string | null;
+  voice_configured: boolean;
   updated_at: string;
 }
 

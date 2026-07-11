@@ -4,7 +4,7 @@ import { Loader2, Mic, Square, X } from "lucide-react";
 
 import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
 import { useDictation } from "@/hooks/useDictation";
-import { useTextToSpeech } from "@/hooks/useTextToSpeech";
+import { useTextToSpeech, type TtsStream } from "@/hooks/useTextToSpeech";
 import { useChatStore } from "@/store/chatStore";
 import { cn } from "@/utils/cn";
 import { markdownToSpeech, stripInlineCitations } from "@/utils/speechText";
@@ -68,6 +68,10 @@ export function VoiceModeOverlay({
   // new reply apart from the previous one without racing on isStreaming.
   const baselineAssistantIdRef = useRef<string | null>(null);
   const closingRef = useRef(false);
+  // Active streaming-TTS controller for the in-flight reply (null between
+  // turns). Fed sentence-by-sentence as the reply streams so speech starts
+  // on sentence 1 instead of waiting for the whole reply.
+  const streamCtlRef = useRef<TtsStream | null>(null);
 
   const tts = useTextToSpeech();
   // Live mic level → drive the orb halo + waveform directly via refs (no
@@ -134,16 +138,36 @@ export function VoiceModeOverlay({
       }
       setUserText(t);
       setReplyText("");
+      // Drop any stale controller from a barged-in previous turn.
+      streamCtlRef.current = null;
       baselineAssistantIdRef.current = lastAssistant()?.id ?? null;
       setThinking(true);
       onSend(t);
     };
   }, [startListening, onSend, lastAssistant]);
 
-  // Detect reply completion → read it aloud → re-open the mic.
+  // Feed the reply into streaming TTS as it arrives: open a controller on
+  // the first tokens, then push the growing text so complete sentences are
+  // spoken while the model is still generating the rest.
+  useEffect(() => {
+    if (!thinking || !streamingContent) return;
+    if (!streamCtlRef.current) {
+      streamCtlRef.current = tts.speakStream({
+        onDone: () => startListening(),
+      });
+    }
+    streamCtlRef.current.push(
+      markdownToSpeech(stripInlineCitations(streamingContent))
+    );
+  }, [thinking, streamingContent, tts, startListening]);
+
+  // Reply finished (or errored) → flush the final text and stop "thinking".
+  // The controller's onDone re-opens the mic once playback drains.
   useEffect(() => {
     if (!thinking) return;
     if (streamError) {
+      streamCtlRef.current = null;
+      tts.stop();
       setThinking(false);
       setErrorMsg(streamError);
       return;
@@ -156,11 +180,19 @@ export function VoiceModeOverlay({
     setThinking(false);
     const plain = markdownToSpeech(stripInlineCitations(a.content || ""));
     setReplyText(plain);
-    if (!plain) {
-      startListening();
-      return;
+    const ctl = streamCtlRef.current;
+    streamCtlRef.current = null;
+    if (ctl) {
+      // Flush whatever hasn't been spoken yet; onDone fires when it drains.
+      ctl.end(plain);
+    } else {
+      // No tokens ever streamed (instant/empty reply) — one-shot fallback.
+      if (!plain) {
+        startListening();
+        return;
+      }
+      void tts.speak(plain, { onDone: () => startListening() });
     }
-    void tts.speak(plain, { onDone: () => startListening() });
   }, [thinking, isStreaming, streamError, lastAssistant, startListening, tts]);
 
   // Surface dictation / TTS errors in the overlay.
@@ -177,6 +209,7 @@ export function VoiceModeOverlay({
     startListening();
     return () => {
       closingRef.current = true;
+      streamCtlRef.current = null;
       cancelDictation();
       tts.stop();
     };
@@ -185,6 +218,7 @@ export function VoiceModeOverlay({
 
   const handleClose = useCallback(() => {
     closingRef.current = true;
+    streamCtlRef.current = null;
     cancelDictation();
     tts.stop();
     onClose();
@@ -204,11 +238,15 @@ export function VoiceModeOverlay({
     };
   }, [handleClose]);
 
+  // "speaking" means audio is actually playing. While the first chunk is
+  // still being synthesised (tts.loading) we're effectively still thinking,
+  // so don't flip the orb to the talking state prematurely.
+  const audioPlaying = tts.speaking && !tts.loading;
   const phase: Phase = errorMsg
     ? "error"
-    : tts.speaking
+    : audioPlaying
       ? "speaking"
-      : thinking
+      : thinking || tts.loading
         ? "thinking"
         : dictationStatus === "recording"
           ? "listening"
@@ -222,11 +260,17 @@ export function VoiceModeOverlay({
         stopDictation(); // finish & transcribe this turn
         break;
       case "speaking":
-        tts.stop(); // barge-in: skip playback and start talking
+        // Barge-in: stop playback, cancel any still-generating reply, talk.
+        tts.stop();
+        streamCtlRef.current = null;
+        onCancelStream();
+        setThinking(false);
         startListening();
         break;
       case "thinking":
         onCancelStream();
+        streamCtlRef.current = null;
+        tts.stop();
         setThinking(false);
         startListening();
         break;
