@@ -14,6 +14,7 @@ import logging
 import uuid
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
@@ -84,6 +85,50 @@ async def create_note_with_item(
     db.add(item)
     await db.flush()
     return item
+
+
+async def resolve_or_create_notebook(
+    db: AsyncSession,
+    *,
+    ws: Workspace,
+    creator_id: uuid.UUID,
+    name: str,
+) -> uuid.UUID:
+    """Return the id of the workspace's notebook (``kind='container'``) titled
+    ``name``, creating a top-level one if none exists. Case-insensitive match
+    so "Campaign Archive" / "campaign archive" resolve to the same notebook —
+    lets the AI file successive notes into a stable group. Flushed, not
+    committed. Raises ``ValueError`` on a blank name.
+    """
+    from app.workspaces.items_router import _next_position
+
+    clean = (name or "").strip()[:200]
+    if not clean:
+        raise ValueError("notebook name is required")
+    existing = (
+        await db.execute(
+            select(WorkspaceItem).where(
+                WorkspaceItem.workspace_id == ws.id,
+                WorkspaceItem.kind == "container",
+                func.lower(WorkspaceItem.title) == clean.lower(),
+            )
+        )
+    ).scalars().first()
+    if existing is not None:
+        return existing.id
+    pos = await _next_position(db, ws.id, None)
+    item = WorkspaceItem(
+        workspace_id=ws.id,
+        parent_id=None,
+        kind="container",
+        ref_id=None,
+        title=clean,
+        position=pos,
+        created_by=creator_id,
+    )
+    db.add(item)
+    await db.flush()
+    return item.id
 
 
 async def create_board_with_labels(

@@ -179,7 +179,10 @@ async def apply_proposal(
 async def _apply_create_note(
     db: AsyncSession, *, ws: Workspace, user: User, payload: dict[str, Any]
 ) -> uuid.UUID:
-    from app.workspaces.content_seed import create_note_with_item
+    from app.workspaces.content_seed import (
+        create_note_with_item,
+        resolve_or_create_notebook,
+    )
 
     title = str(payload.get("title") or "Untitled note").strip()[:200]
     markdown = str(payload.get("markdown") or "")
@@ -189,6 +192,18 @@ async def _apply_create_note(
             status_code=status.HTTP_410_GONE, detail="Workspace owner missing."
         )
 
+    # Optional: file the note inside a notebook (created if missing) so the AI
+    # can keep e.g. a "Campaign Archive" group instead of cluttering the root.
+    parent_id: uuid.UUID | None = None
+    notebook = str(payload.get("notebook") or "").strip()
+    if notebook:
+        try:
+            parent_id = await resolve_or_create_notebook(
+                db, ws=ws, creator_id=user.id, name=notebook
+            )
+        except ValueError:
+            parent_id = None
+
     item = await create_note_with_item(
         db,
         ws=ws,
@@ -196,6 +211,7 @@ async def _apply_create_note(
         creator_id=user.id,
         title=title,
         markdown=markdown,
+        parent_id=parent_id,
     )
     try:
         from app.workspaces.knowledge import index_note_for_workspace

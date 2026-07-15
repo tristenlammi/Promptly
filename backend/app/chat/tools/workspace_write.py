@@ -72,13 +72,18 @@ class ProposeWorkspaceNoteTool(Tool):
     description = (
         "Propose creating a new note in this chat's workspace from Markdown "
         "content. Use when the user asks to save, capture, or turn the "
-        "discussion into a note/brief/summary document. The note is NOT "
-        "created immediately — the user sees a preview card and must "
-        "approve it, so never claim the note already exists."
+        "discussion into a note/brief/summary document. Optionally pass "
+        "`notebook` to file the note inside a named notebook (a grouping "
+        "folder) — reuse the same name across notes to keep them together "
+        "(e.g. all campaign records under 'Campaign Archive'); the notebook "
+        "is created if it doesn't exist. The note is NOT created immediately "
+        "— the user sees a preview card and must approve it, so never claim "
+        "the note already exists."
     )
     prompt_hint = (
-        "propose_workspace_note — draft a workspace note from this chat "
-        "(the user approves it from a preview card before anything is created)"
+        "propose_workspace_note — draft a workspace note from this chat, "
+        "optionally filed under a `notebook` group (the user approves it from "
+        "a preview card before anything is created)"
     )
     parameters = {
         "type": "object",
@@ -91,6 +96,16 @@ class ProposeWorkspaceNoteTool(Tool):
             "markdown": {
                 "type": "string",
                 "description": "Full note body as Markdown.",
+            },
+            "notebook": {
+                "type": "string",
+                "maxLength": 200,
+                "description": (
+                    "Optional. Name of a notebook (grouping folder) to file "
+                    "this note under. Reuse the same name to keep related "
+                    "notes together; created automatically if it doesn't "
+                    "exist. Omit to place the note at the workspace top level."
+                ),
             },
         },
         "required": ["title", "markdown"],
@@ -106,28 +121,36 @@ class ProposeWorkspaceNoteTool(Tool):
                 f"Note content is capped at {_MAX_NOTE_CHARS} characters — "
                 "shorten it or split into two notes."
             )
+        notebook = str(args.get("notebook") or "").strip()[:200]
         workspace_id = await _workspace_id_for(ctx)
+        payload: dict[str, Any] = {"title": title[:200], "markdown": markdown}
+        if notebook:
+            payload["notebook"] = notebook
         proposal = WorkspaceProposal(
             conversation_id=ctx.conversation_id,
             workspace_id=workspace_id,
             user_id=ctx.user.id,
             kind="create_note",
-            payload={"title": title[:200], "markdown": markdown},
+            payload=payload,
         )
         ctx.db.add(proposal)
         await ctx.db.commit()
+        where = f' in notebook "{notebook}"' if notebook else ""
+        meta: dict[str, Any] = {
+            "proposal_id": str(proposal.id),
+            "kind": "create_note",
+            "title": title,
+        }
+        if notebook:
+            meta["notebook"] = notebook
         return ToolResult(
             content=(
-                f'Proposal filed: create note "{title}" '
+                f'Proposal filed: create note "{title}"{where} '
                 f"({len(markdown)} chars). A preview card is now showing in "
                 "the chat — tell the user to review and Apply it. The note "
                 "does not exist yet."
             ),
-            meta={
-                "proposal_id": str(proposal.id),
-                "kind": "create_note",
-                "title": title,
-            },
+            meta=meta,
         )
 
 
