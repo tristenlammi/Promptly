@@ -52,9 +52,44 @@ _PROSE_SYSTEM_PROMPT: Final[str] = (
     "commentary, no 'Here is'."
 )
 
+# Workspace-instructions mode — improve the shared "workspace instructions"
+# that get injected as the system prompt into every chat in a workspace. The
+# rewrite must fit how Promptly workspaces actually work (RAG over notes +
+# human-approved write-back), so it steers the model away from assuming an
+# autonomous read/write memory it doesn't have.
+_WORKSPACE_INSTRUCTIONS_SYSTEM_PROMPT: Final[str] = (
+    "You rewrite 'workspace instructions' for Promptly, a self-hosted AI "
+    "workspace. These instructions are injected as the system prompt into "
+    "EVERY chat inside one workspace, so they must be tight and general. "
+    "Rewrite the user's rough draft into clear, effective instructions.\n\n"
+    "CRITICAL — the rewrite must fit how Promptly workspaces actually work:\n"
+    "- The AI's knowledge of the workspace comes from its NOTES, documents, "
+    "sheets and boards, retrieved automatically as context. The AI reads them; "
+    "it does NOT keep its own private memory or database.\n"
+    "- To record or save something, the AI PROPOSES a note that the user "
+    "approves from a preview card — it cannot silently 'store' data and must "
+    "never claim a note exists before it's approved.\n"
+    "- The AI only acts when messaged; it cannot run on a schedule or "
+    "'periodically' maintain things on its own.\n"
+    "- Answers should come from the retrieved workspace notes; if something "
+    "isn't in them, it should say so rather than inventing it.\n\n"
+    "Rules:\n"
+    "- Preserve the user's intent, domain, and voice. Never invent project "
+    "facts or add unrelated requirements.\n"
+    "- Reword anything that assumes the AI has an autonomous read/write memory, "
+    "auto-runs, categorises/prunes a database, or 'stores' data itself — "
+    "reframe as 'propose a note', 'answer from the workspace notes', or 'on "
+    "request'.\n"
+    "- Keep it concise (it runs every turn): a tight, well-structured prompt "
+    "beats an exhaustive one.\n"
+    "- Output ONLY the rewritten workspace instructions as plain text — no "
+    "preamble, no quotes, no commentary, no 'Here is'."
+)
+
 _SYSTEM_BY_MODE: Final[dict[str, str]] = {
     "prompt": _ENHANCE_SYSTEM_PROMPT,
     "prose": _PROSE_SYSTEM_PROMPT,
+    "workspace_instructions": _WORKSPACE_INSTRUCTIONS_SYSTEM_PROMPT,
 }
 
 # Guardrails: long enough for a detailed rewrite, bounded so a runaway
@@ -102,11 +137,10 @@ async def enhance_prompt(
         return ""
 
     system = _SYSTEM_BY_MODE.get(mode, _ENHANCE_SYSTEM_PROMPT)
-    user_lead = (
-        "HTML fragment to improve:"
-        if mode == "prose"
-        else "Rough prompt to improve:"
-    )
+    user_lead = {
+        "prose": "HTML fragment to improve:",
+        "workspace_instructions": "Rough workspace instructions to improve:",
+    }.get(mode, "Rough prompt to improve:")
     messages = [ChatMessage(role="user", content=f"{user_lead}\n\n{draft}")]
 
     async def _collect(reasoning: str | None) -> str:

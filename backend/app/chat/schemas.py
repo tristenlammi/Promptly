@@ -343,7 +343,7 @@ class EnhancePromptRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     model_id: str | None = Field(default=None, max_length=255)
     provider_id: uuid.UUID | None = None
-    mode: Literal["prompt", "prose"] = "prompt"
+    mode: Literal["prompt", "prose", "workspace_instructions"] = "prompt"
 
 
 class EnhancePromptResponse(BaseModel):

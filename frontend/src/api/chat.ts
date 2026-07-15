@@ -322,7 +322,7 @@ export const chatApi = {
     text: string,
     providerId?: string | null,
     modelId?: string | null,
-    mode: "prompt" | "prose" = "prompt"
+    mode: "prompt" | "prose" | "workspace_instructions" = "prompt"
   ): Promise<string> {
     const { data } = await apiClient.post<{ enhanced: string }>(
       `/chat/enhance-prompt`,

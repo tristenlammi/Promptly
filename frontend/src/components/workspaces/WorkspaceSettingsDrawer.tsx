@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Save,
   Settings2,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -28,6 +29,8 @@ import { WorkspaceMembersPanel } from "@/components/workspaces/WorkspaceMembersP
 import { WorkspaceConnectorsTab } from "@/components/workspaces/WorkspaceConnectorsTab";
 import type { WorkspaceDetail, WorkspaceMemoryMode } from "@/api/workspaces";
 import { workspacesApi } from "@/api/workspaces";
+import { chatApi } from "@/api/chat";
+import { apiErrorMessage } from "@/utils/apiError";
 import {
   useUpdateWorkspace,
   useWorkspaceDrive,
@@ -658,6 +661,8 @@ function SettingsTab({
           value={systemPrompt}
           onChange={setSystemPrompt}
           disabled={!canManage}
+          providerId={providerId}
+          modelId={modelId}
         />
         <WorkspaceModelField
           modelId={modelId}
@@ -1148,13 +1153,43 @@ function WorkspaceInstructionsEditor({
   value,
   onChange,
   disabled = false,
+  providerId,
+  modelId,
 }: {
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  providerId?: string | null;
+  modelId?: string | null;
 }) {
   const [showTips, setShowTips] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const tokens = useMemo(() => estimateTokens(value), [value]);
+
+  const handleEnhance = async () => {
+    if (enhancing || disabled || !value.trim()) return;
+    setEnhanceError(null);
+    setEnhancing(true);
+    try {
+      // Uses the workspace's own model; the endpoint 400s with a clear
+      // message if no model is set. The "workspace_instructions" mode makes
+      // the rewrite fit how Promptly workspaces work (RAG over notes +
+      // human-approved write-back), not an autonomous memory.
+      const improved = await chatApi.enhancePrompt(
+        value,
+        providerId,
+        modelId,
+        "workspace_instructions"
+      );
+      const cleaned = improved.trim();
+      if (cleaned && cleaned !== value.trim()) onChange(cleaned);
+    } catch (err) {
+      setEnhanceError(apiErrorMessage(err, "Couldn't enhance — try again."));
+    } finally {
+      setEnhancing(false);
+    }
+  };
 
   let toneClass = "text-[var(--success)]";
   let toneLabel = "compact";
@@ -1168,21 +1203,42 @@ function WorkspaceInstructionsEditor({
 
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-        Workspace instructions{" "}
-        <span className="text-[var(--text-muted)]/70">
-          (shared across every chat in this workspace)
-        </span>
-      </label>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label className="block text-xs font-medium text-[var(--text-muted)]">
+          Workspace instructions{" "}
+          <span className="text-[var(--text-muted)]/70">
+            (shared across every chat in this workspace)
+          </span>
+        </label>
+        <button
+          type="button"
+          onClick={handleEnhance}
+          disabled={disabled || enhancing || !value.trim()}
+          title="Rewrite these instructions to be clearer and fit how workspaces work"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-medium text-[var(--accent)] transition hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {enhancing ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Sparkles className="h-3 w-3" />
+          )}
+          {enhancing ? "Enhancing…" : "Enhance"}
+        </button>
+      </div>
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={10}
-        disabled={disabled}
+        disabled={disabled || enhancing}
         placeholder={WORKSPACE_INSTRUCTIONS_PLACEHOLDER}
         className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
         maxLength={20000}
       />
+      {enhanceError && (
+        <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">
+          {enhanceError}
+        </div>
+      )}
       <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
         <button
           type="button"
