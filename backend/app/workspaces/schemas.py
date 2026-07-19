@@ -373,6 +373,7 @@ class WorkspaceItemCreate(BaseModel):
         "container",
         "chat",
         "roster",
+        "discussion",
     ]
     parent_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=255)

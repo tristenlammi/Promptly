@@ -104,6 +104,7 @@ _DEFAULT_CANVAS_TITLE = "Untitled canvas"
 _DEFAULT_BOARD_TITLE = "Board"
 _DEFAULT_NOTEBOOK_TITLE = "Notebook"
 _DEFAULT_ROSTER_TITLE = "Untitled roster"
+_DEFAULT_DISCUSSION_TITLE = "Discussion"
 
 
 def _strip_doc_ext(name: str) -> str:
@@ -488,14 +489,16 @@ async def create_workspace_item(
     position = await _next_position(db, ws.id, payload.parent_id)
     title = (payload.title or "").strip()
 
-    if payload.kind in ("board", "container"):
-        # Both are tree-only nodes with no backing Drive entity. A board's
-        # tasks reference it via ``workspace_tasks.board_item_id``; a
-        # container (notebook) holds its pages as child items. Deleting the
-        # row cascades its children/tasks via the self/board FKs.
+    if payload.kind in ("board", "container", "discussion"):
+        # Tree-only nodes with no backing Drive entity. A board's tasks
+        # reference it via ``workspace_tasks.board_item_id``; a container
+        # (notebook) holds its pages as child items; a discussion's threads
+        # reference it via ``discussion_threads.item_id``. Deleting the row
+        # cascades its children/tasks/threads via those FKs.
         default_title = {
             "board": _DEFAULT_BOARD_TITLE,
             "container": _DEFAULT_NOTEBOOK_TITLE,
+            "discussion": _DEFAULT_DISCUSSION_TITLE,
         }[payload.kind]
         item = WorkspaceItem(
             workspace_id=ws.id,
@@ -507,6 +510,10 @@ async def create_workspace_item(
                 db, ws.id, payload.parent_id, default_title
             ),
             position=position,
+            # Discussions are OPT-IN for AI context. Team chatter must never
+            # be embedded until a member explicitly turns "use as context"
+            # on — unlike notes/canvases, which default to on.
+            context_enabled=payload.kind != "discussion",
         )
         db.add(item)
         await db.commit()

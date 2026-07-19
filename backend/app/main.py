@@ -308,6 +308,9 @@ from app.workspaces.ask_router import global_search_router as workspace_global_s
 from app.workspaces.overview_router import router as workspace_overview_router  # noqa: E402
 from app.workspaces.tasks_router import router as workspace_tasks_router  # noqa: E402
 from app.workspaces.comments_router import router as workspace_comments_router  # noqa: E402
+from app.workspaces.discussions_router import (  # noqa: E402
+    router as workspace_discussions_router,
+)
 from app.workspaces.meetings_router import router as workspace_meetings_router  # noqa: E402
 from app.workspaces.export_router import router as workspace_export_router  # noqa: E402
 from app.secrets.router import router as secrets_router  # noqa: E402
@@ -402,6 +405,11 @@ app.include_router(
 # Workspace item comments (collaboration discussion threads).
 app.include_router(
     workspace_comments_router, prefix="/api/workspaces", tags=["workspaces"]
+)
+app.include_router(
+    workspace_discussions_router,
+    prefix="/api/workspaces",
+    tags=["workspaces", "discussions"],
 )
 # Meeting notes from a recording (chunked transcription → summarised note).
 app.include_router(

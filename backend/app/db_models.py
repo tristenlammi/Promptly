@@ -14,6 +14,8 @@ from app.chat.models import (  # noqa: F401
     CompareGroup,
     Conversation,
     ConversationExcludedWorkspaceFile,
+    DiscussionMessage,
+    DiscussionThread,
     Message,
     MessageEmbedding,
     Workspace,

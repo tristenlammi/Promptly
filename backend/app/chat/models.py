@@ -624,6 +624,74 @@ class WorkspaceItemComment(UUIDPKMixin, TimestampMixin, Base):
         return f"<WorkspaceItemComment id={self.id} item={self.item_id}>"
 
 
+class DiscussionThread(UUIDPKMixin, TimestampMixin, Base):
+    """A topic thread inside a ``kind='discussion'`` workspace item.
+
+    The discussion item is the "channel"; each thread is a topic holding a
+    chronological list of :class:`DiscussionMessage`. ``workspace_id`` is
+    denormalised alongside ``item_id`` so listing + access checks don't need
+    a join back through the item (same trick as
+    :class:`WorkspaceItemComment`).
+    """
+
+    __tablename__ = "discussion_threads"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    # ``SET NULL`` so removing a member keeps their threads readable.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Sort key for "most recent activity first"; bumped on every post.
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<DiscussionThread id={self.id} item={self.item_id}>"
+
+
+class DiscussionMessage(UUIDPKMixin, CreatedAtMixin, Base):
+    """One message in a :class:`DiscussionThread`.
+
+    Plain text/Markdown body — @-mentions are parsed at post time to fire
+    notifications. Author is ``SET NULL`` so history survives a member being
+    deleted (rendered as "former member").
+    """
+
+    __tablename__ = "discussion_messages"
+
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("discussion_threads.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def __repr__(self) -> str:
+        return f"<DiscussionMessage id={self.id} thread={self.thread_id}>"
+
+
 class WorkspaceProposal(UUIDPKMixin, Base):
     """A chat's *proposed* write into its workspace (Batch 4.1).
 
