@@ -44,6 +44,8 @@ from sqlalchemy.orm import aliased
 from app.auth.models import User
 from app.chat.models import (
     Conversation,
+    DiscussionMessage,
+    DiscussionThread,
     Message,
     Roster,
     Spreadsheet,
@@ -888,6 +890,342 @@ async def index_roster_for_workspace(
                 )
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ---------------------------------------------------------------------
+# Discussion ingestion (OPT-IN — team chatter is never embedded by default)
+# ---------------------------------------------------------------------
+# Unlike notes (always embedded, filtered at query time), a discussion is
+# only vectorised once a member flips the item's ``context_enabled`` toggle
+# ON. Every entry point below re-checks the flag before touching the
+# embedder. A discussion has no backing entity row (``ref_id`` is None), so
+# the id of its flattened-transcript Drive file is stashed in the item's
+# ``config['text_file_id']`` — the JSONB analogue of ``Roster.text_file_id``.
+
+
+def _discussion_text_file_id(item: WorkspaceItem) -> uuid.UUID | None:
+    """Backing Drive file id from the item's ``config``, or ``None``."""
+    raw = (item.config or {}).get("text_file_id")
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _set_discussion_text_file_id(
+    item: WorkspaceItem, file_id: uuid.UUID | None
+) -> None:
+    """Store (or clear) the backing file id in the item's ``config``.
+
+    Always rebinds a *new* dict — SQLAlchemy won't notice an in-place
+    mutation of a JSONB value.
+    """
+    cfg = dict(item.config or {})
+    if file_id is None:
+        cfg.pop("text_file_id", None)
+    else:
+        cfg["text_file_id"] = str(file_id)
+    item.config = cfg
+
+
+def _flatten_discussion(
+    item: WorkspaceItem,
+    threads: list[tuple[DiscussionThread, list[tuple[DiscussionMessage, str]]]],
+) -> str:
+    """Render a discussion channel as readable Markdown for embedding.
+
+    One ``##`` heading per thread (most recently active first), then that
+    thread's messages in chronological order as ``Author: body``.
+    """
+    title = (item.title or "Discussion").strip()
+    lines: list[str] = [f"# {title}", ""]
+    for thread, messages in threads:
+        if not messages:
+            continue
+        lines.append(f"## {(thread.title or 'Thread').strip()}")
+        lines.append("")
+        for msg, author in messages:
+            body = (msg.body or "").strip()
+            if not body:
+                continue
+            lines.append(f"{author}: {body}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+async def _load_discussion_threads(
+    db: AsyncSession, item_id: uuid.UUID
+) -> list[tuple[DiscussionThread, list[tuple[DiscussionMessage, str]]]]:
+    """Threads (most recent activity first) each with their messages in
+    chronological order, author usernames resolved."""
+    threads = list(
+        (
+            await db.execute(
+                select(DiscussionThread)
+                .where(DiscussionThread.item_id == item_id)
+                .order_by(
+                    DiscussionThread.last_message_at.desc().nulls_last(),
+                    DiscussionThread.created_at.desc(),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not threads:
+        return []
+
+    rows = (
+        await db.execute(
+            select(DiscussionMessage, User.username)
+            .outerjoin(User, User.id == DiscussionMessage.author_user_id)
+            .where(
+                DiscussionMessage.thread_id.in_([t.id for t in threads])
+            )
+            .order_by(DiscussionMessage.created_at.asc())
+        )
+    ).all()
+
+    by_thread: dict[uuid.UUID, list[tuple[DiscussionMessage, str]]] = {}
+    for msg, username in rows:
+        by_thread.setdefault(msg.thread_id, []).append(
+            (msg, username or "former member")
+        )
+    return [(t, by_thread.get(t.id, [])) for t in threads]
+
+
+async def _ensure_discussion_backing_file(
+    db: AsyncSession, *, ws: Workspace, item: WorkspaceItem, text: str
+) -> UserFile | None:
+    """Create or update the Drive file backing a discussion's RAG text — the
+    discussion analogue of :func:`_ensure_roster_backing_file`. The file id
+    lives in ``item.config['text_file_id']`` (no backing entity row exists) so
+    re-indexes update the same file in place instead of piling up copies."""
+    owner = await db.get(User, ws.user_id)
+    if owner is None:
+        return None
+    now = datetime.now(timezone.utc)
+    title = (item.title or "Discussion").strip() or "Discussion"
+
+    existing_id = _discussion_text_file_id(item)
+    if existing_id is not None:
+        uf = await db.get(UserFile, existing_id)
+        if uf is not None and uf.trashed_at is None:
+            abs_path = absolute_path(uf.storage_path)
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            uf.filename = f"{title}.md"
+            uf.size_bytes = len(text.encode("utf-8"))
+            uf.content_text = text
+            uf.updated_at = now
+            await db.flush()
+            return uf
+
+    file_id = uuid.uuid4()
+    rel_path = storage_path_for(owner.id, file_id, ".md")
+    ensure_bucket(owner.id)
+    abs_path = absolute_path(rel_path)
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    folder_id: uuid.UUID | None = None
+    if ws.root_folder_id is not None:
+        sub = await get_or_create_subfolder(
+            db,
+            user_id=owner.id,
+            parent_id=ws.root_folder_id,
+            name="Discussions",
+        )
+        folder_id = sub.id
+
+    uf = UserFile(
+        id=file_id,
+        user_id=owner.id,
+        folder_id=folder_id,
+        filename=f"{title}.md",
+        original_filename=f"{title}.md",
+        mime_type="text/markdown",
+        size_bytes=len(text.encode("utf-8")),
+        storage_path=rel_path,
+        source_kind=GeneratedKind.DISCUSSION_TEXT.value,
+        content_text=text,
+    )
+    db.add(uf)
+    await db.flush()
+    _set_discussion_text_file_id(item, uf.id)
+    return uf
+
+
+async def _purge_discussion_inner(
+    db: AsyncSession, *, workspace_id: uuid.UUID, item: WorkspaceItem
+) -> None:
+    """Drop a discussion's chunks, trash its backing file, clear the config
+    pointer. Caller owns the commit."""
+    file_id = _discussion_text_file_id(item)
+    if file_id is not None:
+        await delete_existing_chunks(
+            db,
+            scope_kind="workspace",
+            scope_id=workspace_id,
+            user_file_id=file_id,
+        )
+        uf = await db.get(UserFile, file_id)
+        if uf is not None and uf.trashed_at is None:
+            uf.trashed_at = datetime.now(timezone.utc)
+    _set_discussion_text_file_id(item, None)
+
+
+async def index_discussion_for_workspace(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    *,
+    force: bool = False,
+) -> None:
+    """Embed (or re-embed) an **opted-in** discussion's transcript.
+
+    Called after every post/edit/delete (via ``_reindex_if_opted_in``) and
+    when a member turns the item's context toggle ON. Owns its own session
+    (``BackgroundTasks``-safe) and no-ops without an embedding provider.
+
+    Bails out silently — without embedding anything — when the item is gone,
+    isn't a discussion, or has ``context_enabled`` off. That last check is
+    deliberately redundant with the router's: opt-out must hold even if a
+    future caller forgets to guard.
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "discussion":
+                return
+            if item.workspace_id != workspace_id:
+                return
+            if not item.context_enabled:
+                # Opted out (possibly toggled off since this was queued) —
+                # make sure nothing of it is left in the pool.
+                await _purge_discussion_inner(
+                    db, workspace_id=workspace_id, item=item
+                )
+                await db.commit()
+                return
+
+            ws = await db.get(Workspace, workspace_id)
+            if ws is None:
+                return
+            cfg = await get_embedding_config(db)
+            if cfg is None:
+                return  # leave queued until an embedding provider exists
+
+            threads = await _load_discussion_threads(db, item.id)
+            text = _flatten_discussion(item, threads).strip()
+            # A heading-only render (no messages at all) is not worth a file.
+            has_messages = any(msgs for _t, msgs in threads)
+            if not has_messages or not text:
+                await _purge_discussion_inner(
+                    db, workspace_id=workspace_id, item=item
+                )
+                await _set_note_index_status(
+                    db, item_id=item_id, status="empty"
+                )
+                return
+
+            current_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if (
+                not force
+                and item.indexed_content_hash == current_hash
+                and item.indexing_status == "ready"
+            ):
+                return
+
+            await _set_note_index_status(
+                db, item_id=item_id, status="embedding"
+            )
+            uf = await _ensure_discussion_backing_file(
+                db, ws=ws, item=item, text=text
+            )
+            if uf is None:
+                await _set_note_index_status(
+                    db,
+                    item_id=item_id,
+                    status="failed",
+                    error="workspace owner missing",
+                )
+                return
+
+            try:
+                chunks, embeddings = await embed_text_to_chunks(
+                    text,
+                    provider=cfg.provider,
+                    model_id=cfg.model_id,
+                    dim=cfg.dim,
+                )
+            except ValueError as exc:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error=str(exc)
+                )
+                return
+
+            await delete_existing_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+            )
+            await insert_chunks(
+                db,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                user_file_id=uf.id,
+                chunks=chunks,
+                embeddings=embeddings,
+                embedding_model=cfg.model_id,
+                embedding_dim=cfg.dim,
+            )
+            await _set_note_index_status(
+                db, item_id=item_id, status="ready", indexed_hash=current_hash
+            )
+            logger.info(
+                "indexed %d chunks for workspace=%s discussion=%s",
+                len(chunks),
+                workspace_id,
+                item_id,
+            )
+        except Exception:  # noqa: BLE001 - last-line catch
+            logger.exception("index_discussion_for_workspace failed")
+            try:
+                await _set_note_index_status(
+                    db, item_id=item_id, status="failed", error="indexing error"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+
+async def purge_discussion_index(
+    workspace_id: uuid.UUID, item_id: uuid.UUID
+) -> None:
+    """Tear down a discussion's index (context toggle turned OFF).
+
+    Drops the backing file's workspace chunks, trashes the file and clears
+    ``config['text_file_id']`` so a later opt-in starts clean. Owns its own
+    session so it's safe on a ``BackgroundTasks`` runner.
+    """
+    async with SessionLocal() as db:
+        try:
+            item = await db.get(WorkspaceItem, item_id)
+            if item is None or item.kind != "discussion":
+                return
+            await _purge_discussion_inner(
+                db, workspace_id=workspace_id, item=item
+            )
+            item.indexing_status = None
+            item.indexing_error = None
+            item.indexed_content_hash = None
+            await db.commit()
+        except Exception:  # noqa: BLE001 - best-effort teardown
+            logger.exception("purge_discussion_index failed")
 
 
 # ---------------------------------------------------------------------

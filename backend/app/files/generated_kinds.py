@@ -75,6 +75,14 @@ class GeneratedKind(str, Enum):
     # Drive folder; re-written on save. Keyed off ``Roster.text_file_id``.
     ROSTER_TEXT = "roster_text"
 
+    # Backing text file for a workspace *discussion* the members opted into
+    # RAG (``WorkspaceItem.context_enabled``). Holds the flattened thread
+    # transcript so the channel feeds ``knowledge_chunks`` like a chat. Lives
+    # in the workspace's ``Discussions/`` Drive folder; the file id is kept in
+    # the item's ``config['text_file_id']`` (a discussion has no backing row).
+    # Trashed when the context toggle goes back off.
+    DISCUSSION_TEXT = "discussion_text"
+
     # Backing text file for a workspace's *automations* index (Phase 10).
     # Holds a rendered summary of every scheduled Task homed in the
     # workspace (name / schedule / prompt / flow node summary) so chats can

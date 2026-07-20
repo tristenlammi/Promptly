@@ -24,6 +24,7 @@ that router's surface.
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -95,6 +96,8 @@ def _require_roster_admin(kind: str, access_role: str) -> None:
     the normal write check with the item's kind."""
     if kind == "roster":
         require_workspace_admin(access_role)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -1382,9 +1385,17 @@ async def update_workspace_item(
                 uf.updated_at = datetime.now(timezone.utc)
     if "icon" in sent:
         item.icon = payload.icon
+    discussion_context_change: bool | None = None
     if "context_enabled" in sent and payload.context_enabled is not None:
         # Note/canvas/board items participate in RAG context; folders/chats
         # carry the flag harmlessly but it's never consulted for them.
+        # Discussions are the opt-in case: nothing is embedded until this
+        # flips ON, and flipping it OFF purges what was embedded.
+        if (
+            item.kind == "discussion"
+            and bool(item.context_enabled) != bool(payload.context_enabled)
+        ):
+            discussion_context_change = bool(payload.context_enabled)
         item.context_enabled = payload.context_enabled
     if "pinned" in sent and payload.pinned is not None:
         item.pinned = payload.pinned
@@ -1427,6 +1438,27 @@ async def update_workspace_item(
         from app.workspaces.knowledge import index_board_for_workspace
 
         background.add_task(index_board_for_workspace, ws.id, item.id)
+
+    # Discussions are opt-in: turning the toggle ON embeds the transcript for
+    # the first time, turning it OFF purges the chunks + backing file. Both
+    # run in the background and are best-effort — a toggle must never 500.
+    if discussion_context_change is not None:
+        try:
+            from app.workspaces.knowledge import (
+                index_discussion_for_workspace,
+                purge_discussion_index,
+            )
+
+            if discussion_context_change:
+                background.add_task(
+                    index_discussion_for_workspace, ws.id, item.id
+                )
+            else:
+                background.add_task(purge_discussion_index, ws.id, item.id)
+        except Exception:  # noqa: BLE001 - never fail the toggle
+            logger.warning(
+                "discussion context toggle indexing failed", exc_info=True
+            )
 
     return WorkspaceItemResponse.model_validate(item)
 
@@ -2082,6 +2114,21 @@ async def _purge_item(
                         bf.trashed_at = now
                     chunk_file_ids.add(backing.text_file_id)
                 await db.delete(backing)
+        elif it.kind == "discussion":
+            # A discussion has no backing row — its (opt-in) RAG transcript
+            # file id lives in ``config['text_file_id']``. Threads/messages
+            # cascade off the item FK; the file + chunks don't.
+            raw = (it.config or {}).get("text_file_id")
+            if raw:
+                try:
+                    dfid = uuid.UUID(str(raw))
+                except (ValueError, TypeError):
+                    dfid = None
+                if dfid is not None:
+                    df = await db.get(UserFile, dfid)
+                    if df is not None and df.trashed_at is None:
+                        df.trashed_at = now
+                    chunk_file_ids.add(dfid)
 
     # Purge the RAG chunks for every backing file we just retired so a
     # deleted item stops contributing to retrieval (and to the indexed-token
