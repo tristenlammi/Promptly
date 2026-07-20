@@ -6,6 +6,7 @@ import {
   Copy,
   FileText,
   Loader2,
+  MessagesSquare,
   Shapes,
   Table2,
   Zap,
@@ -29,6 +30,7 @@ const KIND_ICONS: Partial<Record<WorkspaceItemKind, typeof FileText>> = {
   board: Columns3,
   sheet: Table2,
   roster: CalendarDays,
+  discussion: MessagesSquare,
   task: Clock,
 };
 

@@ -116,6 +116,7 @@ export type WorkspaceItemKind =
   | "sheet"
   | "container"
   | "roster"
+  | "discussion"
   | "task";
 
 /** One node in ``GET /workspaces/{id}/tree``. Folders/notes nest via
@@ -535,7 +536,8 @@ export interface CreateWorkspaceItemPayload {
     | "sheet"
     | "container"
     | "chat"
-    | "roster";
+    | "roster"
+    | "discussion";
   parent_id?: string | null;
   title?: string;
 }

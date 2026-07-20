@@ -47,6 +47,7 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  MessagesSquare,
   MoreHorizontal,
   Pencil,
   PenTool,
@@ -494,7 +495,8 @@ export function WorkspaceNavigatorTree({
       | "board"
       | "sheet"
       | "container"
-      | "roster",
+      | "roster"
+      | "discussion",
     parentId: string | null
   ) => {
     const item = await create.mutateAsync({ kind, parent_id: parentId });
@@ -506,7 +508,8 @@ export function WorkspaceNavigatorTree({
       kind === "canvas" ||
       kind === "sheet" ||
       kind === "container" ||
-      kind === "roster"
+      kind === "roster" ||
+      kind === "discussion"
     ) {
       onSelect({
         id: item.id,
@@ -642,6 +645,7 @@ export function WorkspaceNavigatorTree({
             onNewRoster={
               canManageRoster ? () => handleCreate("roster", null) : undefined
             }
+            onNewDiscussion={() => handleCreate("discussion", null)}
             onNewNotebook={() => handleCreate("container", null)}
             onNewTask={onNewTask}
             onNewMeeting={onNewMeeting}
@@ -1495,10 +1499,14 @@ function TreeRow({
     node.kind === "sheet" ||
     node.kind === "container" ||
     node.kind === "roster" ||
+    node.kind === "discussion" ||
     isChat;
-  const contextOn = isChat
-    ? node.context_enabled === true
-    : node.context_enabled !== false;
+  // Chats and discussions are opt-in (scratch space / team chatter stays out
+  // of the RAG pool until a member turns it on); documents are opt-out.
+  const contextOn =
+    isChat || node.kind === "discussion"
+      ? node.context_enabled === true
+      : node.context_enabled !== false;
   // Every item gets a menu now (archive then delete). Chats are
   // synthesised, so their archive/delete go through the conversation
   // endpoints; folders/notes/canvases through the workspace_items ones.
@@ -1904,6 +1912,7 @@ const KIND_TILE: Record<string, { tile: string; ink: string }> = {
   sheet: { tile: "bg-[rgba(236,72,153,0.16)]", ink: "text-[#EC4899]" },
   container: { tile: "bg-[rgba(139,92,246,0.16)]", ink: "text-[#8B5CF6]" },
   roster: { tile: "bg-[rgba(21,154,168,0.16)]", ink: "text-[#159AA8]" },
+  discussion: { tile: "bg-[rgba(168,85,247,0.16)]", ink: "text-[#A855F7]" },
   task: { tile: "bg-[rgba(100,116,139,0.18)]", ink: "text-[#64748B]" },
 };
 
@@ -1942,6 +1951,8 @@ function NodeIcon({
         return Layers;
       case "roster":
         return CalendarDays;
+      case "discussion":
+        return MessagesSquare;
       case "task":
         // A clock reads "scheduled"; reserve the bolt for the context flag.
         return Clock;
@@ -2311,6 +2322,7 @@ function NewMenu({
   onNewBoard,
   onNewSheet,
   onNewRoster,
+  onNewDiscussion,
   onNewNotebook,
   onNewTask,
   onNewMeeting,
@@ -2325,6 +2337,8 @@ function NewMenu({
   onNewSheet: () => void;
   /** Owner/admin only — rosters are an admin surface, hidden for editors. */
   onNewRoster?: () => void;
+  /** A threaded discussion channel for the workspace's members. */
+  onNewDiscussion?: () => void;
   onNewNotebook: () => void;
   onNewTask?: () => void;
   /** Upload a meeting recording → transcribed + summarised note. */
@@ -2427,6 +2441,16 @@ function NewMenu({
                 onClick={() => {
                   setOpen(false);
                   onNewRoster();
+                }}
+              />
+            )}
+            {onNewDiscussion && (
+              <MenuItem
+                icon={<MessagesSquare className="h-3.5 w-3.5" />}
+                label="New discussion"
+                onClick={() => {
+                  setOpen(false);
+                  onNewDiscussion();
                 }}
               />
             )}

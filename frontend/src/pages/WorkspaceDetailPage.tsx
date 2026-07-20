@@ -43,6 +43,7 @@ import {
   Link2,
   Loader2,
   MessageSquare,
+  MessagesSquare,
   Monitor,
   Plus,
   Search,
@@ -96,6 +97,7 @@ import {
 } from "@/components/workspaces/WorkspaceCommandPalette";
 import { WorkspaceBoardPane } from "@/components/workspaces/WorkspaceBoardPane";
 import { WorkspaceRosterPane } from "@/components/workspaces/WorkspaceRosterPane";
+import { WorkspaceDiscussionPane } from "@/components/workspaces/WorkspaceDiscussionPane";
 import { ItemContextToggle } from "@/components/workspaces/ItemPaneHeader";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
@@ -895,6 +897,7 @@ const KIND_META: Partial<
   chat: { icon: MessageSquare, label: "Chat" },
   container: { icon: Layers, label: "Notebook" },
   roster: { icon: CalendarDays, label: "Roster" },
+  discussion: { icon: MessagesSquare, label: "Discussion" },
   task: { icon: Clock, label: "Automation" },
 };
 
@@ -1122,6 +1125,7 @@ function WorkspaceMainPane({
       node.kind === "sheet" ||
       node.kind === "container" ||
       node.kind === "roster" ||
+      node.kind === "discussion" ||
       node.kind === "task")
   ) {
     return (
@@ -1436,6 +1440,15 @@ function WorkspaceItemView({
       <WorkspaceRosterPane
         workspaceId={workspaceId}
         rosterId={node.ref_id}
+        node={node}
+        canEdit={canEdit}
+      />
+    );
+  }
+  if (node.kind === "discussion") {
+    return (
+      <WorkspaceDiscussionPane
+        workspaceId={workspaceId}
         node={node}
         canEdit={canEdit}
       />

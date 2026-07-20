@@ -12,6 +12,7 @@ import {
   Layers,
   Loader2,
   MessageSquare,
+  MessagesSquare,
   PenTool,
   RefreshCw,
   Settings2,
@@ -810,6 +811,8 @@ function KindIcon({ kind, className }: { kind: string; className?: string }) {
       return <Columns3 className={cls} />;
     case "sheet":
       return <Table2 className={cls} />;
+    case "discussion":
+      return <MessagesSquare className={cls} />;
     default:
       return <FileText className={cls} />;
   }
