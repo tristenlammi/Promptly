@@ -119,6 +119,8 @@ import {
 } from "@/components/workspaces/itemPreviewContext";
 import { ChatPage } from "./ChatPage";
 import { filesApi, type FileItem } from "@/api/files";
+import { chatApi } from "@/api/chat";
+import { useModelStore } from "@/store/modelStore";
 import { type WorkspaceItemNode } from "@/api/workspaces";
 import { apiErrorMessage } from "@/utils/apiError";
 import {
@@ -174,6 +176,7 @@ export function WorkspaceDetailPage() {
   const [taskChooserOpen, setTaskChooserOpen] = useState(false);
   const [meetingOpen, setMeetingOpen] = useState(false);
   const createTask = useCreateTask();
+  const createItem = useCreateWorkspaceItem(id ?? "");
   const { data: taskModels } = useAvailableModels();
 
   // New automation in this workspace: Simple opens the form (homed here);
@@ -410,16 +413,78 @@ export function WorkspaceDetailPage() {
     handleSelect(node);
   };
 
-  // Mobile: a read-only single-column view. The desktop two-pane layout
-  // (navigator rail + main pane + split/drag) can't fit a phone, so mobile
-  // gets a tappable item list → full-screen pane. Everything is read-only
-  // (canEdit=false); notes + chats render, heavier editors show a "best on
-  // desktop" notice. Clicking an item-link in a note opens it here too.
+  // Mobile create affordances. Only the two interactive kinds can be
+  // *started* from a phone (chat + discussion); the richer editors stay
+  // desktop-only. These reuse the exact create calls the desktop navigator
+  // tree uses, then open the fresh item inline.
+  const handleMobileNewDiscussion = async () => {
+    if (!id) return;
+    try {
+      const item = await createItem.mutateAsync({
+        kind: "discussion",
+        parent_id: null,
+      });
+      setSelected({
+        id: item.id,
+        kind: item.kind,
+        ref_id: item.ref_id,
+        title: item.title,
+        icon: item.icon,
+        position: item.position,
+        indexing_status: item.indexing_status,
+        children: [],
+      });
+    } catch {
+      /* surfaced by the axios interceptor as a toast */
+    }
+  };
+  const handleMobileNewChat = async () => {
+    if (!id) return;
+    const { selectedModelId, selectedProviderId } = useModelStore.getState();
+    try {
+      const conv = await chatApi.create({
+        title: null,
+        model_id: workspace?.default_model_id ?? selectedModelId ?? undefined,
+        provider_id:
+          workspace?.default_provider_id ?? selectedProviderId ?? undefined,
+        web_search_mode: "off",
+        workspace_id: id,
+      });
+      await qc.invalidateQueries({ queryKey: ["workspaces", "tree", id] });
+      setSelected({
+        id: String(conv.id),
+        kind: "chat",
+        ref_id: String(conv.id),
+        title: conv.title ?? "New chat",
+        icon: null,
+        position: 0,
+        indexing_status: null,
+        children: [],
+      });
+    } catch {
+      /* surfaced by the axios interceptor as a toast */
+    }
+  };
+
+  // Mobile: a single-column view. The desktop two-pane layout (navigator
+  // rail + main pane + split/drag) can't fit a phone, so mobile gets a
+  // tappable item list → full-screen pane. The interactive kinds (chat +
+  // discussion) are fully editable here; notes render read-only; heavier
+  // editors show a "best on desktop" notice. Clicking an item-link in a note
+  // opens it here too.
   if (isMobile) {
     const activeNode = selected;
     const readable = activeNode
       ? MOBILE_READABLE_KINDS.has(activeNode.kind)
       : false;
+    // Chat + discussion get the real write permission (same value the desktop
+    // path derives from the workspace access role); every other kind stays
+    // read-only on a phone.
+    const mobileCanEdit =
+      activeNode &&
+      (activeNode.kind === "chat" || activeNode.kind === "discussion")
+        ? canEdit
+        : false;
     return (
       <ItemPreviewContext.Provider value={(n) => setSelected(n)}>
         <TopNav
@@ -454,14 +519,14 @@ export function WorkspaceDetailPage() {
                 workspaceId={id}
                 onOpenItem={(n) => setSelected(n)}
                 onClose={() => setSelected(null)}
-                canEdit={false}
+                canEdit={mobileCanEdit}
               />
             ) : (
               <div className="flex-1 overflow-y-auto px-4 py-10">
                 <EmptyState
                   icon={<Monitor className="h-5 w-5" />}
                   title={`${KIND_META[activeNode.kind]?.label ?? "This item"} is best on desktop`}
-                  description="Notes and chats are readable here on your phone. Canvases, boards, sheets, and rosters need the desktop layout — open this workspace on a computer to view it."
+                  description="Notes, chats, and discussions work here on your phone. Canvases, boards, sheets, and rosters need the desktop layout — open this workspace on a computer to view them."
                   action={
                     <Button variant="primary" onClick={() => setSelected(null)}>
                       Back to items
@@ -478,6 +543,28 @@ export function WorkspaceDetailPage() {
                 {workspace.description}
               </p>
             )}
+            {canEdit && !isArchived && (
+              <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<MessageSquare className="h-4 w-4" />}
+                  onClick={handleMobileNewChat}
+                  disabled={createItem.isPending}
+                >
+                  New chat
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<MessagesSquare className="h-4 w-4" />}
+                  onClick={handleMobileNewDiscussion}
+                  disabled={createItem.isPending}
+                >
+                  New discussion
+                </Button>
+              </div>
+            )}
             {tree && tree.length > 0 ? (
               <MobileTreeList
                 nodes={tree}
@@ -488,12 +575,13 @@ export function WorkspaceDetailPage() {
                 <EmptyState
                   icon={<Layers className="h-5 w-5" />}
                   title="Nothing here yet"
-                  description="This workspace has no items yet. Add notes, boards, and more from the desktop app."
+                  description="Start a chat or discussion above, or add notes, boards, and more from the desktop app."
                 />
               </div>
             )}
             <p className="px-4 py-4 text-center text-xs text-[var(--text-muted)]">
-              Viewing on mobile is read-only. Open on desktop to edit.
+              Chats and discussions work on mobile. Other items are read-only
+              here — open on desktop to edit.
             </p>
           </div>
         )}
@@ -901,14 +989,15 @@ const KIND_META: Partial<
   task: { icon: Clock, label: "Automation" },
 };
 
-// Kinds that render usefully read-only on a phone (Lean mobile cut). Notes
-// and chats read beautifully in a single column; the heavier editors —
-// canvas / sheet / board / roster / automation — need the desktop layout,
-// so on mobile they show a "best on desktop" notice instead of squeezing a
-// broken editor onto the screen.
+// Kinds that render usefully on a phone (Lean mobile cut). Notes read
+// beautifully in a single column (read-only); chats and discussions are
+// fully interactive; the heavier editors — canvas / sheet / board / roster /
+// automation — need the desktop layout, so on mobile they show a "best on
+// desktop" notice instead of squeezing a broken editor onto the screen.
 const MOBILE_READABLE_KINDS = new Set<WorkspaceItemNode["kind"]>([
   "note",
   "chat",
+  "discussion",
 ]);
 
 /**

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   Loader2,
   MessagesSquare,
   Plus,
@@ -16,6 +17,7 @@ import {
 } from "@/api/discussions";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { useWorkspaceTree } from "@/hooks/useWorkspaces";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useDiscussionEvents } from "@/hooks/useDiscussionEvents";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { Callout, ErrorState } from "@/components/shared/Callout";
@@ -59,6 +61,7 @@ export function WorkspaceDiscussionPane({
 }) {
   const itemId = node.id;
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
@@ -104,13 +107,16 @@ export function WorkspaceDiscussionPane({
   });
 
   // Default to the most recently active thread so opening the pane lands on
-  // the live conversation rather than an empty right-hand column.
+  // the live conversation rather than an empty right-hand column. On mobile
+  // we DON'T auto-open — the single column starts on the thread list so the
+  // user picks a thread (tapping drills into the messages screen).
   useEffect(() => {
+    if (isMobile) return;
     const list = threads.data;
     if (!list || list.length === 0) return;
     if (selectedThreadId && list.some((t) => t.id === selectedThreadId)) return;
     setSelectedThreadId(list[0].id);
-  }, [threads.data, selectedThreadId]);
+  }, [isMobile, threads.data, selectedThreadId]);
 
   const selectedThread = useMemo(
     () => (threads.data ?? []).find((t) => t.id === selectedThreadId) ?? null,
@@ -163,8 +169,17 @@ export function WorkspaceDiscussionPane({
       <ContextHint workspaceId={workspaceId} itemId={itemId} />
 
       <div className="flex min-h-0 flex-1">
-        {/* Thread rail */}
-        <aside className="flex w-64 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg)]">
+        {/* Thread rail. Desktop: a fixed-width left column always visible.
+            Mobile: full-width and hidden once a thread is open (the messages
+            screen takes over, with its own back button). */}
+        <aside
+          className={cn(
+            "flex flex-col border-r border-[var(--border)] bg-[var(--bg)]",
+            isMobile
+              ? cn("w-full border-r-0", selectedThreadId && "hidden")
+              : "w-64 shrink-0"
+          )}
+        >
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
               Threads
@@ -269,8 +284,25 @@ export function WorkspaceDiscussionPane({
           </div>
         </aside>
 
-        {/* Messages */}
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* Messages. On mobile this column is hidden until a thread is
+            selected (then it fills the screen); on desktop it's always the
+            right-hand pane. */}
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col",
+            isMobile && !selectedThreadId && "hidden"
+          )}
+        >
+          {isMobile && selectedThread && (
+            <button
+              type="button"
+              onClick={() => setSelectedThreadId(null)}
+              className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text)]"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Threads
+            </button>
+          )}
           {selectedThread ? (
             <ThreadView
               key={selectedThread.id}
