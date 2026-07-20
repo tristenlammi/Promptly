@@ -53,6 +53,11 @@ interface ChatState {
   streamingAttachments: MessageAttachmentSnapshot[] | null;
   /** True while an outbound send or an open SSE stream is in flight. */
   isStreaming: boolean;
+  /** Which conversation the in-flight stream belongs to. Streaming state
+   *  (bubble, isStreaming, message hydration guard) must be scoped to this so
+   *  switching to another conversation mid-stream shows *that* conversation,
+   *  not the one that's streaming. Null when nothing is streaming. */
+  streamingConversationId: string | null;
   streamError: string | null;
   /** Structured metadata about a classified upstream error. Populated
    *  alongside ``streamError`` when the backend recognises the failure
@@ -180,6 +185,7 @@ export const useChatStore = create<ChatState>((set) => ({
   visionRelayInvocations: [],
   streamingAttachments: null,
   isStreaming: false,
+  streamingConversationId: null,
   streamError: null,
   streamErrorMeta: null,
 
@@ -334,6 +340,7 @@ export const useChatStore = create<ChatState>((set) => ({
       visionRelayInvocations: [],
       streamingAttachments: null,
       isStreaming: false,
+      streamingConversationId: null,
       streamError: null,
       streamErrorMeta: null,
     }),

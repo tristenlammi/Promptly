@@ -206,6 +206,10 @@ export function useStreamingChat(): UseStreamingChatResult {
       ac: AbortController
     ): Promise<void> => {
       const store = useChatStore.getState();
+      // Tag the stream with its conversation so the UI can scope streaming
+      // state to it — switching to a different conversation mid-stream must
+      // show *that* conversation, not this streaming one.
+      useChatStore.setState({ streamingConversationId: conversationId });
 
       const resp = await fetch(chatApi.streamUrl(streamId), {
         method: "GET",
@@ -448,7 +452,14 @@ export function useStreamingChat(): UseStreamingChatResult {
       }
 
       if (finalMessage) {
-        store.appendMessage(finalMessage);
+        // Only append into the visible list if the user is still on this
+        // conversation. If they've switched away, the completed reply is
+        // picked up when they return (the conversation query is invalidated
+        // in the send's finally block) — appending here would inject this
+        // conversation's reply into whatever they're now viewing.
+        if (useChatStore.getState().activeId === conversationId) {
+          store.appendMessage(finalMessage);
+        }
       }
     },
     [qc]

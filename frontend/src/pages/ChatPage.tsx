@@ -136,6 +136,13 @@ export function ChatPage({
   const replaceMessage = useChatStore((s) => s.replaceMessage);
   const upsertConversation = useChatStore((s) => s.upsertConversation);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingConversationId = useChatStore(
+    (s) => s.streamingConversationId
+  );
+  // Streaming is only *shown* on the conversation it belongs to. If a stream
+  // is running in another conversation and the user opens this one, this view
+  // must render its own messages, not the streaming one's live bubble.
+  const viewIsStreaming = isStreaming && streamingConversationId === id;
   // Subscribe to message count directly so we can render the live chat pane
   // the moment an optimistic user bubble is appended (before the backend has
   // responded). Keeping this a primitive selector avoids re-renders when
@@ -561,7 +568,13 @@ export function ChatPage({
       return;
     }
     if (!conversation) return;
-    if (useChatStore.getState().isStreaming) return;
+    // Don't clobber the message list only while THIS conversation is the one
+    // streaming (protects its optimistic bubble + live reply). If a *different*
+    // conversation is streaming, we still hydrate the one we just opened —
+    // otherwise switching mid-stream would leave the streaming conversation's
+    // messages on screen.
+    const st = useChatStore.getState();
+    if (st.isStreaming && st.streamingConversationId === id) return;
     setMessages(conversation.messages);
   }, [id, conversation, setMessages]);
 
@@ -1261,8 +1274,8 @@ export function ChatPage({
               onCompact={handleCompact}
             />
           )}
-          <StreamingAnnouncer streaming={isStreaming} />
-          {(id || isStreaming) && (hasMessages || isStreaming) ? (
+          <StreamingAnnouncer streaming={viewIsStreaming} />
+          {(id || viewIsStreaming) && (hasMessages || viewIsStreaming) ? (
             <ChatWindow
               // Single-owner chats: mutating affordances are owner-only
               // (the backend 403s a collaborator). Branch stays open so a
@@ -1322,7 +1335,7 @@ export function ChatPage({
 
           {isOwner ? (
             <InputBar
-              streaming={isStreaming}
+              streaming={viewIsStreaming}
               disabled={!selectedModel}
               onSend={handleSend}
               onCancel={cancel}
