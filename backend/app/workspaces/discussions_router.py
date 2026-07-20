@@ -16,11 +16,15 @@ Mounted under ``/api/workspaces``.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +33,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.chat.models import DiscussionMessage, DiscussionThread, WorkspaceItem
 from app.database import get_db
+from app.redis_client import redis
 from app.workspaces.shares import (
     get_accessible_workspace,
     require_workspace_write,
@@ -57,6 +62,10 @@ class ThreadResponse(BaseModel):
     title: str
     created_by: uuid.UUID | None
     created_by_name: str
+    # Profile picture for the thread starter. ``None`` when they never set
+    # one (the UI falls back to an initials chip) or the account is gone.
+    created_by_avatar_url: str | None = None
+    created_by_avatar_color: str | None = None
     message_count: int
     last_message_at: datetime | None
     created_at: datetime
@@ -72,17 +81,55 @@ class MessageResponse(BaseModel):
     body: str
     author_user_id: uuid.UUID | None
     author_name: str
+    author_avatar_url: str | None = None
+    author_avatar_color: str | None = None
     edited_at: datetime | None
     created_at: datetime
 
 
-def _msg_response(m: DiscussionMessage, author_name: str) -> MessageResponse:
+_DELETED_AUTHOR = "former member"
+
+
+def _identity(author: User | None) -> tuple[str, str | None, str | None]:
+    """(display name, avatar url, avatar colour) for a possibly-deleted user.
+
+    ``avatar_url`` is a *property* that signs a URL, so it can only be read
+    off a real ``User`` — which is why the list queries select the entity
+    rather than just ``User.username``.
+    """
+    if author is None:
+        return _DELETED_AUTHOR, None, None
+    return author.username, author.avatar_url, author.avatar_color
+
+
+def _thread_response(
+    t: DiscussionThread, author: User | None, message_count: int
+) -> ThreadResponse:
+    name, url, color = _identity(author)
+    return ThreadResponse(
+        id=t.id,
+        item_id=t.item_id,
+        title=t.title,
+        created_by=t.created_by,
+        created_by_name=name,
+        created_by_avatar_url=url,
+        created_by_avatar_color=color,
+        message_count=message_count,
+        last_message_at=t.last_message_at,
+        created_at=t.created_at,
+    )
+
+
+def _msg_response(m: DiscussionMessage, author: User | None) -> MessageResponse:
+    name, url, color = _identity(author)
     return MessageResponse(
         id=m.id,
         thread_id=m.thread_id,
         body=m.body,
         author_user_id=m.author_user_id,
-        author_name=author_name,
+        author_name=name,
+        author_avatar_url=url,
+        author_avatar_color=color,
         edited_at=m.edited_at,
         created_at=m.created_at,
     )
@@ -146,6 +193,105 @@ async def _reindex_if_opted_in(item: WorkspaceItem) -> None:
 
 
 # ---------------------------------------------------------------------
+# Realtime — Redis pub/sub fan-out over SSE
+# ---------------------------------------------------------------------
+# Every mutation publishes a small JSON envelope on a per-item channel;
+# open panes subscribe over SSE and patch their react-query caches. This
+# replaces the old 6s poll (the client keeps a slow safety-net refetch so a
+# dropped stream still self-heals).
+#
+# Fan-out is deliberately Redis pub/sub rather than in-process: pub/sub is
+# fire-and-forget with no history, which is exactly right for "something
+# changed, here it is" — nothing accumulates and a subscriber that isn't
+# there simply misses an event and recovers on its next refetch.
+_HEARTBEAT_SECONDS = 20.0
+
+
+def _discussion_channel(item_id: uuid.UUID) -> str:
+    return f"discussion:{item_id}"
+
+
+async def _publish(item_id: uuid.UUID, event: dict) -> None:
+    """Best-effort fan-out. A dead Redis must never fail a post."""
+    try:
+        await redis.publish(
+            _discussion_channel(item_id), json.dumps(event, default=str)
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("discussion event publish failed", exc_info=True)
+
+
+async def _discussion_event_stream(
+    item_id: uuid.UUID, request: Request
+) -> AsyncGenerator[str, None]:
+    pubsub = redis.pubsub()
+    channel = _discussion_channel(item_id)
+    try:
+        await pubsub.subscribe(channel)
+        # An immediate comment flushes headers so the client knows it's live.
+        yield ": connected\n\n"
+        while True:
+            if await request.is_disconnected():
+                return
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=_HEARTBEAT_SECONDS
+            )
+            if message is None:
+                # Idle tick — keeps proxies (and our own nginx) from
+                # reaping the connection.
+                yield ": ping\n\n"
+                continue
+            data = message.get("data")
+            if isinstance(data, bytes):
+                data = data.decode("utf-8", errors="replace")
+            if not data:
+                continue
+            yield f"data: {data}\n\n"
+    except asyncio.CancelledError:
+        # Starlette cancels us when the client drops — nothing to salvage.
+        return
+    finally:
+        # Always hand the pub/sub connection back; a leaked subscription
+        # holds a Redis connection open for the life of the process.
+        try:
+            await pubsub.unsubscribe(channel)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            closer = getattr(pubsub, "aclose", None) or pubsub.close
+            await closer()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@router.get("/{workspace_id}/discussions/{item_id}/events")
+async def discussion_events(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Live feed of thread/message changes in one discussion item.
+
+    Gated by the same read check as every other discussion endpoint, so
+    losing workspace access closes the tap on the next connect.
+    """
+    await get_accessible_workspace(workspace_id, user, db)
+    await _require_discussion_item(workspace_id, item_id, db, user)
+
+    return StreamingResponse(
+        _discussion_event_stream(item_id, request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------
 # Threads
 # ---------------------------------------------------------------------
 @router.get(
@@ -172,7 +318,7 @@ async def list_threads(
     )
     rows = (
         await db.execute(
-            select(DiscussionThread, User.username, counts.c.n)
+            select(DiscussionThread, User, counts.c.n)
             .outerjoin(User, User.id == DiscussionThread.created_by)
             .outerjoin(counts, counts.c.tid == DiscussionThread.id)
             .where(DiscussionThread.item_id == item_id)
@@ -185,17 +331,7 @@ async def list_threads(
     ).all()
 
     return [
-        ThreadResponse(
-            id=t.id,
-            item_id=t.item_id,
-            title=t.title,
-            created_by=t.created_by,
-            created_by_name=username or "former member",
-            message_count=int(n or 0),
-            last_message_at=t.last_message_at,
-            created_at=t.created_at,
-        )
-        for t, username, n in rows
+        _thread_response(t, author, int(n or 0)) for t, author, n in rows
     ]
 
 
@@ -246,16 +382,17 @@ async def create_thread(
         await _notify_mentions(db, ws, user, body, workspace_id, item)
         await _reindex_if_opted_in(item)
 
-    return ThreadResponse(
-        id=thread.id,
-        item_id=thread.item_id,
-        title=thread.title,
-        created_by=thread.created_by,
-        created_by_name=user.username,
-        message_count=count,
-        last_message_at=thread.last_message_at,
-        created_at=thread.created_at,
+    response = _thread_response(thread, user, count)
+    await _publish(
+        item_id,
+        {
+            "type": "thread_created",
+            "item_id": str(item_id),
+            "thread_id": str(thread.id),
+            "actor_id": str(user.id),
+        },
     )
+    return response
 
 
 @router.delete(
@@ -279,6 +416,15 @@ async def delete_thread(
     await db.delete(thread)  # messages cascade
     await db.commit()
     await _reindex_if_opted_in(item)
+    await _publish(
+        item.id,
+        {
+            "type": "thread_deleted",
+            "item_id": str(item.id),
+            "thread_id": str(thread_id),
+            "actor_id": str(user.id),
+        },
+    )
 
 
 # ---------------------------------------------------------------------
@@ -299,15 +445,13 @@ async def list_messages(
 
     rows = (
         await db.execute(
-            select(DiscussionMessage, User.username)
+            select(DiscussionMessage, User)
             .outerjoin(User, User.id == DiscussionMessage.author_user_id)
             .where(DiscussionMessage.thread_id == thread_id)
             .order_by(DiscussionMessage.created_at.asc())
         )
     ).all()
-    return [
-        _msg_response(m, username or "former member") for m, username in rows
-    ]
+    return [_msg_response(m, author) for m, author in rows]
 
 
 @router.post(
@@ -341,7 +485,21 @@ async def post_message(
     await _notify_mentions(db, ws, user, body, workspace_id, item, thread)
     await _reindex_if_opted_in(item)
 
-    return _msg_response(message, user.username)
+    response = _msg_response(message, user)
+    # Carry the whole message so subscribers can append without a refetch;
+    # they dedupe on ``message.id``, which also makes a duplicate delivery
+    # after a reconnect a no-op.
+    await _publish(
+        item.id,
+        {
+            "type": "message_created",
+            "item_id": str(item.id),
+            "thread_id": str(thread_id),
+            "actor_id": str(user.id),
+            "message": response.model_dump(mode="json"),
+        },
+    )
+    return response
 
 
 @router.delete(
@@ -368,9 +526,20 @@ async def delete_message(
             detail="Only the author or a workspace admin can delete a message.",
         )
     _thread, item = await _require_thread(workspace_id, message.thread_id, db, user)
+    thread_id = message.thread_id
     await db.delete(message)
     await db.commit()
     await _reindex_if_opted_in(item)
+    await _publish(
+        item.id,
+        {
+            "type": "message_deleted",
+            "item_id": str(item.id),
+            "thread_id": str(thread_id),
+            "message_id": str(message_id),
+            "actor_id": str(user.id),
+        },
+    )
 
 
 # ---------------------------------------------------------------------

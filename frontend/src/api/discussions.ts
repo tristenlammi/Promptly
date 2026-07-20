@@ -22,6 +22,9 @@ export interface DiscussionThread {
   /** null once the author's account is gone (history survives). */
   created_by: string | null;
   created_by_name: string;
+  /** Signed profile-picture URL; null → initials chip on the colour. */
+  created_by_avatar_url: string | null;
+  created_by_avatar_color: string | null;
   message_count: number;
   last_message_at: string | null;
   created_at: string;
@@ -34,6 +37,9 @@ export interface DiscussionMessage {
   body: string;
   author_user_id: string | null;
   author_name: string;
+  /** Signed profile-picture URL; null → initials chip on the colour. */
+  author_avatar_url: string | null;
+  author_avatar_color: string | null;
   edited_at: string | null;
   created_at: string;
 }

@@ -16,20 +16,21 @@ import {
 } from "@/api/discussions";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { useWorkspaceTree } from "@/hooks/useWorkspaces";
+import { useDiscussionEvents } from "@/hooks/useDiscussionEvents";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { Callout, ErrorState } from "@/components/shared/Callout";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { ItemPaneHeader } from "./ItemPaneHeader";
 
-/** Poll cadence while a discussion is open. There's no realtime transport
- *  for discussions yet, so the open thread and the thread list refresh on a
- *  timer — slow enough to be cheap, fast enough that a back-and-forth
- *  between two members feels live. */
-const POLL_MS = 6000;
+/** Safety net only. Changes arrive over SSE (``useDiscussionEvents``); this
+ *  slow refetch exists so a silently-dropped stream still converges rather
+ *  than leaving the pane frozen until the user navigates away. */
+const SAFETY_REFETCH_MS = 120000;
 
 const threadsKey = (workspaceId: string, itemId: string) =>
   ["workspaces", "discussion-threads", workspaceId, itemId] as const;
@@ -67,7 +68,39 @@ export function WorkspaceDiscussionPane({
   const threads = useQuery({
     queryKey: threadsKey(workspaceId, itemId),
     queryFn: () => discussionsApi.listThreads(workspaceId, itemId),
-    refetchInterval: POLL_MS,
+    refetchInterval: SAFETY_REFETCH_MS,
+    refetchOnWindowFocus: true,
+  });
+
+  // Realtime: patch the caches as events land instead of polling.
+  useDiscussionEvents(workspaceId, itemId, (event) => {
+    const threads = threadsKey(workspaceId, itemId);
+    if (event.type === "message_created" && event.thread_id && event.message) {
+      const incoming = event.message as DiscussionMessage;
+      qc.setQueryData<DiscussionMessage[]>(
+        messagesKey(workspaceId, event.thread_id),
+        (prev) => {
+          if (!prev) return prev; // not loaded — the query will fetch fresh
+          // Dedupe by id: our own POST already appended this one, and a
+          // reconnect can redeliver.
+          if (prev.some((m) => m.id === incoming.id)) return prev;
+          return [...prev, incoming];
+        }
+      );
+      // The rail shows counts + last activity.
+      void qc.invalidateQueries({ queryKey: threads });
+      return;
+    }
+    if (event.type === "message_deleted" && event.thread_id) {
+      qc.setQueryData<DiscussionMessage[]>(
+        messagesKey(workspaceId, event.thread_id),
+        (prev) => prev?.filter((m) => m.id !== event.message_id)
+      );
+      void qc.invalidateQueries({ queryKey: threads });
+      return;
+    }
+    // thread_created / thread_deleted — the rail is the source of truth.
+    void qc.invalidateQueries({ queryKey: threads });
   });
 
   // Default to the most recently active thread so opening the pane lands on
@@ -213,11 +246,20 @@ export function WorkspaceDiscussionPane({
                           </span>
                         )}
                       </span>
-                      <span className="truncate text-[10px] text-[var(--text-muted)]">
-                        {t.created_by_name} · {t.message_count} msg
-                        {t.message_count === 1 ? "" : "s"}
-                        {" · "}
-                        {formatRelativeTime(t.last_message_at ?? t.created_at)}
+                      <span className="flex items-center gap-1.5 truncate text-[10px] text-[var(--text-muted)]">
+                        <UserAvatar
+                          name={t.created_by_name}
+                          userId={t.created_by}
+                          avatarUrl={t.created_by_avatar_url}
+                          color={t.created_by_avatar_color}
+                          size={14}
+                        />
+                        <span className="truncate">
+                          {t.created_by_name} · {t.message_count} msg
+                          {t.message_count === 1 ? "" : "s"}
+                          {" · "}
+                          {formatRelativeTime(t.last_message_at ?? t.created_at)}
+                        </span>
                       </span>
                     </button>
                   </li>
@@ -396,7 +438,8 @@ function ThreadView({
   const messages = useQuery({
     queryKey: messagesKey(workspaceId, thread.id),
     queryFn: () => discussionsApi.listMessages(workspaceId, thread.id),
-    refetchInterval: POLL_MS,
+    refetchInterval: SAFETY_REFETCH_MS,
+    refetchOnWindowFocus: true,
   });
 
   const list = messages.data;
@@ -445,9 +488,18 @@ function ThreadView({
         <h3 className="truncate text-sm font-semibold text-[var(--text)]">
           {thread.title}
         </h3>
-        <p className="text-[11px] text-[var(--text-muted)]">
-          Started by {thread.created_by_name} ·{" "}
-          {formatRelativeTime(thread.created_at)}
+        <p className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+          <UserAvatar
+            name={thread.created_by_name}
+            userId={thread.created_by}
+            avatarUrl={thread.created_by_avatar_url}
+            color={thread.created_by_avatar_color}
+            size={16}
+          />
+          <span>
+            Started by {thread.created_by_name} ·{" "}
+            {formatRelativeTime(thread.created_at)}
+          </span>
         </p>
       </div>
 
@@ -537,6 +589,14 @@ function MessageRow({
 }) {
   return (
     <li className="group flex gap-2 text-sm">
+      <UserAvatar
+        name={m.author_name}
+        userId={m.author_user_id}
+        avatarUrl={m.author_avatar_url}
+        color={m.author_avatar_color}
+        size={24}
+        className="mt-0.5"
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
           <span className="font-medium text-[var(--text)]">{m.author_name}</span>
