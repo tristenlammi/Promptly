@@ -83,6 +83,12 @@ interface ChatWindowProps {
    *  the account memory. When set, the message "Remember" action calls this
    *  (no modal) rather than opening the account RememberModal. */
   onRememberToWorkspace?: (content: string) => Promise<void> | void;
+  /** Whether the conversation currently on screen is the one actively
+   *  streaming. Scoped by the caller (``viewIsStreaming``) so a stream running
+   *  in a *different* conversation never leaks its live bubble / thinking
+   *  indicator onto the conversation being viewed. Falls back to the global
+   *  streaming flag when omitted. */
+  streaming?: boolean;
 }
 
 export function ChatWindow({
@@ -100,6 +106,7 @@ export function ChatWindow({
   onSelectVersion,
   hideRemember = false,
   onRememberToWorkspace,
+  streaming,
 }: ChatWindowProps) {
   const messages = useChatStore((s) => s.messages);
   const activeId = useChatStore((s) => s.activeId);
@@ -111,7 +118,13 @@ export function ChatWindow({
   const visionRelayInvocations = useChatStore(
     (s) => s.visionRelayInvocations,
   );
-  const isStreaming = useChatStore((s) => s.isStreaming);
+  const storeStreaming = useChatStore((s) => s.isStreaming);
+  // Scope every streaming affordance (live bubble, thinking indicator,
+  // edit/regenerate guards, auto-scroll) to THIS view. When the caller passes
+  // ``streaming`` it reflects whether the on-screen conversation is the one
+  // streaming; a stream in a different conversation then no longer leaks its
+  // live bubble here. Falls back to the global flag when the prop is omitted.
+  const isStreaming = streaming ?? storeStreaming;
   const streamError = useChatStore((s) => s.streamError);
   const streamErrorMeta = useChatStore((s) => s.streamErrorMeta);
   const setStreamError = useChatStore((s) => s.setStreamError);

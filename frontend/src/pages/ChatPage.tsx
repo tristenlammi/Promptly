@@ -567,14 +567,32 @@ export function ChatPage({
       useChatStore.getState().resetStream();
       return;
     }
-    if (!conversation) return;
-    // Don't clobber the message list only while THIS conversation is the one
-    // streaming (protects its optimistic bubble + live reply). If a *different*
-    // conversation is streaming, we still hydrate the one we just opened —
-    // otherwise switching mid-stream would leave the streaming conversation's
-    // messages on screen.
     const st = useChatStore.getState();
-    if (st.isStreaming && st.streamingConversationId === id) return;
+    // Never clobber the thread of the conversation that's actively streaming
+    // while we're viewing it (protects its optimistic bubble + live reply).
+    // The stream isn't tagged with its conversation id until the send POST
+    // returns, so `streamingConversationId` is briefly null during a fresh
+    // send — hence the second signal: the store already "owns" messages for
+    // THIS id (an optimistic user bubble on a brand-new chat, or an
+    // in-progress reply). If a *different* conversation is streaming, we fall
+    // through and hydrate the one we just opened, so switching mid-stream
+    // doesn't leave the streaming conversation's messages on screen.
+    const ownsLoaded =
+      st.messages.length > 0 &&
+      st.messages.some(
+        (m) => m.conversation_id === id || m.id.startsWith("optimistic-")
+      );
+    if (st.isStreaming && (st.streamingConversationId === id || ownsLoaded)) {
+      return;
+    }
+    if (!conversation) {
+      // The selected conversation's detail hasn't loaded yet. If the store is
+      // still showing a *different* conversation's thread (we just switched
+      // away from a streaming chat), drop it now so that chat's messages don't
+      // linger on screen while this one loads.
+      if (st.messages.length > 0 && !ownsLoaded) setMessages([]);
+      return;
+    }
     setMessages(conversation.messages);
   }, [id, conversation, setMessages]);
 
@@ -1277,6 +1295,10 @@ export function ChatPage({
           <StreamingAnnouncer streaming={viewIsStreaming} />
           {(id || viewIsStreaming) && (hasMessages || viewIsStreaming) ? (
             <ChatWindow
+              // Scope the live streaming bubble/indicator to THIS view so a
+              // reply streaming in another conversation can't leak onto the
+              // one currently on screen.
+              streaming={viewIsStreaming}
               // Single-owner chats: mutating affordances are owner-only
               // (the backend 403s a collaborator). Branch stays open so a
               // collaborator can fork the thread into their own chat.
