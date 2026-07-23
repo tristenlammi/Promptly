@@ -42,6 +42,14 @@ logger = logging.getLogger("promptly.chat.stream")
 # persisted Postgres row is the source of truth past this window.
 COMPLETED_SESSION_TTL_SECONDS = 180
 
+# While a subscriber waits for the next event, emit an SSE comment line
+# (": ping") at this interval so the client can distinguish "the model is
+# quietly thinking" from "the connection is dead". The frontend's stream
+# watchdog aborts after ~75s of total silence, so several consecutive
+# missed pings — not one slow token — is what trips it. Comment lines are
+# invisible to SSE consumers (the client's data-line parser skips them).
+SUBSCRIBER_PING_INTERVAL_SECONDS = 20.0
+
 
 @dataclass
 class StreamSession:
@@ -108,9 +116,17 @@ class StreamSession:
             if self.done:
                 return
             # Snapshot the current event so a push that lands while we're
-            # awaiting it can't slip past us.
+            # awaiting it can't slip past us. Wake up periodically to emit
+            # a keepalive ping (same cursor — comments don't advance the
+            # event log) so idle-but-alive streams are distinguishable from
+            # dead connections client-side.
             wakeup = self._wakeup
-            await wakeup.wait()
+            try:
+                await asyncio.wait_for(
+                    wakeup.wait(), timeout=SUBSCRIBER_PING_INTERVAL_SECONDS
+                )
+            except asyncio.TimeoutError:
+                yield i, ": ping\n\n"
 
 
 # Keyed by stream_id. We never share sessions across stream ids — every

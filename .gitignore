@@ -101,3 +101,7 @@ frontend/public/excalidraw-assets/
 
 *.md
 !README.md
+!CHANGELOG.md
+!OVERVIEW.md
+# CLAUDE.md is intentionally NOT excepted here — it stays local-only
+# (untracked). Claude Code still loads it from disk regardless of git.

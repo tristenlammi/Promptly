@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import {
   chatApi,
@@ -11,17 +11,46 @@ import { authHeader } from "@/api/client";
 import { useChatStore } from "@/store/chatStore";
 import type {
   ChatMessage,
+  ConversationDetail,
   ConversationSummary,
   MessageAttachmentSnapshot,
   PersistedToolCall,
   Source,
 } from "@/api/types";
 
+/** Land a freshly-persisted message in its conversation's detail cache
+ *  (append-if-absent). The visible store list only holds the conversation
+ *  on screen, so this is what makes a turn's user message / finished reply
+ *  show up instantly when the user browses back to a chat that streamed
+ *  while they were elsewhere — without waiting for the invalidation
+ *  refetch. */
+function appendToConversationCache(
+  qc: QueryClient,
+  conversationId: string,
+  message: ChatMessage
+): void {
+  qc.setQueryData<ConversationDetail>(
+    ["conversation", conversationId],
+    (old) =>
+      old && !old.messages.some((m) => m.id === message.id)
+        ? { ...old, messages: [...old.messages, message] }
+        : old
+  );
+}
+
 /**
  * Parse a ReadableStream<Uint8Array> of SSE data. Yields a decoded string for
  * each complete `data: ...` event. Multi-line events are handled by joining on
  * newlines.
  */
+/** Abort the read loop when the server goes silent for this long. The
+ *  backend emits an SSE ping comment every ~20s even when the model
+ *  produces no tokens, so hitting this means the connection is actually
+ *  dead (proxy half-close, phone slept mid-stream, …). Without it a dead
+ *  socket left `isStreaming` stuck true forever, freezing chat switching
+ *  until a full reload. */
+const STREAM_STALL_TIMEOUT_MS = 75_000;
+
 async function* iterateSSE(
   stream: ReadableStream<Uint8Array>,
   signal: AbortSignal
@@ -31,7 +60,27 @@ async function* iterateSSE(
   let buf = "";
   try {
     while (!signal.aborted) {
-      const { done, value } = await reader.read();
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            stallTimer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "The connection to the server went quiet — the reply keeps generating in the background and will appear when you reopen this chat."
+                  )
+                ),
+              STREAM_STALL_TIMEOUT_MS
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(stallTimer);
+      }
+      const { done, value } = result;
       if (done) break;
       buf += decoder.decode(value, { stream: true });
 
@@ -54,6 +103,10 @@ async function* iterateSSE(
     }
   } finally {
     reader.releaseLock();
+    // On a stall-timeout exit the connection is still open server-side —
+    // close it so the browser doesn't hold a dead socket. Harmless on the
+    // normal paths (already-closed streams reject, which we swallow).
+    void stream.cancel().catch(() => {});
   }
 }
 
@@ -460,6 +513,9 @@ export function useStreamingChat(): UseStreamingChatResult {
         if (useChatStore.getState().activeId === conversationId) {
           store.appendMessage(finalMessage);
         }
+        // Either way, land it in the detail cache so browsing back shows
+        // the reply instantly instead of waiting on the refetch.
+        appendToConversationCache(qc, conversationId, finalMessage);
       }
     },
     [qc]
@@ -479,9 +535,12 @@ export function useStreamingChat(): UseStreamingChatResult {
       // `resetStream` zeroes streamingContent/sources/tool state and flips
       // isStreaming to false. The caller may have already set
       // isStreaming=true (to show the thinking indicator before this hook
-      // runs) — re-assert it here.
+      // runs) — re-assert it here, and tag the turn with its conversation
+      // immediately (not just at drain time) so the streaming UI stays
+      // scoped to this chat during the send POST round-trip.
       store.resetStream();
       store.setStreaming(true);
+      useChatStore.setState({ streamingConversationId: conversationId });
 
       try {
         const { stream_id, user_message } = await chatApi.sendMessage(
@@ -489,10 +548,14 @@ export function useStreamingChat(): UseStreamingChatResult {
           payload
         );
         if (options?.optimisticUserId) {
+          // No-ops if the user browsed away and the optimistic row was
+          // hydrated out of the visible list — the cache write below still
+          // records the turn against its conversation.
           store.replaceMessage(options.optimisticUserId, user_message);
-        } else {
+        } else if (useChatStore.getState().activeId === conversationId) {
           store.appendMessage(user_message);
         }
+        appendToConversationCache(qc, conversationId, user_message);
 
         await drainStream(conversationId, stream_id, ac);
       } catch (err) {
@@ -503,17 +566,25 @@ export function useStreamingChat(): UseStreamingChatResult {
         const msg = err instanceof Error ? err.message : String(err);
         store.setStreamError(msg);
       } finally {
-        abortRef.current = null;
-        useChatStore.getState().setStreaming(false);
+        // A newer turn may have taken over the stream slot after
+        // cancel()ing this one (a send in another chat, a reattach
+        // takeover). cancel() nulls abortRef, so the slot is still ours
+        // only when abortRef is exactly this turn's controller — never
+        // tear down a successor's live streaming state.
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          useChatStore.getState().setStreaming(false);
+          useChatStore.setState({
+            streamingContent: "",
+            streamingSources: null,
+            streamingAttachments: null,
+            toolInvocations: [],
+            visionRelayInvocations: [],
+            streamingConversationId: null,
+          });
+        }
         qc.invalidateQueries({ queryKey: ["conversations"] });
         qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        useChatStore.setState({
-          streamingContent: "",
-          streamingSources: null,
-          streamingAttachments: null,
-          toolInvocations: [],
-          visionRelayInvocations: [],
-        });
       }
     },
     [cancel, drainStream, qc]
@@ -532,6 +603,7 @@ export function useStreamingChat(): UseStreamingChatResult {
 
       store.resetStream();
       store.setStreaming(true);
+      useChatStore.setState({ streamingConversationId: conversationId });
 
       try {
         // POST the edit. Phase 2.6 — the backend now inserts the edited
@@ -557,17 +629,25 @@ export function useStreamingChat(): UseStreamingChatResult {
         const msg = err instanceof Error ? err.message : String(err);
         store.setStreamError(msg);
       } finally {
-        abortRef.current = null;
-        useChatStore.getState().setStreaming(false);
+        // A newer turn may have taken over the stream slot after
+        // cancel()ing this one (a send in another chat, a reattach
+        // takeover). cancel() nulls abortRef, so the slot is still ours
+        // only when abortRef is exactly this turn's controller — never
+        // tear down a successor's live streaming state.
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          useChatStore.getState().setStreaming(false);
+          useChatStore.setState({
+            streamingContent: "",
+            streamingSources: null,
+            streamingAttachments: null,
+            toolInvocations: [],
+            visionRelayInvocations: [],
+            streamingConversationId: null,
+          });
+        }
         qc.invalidateQueries({ queryKey: ["conversations"] });
         qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        useChatStore.setState({
-          streamingContent: "",
-          streamingSources: null,
-          streamingAttachments: null,
-          toolInvocations: [],
-          visionRelayInvocations: [],
-        });
       }
     },
     [cancel, drainStream, qc]
@@ -585,6 +665,7 @@ export function useStreamingChat(): UseStreamingChatResult {
       // start from a known-clean slate.
       store.resetStream();
       store.setStreaming(true);
+      useChatStore.setState({ streamingConversationId: conversationId });
 
       try {
         await drainStream(conversationId, streamId, ac);
@@ -593,17 +674,25 @@ export function useStreamingChat(): UseStreamingChatResult {
         const msg = err instanceof Error ? err.message : String(err);
         store.setStreamError(msg);
       } finally {
-        abortRef.current = null;
-        useChatStore.getState().setStreaming(false);
+        // A newer turn may have taken over the stream slot after
+        // cancel()ing this one (a send in another chat, a reattach
+        // takeover). cancel() nulls abortRef, so the slot is still ours
+        // only when abortRef is exactly this turn's controller — never
+        // tear down a successor's live streaming state.
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          useChatStore.getState().setStreaming(false);
+          useChatStore.setState({
+            streamingContent: "",
+            streamingSources: null,
+            streamingAttachments: null,
+            toolInvocations: [],
+            visionRelayInvocations: [],
+            streamingConversationId: null,
+          });
+        }
         qc.invalidateQueries({ queryKey: ["conversations"] });
         qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        useChatStore.setState({
-          streamingContent: "",
-          streamingSources: null,
-          streamingAttachments: null,
-          toolInvocations: [],
-          visionRelayInvocations: [],
-        });
       }
     },
     [cancel, drainStream, qc]
@@ -622,6 +711,7 @@ export function useStreamingChat(): UseStreamingChatResult {
 
       store.resetStream();
       store.setStreaming(true);
+      useChatStore.setState({ streamingConversationId: conversationId });
 
       try {
         // Kicks off the fresh stream on the server. The returned
@@ -647,17 +737,25 @@ export function useStreamingChat(): UseStreamingChatResult {
         const msg = err instanceof Error ? err.message : String(err);
         store.setStreamError(msg);
       } finally {
-        abortRef.current = null;
-        useChatStore.getState().setStreaming(false);
+        // A newer turn may have taken over the stream slot after
+        // cancel()ing this one (a send in another chat, a reattach
+        // takeover). cancel() nulls abortRef, so the slot is still ours
+        // only when abortRef is exactly this turn's controller — never
+        // tear down a successor's live streaming state.
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          useChatStore.getState().setStreaming(false);
+          useChatStore.setState({
+            streamingContent: "",
+            streamingSources: null,
+            streamingAttachments: null,
+            toolInvocations: [],
+            visionRelayInvocations: [],
+            streamingConversationId: null,
+          });
+        }
         qc.invalidateQueries({ queryKey: ["conversations"] });
         qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        useChatStore.setState({
-          streamingContent: "",
-          streamingSources: null,
-          streamingAttachments: null,
-          toolInvocations: [],
-          visionRelayInvocations: [],
-        });
       }
     },
     [cancel, drainStream, qc]
@@ -685,6 +783,7 @@ export function useStreamingChat(): UseStreamingChatResult {
 
       store.resetStream();
       store.setStreaming(true);
+      useChatStore.setState({ streamingConversationId: conversationId });
 
       try {
         const { stream_id, user_message } = await chatApi.continueMessage(
@@ -709,17 +808,25 @@ export function useStreamingChat(): UseStreamingChatResult {
         const msg = err instanceof Error ? err.message : String(err);
         store.setStreamError(msg);
       } finally {
-        abortRef.current = null;
-        useChatStore.getState().setStreaming(false);
+        // A newer turn may have taken over the stream slot after
+        // cancel()ing this one (a send in another chat, a reattach
+        // takeover). cancel() nulls abortRef, so the slot is still ours
+        // only when abortRef is exactly this turn's controller — never
+        // tear down a successor's live streaming state.
+        if (abortRef.current === ac) {
+          abortRef.current = null;
+          useChatStore.getState().setStreaming(false);
+          useChatStore.setState({
+            streamingContent: "",
+            streamingSources: null,
+            streamingAttachments: null,
+            toolInvocations: [],
+            visionRelayInvocations: [],
+            streamingConversationId: null,
+          });
+        }
         qc.invalidateQueries({ queryKey: ["conversations"] });
         qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
-        useChatStore.setState({
-          streamingContent: "",
-          streamingSources: null,
-          streamingAttachments: null,
-          toolInvocations: [],
-          visionRelayInvocations: [],
-        });
       }
     },
     [cancel, drainStream, qc]

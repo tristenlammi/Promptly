@@ -142,7 +142,13 @@ export function ChatPage({
   // Streaming is only *shown* on the conversation it belongs to. If a stream
   // is running in another conversation and the user opens this one, this view
   // must render its own messages, not the streaming one's live bubble.
-  const viewIsStreaming = isStreaming && streamingConversationId === id;
+  // Whether the conversation on screen is the one actively streaming. A
+  // brand-new chat has no id until the create POST returns; its in-flight
+  // turn is tagged ``streamingConversationId === null``, so the /chat route
+  // (id undefined) claims exactly the null-tagged stream and nothing else.
+  const viewIsStreaming =
+    isStreaming &&
+    (id ? streamingConversationId === id : streamingConversationId === null);
   // Subscribe to message count directly so we can render the live chat pane
   // the moment an optimistic user bubble is appended (before the backend has
   // responded). Keeping this a primitive selector avoids re-renders when
@@ -568,29 +574,40 @@ export function ChatPage({
       return;
     }
     const st = useChatStore.getState();
-    // Never clobber the thread of the conversation that's actively streaming
-    // while we're viewing it (protects its optimistic bubble + live reply).
-    // The stream isn't tagged with its conversation id until the send POST
-    // returns, so `streamingConversationId` is briefly null during a fresh
-    // send — hence the second signal: the store already "owns" messages for
-    // THIS id (an optimistic user bubble on a brand-new chat, or an
-    // in-progress reply). If a *different* conversation is streaming, we fall
-    // through and hydrate the one we just opened, so switching mid-stream
-    // doesn't leave the streaming conversation's messages on screen.
-    const ownsLoaded =
-      st.messages.length > 0 &&
-      st.messages.some(
-        (m) => m.conversation_id === id || m.id.startsWith("optimistic-")
-      );
-    if (st.isStreaming && (st.streamingConversationId === id || ownsLoaded)) {
-      return;
-    }
+    // Does a store row belong to the conversation on screen? Optimistic rows
+    // are matched by their conversation_id too ("" covers the brand-new-chat
+    // send, whose bubble is created before the conversation exists) so a
+    // *different* chat's in-flight bubble never counts as ours.
+    const belongsHere = (m: ChatMessage) =>
+      m.conversation_id === id ||
+      (m.id.startsWith("optimistic-") && m.conversation_id === "");
+    const ownsLoaded = st.messages.length > 0 && st.messages.some(belongsHere);
     if (!conversation) {
       // The selected conversation's detail hasn't loaded yet. If the store is
       // still showing a *different* conversation's thread (we just switched
       // away from a streaming chat), drop it now so that chat's messages don't
       // linger on screen while this one loads.
       if (st.messages.length > 0 && !ownsLoaded) setMessages([]);
+      return;
+    }
+    if (st.isStreaming && st.streamingConversationId === id) {
+      // This conversation is the one streaming. Hydrate from the server list
+      // but MERGE any local rows the server doesn't know about yet — the
+      // optimistic user bubble (send POST still in flight) and the
+      // just-persisted user turn (detail cache may predate it). A plain skip
+      // here would strand another chat's thread on screen when the user
+      // browses back to the streaming chat mid-reply.
+      const serverIds = new Set(conversation.messages.map((m) => m.id));
+      const extras = st.messages.filter(
+        (m) => !serverIds.has(m.id) && belongsHere(m)
+      );
+      setMessages([...conversation.messages, ...extras]);
+      return;
+    }
+    if (st.isStreaming && !st.streamingConversationId && ownsLoaded) {
+      // A fresh send whose turn isn't tagged yet (conversation id resolves
+      // when the send POST returns). The store already holds this chat's
+      // thread + optimistic bubble — don't wipe it.
       return;
     }
     setMessages(conversation.messages);
@@ -608,9 +625,15 @@ export function ChatPage({
   useEffect(() => {
     if (!id || !conversation) return;
     if (reattachedRef.current === id) return;
-    if (useChatStore.getState().isStreaming) {
-      // Already streaming locally (the user just sent a message and
-      // we're showing the live tokens) — nothing to reattach to.
+    // "Streaming locally" only counts when it's THIS conversation's stream
+    // (or a fresh not-yet-tagged send, which can only belong to the chat on
+    // screen). A stream running for a *different* chat must not suppress the
+    // check — this chat may have its own server-side reply in flight that we
+    // should tail; the visible chat wins the single local stream slot.
+    const owns = (s: ReturnType<typeof useChatStore.getState>) =>
+      s.isStreaming &&
+      (s.streamingConversationId === id || s.streamingConversationId === null);
+    if (owns(useChatStore.getState())) {
       reattachedRef.current = id;
       return;
     }
@@ -620,9 +643,9 @@ export function ChatPage({
       try {
         const streamId = await chatApi.activeStream(id);
         if (cancelled || !streamId) return;
-        // Re-check isStreaming in case the user kicked off a fresh
-        // turn between the check above and the network round-trip.
-        if (useChatStore.getState().isStreaming) return;
+        // Re-check in case the user kicked off a fresh turn here between
+        // the check above and the network round-trip.
+        if (owns(useChatStore.getState())) return;
         await reattach(id, streamId);
       } catch (err) {
         // Non-fatal — just means we won't tail. The persisted reply
@@ -734,8 +757,20 @@ export function ChatPage({
         attachments: attachments.length > 0 ? attachments : null,
         created_at: new Date().toISOString(),
       };
-      store.setStreamError(null);
+      // If another conversation's reply is still draining into the local
+      // stream slot, detach from it first — its generation continues
+      // server-side and re-tails on revisit. Without this, its deltas would
+      // bleed into the thinking bubble we're about to show. cancel() also
+      // nulls the abort ref, which tells the detached turn's cleanup block
+      // it no longer owns the stream state.
+      cancel();
+      store.resetStream();
       store.setStreaming(true);
+      // Tag the turn with its conversation up front so the streaming UI and
+      // the hydration guard scope correctly during the send POST. A
+      // brand-new chat has no id yet — null means "the /chat view's turn"
+      // until sendMessage tags the created conversation.
+      useChatStore.setState({ streamingConversationId: id ?? null });
       store.appendMessage(optimisticMsg);
 
       let conversationId = id;
@@ -775,6 +810,7 @@ export function ChatPage({
           useChatStore.setState((s) => ({
             messages: s.messages.filter((m) => m.id !== optimisticId),
             isStreaming: false,
+            streamingConversationId: null,
             streamError: err instanceof Error ? err.message : String(err),
           }));
           return;
@@ -807,6 +843,7 @@ export function ChatPage({
     [
       id,
       navigate,
+      cancel,
       selectedModel,
       sendMessage,
       upsertConversation,
