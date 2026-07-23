@@ -57,7 +57,6 @@ reach the GPU there). The choice persists in `COMPOSE_PROFILES` in `.env`.
 - **Workspaces** — chats, notes, canvas, boards and sheets sharing one retrieval layer
 - **Voice** — self-hosted Whisper dictation and Kokoro read-aloud; hands-free voice mode
 - **Automations** — node-graph flows on cron/webhook triggers with a credentials vault
-- **Study** — an AI tutor with unit plans, interactive exercises and final exams
 - **Multi-user & secure** — invite-only accounts, MFA, audit log, per-user quotas, admin analytics
 - **Private by architecture** — zero telemetry; pair with local models and search for a fully offline stack
 
