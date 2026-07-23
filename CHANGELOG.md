@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-23
+
+### Fixed
+- Leaked tool-call markup (e.g. DeepSeek's `<|DSML|…>` blocks) no longer
+  lingers on screen: the stream's `done` event now carries the persisted
+  (sanitized) reply text and the client prefers it over its raw delta
+  accumulation — so backend-side cleanup and synthesis-retry answers
+  actually reach the bubble. The live streaming bubble also elides the
+  markup client-side while tokens are still arriving.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added

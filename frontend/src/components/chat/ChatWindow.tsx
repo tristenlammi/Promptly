@@ -18,6 +18,33 @@ import { WorkspaceRememberModal } from "./WorkspaceRememberModal";
 import { StreamErrorCard } from "./StreamErrorCard";
 import { ThinkingBubble } from "./ThinkingBubble";
 
+// Mirrors the backend's ``_strip_leaked_tool_call_xml`` (chat/router.py).
+// Some hosts stream a model's tool call as literal markup in the content
+// channel (e.g. DeepSeek's ``<|DSML|tool_calls>…`` blocks) instead of a
+// structured call. The backend strips it before persisting, and since the
+// ``done`` payload carries the persisted text the finished bubble is clean —
+// this client-side pass keeps the markup from flashing in the LIVE bubble
+// while tokens are still arriving. Delimiter fragment accepts bare tags and
+// ``|…|`` / fullwidth ``｜…｜`` wrapped ones, same as the backend.
+const TAG_DELIM = String.raw`(?:\s*[|｜][^|｜>]*[|｜])?\s*`;
+const LEAKED_TOOL_XML_RES: RegExp[] = [
+  new RegExp(
+    String.raw`<${TAG_DELIM}tool_calls\s*>[\s\S]*?(?:</${TAG_DELIM}tool_calls\s*>|$)`,
+    "gi"
+  ),
+  new RegExp(
+    String.raw`<${TAG_DELIM}invoke\b[^>]*>[\s\S]*?(?:</${TAG_DELIM}invoke\s*>|$)`,
+    "gi"
+  ),
+];
+
+function stripLeakedToolCallXml(text: string): string {
+  if (!text || !text.includes("<")) return text;
+  let out = text;
+  for (const rx of LEAKED_TOOL_XML_RES) out = out.replace(rx, "");
+  return out;
+}
+
 interface ChatWindowProps {
   /** Edit-and-resend hook for the most recent user message. When omitted
    *  (e.g. on a brand-new conversation page that hasn't created a chat
@@ -112,6 +139,12 @@ export function ChatWindow({
   const activeId = useChatStore((s) => s.activeId);
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const streamingContent = useChatStore((s) => s.streamingContent);
+  // Live-bubble copy with any leaked tool-call markup elided (see
+  // stripLeakedToolCallXml above). Cheap: no-ops unless a "<" is present.
+  const displayStreamingContent = useMemo(
+    () => stripLeakedToolCallXml(streamingContent),
+    [streamingContent]
+  );
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingAttachments = useChatStore((s) => s.streamingAttachments);
   const toolInvocations = useChatStore((s) => s.toolInvocations);
@@ -405,7 +438,7 @@ export function ChatWindow({
         {showStreamingBubble && (
           <MessageBubble
             role="assistant"
-            content={streamingContent}
+            content={displayStreamingContent}
             sources={streamingSources}
             attachments={streamingAttachments}
             toolInvocations={toolInvocations}

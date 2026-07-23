@@ -5917,6 +5917,12 @@ async def _stream_generator(
                 "done": True,
                 "message_id": str(assistant.id),
                 "created_at": assistant.created_at.isoformat(),
+                # The authoritative persisted reply text. The client streamed
+                # the raw deltas, but the persisted copy can differ: leaked
+                # tool-call markup is stripped, and a synthesis-retry can
+                # replace an empty reply entirely. Without this field the
+                # client's bubble kept the raw junk until the next refetch.
+                "content": assistant.content,
                 "sources": sources_payload,
                 "tool_calls": tool_call_log or None,
                 "attachments": assistant_attachment_snaps or None,

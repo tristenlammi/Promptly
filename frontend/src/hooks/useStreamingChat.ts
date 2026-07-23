@@ -133,6 +133,12 @@ interface SSEPayload {
   retry_after?: number;
   message_id?: string;
   created_at?: string;
+  /** On the ``done`` payload: the authoritative persisted reply text.
+   *  Can differ from the accumulated deltas — the backend strips leaked
+   *  tool-call markup and may swap in a synthesis-retry answer at the
+   *  persistence boundary. Preferred over the local accumulation when
+   *  present; absent on older backends (falls back to the deltas). */
+  content?: string;
   stream_id?: string;
   // Search citations (attached to the ``tool_finished`` payload of
   // search-category tools and to the final ``done`` payload as the
@@ -469,7 +475,12 @@ export function useStreamingChat(): UseStreamingChatResult {
           // drop the last frame's worth of text.
           cancelScheduledFlush();
           flushDelta();
-          const currentContent = useChatStore.getState().streamingContent;
+          // Prefer the persisted text from the done payload — the backend
+          // strips leaked tool-call markup and may substitute a
+          // synthesis-retry answer, so the accumulated deltas can be
+          // stale/dirty. Older backends omit the field → keep the deltas.
+          const currentContent =
+            data.content ?? useChatStore.getState().streamingContent;
           if (data.sources) finalSources = data.sources;
           if (data.attachments) finalAttachments = data.attachments;
           if (data.message_id && data.created_at) {
