@@ -21,6 +21,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-23
+
+### Added
+- **Ollama Web Search** as a web-search provider: Ollama's hosted search
+  API (free tier with a free ollama.com account, API key auth). Joins the
+  admin-ordered failover chain like any other provider — a zero-cost,
+  off-instance alternative to self-hosted SearXNG.
+- `fetch_url` gained a second blocked-page rescue: when the direct crawl
+  is 403'd/empty and Tavily Extract can't recover it (or isn't
+  configured), Ollama's hosted `web_fetch` now takes a turn. The tool
+  chip shows "via Ollama" / "via Tavily" for whichever fetcher saved the
+  page.
+
 ## [0.2.1] - 2026-07-23
 
 ### Fixed

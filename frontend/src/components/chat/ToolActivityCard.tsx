@@ -157,8 +157,12 @@ function stepDetail(step: ActivityStep): string | null {
       bits.push(`via ${meta.provider} (fallback)`);
     }
     // A page that hard-blocked the direct crawler was recovered through
-    // Tavily's Extract API.
-    if (meta.via_tavily === true) {
+    // an off-instance fetcher (Tavily Extract or Ollama web_fetch).
+    // ``recovered_via`` supersedes the legacy ``via_tavily`` boolean —
+    // check it first so a new backend labels Ollama recoveries correctly.
+    if (meta.recovered_via === "ollama") {
+      bits.push("via Ollama");
+    } else if (meta.recovered_via === "tavily" || meta.via_tavily === true) {
       bits.push("via Tavily");
     }
     if (typeof meta.chart_count === "number" && meta.chart_count > 0) {

@@ -558,6 +558,64 @@ async def _search_openrouter(
 
 
 # ------------------------------------------------------------------
+# Ollama Web Search (hosted)
+# ------------------------------------------------------------------
+# Ollama's hosted search REST API (https://docs.ollama.com/capabilities/
+# web-search). Not the local Ollama runtime — the search runs on
+# ollama.com, authenticated with an API key from a (free) ollama.com
+# account. Generous free tier, so it's a natural zero-cost upgrade over
+# self-hosted SearXNG for instances that already lean on Ollama. The
+# endpoint caps ``max_results`` at 10 per request, so we clamp.
+_OLLAMA_SEARCH_URL = "https://ollama.com/api/web_search"
+
+
+async def _search_ollama(
+    provider: SearchProvider, query: str, count: int
+) -> list[SearchResult]:
+    api_key = _api_key(provider)
+    if not api_key:
+        raise SearchError(
+            "Ollama web search requires an API key from ollama.com"
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {"query": query, "max_results": max(1, min(count, 10))}
+
+    resp = await _safe_request(
+        "POST",
+        _OLLAMA_SEARCH_URL,
+        provider_label="Ollama",
+        headers=headers,
+        json=payload,
+    )
+    _check_status("Ollama", resp)
+
+    try:
+        data = resp.json()
+    except ValueError as e:
+        raise SearchError("Ollama returned non-JSON") from e
+
+    out: list[SearchResult] = []
+    for r in (data.get("results") or [])[:count]:
+        if not isinstance(r, dict):
+            continue
+        url = str(r.get("url") or "").strip()
+        if not url:
+            continue
+        out.append(
+            SearchResult(
+                title=str(r.get("title") or url).strip(),
+                url=url,
+                snippet=str(r.get("content") or "").strip(),
+            )
+        )
+    return out
+
+
+# ------------------------------------------------------------------
 # Dispatcher
 # ------------------------------------------------------------------
 _ADAPTERS = {
@@ -566,6 +624,7 @@ _ADAPTERS = {
     "tavily": _search_tavily,
     "google_pse": _search_google_pse,
     "openrouter": _search_openrouter,
+    "ollama": _search_ollama,
 }
 
 
@@ -616,6 +675,46 @@ async def tavily_extract(provider: SearchProvider, url: str) -> str | None:
     if not isinstance(first, dict):
         return None
     text = str(first.get("raw_content") or first.get("content") or "").strip()
+    return text or None
+
+
+_OLLAMA_FETCH_URL = "https://ollama.com/api/web_fetch"
+
+
+async def ollama_web_fetch(provider: SearchProvider, url: str) -> str | None:
+    """Fetch a page's readable content via Ollama's hosted web_fetch API.
+
+    Same job as :func:`tavily_extract` — the fetch runs on ollama.com's
+    infrastructure, so it can get past anti-bot walls that 403 a
+    self-hosted crawler. Free tier (same ollama.com API key as the
+    search adapter). Only meaningful for an ``ollama`` provider;
+    returns ``None`` for any other type or when nothing usable comes
+    back, so the caller keeps whatever error it already had.
+    """
+    if provider.type != "ollama":
+        return None
+    api_key = _api_key(provider)
+    if not api_key:
+        return None
+    try:
+        resp = await _safe_request(
+            "POST",
+            _OLLAMA_FETCH_URL,
+            provider_label="Ollama",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"url": url},
+        )
+        if not resp.is_success:
+            return None
+        data = resp.json()
+    except (SearchError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    text = str(data.get("content") or "").strip()
     return text or None
 
 

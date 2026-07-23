@@ -46,6 +46,11 @@ const TYPE_INFO: Record<
     hint: "API key from tavily.com — 1,000 free searches/month, no card. Recommended fallback (or primary).",
     needsKey: true,
   },
+  ollama: {
+    label: "Ollama Web Search",
+    hint: "Hosted search API from ollama.com (not your local Ollama) — free tier with a free account, API key from ollama.com/settings/keys. Runs off-instance, so it dodges the rate-limit walls that block SearXNG. Great primary or fallback.",
+    needsKey: true,
+  },
   searxng: {
     label: "SearXNG",
     hint: "Base URL of a self-hosted SearXNG instance (free, but upstream engines can rate-limit it).",

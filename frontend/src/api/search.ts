@@ -5,7 +5,8 @@ export type SearchProviderType =
   | "brave"
   | "tavily"
   | "google_pse"
-  | "openrouter";
+  | "openrouter"
+  | "ollama";
 
 export interface SearchProviderRow {
   id: string;

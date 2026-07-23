@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SearchProviderType = Literal[
-    "searxng", "brave", "tavily", "google_pse", "openrouter"
+    "searxng", "brave", "tavily", "google_pse", "openrouter", "ollama"
 ]
 
 
@@ -43,6 +43,8 @@ class SearchProviderCreate(BaseModel):
     #   * ``model`` — OpenRouter: pin a specific cheap model for the search
     #     completion (default ``openrouter/auto``). ``api_key`` is optional —
     #     falls back to the instance ``OPENROUTER_API_KEY``.
+    #   * ``api_key`` — Ollama: key from a (free) ollama.com account; the
+    #     search runs on Ollama's hosted API, not the local runtime.
     #   * ``result_count`` — int, optional per-provider override of the
     #     global ``SEARCH_RESULT_COUNT`` setting.
     config: dict[str, Any] = Field(default_factory=dict)
