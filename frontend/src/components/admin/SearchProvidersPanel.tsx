@@ -48,7 +48,7 @@ const TYPE_INFO: Record<
   },
   ollama: {
     label: "Ollama Web Search",
-    hint: "Hosted search API from ollama.com (not your local Ollama) — free tier with a free account, API key from ollama.com/settings/keys. Runs off-instance, so it dodges the rate-limit walls that block SearXNG. Great primary or fallback.",
+    hint: "Hosted search API from ollama.com (not your local Ollama) — API key from ollama.com/settings/keys. Heads up: the free tier is SMALL (unpublished, roughly a dozen searches per cycle in practice) — put it LAST in the chain as an emergency fallback. Its real value is the blocked-page fetch rescue, which fires rarely.",
     needsKey: true,
   },
   searxng: {

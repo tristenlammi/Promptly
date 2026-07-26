@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+- Ollama Web Search admin hint rewritten to be honest about the free
+  tier: it's small (unpublished; ~a dozen searches per cycle in
+  practice), so the guidance is now "last in the chain / blocked-page
+  rescue", not "great primary".
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
