@@ -299,6 +299,21 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             # now". Skip the noisy /api/health probe so a 1-second
             # healthcheck doesn't drown out real traffic.
             if request.url.path != "/api/health":
+                # Feed the runtime metrics window from the timing we just
+                # computed — no second middleware, no extra clock reads.
+                # Imported lazily so logging setup stays importable during
+                # bootstrap, before the DB layer exists.
+                try:
+                    from app.observability.metrics import record_request
+
+                    record_request(
+                        route=route,
+                        status_code=status_code,
+                        elapsed_ms=elapsed_ms,
+                    )
+                except Exception:  # noqa: BLE001 — metrics must never break a request
+                    pass
+
                 logging.getLogger("promptly.access").info(
                     "%s -> %s in %dms",
                     route,

@@ -21,6 +21,26 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-08
+
+### Added
+- **A Health tab in Admin → Console** showing what the app is actually
+  doing right now: database-pool usage against its ceiling, replies in
+  flight, background tasks, memory, request counts by status class, and
+  p50/p95/p99 response times. Promptly had no metrics of any kind, which
+  meant the recent resource-starvation fixes (a pooled connection held
+  for a whole generation, large uploads blocking the event loop,
+  background tasks being collected mid-flight) were all made blind —
+  with no way to confirm a fix held or to spot the next one before users
+  did. The pool bar is the one to watch: exhausting it also blocked the
+  health check, which got the container restarted mid-reply.
+- `GET /api/admin/metrics` (admin-only) backs the panel. Deliberately a
+  plain JSON snapshot rather than a Prometheus endpoint — the operator
+  here is an admin on a settings page, not an SRE with a scraper. Numbers
+  are collected in-process, cost nothing (counters plus a fixed-size
+  latency ring), and are fed from the timing the access log already
+  computes, so there's no second middleware and no extra clock reads.
+
 ## [0.4.2] - 2026-08-08
 
 ### Fixed

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDot,
+  HeartPulse,
   Loader2,
   Pause,
   Play,
@@ -14,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { HealthPanel } from "@/components/admin/HealthPanel";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { API_BASE_URL, authHeader } from "@/api/client";
@@ -27,16 +29,20 @@ import {
 import { cn } from "@/utils/cn";
 import type { ErrorGroupRow } from "@/api/types";
 
-type Tab = "live" | "errors";
+type Tab = "health" | "live" | "errors";
 type Level = "" | "INFO" | "WARNING" | "ERROR";
 
 const TAB_LABELS: Record<Tab, string> = {
+  health: "Health",
   live: "Live logs",
   errors: "Errors",
 };
 
 export function ConsolePanel() {
-  const [tab, setTab] = useState<Tab>("live");
+  // Health first: "is the app OK right now" is the question an admin
+  // opens this panel with; the log tail is what you read once you know
+  // something is wrong.
+  const [tab, setTab] = useState<Tab>("health");
 
   return (
     <div className="space-y-4">
@@ -58,7 +64,9 @@ export function ConsolePanel() {
                 : "text-[var(--text-muted)] hover:text-[var(--text)]"
             )}
           >
-            {t === "live" ? (
+            {t === "health" ? (
+              <HeartPulse className="h-3.5 w-3.5" />
+            ) : t === "live" ? (
               <CircleDot className="h-3.5 w-3.5" />
             ) : (
               <Bug className="h-3.5 w-3.5" />
@@ -68,7 +76,13 @@ export function ConsolePanel() {
         ))}
       </div>
 
-      {tab === "live" ? <LiveLogs /> : <ErrorsView />}
+      {tab === "health" ? (
+        <HealthPanel />
+      ) : tab === "live" ? (
+        <LiveLogs />
+      ) : (
+        <ErrorsView />
+      )}
     </div>
   );
 }

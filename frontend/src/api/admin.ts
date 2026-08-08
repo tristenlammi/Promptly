@@ -12,6 +12,7 @@ import type {
   ErrorEventDetail,
   ErrorEventRow,
   ErrorGroupRow,
+  RuntimeMetrics,
   UserRole,
 } from "./types";
 
@@ -386,6 +387,10 @@ export const adminApi = {
       "/admin/errors/groups",
       { params }
     );
+    return data;
+  },
+  async runtimeMetrics(): Promise<RuntimeMetrics> {
+    const { data } = await apiClient.get<RuntimeMetrics>("/admin/metrics");
     return data;
   },
   async errorGroupEvents(

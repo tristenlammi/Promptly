@@ -158,6 +158,26 @@ async def stream_logs(
 
 
 # --------------------------------------------------------------------
+# Runtime metrics
+# --------------------------------------------------------------------
+@router.get("/metrics")
+async def get_runtime_metrics(_: User = Depends(require_admin)) -> dict:
+    """Live process metrics for the admin health panel.
+
+    Deliberately not a Prometheus scrape endpoint: the operator here is an
+    admin looking at a settings page, not an SRE with a scraper. Returns a
+    plain JSON snapshot — see ``app/observability/metrics.py`` for what's
+    collected and why.
+
+    Values are process-local and reset on restart, which is honest: with a
+    single uvicorn worker there is exactly one process to describe.
+    """
+    from app.observability.metrics import snapshot
+
+    return snapshot()
+
+
+# --------------------------------------------------------------------
 # Errors — grouped + raw detail
 # --------------------------------------------------------------------
 @router.get("/errors/groups", response_model=list[ErrorGroupRow])

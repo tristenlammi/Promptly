@@ -461,6 +461,40 @@ export interface ErrorEventDetail extends ErrorEventRow {
   extra: Record<string, unknown> | null;
 }
 
+/** Live process metrics for the admin health panel (`GET /admin/metrics`).
+ *  Process-local and reset on restart — with a single uvicorn worker there is
+ *  exactly one process to describe. */
+export interface RuntimeMetrics {
+  uptime_seconds: number;
+  requests: {
+    total: number;
+    by_class: Record<string, number>;
+    error_rate_pct: number;
+  };
+  latency_ms: {
+    samples: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    max: number;
+    slowest_route: string | null;
+    slowest_ms: number;
+  };
+  db_pool:
+    | { available: false }
+    | {
+        available: true;
+        checked_out: number;
+        size: number;
+        overflow: number;
+        capacity: number;
+        utilisation_pct: number;
+      };
+  streams: { active: number; retained: number };
+  background_tasks: number;
+  memory_rss_bytes: number | null;
+}
+
 export interface ErrorGroupRow {
   fingerprint: string;
   level: string;
