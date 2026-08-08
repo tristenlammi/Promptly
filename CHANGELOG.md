@@ -21,6 +21,28 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-09
+
+### Added
+- **The chat streaming path has tests.** It's the most critical code in
+  the app and had none, because it genuinely needs a database and Redis to
+  do anything and the suite had no harness for either. There is one now —
+  a scratch database built by running the real Alembic chain (so a
+  migration that doesn't apply cleanly fails the suite), plus row
+  factories and a stubbed model provider. CI gained Postgres and Redis
+  service containers to run it, and fails rather than skips if they're
+  missing, so a broken service can't produce a green run that proved
+  nothing.
+- Four end-to-end tests over a real generation, two of which lock in fixes
+  previously verified only by hand: the reply is streamed **and persisted**
+  with token usage recorded, deleting a chat mid-reply still closes the
+  stream cleanly and writes nothing, and — the important one — **no
+  database connection is held during the model call**, which is what
+  stopped concurrent replies from exhausting the pool and restarting the
+  container. That last one is asserted by sampling pool occupancy at the
+  moment the provider is called; it confirmed the generation holds zero
+  connections while the model is working.
+
 ## [0.5.3] - 2026-08-09
 
 ### Fixed

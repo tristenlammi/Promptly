@@ -33,6 +33,45 @@ jobs:
     name: Backend tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # The chat/streaming tests need a real database and Redis — that path
+    # can't be meaningfully faked, which is why it had no coverage for so
+    # long. Without these services the DB-backed tests *skip* rather than
+    # fail (see tests/conftest.py), which would quietly give us a green run
+    # that proved nothing.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15 # same image as docker-compose
+        env:
+          POSTGRES_USER: promptly
+          POSTGRES_PASSWORD: promptly
+          POSTGRES_DB: promptly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U promptly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # conftest.py derives the scratch database name from this and points
+      # the whole app at it, so tests can never touch the primary DB.
+      DATABASE_URL: postgresql+asyncpg://promptly:promptly@localhost:5432/promptly
+      REDIS_URL: redis://localhost:6379/0
+      # Turn a "Postgres wasn't there" skip into a hard failure here, so a
+      # broken service container can't produce a green run.
+      PROMPTLY_REQUIRE_DB_TESTS: "1"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -48,9 +87,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # -rs reports skip reasons, so a skipped test is visible in the log
+      # rather than hiding inside a dot.
       - name: Run tests
         working-directory: backend
-        run: python -m pytest -q
+        run: python -m pytest -q -rs
 
   frontend:
     name: Frontend lint + build
