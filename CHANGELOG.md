@@ -21,6 +21,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-08
+
+### Fixed
+- **Background work can no longer vanish before it runs.** Nine places
+  fired off a task and discarded the handle, but the event loop keeps
+  only a *weak* reference to tasks — so Python was free to collect them
+  mid-flight. The affected work is all the kind whose disappearance is
+  silent: push notifications and inbox rows, workspace-memory refresh,
+  chat re-indexing, automation event fan-out, the Redis-unavailable
+  fallback for task runs, stream-session eviction, and the write that
+  persists captured errors (so the admin error log could drop exactly
+  the errors that happen under load). All now go through a shared helper
+  that holds a reference until completion **and logs failures** —
+  previously a crash in one of these surfaced only as asyncio's "Task
+  exception was never retrieved" during garbage collection, attributed
+  to nothing in particular.
+
 ## [0.4.1] - 2026-08-08
 
 ### Fixed

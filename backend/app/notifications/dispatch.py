@@ -36,6 +36,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+from app.background import spawn
 from app.database import SessionLocal
 from app.notifications.models import (
     Notification,
@@ -151,8 +152,11 @@ async def notify_user(
         actor_user_id=actor_user_id,
         workspace_id=workspace_id,
     )
+    # Check for a loop up front rather than letting ``spawn`` report it:
+    # ``spawn`` closes the coroutine when there's none, and this path wants
+    # to still run it synchronously.
     try:
-        asyncio.create_task(coro)
+        asyncio.get_running_loop()
     except RuntimeError:
         # No running event loop (e.g. called from a sync context —
         # we don't expect that, but defensive). Fall back to
@@ -163,6 +167,10 @@ async def notify_user(
             asyncio.run(coro)
         except Exception:
             logger.exception("notify_user: sync fallback dispatch failed")
+    else:
+        # Held until done — a dropped task here means a notification the
+        # user simply never receives, with nothing logged.
+        spawn(coro, name=f"notify-{category}-{user_id}")
 
 
 # Per-user inbox cap — enough scroll-back to catch up after a holiday

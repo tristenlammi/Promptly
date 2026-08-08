@@ -19,6 +19,7 @@ import uuid
 from arq import create_pool
 from arq.connections import RedisSettings
 
+from app.background import spawn
 from app.config import get_settings
 
 logger = logging.getLogger("promptly.tasks.queue")
@@ -58,7 +59,7 @@ async def enqueue_run(run_id: uuid.UUID) -> None:
     # Best-effort inline fallback.
     from app.tasks.runner import execute_run
 
-    asyncio.create_task(execute_run(run_id), name=f"task_run_{run_id}")
+    spawn(execute_run(run_id), name=f"task_run_{run_id}")
 
 
 async def enqueue_meeting(job_id: uuid.UUID) -> None:
@@ -76,7 +77,7 @@ async def enqueue_meeting(job_id: uuid.UUID) -> None:
         )
     from app.workspaces.meetings_runner import execute_meeting
 
-    asyncio.create_task(execute_meeting(job_id), name=f"meeting_job_{job_id}")
+    spawn(execute_meeting(job_id), name=f"meeting_job_{job_id}")
 
 
 __all__ = ["enqueue_run", "enqueue_meeting", "RUN_TASK", "RUN_MEETING"]

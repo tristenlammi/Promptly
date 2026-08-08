@@ -138,6 +138,7 @@ from app.chat.tools import (
     list_openai_tools,
 )
 from app.chat.tools.validation import ToolArgsInvalid, validate_tool_args
+from app.background import spawn as spawn_background
 from app.database import SessionLocal, get_db
 from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.models import UserFile
@@ -5915,7 +5916,10 @@ async def _stream_generator(
         if conv.workspace_id is not None:
             from app.workspaces.knowledge import maybe_refresh_workspace_memory
 
-            asyncio.create_task(maybe_refresh_workspace_memory(conv.id))
+            spawn_background(
+                maybe_refresh_workspace_memory(conv.id),
+                name=f"ws-memory-refresh-{conv.id}",
+            )
 
             # Opt-in chat-as-context (0090): keep the embedded transcript
             # fresh as the chat grows, but only for chats the user has
@@ -5923,8 +5927,9 @@ async def _stream_generator(
             if getattr(conv, "context_enabled", False):
                 from app.workspaces.knowledge import index_chat_for_workspace
 
-                asyncio.create_task(
-                    index_chat_for_workspace(conv.workspace_id, conv.id)
+                spawn_background(
+                    index_chat_for_workspace(conv.workspace_id, conv.id),
+                    name=f"index-chat-{conv.id}",
                 )
 
         # Phase 6 — cross-chat memory capture. Cheap regex pre-filter so

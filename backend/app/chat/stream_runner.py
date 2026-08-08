@@ -33,6 +33,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import AsyncGenerator, Awaitable, Callable
 
+from app.background import spawn
+
 logger = logging.getLogger("promptly.chat.stream")
 
 # How long a *finished* session lingers in memory after the generator
@@ -192,7 +194,7 @@ async def get_or_create_session(
                 # Schedule eviction so finished sessions don't pile up.
                 # Done in a fire-and-forget task so the runner's own
                 # task can complete cleanly.
-                asyncio.create_task(_evict_after_delay(stream_id))
+                spawn(_evict_after_delay(stream_id), name=f"evict-stream-{stream_id}")
 
         session.task = asyncio.create_task(_wrapper())
         return session

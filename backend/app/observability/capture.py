@@ -33,6 +33,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.background import spawn
 from app.database import SessionLocal
 from app.logging_setup import (
     get_request_id,
@@ -174,11 +175,10 @@ def capture_error(captured: CapturedError) -> None:
     loop (e.g. during shutdown) we silently drop, since by that point
     nothing useful is going to consume the row anyway.
     """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    loop.create_task(_persist_async(captured))
+    # Held until done: this is the write that persists captured errors, so a
+    # task collected mid-flight loses exactly the errors that show up under
+    # load — the ones the operator most needs to see.
+    spawn(_persist_async(captured), name="persist-error-event")
 
 
 # ---------------------------------------------------------------------

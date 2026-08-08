@@ -33,6 +33,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from app.background import spawn
 from app.database import SessionLocal
 from app.files.models import FileFolder
 from app.tasks.models import Task, TaskRun
@@ -60,13 +61,10 @@ def emit_workspace_event(
     """Schedule event dispatch for every matching automation homed in this
     workspace. Non-blocking; all failures are logged and swallowed —
     emitting an event must never break the request that caused it."""
-    try:
-        asyncio.create_task(
-            _dispatch(workspace_id=workspace_id, event=event, payload=payload),
-            name=f"ws-event-{event}-{workspace_id}",
-        )
-    except RuntimeError:  # no running loop — sync/test context
-        logger.warning("emit_workspace_event: no running loop; dropped")
+    spawn(
+        _dispatch(workspace_id=workspace_id, event=event, payload=payload),
+        name=f"ws-event-{event}-{workspace_id}",
+    )
 
 
 def emit_user_event(
@@ -78,13 +76,10 @@ def emit_user_event(
     """Personal-scope twin of :func:`emit_workspace_event` — matches the
     user's *personal* automations (``workspace_id IS NULL``), e.g. a file
     uploaded to their own Drive."""
-    try:
-        asyncio.create_task(
-            _dispatch(user_id=user_id, event=event, payload=payload),
-            name=f"user-event-{event}-{user_id}",
-        )
-    except RuntimeError:  # no running loop — sync/test context
-        logger.warning("emit_user_event: no running loop; dropped")
+    spawn(
+        _dispatch(user_id=user_id, event=event, payload=payload),
+        name=f"user-event-{event}-{user_id}",
+    )
 
 
 def _trigger_matches(
