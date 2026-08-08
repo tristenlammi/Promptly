@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-09
+
+### Added
+- Tests for the **multi-hop tool path** in chat — a tool is called, its
+  result feeds the next model hop, and the final reply persists with the
+  per-turn tool log the Tool Activity Card renders. The streaming tests
+  added in 0.6.0 all ran with tools disabled, so this half was still
+  uncovered. Also pins the property that no database connection is held
+  across a tool call, so a future refactor can't quietly reintroduce one.
+
 ## [0.6.0] - 2026-08-09
 
 ### Added

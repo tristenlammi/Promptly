@@ -75,7 +75,9 @@ async def _seed_turn(db, conversation):
     return msg
 
 
-async def _run_stream(monkeypatch, user, conversation, user_msg, stub):
+async def _run_stream(
+    monkeypatch, user, conversation, user_msg, stub, *, tools_enabled=False
+):
     """Drive the generator end to end and return the SSE chunks it yielded."""
     from app.chat import router as chat_router
     from app.chat.service import enqueue_stream
@@ -95,7 +97,7 @@ async def _run_stream(monkeypatch, user, conversation, user_msg, stub):
             "web_search_mode": "off",
             "temperature": 0.7,
             "max_tokens": None,
-            "tools_enabled": False,
+            "tools_enabled": tools_enabled,
             "reasoning_effort": None,
         },
     )
@@ -265,3 +267,93 @@ async def test_deleted_conversation_mid_stream_does_not_persist(
         .all()
     )
     assert orphans == [], "no message should be written to a deleted chat"
+
+
+def _stub_tool_then_reply(*, on_tool_dispatch=None):
+    """Two-hop provider stub: ask for the ``echo`` tool, then reply.
+
+    Exercises the tool-dispatch path, which the other tests deliberately
+    skip (``tools_enabled: False``). Without this, changes to how tool
+    calls get their database session would be unguarded.
+    """
+    from app.models_config.provider import ToolCallDelta
+
+    calls = {"n": 0}
+
+    async def _stream(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            yield ToolCallDelta(
+                index=0, id="call_1", name="echo", arguments='{"text": "ping"}'
+            )
+            yield FinishEvent(reason="tool_calls")
+            return
+        # Hop 2 — the model has the tool result and answers.
+        if on_tool_dispatch is not None:
+            on_tool_dispatch()
+        yield TextDelta(text="You said ping")
+        yield UsageEvent(prompt_tokens=5, completion_tokens=3, cost_usd=0.0)
+        yield FinishEvent(reason="stop")
+
+    return _stream
+
+
+async def test_tool_call_round_trip(db, user, conversation, monkeypatch):
+    """A tool call runs, its result feeds the next hop, and the final reply
+    persists — the multi-hop path, end to end."""
+    from app.chat.models import Message
+
+    user_msg = await _seed_turn(db, conversation)
+
+    chunks = await _run_stream(
+        monkeypatch, user, conversation, user_msg,
+        _stub_tool_then_reply(),
+        tools_enabled=True,
+    )
+
+    joined = "".join(chunks)
+    assert "echo" in joined, "the tool invocation should surface as an SSE event"
+
+    rows = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .where(Message.role == "assistant")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].content == "You said ping"
+    # The per-turn tool log is what the Tool Activity Card renders.
+    assert rows[0].tool_calls, "the tool call should be recorded on the reply"
+    assert rows[0].tool_calls[0]["name"] == "echo"
+
+
+async def test_no_connection_is_held_across_the_tool_call(
+    db, user, conversation, monkeypatch
+):
+    """Tools legitimately need the database, but a long one (deep research,
+    sub-agents, code execution) shouldn't pin a pooled connection for its
+    whole duration. Sampled once the tool has run and the next hop begins.
+    """
+    from app.database import engine
+
+    user_msg = await _seed_turn(db, conversation)
+    seen: list[int] = []
+
+    await _run_stream(
+        monkeypatch, user, conversation, user_msg,
+        _stub_tool_then_reply(on_tool_dispatch=lambda: seen.append(
+            engine.pool.checkedout()
+        )),
+        tools_enabled=True,
+    )
+
+    assert seen, "the second hop never ran"
+    assert seen[0] <= 1, (
+        f"a connection was still held entering the post-tool hop "
+        f"(saw {seen[0]})"
+    )
