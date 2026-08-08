@@ -21,6 +21,24 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-09
+
+### Fixed
+- **A crashed worker no longer disables an automation forever.** A run
+  moves `pending` → `running` → done, and only the worker moved it out of
+  the first two states — so if the worker was killed mid-run (OOM,
+  redeploy, `docker compose down`) the row stayed non-terminal
+  permanently. That mattered because two things treat a non-terminal run
+  as "still in flight": a task set to skip overlapping runs was then
+  skipped on **every future tick** (logged once at INFO, so the
+  automation just quietly stopped), and webhook triggers counted the
+  orphan toward their queue cap and eventually returned a permanent 429.
+  A sweeper now fails runs that have outlived any legitimate execution —
+  90 minutes for `running`, comfortably past the worker's own 55-minute
+  job timeout, and 30 for `pending` — with a message distinguishing "the
+  worker died mid-run" from "the worker never picked it up", and a
+  warning in the log because a reaped run means work was lost.
+
 ## [0.5.2] - 2026-08-09
 
 ### Changed

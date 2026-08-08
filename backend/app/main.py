@@ -30,6 +30,7 @@ from app.chat.temporary_sweeper import start_sweeper
 from app.files.chat_upload_sweeper import start_chat_upload_sweeper
 from app.chat.semantic_index import start_semantic_indexer
 from app.tasks.scheduler import start_scheduler
+from app.tasks.stale_run_reaper import start_stale_run_reaper
 from app.redis_client import close_redis, redis
 
 # Configure the JSON logger + in-memory ring buffer *before* any other
@@ -84,6 +85,10 @@ async def lifespan(_: FastAPI):
     # message still references (the delete-conversation hook covers the
     # common case in real time; this catches edits / stragglers).
     chat_upload_sweeper_task = start_chat_upload_sweeper()
+    # Fail automation runs whose worker died mid-flight. Without this a
+    # single orphaned row permanently blocks its schedule (see the
+    # module docstring) with no error surfaced anywhere.
+    stale_run_reaper_task = start_stale_run_reaper()
     try:
         yield
     finally:
@@ -100,6 +105,7 @@ async def lifespan(_: FastAPI):
             scheduler_task,
             indexer_task,
             chat_upload_sweeper_task,
+            stale_run_reaper_task,
         ):
             bg.cancel()
             try:
