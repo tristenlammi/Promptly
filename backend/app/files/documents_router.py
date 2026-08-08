@@ -95,7 +95,7 @@ from app.files.schemas import (
 from app.files.storage import (
     MAX_FILE_BYTES,
     absolute_path,
-    copy_stream_to_disk,
+    copy_stream_to_disk_async,
     delete_blob,
     ensure_bucket,
     storage_path_for,
@@ -1115,7 +1115,7 @@ async def upload_document_asset(
     ensure_bucket(document.user_id)
 
     try:
-        size = copy_stream_to_disk(
+        size = await copy_stream_to_disk_async(
             file.file, rel_path, size_limit=min(DOCUMENT_ASSET_MAX_BYTES, MAX_FILE_BYTES)
         )
     except ValueError:

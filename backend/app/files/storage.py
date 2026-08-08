@@ -14,6 +14,7 @@ client-supplied path can't escape the root.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import uuid
@@ -102,6 +103,31 @@ def copy_stream_to_disk(src, dest_relative: str, size_limit: int = MAX_FILE_BYTE
     return total
 
 
+async def copy_stream_to_disk_async(
+    src, dest_relative: str, size_limit: int = MAX_FILE_BYTES
+) -> int:
+    """Async wrapper for :func:`copy_stream_to_disk`.
+
+    **Use this from any async request handler.** The synchronous version
+    blocks the event loop for the whole write, and Promptly runs a single
+    uvicorn worker on purpose (SSE reconnect state is in-process), so there
+    is no second worker to absorb the stall — a 100 MB meeting recording
+    froze the entire backend for every user until the write finished: no
+    chat tokens, no SSE, not even the health check.
+
+    ``UploadFile.file`` is a ``SpooledTemporaryFile``; handing it to a
+    worker thread is safe because only this coroutine holds it.
+    """
+    return await asyncio.to_thread(
+        copy_stream_to_disk, src, dest_relative, size_limit
+    )
+
+
+async def read_text_async(relative: str, max_bytes: int) -> str:
+    """Async wrapper for :func:`read_text` — same reasoning as above."""
+    return await asyncio.to_thread(read_text, relative, max_bytes)
+
+
 def read_text(relative: str, max_bytes: int) -> str:
     """Read a blob as UTF-8 text up to `max_bytes`. Tolerates encoding errors."""
     path = absolute_path(relative)
@@ -120,6 +146,8 @@ __all__ = [
     "MAX_FILE_BYTES",
     "absolute_path",
     "copy_stream_to_disk",
+    "copy_stream_to_disk_async",
+    "read_text_async",
     "delete_blob",
     "ensure_bucket",
     "read_text",

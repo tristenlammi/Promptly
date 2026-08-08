@@ -58,7 +58,7 @@ from app.files.safety import (
 from app.files.storage import (
     MAX_FILE_BYTES,
     absolute_path,
-    copy_stream_to_disk,
+    copy_stream_to_disk_async,
     delete_blob,
     ensure_bucket,
     storage_path_for,
@@ -353,7 +353,7 @@ async def upload_drive_file(
     rel_path = storage_path_for(owner.id, new_id, ext)
     ensure_bucket(owner.id)
     try:
-        size = copy_stream_to_disk(
+        size = await copy_stream_to_disk_async(
             file.file, rel_path, size_limit=MAX_FILE_BYTES
         )
     except ValueError:

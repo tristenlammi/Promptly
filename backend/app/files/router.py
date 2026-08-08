@@ -21,6 +21,7 @@ Phase 3 hardening (added on top of the original ACL model):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets as _secrets
@@ -132,7 +133,7 @@ from app.files.system_folders import (
 from app.files.storage import (
     MAX_FILE_BYTES,
     absolute_path,
-    copy_stream_to_disk,
+    copy_stream_to_disk_async,
     delete_blob,
     ensure_bucket,
     storage_path_for,
@@ -1119,7 +1120,9 @@ async def upload_file(
     ensure_bucket(owner_id)
 
     try:
-        size = copy_stream_to_disk(file.file, rel_path, size_limit=MAX_FILE_BYTES)
+        size = await copy_stream_to_disk_async(
+            file.file, rel_path, size_limit=MAX_FILE_BYTES
+        )
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -2256,11 +2259,19 @@ async def bulk_zip(
             "Download in smaller batches.",
         )
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for arcname, ap in entries:
-            zf.write(ap, arcname=arcname)
-    buf.seek(0)
+    # Deflate is CPU-bound and this accepts up to 1 GB, so building the
+    # archive inline would freeze the single uvicorn worker — and with it
+    # every other user's chat stream — for as long as the compression took.
+    # No awaits in this loop, so nothing yields; it has to go to a thread.
+    def _build_zip() -> io.BytesIO:
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as zf:
+            for arcname, ap in entries:
+                zf.write(ap, arcname=arcname)
+        b.seek(0)
+        return b
+
+    buf = await asyncio.to_thread(_build_zip)
 
     return StreamingResponse(
         buf,

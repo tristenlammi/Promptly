@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-08
+
+### Fixed
+- **Large file operations no longer freeze the whole backend.** Promptly
+  runs a single uvicorn worker by design, so a synchronous write in an
+  async handler stalls every user at once — no chat tokens, no SSE, not
+  even the health check. Uploading a meeting recording (allowed up to
+  100 MB) did exactly that, as did downloading a folder as a zip, which
+  deflate-compresses up to 1 GB inline. Both now run off the event loop.
+  Covered by tests that race a heartbeat against the write, so the
+  regression is caught rather than remembered.
+
 ## [0.4.0] - 2026-08-08
 
 ### Added

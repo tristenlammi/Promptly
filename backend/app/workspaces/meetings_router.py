@@ -119,11 +119,13 @@ async def create_meeting_job(
     db.add(job)
     await db.flush()
 
-    from app.files.storage import copy_stream_to_disk, delete_blob
+    from app.files.storage import copy_stream_to_disk_async, delete_blob
 
     rel = f"meetings/{job.id}{ext}"
     try:
-        copy_stream_to_disk(file.file, rel, size_limit=_MAX_UPLOAD_BYTES)
+        await copy_stream_to_disk_async(
+            file.file, rel, size_limit=_MAX_UPLOAD_BYTES
+        )
     except ValueError:
         await db.rollback()
         raise HTTPException(
