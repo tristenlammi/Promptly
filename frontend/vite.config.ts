@@ -193,7 +193,35 @@ export default defineConfig({
           if (id.includes("virtual:hunspell/")) {
             return id.split("/").pop();
           }
+          // Vite's ~1 kB dynamic-import helper. Its module id is the
+          // virtual ``\0vite/preload-helper``, which contains no
+          // ``node_modules`` — so this MUST sit above the guard below or
+          // it never matches. Left unassigned, Rollup buries it in
+          // whichever chunk needs it first (excalidraw), which forces the
+          // entry to statically import that 4.6 MB chunk just to reach it.
+          if (id.includes("vite/preload-helper")) {
+            return "vite-preload";
+          }
           if (!id.includes("node_modules")) return undefined;
+          // DOMPurify is imported eagerly by the chat markdown renderer AND
+          // by Excalidraw. Matching no rule here, it was left unassigned —
+          // which lets Rollup place the shared module wherever it likes, and
+          // it chose to bury it inside the excalidraw chunk. The entry then
+          // had to *statically* import 4.6 MB of whiteboard editor purely to
+          // sanitize a message:
+          //
+          //   import { x as purify, ah as __vitePreload } from "./excalidraw-…"
+          //
+          // That static edge is also what put excalidraw (and fortunesheet,
+          // and reactflow behind it) into index.html's modulepreload list on
+          // every page load — ~7.4 MB fetched to open a chat.
+          //
+          // Pinning it to its own 23 kB chunk keeps the heavy editors
+          // genuinely dynamic. There is only one copy in node_modules; this
+          // is about *placement*, not deduplication.
+          if (id.includes("dompurify")) {
+            return "sanitize";
+          }
           // The whiteboard editor is large and only loaded on the
           // (lazily mounted) workspace canvas — keep it out of the main
           // chunk. ``roughjs`` is its hand-drawn renderer.

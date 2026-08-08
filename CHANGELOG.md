@@ -21,6 +21,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-09
+
+### Changed
+- **Opening a chat no longer downloads the whiteboard and spreadsheet
+  editors.** The browser was preloading ~10.6 MB of JavaScript on every
+  page load; it now preloads **3.2 MB**. Excalidraw (4.6 MB),
+  Fortune-Sheet (2.7 MB) and React Flow (163 kB) are genuinely fetched on
+  demand, verified on a cold load with the service worker cleared.
+  Cause: DOMPurify and Vite's dynamic-import helper matched no chunking
+  rule, so Rollup was free to place those shared modules inside the
+  excalidraw chunk — which meant the entry had to statically import 4.6 MB
+  of whiteboard editor just to sanitize a message, dragging the other
+  editors along behind it. Both are now pinned to their own small chunks.
+
 ## [0.5.1] - 2026-08-09
 
 ### Changed
