@@ -322,6 +322,22 @@ export function WorkspaceDetailPage() {
     id ?? ""
   );
 
+  // Item-link preview (0148): clicking an @-mention pill (note) or a linked
+  // shape (canvas) opens the item in a modal rather than jumping to it.
+  // Resolve the full tree node so the preview knows the item's title/ref.
+  // NOTE: these must stay ABOVE the `!id` early return — a hook that runs
+  // only on some renders changes the hook count and crashes React.
+  const [previewNode, setPreviewNode] = useState<WorkspaceItemNode | null>(
+    null
+  );
+  const handlePreview = useCallback(
+    (node: WorkspaceItemNode) => {
+      const full = tree ? findNode(tree, node.id) : null;
+      setPreviewNode(full ?? node);
+    },
+    [tree, findNode]
+  );
+
   if (!id) return null;
 
   const isArchived = Boolean(workspace?.archived_at);
@@ -395,19 +411,6 @@ export function WorkspaceDetailPage() {
     }
   };
 
-  // Item-link preview (0148): clicking an @-mention pill (note) or a linked
-  // shape (canvas) opens the item in a modal rather than jumping to it.
-  // Resolve the full tree node so the preview knows the item's title/ref.
-  const [previewNode, setPreviewNode] = useState<WorkspaceItemNode | null>(
-    null
-  );
-  const handlePreview = useCallback(
-    (node: WorkspaceItemNode) => {
-      const full = tree ? findNode(tree, node.id) : null;
-      setPreviewNode(full ?? node);
-    },
-    [tree, findNode]
-  );
   const openPreviewFully = (node: WorkspaceItemNode) => {
     setPreviewNode(null);
     handleSelect(node);

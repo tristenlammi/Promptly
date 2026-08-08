@@ -15,6 +15,8 @@ import { authApi } from "@/api/auth";
 import { apiErrorMessage } from "@/utils/apiError";
 import { customModelsApi } from "@/api/customModels";
 import { mfaApi } from "@/api/mfa";
+import { modelsApi } from "@/api/models";
+import type { ProviderType } from "@/api/types";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
 import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
@@ -24,23 +26,32 @@ import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
  * ``requires_setup: true``.
  *
  * Step 1 — create the initial admin account (auto-logs in).
- * Step 2 — declare the public URL the operator wants to reach
+ * Step 2 — connect a model provider. This one comes first among the
+ *          optional-ish steps because without it the app finishes setup
+ *          unable to answer a single message — the previous wizard
+ *          configured SMTP and CORS but never the model, so a fresh
+ *          install landed on a chat screen that couldn't reply. Auto-
+ *          satisfied when ``bootstrap.py`` already seeded a provider
+ *          from an ``*_API_KEY`` env var.
+ * Step 3 — declare the public URL the operator wants to reach
  *          Promptly on. Persists to ``app_settings.public_origins``
  *          which feeds the dynamic CORS middleware on every request.
  *          Skippable for "I'll set this up later" / "I'm only using
  *          this on localhost".
- * Step 3 — pick how Custom-Model knowledge gets embedded (local
+ * Step 4 — pick how Custom-Model knowledge gets embedded (local
  *          Ollama vs API model). Persists to ``app_settings``.
- * Step 4 — offer two-step verification for the freshly-created admin
+ * Step 5 — outgoing email (SMTP), optional.
+ * Step 6 — offer two-step verification for the freshly-created admin
  *          account (embeds the self-service ``EnrollmentWizard``).
  *
- * The user can skip steps 2–4 entirely; CORS will continue to accept
+ * The user can skip steps 2–6 entirely; CORS will continue to accept
  * localhost requests, Custom Models just won't be usable until an
  * embedding provider is configured from the admin panel later, and
- * MFA stays available under Account → Security.
+ * MFA stays available under Account → Security. Skipping step 2 warns
+ * explicitly that chat won't work until a provider is added.
  */
-type Step = 1 | 2 | 3 | 4 | 5;
-const TOTAL_STEPS: Step = 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6;
+const TOTAL_STEPS: Step = 6;
 
 export function SetupPage() {
   const [step, setStep] = useState<Step>(1);
@@ -91,10 +102,14 @@ export function SetupPage() {
       const res = await authApi.setup(email.trim(), username.trim(), password);
       setUser(res.user);
       setAccessToken(res.access_token);
-      setStatus("authenticated");
-      // Account is created and we're logged in — advance to the
-      // public-URL step so CORS gets configured before the operator
-      // ever tries to load Promptly from a public hostname.
+      // NOTE: deliberately NOT flipping auth status to "authenticated" here.
+      // The whole wizard only renders while status is "needs_setup"
+      // (App.tsx), and the authenticated branch redirects /setup → /chat — so
+      // flipping it at account-creation time booted the operator straight
+      // into the app and made every step after this one unreachable. The
+      // remaining steps still make authenticated calls: the axios client
+      // reads `accessToken`, which is set above, and never looks at `status`.
+      // The flip happens in `finish()` instead.
       setStep(2);
     } catch (err) {
       setError(extractError(err, "Setup failed"));
@@ -103,7 +118,14 @@ export function SetupPage() {
     }
   };
 
-  const finish = () => navigate("/chat", { replace: true });
+  /** Leaving the wizard is the one place auth status flips to
+   *  "authenticated" — that's what swaps App.tsx over to the real app
+   *  routes. Must happen before the navigate, or the "needs_setup"
+   *  catch-all bounces /chat straight back to /setup. */
+  const finish = () => {
+    setStatus("authenticated");
+    navigate("/chat", { replace: true });
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4 text-[var(--text)]">
@@ -120,12 +142,14 @@ export function SetupPage() {
               {step === 1
                 ? "Create the first administrator account to get started."
                 : step === 2
-                  ? "Where will people reach Promptly?"
+                  ? "Connect a model so Promptly can answer."
                   : step === 3
-                    ? "How should knowledge libraries be embedded?"
+                    ? "Where will people reach Promptly?"
                     : step === 4
-                      ? "Set up outgoing email (optional)."
-                      : "One last thing — protect your admin account."}
+                      ? "Choose an embedding model — the one that powers search."
+                      : step === 5
+                        ? "Set up outgoing email (optional)."
+                        : "One last thing — protect your admin account."}
             </p>
           </div>
         </div>
@@ -148,13 +172,15 @@ export function SetupPage() {
           />
         )}
 
-        {step === 2 && <PublicUrlStep onContinue={() => setStep(3)} />}
+        {step === 2 && <ProviderStep onDone={() => setStep(3)} />}
 
-        {step === 3 && <EmbeddingStep onDone={() => setStep(4)} />}
+        {step === 3 && <PublicUrlStep onContinue={() => setStep(4)} />}
 
-        {step === 4 && <EmailStep onDone={() => setStep(5)} />}
+        {step === 4 && <EmbeddingStep onDone={() => setStep(5)} />}
 
-        {step === 5 && <MfaStep email={email} onFinish={finish} />}
+        {step === 5 && <EmailStep onDone={() => setStep(6)} />}
+
+        {step === 6 && <MfaStep email={email} onFinish={finish} />}
       </div>
     </div>
   );
@@ -266,7 +292,7 @@ function AccountStep({
 }
 
 // --------------------------------------------------------------------
-// Step 2 — public URL / CORS
+// Step 3 — public URL / CORS
 // --------------------------------------------------------------------
 
 function PublicUrlStep({ onContinue }: { onContinue: () => void }) {
@@ -424,7 +450,7 @@ function PublicUrlStep({ onContinue }: { onContinue: () => void }) {
 }
 
 // --------------------------------------------------------------------
-// Step 3 — embedding provider
+// Step 4 — embedding model
 // --------------------------------------------------------------------
 
 function EmbeddingStep({ onDone }: { onDone: () => void }) {
@@ -454,29 +480,54 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-        Custom Models let you attach a knowledge library of files. Those files
-        get chunked and embedded so the model can retrieve relevant context at
-        chat time. Pick an embedding backend — you can change this later in
-        Admin → Models.
+      {/* Say what this is, plainly and up front. The old copy opened with a
+          paragraph about Custom Models and buried "pick an embedding backend"
+          at the end — and because the tiles looked almost identical to the
+          chat-provider tiles two steps earlier, it read as picking the same
+          thing twice. Name the thing, then say how it differs from the chat
+          model. */}
+      <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
+        <div className="text-sm font-medium text-[var(--text)]">
+          Embedding model
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+          This is the model that powers{" "}
+          <span className="font-medium text-[var(--text)]">search</span> — it
+          turns your files, notes and workspace content into vectors so
+          Promptly can find the relevant parts to answer from.
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-[var(--text-muted)]">
+          It's{" "}
+          <span className="font-medium text-[var(--text)]">
+            not the chat model
+          </span>{" "}
+          you connected earlier and it never writes replies. Without one, file
+          search and workspace knowledge stay switched off.
+        </p>
+      </div>
+
+      <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+        You can change this later in Admin → Models.
       </p>
 
       <ProviderCard
         icon={<HardDrive className="h-5 w-5" />}
-        title="Local (Ollama)"
-        subtitle="Bundled — runs entirely on this server. Recommended."
-        bullet="Uses nomic-embed-text (270 MB, downloaded automatically)"
+        title="Local embedding model"
+        subtitle="Bundled Ollama — runs entirely on this server. Recommended."
+        bullet="Downloads nomic-embed-text (270 MB) automatically"
         selected={choice === "local"}
         loading={loading && choice === "local"}
         disabled={done || loading}
         onClick={() => choose("local")}
       />
 
+      {/* This tile configures nothing — it defers to the admin panel. The old
+          "API provider" label implied it set something up here. */}
       <ProviderCard
         icon={<Cloud className="h-5 w-5" />}
-        title="API provider"
-        subtitle="Use OpenAI, Gemini, or another OpenAI-compatible API."
-        bullet="Configure in Admin → Models after setup finishes"
+        title="Cloud embedding model — set up later"
+        subtitle="OpenAI, Gemini, or any OpenAI-compatible API."
+        bullet="Nothing is configured now; you'll finish this in Admin → Models"
         selected={choice === "skip"}
         disabled={done || loading}
         onClick={() => choose("skip")}
@@ -491,6 +542,23 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
         </div>
       )}
 
+      {/* Confirm what actually happened — picking a tile used to do nothing
+          visible except enable Continue, which left "did that work?" open. */}
+      {done && !error && (
+        <div
+          className={[
+            "rounded-card border px-3 py-2 text-xs",
+            choice === "local"
+              ? "border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+          ].join(" ")}
+        >
+          {choice === "local"
+            ? "Local embedding model configured — file and workspace search are on."
+            : "No embedding model set yet. File and workspace search stay off until you add one in Admin → Models."}
+        </div>
+      )}
+
       <Button
         type="button"
         variant="primary"
@@ -500,6 +568,263 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
       >
         Continue
       </Button>
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------
+// Step 2 — connect a model provider
+// --------------------------------------------------------------------
+
+/** The handful of providers worth offering during first-run. Everything else
+ *  (Gemini, DeepSeek, Atlas, any OpenAI-compatible endpoint) is available in
+ *  Admin → Models afterwards; this step optimises for "get to a working chat",
+ *  not for completeness. `base_url` is left null on purpose — the backend
+ *  resolves a per-type default at call time (models_config/provider.py). */
+const SETUP_PROVIDERS: {
+  type: ProviderType;
+  name: string;
+  title: string;
+  subtitle: string;
+  bullet: string;
+  keyless?: boolean;
+  keyHint?: string;
+}[] = [
+  {
+    type: "openrouter",
+    name: "OpenRouter",
+    title: "OpenRouter",
+    subtitle: "One key, 300+ models. Recommended.",
+    bullet: "Anthropic, OpenAI, Google, Llama and more from a single key",
+    keyHint: "sk-or-...",
+  },
+  {
+    type: "anthropic",
+    name: "Anthropic",
+    title: "Anthropic",
+    subtitle: "Claude models, direct from Anthropic.",
+    bullet: "console.anthropic.com → API keys",
+    keyHint: "sk-ant-...",
+  },
+  {
+    type: "openai",
+    name: "OpenAI",
+    title: "OpenAI",
+    subtitle: "GPT models, direct from OpenAI.",
+    bullet: "platform.openai.com → API keys",
+    keyHint: "sk-...",
+  },
+  {
+    type: "ollama",
+    name: "Ollama",
+    title: "Local (Ollama)",
+    subtitle: "Models running on this machine. No API key.",
+    bullet: "Expects Ollama on http://localhost:11434",
+    keyless: true,
+  },
+];
+
+function ProviderStep({ onDone }: { onDone: () => void }) {
+  const [picked, setPicked] = useState<ProviderType | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [skipped, setSkipped] = useState(false);
+  const [modelCount, setModelCount] = useState<number | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  const choice = SETUP_PROVIDERS.find((p) => p.type === picked) ?? null;
+
+  // An operator who set OPENROUTER_API_KEY (or similar) in .env already has a
+  // provider seeded by bootstrap.py — don't make them configure a second one.
+  useEffect(() => {
+    let alive = true;
+    modelsApi
+      .list()
+      .then((providers) => {
+        if (!alive) return;
+        const existing = providers.find((p) => p.enabled);
+        if (existing) {
+          setDone(true);
+          setModelCount(existing.models?.length ?? 0);
+          setPicked(existing.type);
+        }
+      })
+      .catch(() => {
+        /* Non-fatal — fall through to the manual form. */
+      })
+      .finally(() => alive && setChecking(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const connect = async () => {
+    if (!choice) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const provider = await modelsApi.create({
+        name: choice.name,
+        type: choice.type,
+        // Null base_url → the backend's per-type default applies.
+        base_url: null,
+        api_key: choice.keyless ? null : apiKey.trim(),
+        enabled: true,
+      });
+      // Creating a provider doesn't populate its model list; without this the
+      // chat picker would still be empty and setup would "succeed" into the
+      // exact broken state this step exists to prevent.
+      let count = 0;
+      try {
+        const withModels = await modelsApi.fetchModels(provider.id);
+        count = withModels.models?.length ?? 0;
+      } catch {
+        // The provider saved fine but the model list couldn't be fetched
+        // (bad key, provider down, Ollama not running). Say so rather than
+        // silently continuing — but keep the provider so it can be fixed
+        // in Admin → Models instead of re-entered.
+        setError(
+          "Saved, but couldn't load models from that provider. Check the API key (or that Ollama is running), then use Refresh models in Admin → Models."
+        );
+        setDone(true);
+        setModelCount(0);
+        return;
+      }
+      setModelCount(count);
+      setDone(true);
+    } catch (err) {
+      setError(extractError(err, "Could not connect that provider"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (checking) {
+    return (
+      <div className="py-6 text-center text-xs text-[var(--text-muted)]">
+        Checking for existing providers…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+        Promptly needs at least one model provider before it can answer
+        anything. Pick one now — you can add more later in Admin → Models.
+      </p>
+
+      {!done &&
+        SETUP_PROVIDERS.map((p) => (
+          <ProviderCard
+            key={p.type}
+            icon={p.type === "ollama" ? <HardDrive className="h-5 w-5" /> : <Cloud className="h-5 w-5" />}
+            title={p.title}
+            subtitle={p.subtitle}
+            bullet={p.bullet}
+            selected={picked === p.type}
+            disabled={loading}
+            onClick={() => {
+              setPicked(p.type);
+              setError(null);
+              setSkipped(false);
+            }}
+          />
+        ))}
+
+      {!done && choice && !choice.keyless && (
+        <div className="space-y-1">
+          <label
+            htmlFor="setup-api-key"
+            className="text-xs font-medium text-[var(--text-muted)]"
+          >
+            {choice.name} API key
+          </label>
+          <input
+            id="setup-api-key"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={choice.keyHint}
+            disabled={loading}
+            className="w-full rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+          />
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Stored encrypted on this server. It never leaves your instance
+            except to call {choice.name}.
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <div
+          role="alert"
+          className="rounded-card border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400"
+        >
+          {error}
+        </div>
+      )}
+
+      {done && !error && (
+        <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--text-muted)]">
+          {modelCount
+            ? `Connected — ${modelCount} model${modelCount === 1 ? "" : "s"} available.`
+            : "Provider connected."}
+        </div>
+      )}
+
+      {skipped && (
+        <div
+          role="alert"
+          className="rounded-card border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+        >
+          Chat won't work until you add a provider. You can do it any time from
+          Admin → Models.
+        </div>
+      )}
+
+      {!done && (
+        <Button
+          type="button"
+          variant="primary"
+          className="w-full"
+          disabled={!choice || loading || (!choice.keyless && !apiKey.trim())}
+          onClick={connect}
+        >
+          {loading ? "Connecting…" : "Connect"}
+        </Button>
+      )}
+
+      {done ? (
+        <Button
+          type="button"
+          variant="primary"
+          className="w-full"
+          onClick={onDone}
+        >
+          Continue
+        </Button>
+      ) : skipped ? (
+        <button
+          type="button"
+          onClick={onDone}
+          className="w-full text-center text-xs text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text)]"
+        >
+          Continue without a provider
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSkipped(true)}
+          className="w-full text-center text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+        >
+          Skip for now
+        </button>
+      )}
     </div>
   );
 }
@@ -566,7 +891,7 @@ function ProviderCard({
 }
 
 // --------------------------------------------------------------------
-// Step 4 — outgoing email (SMTP)
+// Step 5 — outgoing email (SMTP)
 // --------------------------------------------------------------------
 
 function EmailStep({ onDone }: { onDone: () => void }) {
@@ -860,7 +1185,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
   );
 }
 
-/** Step 4 — offer MFA for the freshly-created admin account. Embeds the
+/** Step 6 — offer MFA for the freshly-created admin account. Embeds the
  *  same self-service ``EnrollmentWizard`` the settings panel uses (we're
  *  authenticated by now, so the regular session endpoints apply). */
 function MfaStep({ email, onFinish }: { email: string; onFinish: () => void }) {

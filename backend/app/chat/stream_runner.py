@@ -70,6 +70,17 @@ class StreamSession:
     task: asyncio.Task[None] | None = None
     started_at: float = field(default_factory=time.monotonic)
     finished_at: float | None = None
+    # Registered by the chat generator once it has enough context to save
+    # whatever text has accumulated so far. Called by ``flush_in_flight``
+    # on graceful shutdown: without it, a redeploy mid-reply left the
+    # conversation with a user turn and no answer at all, silently, with
+    # the provider already billed for the tokens. Returns True if a row
+    # was written. ``None`` until the generator gets far enough to have
+    # something worth saving.
+    flush_partial: Callable[[], Awaitable[bool]] | None = None
+    # Guards against double-writing if shutdown races the generator's own
+    # persist step.
+    flushed: bool = False
     # Recreated every push so previously-waiting subscribers can be
     # released without missing the new chunk. ``asyncio.Event`` is the
     # right primitive here over Condition because we don't need a lock —
@@ -191,6 +202,63 @@ async def _evict_after_delay(stream_id: uuid.UUID) -> None:
     await asyncio.sleep(COMPLETED_SESSION_TTL_SECONDS)
     async with _lock:
         _sessions.pop(stream_id, None)
+
+
+async def flush_in_flight(timeout: float = 8.0) -> int:
+    """Persist a partial reply for every still-running session.
+
+    Called from the app's shutdown hook. Generation lives entirely in
+    process memory (see the module docstring), so before this existed a
+    restart — including every routine ``docker compose up -d`` — destroyed
+    all in-flight replies: no row, no billing entry, and the conversation
+    left showing a question with no answer and no error.
+
+    Best-effort by design. Each session is flushed independently so one
+    failure can't block the others, and the whole batch is bounded by
+    ``timeout`` because the container's shutdown grace period is finite —
+    losing a partial reply is bad, but hanging the shutdown is worse.
+
+    Returns the number of sessions that actually wrote something.
+    """
+    live = [
+        s
+        for s in _sessions.values()
+        if not s.done and s.flush_partial is not None and not s.flushed
+    ]
+    if not live:
+        return 0
+
+    logger.info("Flushing %d in-flight stream(s) before shutdown", len(live))
+
+    async def _one(session: StreamSession) -> bool:
+        # Mark first: if this raises or times out we still don't want the
+        # generator's own persist path racing a second row in.
+        session.flushed = True
+        try:
+            assert session.flush_partial is not None
+            return bool(await session.flush_partial())
+        except Exception:  # noqa: BLE001 — shutdown must not raise
+            logger.exception(
+                "Failed to persist partial reply for stream %s", session.stream_id
+            )
+            return False
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(_one(s) for s in live), return_exceptions=True),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timed out after %.1fs flushing in-flight streams; some partial "
+            "replies were not saved",
+            timeout,
+        )
+        return 0
+
+    saved = sum(1 for r in results if r is True)
+    logger.info("Saved %d partial repl%s on shutdown", saved, "y" if saved == 1 else "ies")
+    return saved
 
 
 def get_session(stream_id: uuid.UUID) -> StreamSession | None:

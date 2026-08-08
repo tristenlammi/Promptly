@@ -65,17 +65,21 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
   const streamingReport = useResearchStore((s) => s.streamingReport);
   const researchConvId = useResearchStore((s) => s.conversationId);
 
-  if (researchConvId !== conversationId || step === "idle" || step === "done" || step === "error") {
-    return null;
-  }
-
-  const isSynthesizing = step === "synthesizing";
-
+  // Must stay ABOVE the early return below: a hook that only runs on some
+  // renders changes the hook count between renders, which throws
+  // "Rendered fewer hooks than expected" the moment this card goes from
+  // visible to hidden without unmounting.
   const doneSteps: ResearchStep[] = useMemo(() => {
     const order: ResearchStep[] = ["decomposing", "searching", "reading", "gap_check", "synthesizing"];
     const currentIndex = order.indexOf(step);
     return order.filter((_, i) => i < currentIndex);
   }, [step]);
+
+  if (researchConvId !== conversationId || step === "idle" || step === "done" || step === "error") {
+    return null;
+  }
+
+  const isSynthesizing = step === "synthesizing";
 
   const searchDone = doneSteps.includes("searching") || step === "reading" || step === "gap_check" || step === "synthesizing";
   const readDone = doneSteps.includes("reading") || step === "gap_check" || step === "synthesizing";

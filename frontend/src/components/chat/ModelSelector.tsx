@@ -3,6 +3,7 @@ import { Check, ChevronDown, Eye, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { useAvailableModels } from "@/hooks/useProviders";
+import { useAuthStore } from "@/store/authStore";
 import { useModelStore, useSelectedModel } from "@/store/modelStore";
 import { cn } from "@/utils/cn";
 
@@ -24,6 +25,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
 
   // Open on demand when another surface requests it (e.g. the
   // "Pick another model" action on a stream-error card). Skips the
@@ -111,9 +113,20 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
         </button>
       );
     }
+    // Only an admin can actually add a provider. Offering the button to
+    // everyone meant a non-admin clicked "Configure a model" and got
+    // silently redirected back to /chat (the ``/models`` route bounces
+    // non-admins), which read as the app being broken.
+    if (!isAdmin) {
+      return (
+        <span className="inline-flex items-center rounded-input border border-dashed border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
+          No model available
+        </span>
+      );
+    }
     return (
       <button
-        onClick={() => navigate("/models")}
+        onClick={() => navigate("/admin?tab=models")}
         className="inline-flex items-center gap-1.5 rounded-input border border-dashed border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
       >
         Configure a model

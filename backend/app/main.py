@@ -25,6 +25,7 @@ from app.observability.capture import (
     capture_error,
     install_error_capture,
 )
+from app.chat.stream_runner import flush_in_flight
 from app.chat.temporary_sweeper import start_sweeper
 from app.files.chat_upload_sweeper import start_chat_upload_sweeper
 from app.chat.semantic_index import start_semantic_indexer
@@ -87,6 +88,13 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("Promptly backend shutting down")
+        # Save whatever in-flight replies have generated so far, before
+        # anything else is torn down — this needs a live event loop and a
+        # working DB pool. Every restart used to silently destroy them.
+        try:
+            await flush_in_flight()
+        except Exception:  # noqa: BLE001 — never block shutdown
+            logger.exception("Error while flushing in-flight streams")
         for bg in (
             sweeper_task,
             scheduler_task,

@@ -419,11 +419,24 @@ async def test_deep_research_node_synthesises_from_fetched_pages(
     async def fake_pick(db, user, **kw):
         return object()
 
-    async def fake_run_search(provider, query, count):
+    def _hits(count):
         return [
             SimpleNamespace(title=f"R{i}", url=f"https://ex/{i}", snippet=f"snip{i}")
             for i in range(count)
         ]
+
+    async def fake_run_search(provider, query, count):
+        return _hits(count)
+
+    # The search-failover work moved every consumer onto
+    # ``run_search_with_failover`` (it walks the admin-ordered provider chain
+    # itself), so patching ``run_search`` alone no longer intercepts the node —
+    # the real failover helper would hit the DB, which is ``None`` here.
+    # Returns ``(results, provider_used)``.
+    async def fake_run_search_with_failover(
+        db, user, query, *, count=None, primary=None
+    ):
+        return _hits(count or 5), primary
 
     async def fake_safe_fetch(method, url, **kw):
         return SimpleNamespace(
@@ -432,6 +445,9 @@ async def test_deep_research_node_synthesises_from_fetched_pages(
 
     monkeypatch.setattr(search_service, "pick_search_provider", fake_pick)
     monkeypatch.setattr(search_providers, "run_search", fake_run_search)
+    monkeypatch.setattr(
+        search_service, "run_search_with_failover", fake_run_search_with_failover
+    )
     monkeypatch.setattr(safe_fetch_mod, "safe_fetch", fake_safe_fetch)
     monkeypatch.setattr(trafilatura, "extract", lambda html: "EXTRACTED_BODY")
 

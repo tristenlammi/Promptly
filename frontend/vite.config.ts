@@ -41,7 +41,19 @@ function hunspellDictionaries(): Plugin {
   };
 }
 
+// Single source of truth for the in-app version indicator. Read from
+// package.json at build time and injected via ``define`` below as the
+// ``__APP_VERSION__`` global (see ``src/vite-env.d.ts``). The repo-root
+// ``VERSION`` file mirrors this value; ``scripts/release.*`` keeps the two
+// in lockstep when cutting a release.
+const pkg = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8"),
+) as { version: string };
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     hunspellDictionaries(),

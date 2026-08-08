@@ -1000,6 +1000,12 @@ function UserFooter() {
           <ThemeToggle />
         </div>
       </div>
+      <div
+        className="mt-2 text-center text-[10px] font-medium tracking-wide text-[var(--text-muted)]/60"
+        title={`Promptly v${__APP_VERSION__}`}
+      >
+        v{__APP_VERSION__}
+      </div>
       <ShareInvitesPanel
         open={invitesOpen}
         onClose={() => setInvitesOpen(false)}

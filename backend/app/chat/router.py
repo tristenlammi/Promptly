@@ -3232,6 +3232,16 @@ async def _load_message_attachments(
 # model produces neither text nor tool-calls on the forced hop.
 MAX_TOOL_HOPS = 8
 
+# Appended to a reply that was cut short because the server shut down while
+# it was still being written. There's no ``truncated`` column on ``messages``
+# to flag it structurally, and an answer that just stops mid-sentence reads
+# like the model broke — so the reason is stated inline where the reader
+# will actually see it.
+_INTERRUPTED_SUFFIX = (
+    "\n\n_[This reply was cut short — the server restarted while it was "
+    "being written.]_"
+)
+
 # Token backstop for voice-mode turns when the client didn't set its own
 # cap. The brevity system prompt does the real work (replies end
 # naturally); this is a guard so a model that ignores the steer can't read
@@ -4002,13 +4012,21 @@ async def _dispatch_tools(
 
 
 async def _stream_generator(
-    stream_id: uuid.UUID, user: User, request: Request
+    stream_id: uuid.UUID,
+    user: User,
+    request: Request,
+    session: StreamSession | None = None,
 ) -> AsyncGenerator[str, None]:
     """The actual token-producing generator for the SSE response.
 
     Uses its own short-lived DB session because the FastAPI-managed session
     from `Depends(get_db)` is torn down as soon as the handler returns, well
     before the generator finishes yielding.
+
+    ``session`` is the :class:`StreamSession` this generator is feeding, when
+    it's running as a background stream. We use it to register a
+    shutdown-flush callback so a restart mid-reply saves the partial answer
+    instead of discarding it. ``None`` when called outside that path.
     """
     ctx = await consume_stream(stream_id)
     if ctx is None:
@@ -4765,6 +4783,25 @@ async def _stream_generator(
                     )
                 )
 
+        # ---- Prep is done; generation starts here ----------------------
+        # Everything above is read-only setup. Everything below is
+        # dominated by LLM round-trips that touch no database at all — but
+        # this session used to stay checked out for the entire generation,
+        # parking one pooled connection per active chat as ``idle in
+        # transaction``. With ``pool_size=10, max_overflow=20`` that capped
+        # the instance at ~30 concurrent replies; once the pool drained,
+        # even ``/api/health``'s ``SELECT 1`` blocked, the container was
+        # marked unhealthy and restarted, and every in-flight stream died.
+        #
+        # ``commit()`` ends the transaction and hands the connection back
+        # to the pool. SQLAlchemy re-acquires transparently on the next
+        # use, so tool calls further down still work unchanged, and
+        # ``expire_on_commit=False`` means ``conv`` / ``provider`` stay
+        # attached with their loaded values intact. Prep is read-only, so
+        # there is nothing to write here — this is purely about not
+        # holding a connection across the slow part.
+        await db.commit()
+
         collected_text: list[str] = []
         # DeepSeek thinking-mode chain-of-thought, accumulated across
         # hops the same way ``collected_text`` is. Persisted on the
@@ -4775,6 +4812,62 @@ async def _stream_generator(
         # never emit it; this stays an empty list and the column
         # ends up NULL.
         collected_reasoning: list[str] = []
+
+        # ---- Shutdown safety net ---------------------------------------
+        # Generation state lives only in this process. Register a callback
+        # the shutdown hook can call to persist whatever has accumulated so
+        # far, so a restart mid-reply leaves a truncated answer rather than
+        # a question with no answer (and no error) at all. Uses its own
+        # session: by the time this runs the generator's task is being
+        # cancelled and its session can't be trusted.
+        if session is not None:
+
+            async def _flush_partial_reply() -> bool:
+                text = _strip_leaked_tool_call_xml("".join(collected_text)).strip()
+                if not text:
+                    return False
+                text += _INTERRUPTED_SUFFIX
+                reasoning = "".join(collected_reasoning) or None
+                async with SessionLocal() as fdb:
+                    conv_row = await fdb.get(Conversation, conv_id)
+                    if conv_row is None:
+                        # Chat was deleted mid-stream — nothing to attach to.
+                        return False
+                    if continue_from_id is not None:
+                        # Continue-generation extends an existing reply in
+                        # place; appending a sibling here would split one
+                        # answer across two bubbles.
+                        target = await fdb.get(Message, continue_from_id)
+                        if target is None:
+                            return False
+                        target.content = (target.content or "") + text
+                        leaf_id = target.id
+                    else:
+                        msg = Message(
+                            conversation_id=conv_id,
+                            role="assistant",
+                            content=text,
+                            parent_id=triggering_user_msg_id,
+                            reasoning_content=reasoning,
+                            model_id=ctx["model_id"],
+                        )
+                        fdb.add(msg)
+                        await fdb.flush()
+                        leaf_id = msg.id
+                    conv_row.active_leaf_message_id = leaf_id
+                    conv_row.updated_at = datetime.now(timezone.utc)
+                    await fdb.commit()
+                logger.info(
+                    "Persisted partial reply (%d chars) for conversation %s "
+                    "after shutdown (stream=%s)",
+                    len(text),
+                    conv_id,
+                    stream_id,
+                )
+                return True
+
+            session.flush_partial = _flush_partial_reply
+
         assistant_attachment_snaps: list[dict[str, Any]] = []
         # Tool Activity Card — compact per-call records ({id, name, ok,
         # error?, elapsed_ms?, meta?}) accumulated across every hop and
@@ -5238,6 +5331,16 @@ async def _stream_generator(
                         }
                     )
 
+                # Release the pooled connection for the duration of this
+                # hop's model call — the slowest thing in the whole
+                # request, and one that needs no database. Also commits
+                # whatever the previous hop's tools wrote, which is a fix
+                # in its own right: tool side-effects (a generated image,
+                # a PDF, a workspace write) used to sit uncommitted in
+                # this transaction and vanish if the generation later
+                # failed. Tools below re-acquire a connection on demand.
+                await db.commit()
+
                 async for ev in model_router.stream_chat_events(
                     provider=provider,
                     model_id=ctx["model_id"],
@@ -5584,6 +5687,10 @@ async def _stream_generator(
 
             retry_text_parts: list[str] = []
             try:
+                # Same reasoning as the hop loop above — don't hold a
+                # connection across the synthesis-retry model call.
+                await db.commit()
+
                 async for ev in model_router.stream_chat_events(
                     provider=provider,
                     model_id=ctx["model_id"],
@@ -5647,6 +5754,19 @@ async def _stream_generator(
             cost_micros = max(0, int(round(cost_usd * 1_000_000)))
 
         reasoning_full = "".join(collected_reasoning) or None
+
+        # If the shutdown hook already saved this reply, don't write it a
+        # second time. Only reachable in the narrow window where generation
+        # finishes while shutdown is flushing; the flush marks the session
+        # before awaiting, so whichever gets there first wins.
+        if session is not None and session.flushed:
+            logger.info(
+                "Skipping persist for stream %s — already saved by the "
+                "shutdown flush",
+                stream_id,
+            )
+            yield _sse({"done": True})
+            return
 
         # The conversation can be deleted out from under a long stream — the
         # user deletes the chat (or its workspace notebook page) while the
@@ -5960,7 +6080,7 @@ async def _bridge_generator_to_session(
     HTTP connection going away no longer aborts generation. Runs once
     per stream; ``get_or_create_session`` enforces the singleton.
     """
-    async for chunk in _stream_generator(stream_id, user, request):
+    async for chunk in _stream_generator(stream_id, user, request, session=session):
         session.push(chunk)
 
 

@@ -29,6 +29,8 @@ from app.auth.utils import hash_password
 from app.config import get_settings
 from app.database import SessionLocal
 from app.files.system_folders import seed_system_folders
+from app.models_config.models import ModelProvider
+from app.models_config.service import encrypt_api_key
 from app.search.models import SearchProvider
 
 from app.logging_setup import configure_logging  # noqa: E402
@@ -129,6 +131,59 @@ async def provision_default_search_provider() -> None:
         db.add(sp)
         await db.commit()
         logger.info("Provisioned system SearXNG search provider (%s)", settings.SEARXNG_URL)
+
+
+async def provision_env_model_provider() -> None:
+    """Seed a chat model provider from an ``*_API_KEY`` env var, if one is set.
+
+    Without this, an operator who put ``OPENROUTER_API_KEY`` in their ``.env``
+    still had to re-enter the same key in the first-run wizard — and if they
+    skipped that step, the install finished in a state where Promptly could
+    not answer anything at all. The setup wizard detects the provider this
+    creates and skips its provider step entirely.
+
+    Only runs when there is no provider yet, so it never fights an operator
+    who has since configured providers in the admin panel. First match wins,
+    in preference order; the rest can be added from Admin → Models.
+    """
+    settings = get_settings()
+    candidates: list[tuple[str, str, str]] = [
+        # (provider type, display name, key)
+        ("openrouter", "OpenRouter", settings.OPENROUTER_API_KEY),
+        ("anthropic", "Anthropic", settings.ANTHROPIC_API_KEY),
+        ("openai", "OpenAI", settings.OPENAI_API_KEY),
+    ]
+    chosen = next(((t, n, k.strip()) for t, n, k in candidates if k and k.strip()), None)
+    if chosen is None:
+        return
+
+    provider_type, name, api_key = chosen
+    async with SessionLocal() as db:
+        existing = await db.execute(select(ModelProvider).limit(1))
+        if existing.scalar_one_or_none() is not None:
+            # Somebody has already configured providers — leave them alone.
+            return
+
+        mp = ModelProvider(
+            user_id=None,  # system-wide
+            name=name,
+            # base_url stays NULL: provider.py resolves a per-type default at
+            # call time, so we don't bake a host into the row.
+            base_url=None,
+            type=provider_type,
+            api_key=encrypt_api_key(api_key),
+            enabled=True,
+            # Left empty deliberately — the model list is fetched on demand
+            # ("Refresh models"), and guessing it here would go stale.
+            models=[],
+        )
+        db.add(mp)
+        await db.commit()
+        logger.info(
+            "Provisioned %s model provider from environment (%s_API_KEY).",
+            name,
+            provider_type.upper(),
+        )
 
 
 async def provision_app_settings() -> None:
@@ -257,6 +312,7 @@ async def _provision_all() -> None:
     await provision_vapid_keys()
     await provision_singleton_user()
     await provision_default_search_provider()
+    await provision_env_model_provider()
 
 
 def main() -> int:

@@ -1,0 +1,82 @@
+name: CI
+
+# The first automated gate this repo has had. Before this, the only thing
+# standing between a bad commit and a tagged release was `tsc -b` happening to
+# run during a local Docker build.
+#
+# Deliberately kept to checks that pass today, so a red run always means a real
+# regression rather than pre-existing debt:
+#   - backend  : pytest (89 tests)
+#   - frontend : eslint (errors only — warnings are tracked debt), then the
+#                full production build, which is `tsc -b` + `vite build`.
+#
+# The full build matters more than a bare typecheck here: the PWA precache step
+# (injectManifest) hard-fails when a large lazy chunk isn't listed in
+# globIgnores, and that failure only ever shows up at bundle time.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an in-flight run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # matches backend/Dockerfile (python:3.11-slim)
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend lint + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # Fails on errors only. Warnings (currently ~233: exhaustive-deps,
+      # a11y, explicit-any) are known debt — use `npm run lint:strict` when
+      # burning them down.
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      # `tsc -b` + `vite build` + PWA precache generation.
+      - name: Build
+        working-directory: frontend
+        run: npm run build

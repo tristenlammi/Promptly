@@ -17,7 +17,8 @@ export function useDriveSelection() {
     setFiles((prev) => {
       const next = new Set(prev);
       const want = on ?? !next.has(id);
-      want ? next.add(id) : next.delete(id);
+      if (want) next.add(id);
+      else next.delete(id);
       return next;
     });
   }, []);
@@ -26,7 +27,8 @@ export function useDriveSelection() {
     setFolders((prev) => {
       const next = new Set(prev);
       const want = on ?? !next.has(id);
-      want ? next.add(id) : next.delete(id);
+      if (want) next.add(id);
+      else next.delete(id);
       return next;
     });
   }, []);

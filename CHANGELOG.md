@@ -21,7 +21,87 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-08
+
+### Added
+- **First-run setup now connects a model provider.** The wizard gained a
+  provider step (OpenRouter / Anthropic / OpenAI / local Ollama) right
+  after account creation, so a fresh install can actually answer a
+  message when setup finishes — previously it configured SMTP, CORS and
+  MFA but never the model, and landed on a chat screen that couldn't
+  reply. Skipping is still allowed but says plainly that chat won't work.
+- A provider set via `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` /
+  `OPENAI_API_KEY` in the environment is now **seeded automatically on
+  first boot**, and the wizard detects it and skips the provider step.
+- **An in-flight reply now survives a server restart.** Generation state
+  lives only in process memory, so every restart — including a routine
+  `docker compose up -d` — silently destroyed replies that were still
+  being written: no message row, no billing entry, and the chat left
+  showing a question with no answer and no error. Shutdown now persists
+  whatever text has accumulated, marked inline as interrupted. Bounded by
+  an 8s timeout so a slow save can't hang the shutdown, and covered by
+  the first automated tests this path has ever had.
+- **Continuous integration** (`.github/workflows/ci.yml`) — the repo's
+  first automated gate. Runs the backend test suite, frontend lint, and
+  the full production build (which is where PWA precache failures
+  surface) on every push and pull request.
+- **ESLint is now real.** A `lint` script had existed for a long time
+  with no config and no eslint installed, so it could never run; there
+  is now a flat config (typescript-eslint + react-hooks + jsx-a11y) that
+  passes clean on errors. `npm run lint:strict` also fails on the ~233
+  known warnings for burning that debt down.
+
+### Fixed
+- **A chat reply no longer holds a database connection for its whole
+  generation.** The streaming path kept one pooled connection checked out
+  as `idle in transaction` from the first prep query until the reply was
+  persisted — across every tool hop and model round-trip. With
+  `pool_size=10, max_overflow=20` that capped the instance at roughly 30
+  concurrent replies, and once the pool drained even `/api/health`'s
+  `SELECT 1` blocked, so the container was marked unhealthy and restarted,
+  killing every in-flight stream. The connection is now returned to the
+  pool around each model call and re-acquired on demand.
+- Tool side-effects (a generated image or PDF, a workspace write) are now
+  committed as they happen instead of sitting uncommitted in the reply's
+  transaction, where they were rolled back and lost if the generation
+  later failed.
+- **The setup wizard ended after its first step.** Creating the admin
+  account flipped auth status to "authenticated", which swapped the
+  router to the signed-in branch — where `/setup` redirects to `/chat`.
+  Every step after account creation was therefore unreachable, so no
+  install ever got the chance to configure a public URL, an embedder, or
+  SMTP. Status now flips when the wizard actually finishes.
+- **Two conditional-React-hook bugs**, both caught by the new lint gate:
+  `ResearchProgressCard` called `useMemo` after an early `return null`,
+  and `WorkspaceDetailPage` called `useState`/`useCallback` after its
+  `!id` guard. Either one throws "rendered fewer hooks than expected"
+  and blanks the page if the component re-renders across that boundary
+  instead of unmounting.
+- The zero-provider chat screen is actionable instead of misleading: it
+  no longer points at a "Models tab" that no longer exists, gives admins
+  a button straight to the right settings tab, and tells non-admins to
+  ask an administrator — previously they clicked "Configure a model" and
+  were silently bounced back to the same broken screen.
+- The backend test suite runs again. It had been broken since the Study
+  feature was deleted — two test files still imported the removed
+  `app.study` module, so `pytest` failed at collection and every test
+  silently stopped running. Also repaired a stale test that patched
+  `run_search` after the search-failover work moved callers onto
+  `run_search_with_failover`.
+
 ### Changed
+- The setup wizard's embedding step now says what it's actually asking
+  for. It never used the words "embedding model" anywhere prominent, and
+  its two tiles looked almost identical to the model-provider tiles a
+  couple of steps earlier (both offered "Local (Ollama)"), so it read as
+  picking the same thing twice. It now names the thing, explains that it
+  powers search, states plainly that it is *not* the chat model, and
+  confirms what was configured. The "API provider" tile — which sets up
+  nothing and defers to the admin panel — says so.
+- `scripts/release.ps1` works on Windows again. Its `[Unreleased]` regex
+  didn't tolerate carriage returns, so with `core.autocrlf=true` (the
+  Windows default, and this is the Windows-primary script) it refused to
+  cut any release at all.
 - Ollama Web Search admin hint rewritten to be honest about the free
   tier: it's small (unpublished; ~a dozen searches per cycle in
   practice), so the guidance is now "last in the chain / blocked-page
