@@ -29,6 +29,7 @@ from app.chat.models import (
     WorkspaceProposal,
     WorkspaceTask,
 )
+from app.workspaces.board_columns import column_labels, resolve_status
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 
 logger = logging.getLogger("promptly.chat.tools.workspace")
@@ -370,7 +371,6 @@ class ProposeBoardUpdatesTool(Tool):
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         from app.chat.tools.query_board import (
-            _STATUS_ALIASES,
             _resolve_assignee,
             _resolve_board,
         )
@@ -395,9 +395,20 @@ class ProposeBoardUpdatesTool(Tool):
         changes: dict[str, Any] = {}
         set_status = str(set_.get("status") or "").strip()
         if set_status:
-            changes["status"] = _STATUS_ALIASES.get(
-                set_status.lower(), set_status.lower()
-            )
+            # Resolve against this board's actual columns. Writing an
+            # unrecognised status was the worst failure in this file: it
+            # matched no column, so the card wasn't really "done" and the
+            # board UI bucketed it into the *first* column — the user asked
+            # to complete work and watched it move to the backlog, under a
+            # proposal that reported "Applied".
+            resolved = resolve_status(board.config, set_status)
+            if resolved is None:
+                labels = column_labels(board.config)
+                raise ToolError(
+                    f'No column named "{set_status}" on board '
+                    f'"{board.title}". Valid columns: {", ".join(labels)}.'
+                )
+            changes["status"] = resolved
         set_prio = str(set_.get("priority") or "").strip().lower()
         if set_prio in _PRIORITIES:
             changes["priority"] = set_prio
@@ -418,8 +429,17 @@ class ProposeBoardUpdatesTool(Tool):
 
         m_status = str(match.get("status") or "").strip()
         if m_status:
-            canon = _STATUS_ALIASES.get(m_status.lower(), m_status.lower())
-            conds.append(func.lower(WorkspaceTask.status) == canon)
+            # Same resolution as the `set` side — otherwise "the in-progress
+            # ones" selects nothing on a custom board and the update silently
+            # applies to zero cards while reporting success.
+            canon = resolve_status(board.config, m_status)
+            if canon is None:
+                labels = column_labels(board.config)
+                raise ToolError(
+                    f'No column named "{m_status}" on board "{board.title}". '
+                    f"Valid columns: {', '.join(labels)}."
+                )
+            conds.append(func.lower(WorkspaceTask.status) == canon.lower())
             applied.append(f"status={canon}")
 
         m_assignee = str(match.get("assignee") or "").strip()

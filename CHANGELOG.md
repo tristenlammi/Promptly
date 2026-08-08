@@ -21,6 +21,46 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-09
+
+### Fixed
+- **Code in replies is no longer silently corrupted.** Inline citation
+  markers were stripped with a regex run over the whole message, code
+  blocks included — and array indexing is indistinguishable from a
+  citation. `print(items[0])` rendered as `print(items)` and
+  `matrix[1][2];` as `matrix;`. Because Copy strips too, users were
+  pasting broken code with no sign anything had changed. Stripping now
+  skips fenced blocks and inline code, and leaves Markdown link
+  definitions (`[1]: https://…`) intact.
+- **Research sub-agents no longer produce citations that point at the
+  wrong pages.** Each agent numbered its own sources — and `web_search`
+  restarts at `[1]` on every call — so those markers couldn't be mapped
+  onto anything, yet the parent model was told to cite "from the merged
+  list" and copied them verbatim. Clicking a citation landed on an
+  unrelated source. The unresolvable markers are now removed from agent
+  briefs and the merged sources are presented numbered once, correctly,
+  for the parent to cite against.
+- **Boards with custom columns work with the AI again.** The chat tools
+  matched a column *id* against the column *name* the model reads from
+  the board text, so on any board with custom columns "how many are in
+  review?" answered **0 cards** as fact, and "mark the in-progress ones
+  done" wrote a status no column owned — the card wasn't actually
+  completed and the board put it in the *first* column, so work the user
+  asked to finish moved to the backlog under a proposal marked
+  "Applied". Both tools now resolve against the board's real column
+  registry (by name, id, or alias) and say which columns exist when a
+  name doesn't match.
+- **A failed Deep Research run says so.** The card previously just
+  vanished after 1–3 minutes of visible progress — no message, no
+  reason, and any partially-written report discarded — even though the
+  failure reason was recorded and simply never rendered. It now shows
+  what went wrong and offers the partial report.
+- **Tool failures explain themselves.** The backend writes useful
+  messages ("this workspace has several boards — pass the board
+  argument", "no label named X"), and the UI discarded them one layer
+  before rendering, showing only "failed". The reason is now shown on
+  the step.
+
 ## [0.6.1] - 2026-08-09
 
 ### Added

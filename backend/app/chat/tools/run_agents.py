@@ -23,6 +23,7 @@ Why this shape:
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 from typing import Any
 
@@ -247,28 +248,65 @@ class RunAgentsTool(Tool):
             _emit()
         results: list[AgentResult] = [r for r in ordered if r is not None]
 
-        # ---- Merge briefs into one model-facing string ----
+        # ---- Merge sources FIRST, then build the briefs around them ----
+        # Order matters: the parent is told to cite against this list, so it
+        # has to exist before we assemble the text that references it.
+        merged_sources = _merge_sources(r.sources for r in results)
+
+        # Each agent numbered its own citations, and ``web_search`` restarts
+        # at [1] on every call — so an agent that searched three times has
+        # three different sources all labelled [1]. Those markers cannot be
+        # mapped onto the merged list (or onto anything), and previously they
+        # were passed through verbatim while the parent was told to cite "from
+        # the merged citation list". The parent copied them, and citation
+        # chips pointed at unrelated pages.
+        #
+        # Stripping them is the honest fix: a marker that can't be resolved is
+        # worse than no marker, because it looks authoritative. The parent
+        # still gets every source, numbered once and correctly, in the list
+        # below and cites against that.
         blocks: list[str] = []
         for i, r in enumerate(results, start=1):
             header = f"### Agent {i}: {r.task}"
             if r.error:
                 blocks.append(f"{header}\n[failed] {r.text}")
             else:
-                blocks.append(f"{header}\n{r.text}")
+                blocks.append(f"{header}\n{_strip_agent_citations(r.text)}")
+
+        if merged_sources:
+            source_lines = "\n".join(
+                f"[{n}] {s.get('title') or '(untitled)'} — {s.get('url', '')}"
+                for n, s in enumerate(merged_sources, start=1)
+            )
+            citation_block = (
+                "\n\n## Sources\n"
+                "Cite these inline as [1], [2] — these numbers are the only "
+                "valid ones. The briefs above are deliberately unnumbered.\n"
+                f"{source_lines}"
+            )
+        else:
+            citation_block = ""
+
+        failed_count = len(results) - sum(1 for r in results if not r.error)
+        failed_note = (
+            f" {failed_count} of them failed — their sections are marked "
+            "[failed], so treat that ground as uncovered rather than absent."
+            if failed_count
+            else ""
+        )
+
         content = (
             "You ran "
-            f"{len(results)} research sub-agent(s) in parallel. Their "
-            "findings are below. Write your final answer for the user "
-            "NOW from these briefs, citing sources inline with [1], "
-            "[2] from the merged citation list. The agents already "
+            f"{len(results)} research sub-agent(s) in parallel.{failed_note} "
+            "Their findings are below. Write your final answer for the user "
+            "NOW from these briefs. The agents already "
             "searched and read pages — do NOT call web_search or "
             "fetch_url again to re-verify their findings; only search "
             "again if a fact the user explicitly asked for is missing "
-            "from every brief.\n\n" + "\n\n".join(blocks)
+            "from every brief.\n\n"
+            + "\n\n".join(blocks)
+            + citation_block
         )
-
-        # ---- Merge + renumber citations across agents ----
-        merged_sources = _merge_sources(r.sources for r in results)
 
         total_cost = sum(r.cost_usd for r in results)
         ok_count = sum(1 for r in results if not r.error)
@@ -290,6 +328,27 @@ class RunAgentsTool(Tool):
             meta["cost_usd"] = total_cost
 
         return ToolResult(content=content, sources=merged_sources, meta=meta)
+
+
+def _strip_agent_citations(text: str) -> str:
+    """Remove an agent's own ``[1]`` / ``[2]`` markers from its brief.
+
+    They are unresolvable by the time the parent sees them (see the call
+    site), so they can only mislead. Mirrors the frontend's citation
+    stripping: code spans and fenced blocks are left alone, because array
+    indexing is indistinguishable from a citation by regex and a brief can
+    legitimately quote code.
+    """
+    if not text:
+        return text
+    return "".join(
+        seg
+        if i % 2 == 1
+        else re.sub(r"\s+([.,;:!?])", r"\1", re.sub(r"(?:\s*\[\d{1,2}\](?!:))+", "", seg))
+        for i, seg in enumerate(
+            re.split(r"(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)", text)
+        )
+    )
 
 
 def _merge_sources(

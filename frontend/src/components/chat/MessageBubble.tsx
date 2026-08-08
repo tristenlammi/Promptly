@@ -643,11 +643,31 @@ const markdownComponents: Components = {
  *  ``[TODO]`` survive untouched. Adjacent stripped chips collapse
  *  into a single space so the prose doesn't end up with awkward
  *  double spacing. */
+// Fenced blocks (``` or ~~~) and inline code spans. Split on this first so
+// citation stripping can never reach inside code: array indexing is
+// syntactically identical to a citation marker, and running the strip over
+// the whole string silently rewrote ``print(items[0])`` to ``print(items)``
+// and ``matrix[1][2];`` to ``matrix;``. That corruption reached the rendered
+// bubble *and* the clipboard, because Copy strips too — so users were
+// pasting broken code with no indication anything had changed.
+const CODE_SEGMENT_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
+
+// ``(?!:)`` keeps Markdown link-reference definitions (``[1]: https://…``)
+// intact; without it the marker vanished and left a dangling ``: https://…``.
+const CITATION_RE = /(?:\s*\[\d{1,2}\](?!:))+/g;
+
 function stripInlineCitations(markdown: string): string {
   if (!markdown) return markdown;
+  // ``split`` with one capturing group yields [prose, code, prose, code, …],
+  // so odd indices are the code segments and pass through verbatim.
   return markdown
-    .replace(/(?:\s*\[\d{1,2}\])+/g, "")
-    .replace(/\s+([.,;:!?])/g, "$1");
+    .split(CODE_SEGMENT_RE)
+    .map((segment, i) =>
+      i % 2 === 1
+        ? segment
+        : segment.replace(CITATION_RE, "").replace(/\s+([.,;:!?])/g, "$1")
+    )
+    .join("");
 }
 
 /** Strip the ``<!--RESEARCH:{...}-->`` metadata comment and the model-

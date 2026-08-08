@@ -55,6 +55,12 @@ interface ActivityStep {
   id: string;
   name: string;
   status: StepStatus;
+  /** The backend's own explanation, e.g. 'This workspace has several
+   *  boards ("Roadmap", "Ops") — pass the board argument to pick one.'
+   *  It arrives on both wire shapes and used to be dropped here, so a
+   *  failed step showed the word "failed" and nothing else — the user
+   *  had no idea what went wrong or whether it was their fault. */
+  error?: string | null;
   errorKind?: string | null;
   elapsedMs?: number | null;
   progressMessage?: string | null;
@@ -779,6 +785,18 @@ function StepRow({ step }: { step: ActivityStep }) {
           </span>
         )}
       </div>
+
+      {/* The reason, when there is one. The backend writes genuinely useful
+          messages here — which board to name, which label doesn't exist,
+          which argument was invalid — and they were being discarded, so a
+          failure read as an unexplained "failed". Only shown for real
+          failures: a per-turn-cap notice is budget noise, not a problem the
+          user can act on. */}
+      {isError && step.error && step.errorKind !== "per_turn_cap" && (
+        <p className="mt-1 pl-5 text-[11px] leading-snug text-[var(--text-muted)]">
+          {step.error}
+        </p>
+      )}
     </div>
   );
 }
@@ -816,6 +834,7 @@ export function stepsFromInvocations(
       id: t.id,
       name: t.name,
       status: t.status,
+      error: t.error ?? null,
       errorKind: t.errorKind ?? null,
       elapsedMs: t.elapsedMs ?? null,
       progressMessage: t.progressMessage ?? null,
@@ -837,6 +856,7 @@ export function stepsFromPersisted(
       id: c.id,
       name: c.name,
       status: (c.ok ? "ok" : "error") as StepStatus,
+      error: c.error ?? null,
       errorKind: c.error_kind ?? null,
       elapsedMs: c.elapsed_ms ?? null,
       meta: c.meta ?? null,

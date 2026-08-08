@@ -20,19 +20,19 @@ from sqlalchemy import func, or_, select
 
 from app.auth.models import User
 from app.chat.models import Conversation, WorkspaceItem, WorkspaceTask
+from app.workspaces.board_columns import (
+    column_labels,
+    done_status_ids,
+    resolve_status,
+)
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 
 logger = logging.getLogger("promptly.chat.tools.query_board")
 
-# Map the words people say to the canonical kanban status keys. Anything
-# not in here is matched against the stored status verbatim (custom columns).
-_STATUS_ALIASES = {
-    "todo": "todo", "to do": "todo", "to-do": "todo", "backlog": "todo",
-    "not started": "todo", "open": "todo",
-    "doing": "doing", "in progress": "doing", "in-progress": "doing",
-    "wip": "doing", "started": "doing", "active": "doing",
-    "done": "done", "complete": "done", "completed": "done", "finished": "done",
-}
+# Column resolution lives in ``app.workspaces.board_columns`` so the read
+# and write tools can't drift apart — matching a column name against the
+# stored id was the bug that made this tool report "0 cards" on any board
+# with custom columns.
 _PRIORITIES = ("low", "medium", "high")
 _DUE_MODES = ("overdue", "upcoming", "has_due", "no_due")
 _MAX_LIST = 50
@@ -196,10 +196,22 @@ class QueryBoardCardsTool(Tool):
 
         status = str(args.get("status") or "").strip()
         if status:
-            canon = _STATUS_ALIASES.get(status.lower(), status.lower())
-            conds.append(func.lower(WorkspaceTask.status) == canon)
+            # Resolve against THIS board's column registry, not a fixed alias
+            # table: the model reads column *names* from the flattened board
+            # text, but rows store column *ids*. On a board with custom
+            # columns the old id-only comparison matched nothing and reported
+            # "0 cards" as fact. Erroring with the real labels is far better —
+            # a wrong count stated confidently is worse than a retryable miss.
+            canon = resolve_status(board.config, status)
+            if canon is None:
+                labels = column_labels(board.config)
+                raise ToolError(
+                    f'No column named "{status}" on board "{board.title}". '
+                    f"Valid columns: {', '.join(labels)}."
+                )
+            conds.append(func.lower(WorkspaceTask.status) == canon.lower())
             applied.append(f"status={canon}")
-            if canon == "done":
+            if canon in done_status_ids(board.config):
                 include_done = True
 
         assignee = str(args.get("assignee") or "").strip()

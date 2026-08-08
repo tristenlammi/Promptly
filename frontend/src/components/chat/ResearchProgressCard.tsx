@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Check, FlaskConical, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, FlaskConical, Loader2, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -64,6 +64,7 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
   const subquestions = useResearchStore((s) => s.subquestions);
   const streamingReport = useResearchStore((s) => s.streamingReport);
   const researchConvId = useResearchStore((s) => s.conversationId);
+  const error = useResearchStore((s) => s.error);
 
   // Must stay ABOVE the early return below: a hook that only runs on some
   // renders changes the hook count between renders, which throws
@@ -75,8 +76,56 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
     return order.filter((_, i) => i < currentIndex);
   }, [step]);
 
-  if (researchConvId !== conversationId || step === "idle" || step === "done" || step === "error") {
+  if (researchConvId !== conversationId || step === "idle" || step === "done") {
     return null;
+  }
+
+  // A failed run used to be indistinguishable from one that never happened:
+  // the card simply unmounted after 1–3 minutes of visible progress, with no
+  // message, no retry, and any partially-written report discarded. The store
+  // has always recorded *why* ("Research service returned 502.", "Research
+  // stream was interrupted.") — nothing rendered it.
+  if (step === "error") {
+    return (
+      <div className="mx-4 my-3">
+        <div className="overflow-hidden rounded-card border border-[var(--danger)]/40 bg-[var(--surface)]">
+          <div className="flex items-start gap-2 px-4 py-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--danger)]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-[var(--text)]">
+                Deep Research stopped
+              </div>
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                {error || "The research run ended unexpectedly."}
+              </p>
+              {/* Whatever was written before the failure is worth more than
+                  nothing — a partial report still answers part of the
+                  question and cost real time and search credits. */}
+              {streamingReport?.trim() && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-[var(--accent)]">
+                    Show what was written before it stopped
+                  </summary>
+                  <div className="mt-1.5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--bg)] p-2 text-xs text-[var(--text-muted)]">
+                    {streamingReport}
+                  </div>
+                </details>
+              )}
+            </div>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                aria-label="Dismiss research error"
+                className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:text-[var(--text)]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const isSynthesizing = step === "synthesizing";
