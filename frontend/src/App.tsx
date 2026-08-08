@@ -1,33 +1,101 @@
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
-import { AccountSecurityPage } from "@/pages/AccountSecurityPage";
-import { AdminPage } from "@/pages/AdminPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
 import { ChatPage } from "@/pages/ChatPage";
-import { FilesPage, SharedWithMePage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaEnrollPage } from "@/pages/MfaEnrollPage";
 import { MfaVerifyPage } from "@/pages/MfaVerifyPage";
-import { WorkspaceDetailPage } from "@/pages/WorkspaceDetailPage";
-import { WorkspacesPage } from "@/pages/WorkspacesPage";
-import { RecentFilesPage } from "@/pages/RecentFilesPage";
-import { SearchResultsPage } from "@/pages/SearchResultsPage";
 import { SetupPage } from "@/pages/SetupPage";
-import { ShareLinkLandingPage } from "@/pages/ShareLinkLandingPage";
-import { StarredFilesPage } from "@/pages/StarredFilesPage";
-import { ArchivePage } from "@/pages/ArchivePage";
-import { TaskDetailPage } from "@/pages/TaskDetailPage";
-import { TasksPage } from "@/pages/TasksPage";
-import { MyWorkPage } from "@/pages/MyWorkPage";
-import { TrashPage } from "@/pages/TrashPage";
 import { useAuthBootstrap } from "@/hooks/useAuthBootstrap";
 import { useDrivePwaManifest } from "@/hooks/useDrivePwaManifest";
 import { useAuthStore } from "@/store/authStore";
 import { useModelStore } from "@/store/modelStore";
 import { applyTheme } from "@/store/themeStore";
+import { lazyWithRetry } from "@/utils/lazyWithRetry";
+
+// Route-level code splitting. Every page used to be imported eagerly,
+// so opening a chat downloaded the admin console, the automations flow
+// editor and the whole Drive surface first — a 2.4 MB entry chunk to
+// render a text box. These load on first navigation instead; the
+// Suspense boundary lives in AppLayout so the sidebar stays put.
+//
+// ``lazyWithRetry`` (not bare ``React.lazy``) because a redeploy under
+// an open tab invalidates the hashed chunk names a stale page points
+// at; it recovers with a one-time reload instead of a blank screen.
+const AccountSecurityPage = lazyWithRetry(
+  () => import("@/pages/AccountSecurityPage").then((m) => ({ default: m.AccountSecurityPage })),
+  "AccountSecurityPage"
+);
+const AdminPage = lazyWithRetry(
+  () => import("@/pages/AdminPage").then((m) => ({ default: m.AdminPage })),
+  "AdminPage"
+);
+const ArchivePage = lazyWithRetry(
+  () => import("@/pages/ArchivePage").then((m) => ({ default: m.ArchivePage })),
+  "ArchivePage"
+);
+const FilesPage = lazyWithRetry(
+  () => import("@/pages/FilesPage").then((m) => ({ default: m.FilesPage })),
+  "FilesPage"
+);
+const SharedWithMePage = lazyWithRetry(
+  () => import("@/pages/FilesPage").then((m) => ({ default: m.SharedWithMePage })),
+  "SharedWithMePage"
+);
+const MyWorkPage = lazyWithRetry(
+  () => import("@/pages/MyWorkPage").then((m) => ({ default: m.MyWorkPage })),
+  "MyWorkPage"
+);
+const RecentFilesPage = lazyWithRetry(
+  () => import("@/pages/RecentFilesPage").then((m) => ({ default: m.RecentFilesPage })),
+  "RecentFilesPage"
+);
+const SearchResultsPage = lazyWithRetry(
+  () => import("@/pages/SearchResultsPage").then((m) => ({ default: m.SearchResultsPage })),
+  "SearchResultsPage"
+);
+const ShareLinkLandingPage = lazyWithRetry(
+  () => import("@/pages/ShareLinkLandingPage").then((m) => ({ default: m.ShareLinkLandingPage })),
+  "ShareLinkLandingPage"
+);
+const StarredFilesPage = lazyWithRetry(
+  () => import("@/pages/StarredFilesPage").then((m) => ({ default: m.StarredFilesPage })),
+  "StarredFilesPage"
+);
+const TaskDetailPage = lazyWithRetry(
+  () => import("@/pages/TaskDetailPage").then((m) => ({ default: m.TaskDetailPage })),
+  "TaskDetailPage"
+);
+const TasksPage = lazyWithRetry(
+  () => import("@/pages/TasksPage").then((m) => ({ default: m.TasksPage })),
+  "TasksPage"
+);
+const TrashPage = lazyWithRetry(
+  () => import("@/pages/TrashPage").then((m) => ({ default: m.TrashPage })),
+  "TrashPage"
+);
+const WorkspaceDetailPage = lazyWithRetry(
+  () => import("@/pages/WorkspaceDetailPage").then((m) => ({ default: m.WorkspaceDetailPage })),
+  "WorkspaceDetailPage"
+);
+const WorkspacesPage = lazyWithRetry(
+  () => import("@/pages/WorkspacesPage").then((m) => ({ default: m.WorkspacesPage })),
+  "WorkspacesPage"
+);
+
+/** Full-screen pending state for lazy routes rendered outside AppLayout
+ *  (which hosts its own boundary). Matches the auth-bootstrap screen so a
+ *  cold load doesn't visibly change shape. */
+function FullScreenLoading() {
+  return (
+    <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-sm text-[var(--text-muted)]">
+      Loading Promptly...
+    </div>
+  );
+}
 
 export default function App() {
   useAuthBootstrap();
@@ -156,7 +224,14 @@ export default function App() {
         {/* The landing page itself enforces any password / sign-in
             requirements via the backend, so we let the route
             through without the global redirect-to-login. */}
-        <Route path="/s/:token" element={<ShareLinkLandingPage />} />
+        <Route
+          path="/s/:token"
+          element={
+            <Suspense fallback={<FullScreenLoading />}>
+              <ShareLinkLandingPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
@@ -193,7 +268,14 @@ export default function App() {
           no chat sidebar, no auth chrome, and no Promptly-branded
           nav — just the shared file/folder. Mounted above the
           AppLayout block so it wins the route match. */}
-      <Route path="/s/:token" element={<ShareLinkLandingPage />} />
+      <Route
+          path="/s/:token"
+          element={
+            <Suspense fallback={<FullScreenLoading />}>
+              <ShareLinkLandingPage />
+            </Suspense>
+          }
+        />
       <Route element={<AppLayout />}>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatPage />} />

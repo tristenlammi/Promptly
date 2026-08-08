@@ -21,6 +21,22 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-09
+
+### Changed
+- **Pages now load on demand instead of all at once.** Every route was
+  imported eagerly, so opening a chat first downloaded the admin console,
+  the automations flow editor and the whole Drive surface — a 2.4 MB
+  entry chunk to render a text box. Routes are code-split now and the
+  entry is **1.2 MB, roughly half**. The heaviest pages became their own
+  chunks (admin 222 KB, workspace detail 343 KB) fetched on first visit.
+  Login, MFA and the chat page stay eager on purpose: they're the first
+  screens you see, and splitting them would only add a spinner to the
+  most common path. The pending state lives in the app layout, so
+  navigation shows a spinner in the content area rather than blanking the
+  sidebar. Uses the existing `lazyWithRetry`, so a redeploy under an open
+  tab still recovers instead of failing on a stale chunk name.
+
 ## [0.5.0] - 2026-08-08
 
 ### Added

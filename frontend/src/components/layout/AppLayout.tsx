@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { SearchPalette } from "@/components/chat/SearchPalette";
@@ -160,7 +161,21 @@ export function AppLayout() {
       </div>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        <Outlet />
+        {/* Route components are code-split (see App.tsx), so a first visit
+            to a page fetches its chunk. The boundary sits *here* rather
+            than around the whole router on purpose: the sidebar stays put
+            and only the content area shows the pending state, so navigation
+            doesn't blank the app. */}
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading…
+            </div>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </div>
 
       <NetworkStatusToast />
