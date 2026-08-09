@@ -91,6 +91,12 @@ class SandboxRunResult:
     produced_names: list[str] = field(default_factory=list)
     skipped_names: list[str] = field(default_factory=list)
     chart_count: int = 0
+    # Input files as the sandbox actually saw them. ``loaded_inputs`` is
+    # what the code can open; ``dropped_inputs`` carries a reason each.
+    # Without these the model has no way to distinguish "the file isn't
+    # there" from "you never sent it".
+    loaded_inputs: list[str] = field(default_factory=list)
+    dropped_inputs: list[str] = field(default_factory=list)
 
     @property
     def errored(self) -> bool:
@@ -136,13 +142,27 @@ async def run_python_in_sandbox(
         )
 
     payload_files: list[dict[str, str]] = []
+    # Files that never made it into the sandbox. Previously the loop simply
+    # ``break``ed past the byte ceiling, dropping that file *and every
+    # remaining one*, with nothing recorded — so the model's
+    # ``pd.read_csv('sales.csv')`` raised FileNotFoundError and it told the
+    # user the file didn't exist while their attachment chip sat right there
+    # in the thread. Report them instead of guessing.
+    dropped_inputs: list[str] = []
     total = 0
     for name, data in (input_files or []):
         if not data:
+            dropped_inputs.append(f"{name} (empty)")
+            continue
+        if total + len(data) > _MAX_INPUT_TOTAL_BYTES:
+            dropped_inputs.append(
+                f"{name} (would exceed the "
+                f"{_MAX_INPUT_TOTAL_BYTES // (1024 * 1024)} MB total input limit)"
+            )
+            # Keep going rather than break: a single huge file shouldn't
+            # silently disqualify the small ones queued behind it.
             continue
         total += len(data)
-        if total > _MAX_INPUT_TOTAL_BYTES:
-            break
         payload_files.append(
             {"name": name, "content_b64": base64.b64encode(data).decode("ascii")}
         )
@@ -226,6 +246,8 @@ async def run_python_in_sandbox(
         produced_names=produced_names,
         skipped_names=skipped_names,
         chart_count=chart_count,
+        loaded_inputs=[f["name"] for f in payload_files],
+        dropped_inputs=dropped_inputs,
     )
 
 

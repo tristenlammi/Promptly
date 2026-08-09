@@ -3,6 +3,7 @@ prompt injection, and config masking."""
 from __future__ import annotations
 
 import logging
+import time
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -120,6 +121,7 @@ async def run_search_with_failover(
     *,
     count: int | None = None,
     primary: SearchProvider | None = None,
+    budget_s: float | None = None,
 ) -> tuple[list[SearchResult], SearchProvider | None]:
     """Search with automatic failover across the user's enabled providers.
 
@@ -133,9 +135,20 @@ async def run_search_with_failover(
     provider for a week and notifies admins, so a dead key/exhausted quota
     isn't retried on every search.
 
+    ``budget_s`` bounds the whole chain. Each provider is independently
+    capped at ``SEARCH_TIMEOUT_SECONDS`` (10s), so four configured providers
+    could spend 40s — longer than the caller's own deadline. When that
+    happened the caller was cancelled mid-chain and the model got a bare
+    "tool timed out", losing both the reason and the fact that a later
+    provider might well have answered. With a budget we stop *before*
+    starting a provider we can't afford and say what we tried instead.
+
     Returns ``(results, provider_used)``; ``provider_used`` is ``None`` only
     when no provider is configured. Failovers are logged.
     """
+    deadline = (
+        time.monotonic() + budget_s if budget_s and budget_s > 0 else None
+    )
     now = datetime.now(timezone.utc)
     candidates = _order_candidates(
         await _load_visible(db, user), now, primary=primary
@@ -149,7 +162,27 @@ async def run_search_with_failover(
 
     first_reachable: SearchProvider | None = None
     last_error: SearchError | None = None
+    from app.search.providers import SEARCH_TIMEOUT_SECONDS
+
     for i, sp in enumerate(candidates):
+        # Don't start a provider we can't afford to finish. Being cancelled
+        # by the caller mid-request throws away everything we learned; a
+        # deliberate stop can at least report it.
+        if deadline is not None and i > 0:
+            remaining = deadline - time.monotonic()
+            if remaining < SEARCH_TIMEOUT_SECONDS:
+                logger.warning(
+                    "search failover: out of budget after %d provider(s) "
+                    "(%.1fs left, need %.0fs) — stopping",
+                    i, remaining, SEARCH_TIMEOUT_SECONDS,
+                )
+                if last_error is not None:
+                    raise SearchError(
+                        f"Tried {i} search provider(s) without success and ran "
+                        f"out of time before reaching the rest. Last error: "
+                        f"{last_error}"
+                    ) from last_error
+                break
         try:
             results = await run_search(sp, query, count=count)
         except SearchError as e:

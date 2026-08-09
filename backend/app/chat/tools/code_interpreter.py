@@ -154,12 +154,18 @@ class CodeInterpreterTool(Tool):
         # ---- Resolve input files (explicit ∪ auto-attached) → (name, bytes) ----
         files = await self._gather_input_files(ctx, args.get("input_file_ids"))
         input_files: list[tuple[str, bytes]] = []
+        # Inputs that couldn't be read (too large, missing on disk, path
+        # rejected). These used to be dropped in silence — the comment here
+        # claimed "the model still sees what loaded via stdout", but nothing
+        # ever printed the manifest. So the model's ``read_csv('sales.csv')``
+        # raised FileNotFoundError, and it told the user the file didn't
+        # exist while their attachment chip was visible in the thread.
+        unreadable: list[str] = []
         for row in files:
             try:
                 data = await self._read_bytes(row)
-            except ToolError:
-                # Best-effort: skip an unreadable input rather than aborting
-                # the whole run. The model still sees what loaded via stdout.
+            except ToolError as e:
+                unreadable.append(f"{row.filename} ({e})")
                 continue
             input_files.append((row.filename, data))
 
@@ -188,6 +194,12 @@ class CodeInterpreterTool(Tool):
             stderr=result.stderr,
             produced_names=result.produced_names,
             skipped_names=result.skipped_names,
+            loaded_inputs=result.loaded_inputs,
+            # Both sources of loss: files this tool couldn't read, and files
+            # the sandbox refused to ship.
+            dropped_inputs=unreadable + result.dropped_inputs,
+            stdout_truncated=result.stdout_truncated,
+            stderr_truncated=result.stderr_truncated,
         )
 
         meta: dict[str, Any] = {
@@ -299,6 +311,10 @@ class CodeInterpreterTool(Tool):
         stderr: str,
         produced_names: list[str],
         skipped_names: list[str] | None = None,
+        loaded_inputs: list[str] | None = None,
+        dropped_inputs: list[str] | None = None,
+        stdout_truncated: bool = False,
+        stderr_truncated: bool = False,
     ) -> str:
         def _clip(s: str) -> str:
             s = s.rstrip()
@@ -314,12 +330,45 @@ class CodeInterpreterTool(Tool):
         else:
             parts.append(f"Execution FAILED (exit code {exit_code}).")
 
+        # Input manifest FIRST. A missing file is otherwise indistinguishable
+        # from a typo'd filename — the traceback says FileNotFoundError
+        # either way — so the model would conclude the user's attachment
+        # doesn't exist. Stating what was actually in the working directory
+        # turns that into a solvable problem.
+        if loaded_inputs:
+            parts.append(
+                "Input files available in the working directory: "
+                f"{', '.join(loaded_inputs)}."
+            )
+        elif dropped_inputs:
+            parts.append(
+                "No input files were loaded into the working directory."
+            )
+        if dropped_inputs:
+            parts.append(
+                "These input files could NOT be loaded and are absent from "
+                f"the working directory: {'; '.join(dropped_inputs)}. Do not "
+                "retry reading them — tell the user which file failed and "
+                "why, and work with whatever did load."
+            )
+
         if stdout.strip():
-            parts.append(f"stdout:\n{_clip(stdout)}")
+            suffix = (
+                "\n…[stdout was truncated by the sandbox — it is INCOMPLETE; "
+                "do not treat the last line as the end of the output]"
+                if stdout_truncated
+                else ""
+            )
+            parts.append(f"stdout:\n{_clip(stdout)}{suffix}")
         else:
             parts.append("stdout: (empty)")
         if stderr.strip():
-            parts.append(f"stderr:\n{_clip(stderr)}")
+            suffix = (
+                "\n…[stderr was truncated by the sandbox]"
+                if stderr_truncated
+                else ""
+            )
+            parts.append(f"stderr:\n{_clip(stderr)}{suffix}")
 
         if produced_names:
             listed = ", ".join(produced_names)

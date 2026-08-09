@@ -10,10 +10,12 @@ probe by asking the AI to "go look at http://localhost:6379".
 
 Output shape:
 
-* ``content``  — the model-facing string: title, URL, and the cleaned
-  body capped at ~6 000 characters (about 1 500 tokens). Above that we
-  truncate with a ``... [truncated]`` marker so the model knows it
-  can't see the rest.
+* ``content``  — the model-facing string: title, URL, and a ~6 000
+  character window of the cleaned body (about 1 500 tokens). Longer
+  pages are *paginated*, not clipped: the truncation marker reports the
+  character range shown and the exact ``offset`` to pass to read on. The
+  whole page is still fetched and extracted either way — the window only
+  bounds what enters the model's context per call.
 * ``sources`` — a single citation row using the page's ``<title>`` and
   the *final* URL (post-redirect) so the inline ``[n]`` chip points
   the user at what was actually read, not what was requested.
@@ -262,9 +264,11 @@ class FetchUrlTool(Tool):
         "text (boilerplate, nav, ads, and scripts stripped). Use this "
         "as a follow-up to `web_search` when a snippet looks like the "
         "right page but you need the full article to answer accurately. "
-        "Refuses non-public addresses (localhost, RFC1918, etc.) and "
-        "caps the page size — if you get back a truncation marker, the "
-        "rest of the page is unavailable, do not invent it. Returns the "
+        "Refuses non-public addresses (localhost, RFC1918, etc.). Long "
+        "pages come back one chunk at a time: if the result says it was "
+        "truncated, it tells you the exact `offset` to pass to read the "
+        "next chunk — do that when the answer might be further down, and "
+        "never invent content you haven't read. Returns the "
         "URL as a citation row so the chip stays in sync with `web_search`, "
         "and lists other links found on the page — call `fetch_url` again on "
         "one of those to follow a source deeper when the page cites or links "
@@ -288,6 +292,16 @@ class FetchUrlTool(Tool):
                 "format": "uri",
                 "maxLength": 2048,
             },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": (
+                    "Character offset to start reading from. Omit (or 0) "
+                    "for the top of the page. When a previous call reports "
+                    "it was truncated it gives you the exact offset to pass "
+                    "here to continue — use that rather than guessing."
+                ),
+            },
         },
         "required": ["url"],
         "additionalProperties": False,
@@ -298,7 +312,13 @@ class FetchUrlTool(Tool):
     max_per_turn = 6
     # The fetch itself is capped at 12s; the margin covers redirects
     # plus trafilatura extraction on a large page.
-    timeout_seconds = 30.0
+    # Has to cover the whole recovery chain, not just the first attempt:
+    # direct fetch (12s) + trafilatura extraction, then Tavily Extract (10s)
+    # and Ollama web_fetch (10s) when a page hard-blocks the crawler. At 30s
+    # the dispatcher killed that chain right at the last fallback — the step
+    # that exists precisely to rescue anti-bot-walled pages — and turned a
+    # recoverable fetch into a generic "timed out".
+    timeout_seconds = 45.0
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         url = args.get("url")
@@ -307,6 +327,20 @@ class FetchUrlTool(Tool):
         url = url.strip()
         if not url.lower().startswith(("http://", "https://")):
             raise ToolError("`url` must be an http(s) URL")
+
+        # Where to start reading. The whole page is fetched and extracted
+        # either way — this only windows what we hand back, so a long
+        # article costs the same upstream but doesn't blow the context
+        # budget in one go. Coerced rather than rejected: models routinely
+        # emit ``"1500"`` or ``1500.0`` for integer fields, and failing the
+        # call over that wastes a hop for no reason.
+        raw_offset = args.get("offset") or 0
+        try:
+            offset = max(0, int(float(raw_offset)))
+        except (TypeError, ValueError):
+            raise ToolError(
+                "`offset` must be a whole number of characters (or omitted)."
+            )
 
         # --- Attempt 1: direct fetch + local extraction (free). ---
         # ``block_reason`` is set when the direct path fails in a way
@@ -444,9 +478,43 @@ class FetchUrlTool(Tool):
         title = clean_model_text(title or "").strip() or _title_from_url(final_url)
 
         original_chars = len(text)
-        truncated = original_chars > _MAX_TEXT_CHARS
+        # Snippet for the citation chip always comes from the top of the
+        # page, so a continuation call doesn't retitle the source with
+        # whatever happens to be mid-article.
+        head_for_snippet = text[:240]
+
+        # Window the extracted text instead of hard-cutting at the top.
+        # Previously anything past 6 000 chars was unreachable — the tool
+        # took only a `url`, the description told the model the rest was
+        # gone, and a repeat call replayed the identical prefix from the
+        # turn-level dedup cache. So "summarise this long article" silently
+        # answered from the first 15% of it. The dedup key includes the
+        # arguments, so a different `offset` is correctly treated as a
+        # different call.
+        if offset >= original_chars and original_chars > 0:
+            raise ToolError(
+                f"`offset` {offset} is past the end of this page "
+                f"({original_chars} characters). The last readable chunk "
+                f"starts at {max(0, original_chars - _MAX_TEXT_CHARS)}."
+            )
+
+        window = text[offset : offset + _MAX_TEXT_CHARS]
+        next_offset = offset + len(window)
+        truncated = next_offset < original_chars
+
         if truncated:
-            text = text[:_MAX_TEXT_CHARS].rstrip() + "\n\n... [truncated]"
+            window = window.rstrip() + (
+                f"\n\n... [truncated — showing characters {offset}"
+                f"–{next_offset} of {original_chars}. To continue reading, "
+                f"call fetch_url again on this same URL with "
+                f"offset={next_offset}.]"
+            )
+        elif offset > 0:
+            window = window.rstrip() + (
+                f"\n\n[end of page — showing characters {offset}"
+                f"–{next_offset} of {original_chars}.]"
+            )
+        text = window
 
         body = (
             f"Title: {title}\n"
@@ -459,7 +527,7 @@ class FetchUrlTool(Tool):
         # (a fresh fetch_url call). Each is still re-guarded by safe_fetch,
         # so this only widens *choice*, not trust.
         followable = _filter_discovered_links(discovered_links, final_url, url)
-        if followable:
+        if followable and offset == 0:
             link_lines = "\n".join(
                 f"[L{i}] {link['title']} — {link['url']}"
                 for i, link in enumerate(followable, start=1)
@@ -470,7 +538,7 @@ class FetchUrlTool(Tool):
                 f"read next):\n{link_lines}"
             )
 
-        snippet = re.sub(r"\s+", " ", text[:240]).strip()
+        snippet = re.sub(r"\s+", " ", head_for_snippet).strip()
 
         logger.info(
             "fetch_url ok user=%s url=%s chars=%d truncated=%s recovered_via=%s",

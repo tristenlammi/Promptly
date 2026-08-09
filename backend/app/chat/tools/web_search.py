@@ -101,7 +101,13 @@ class WebSearchTool(Tool):
     max_per_turn = 5
     # Provider adapters carry their own HTTP timeouts (~10s); this is
     # the dispatch-layer backstop for a stalled provider or slow DNS.
-    timeout_seconds = 30.0
+    # Must cover the whole failover chain, not one provider: candidates are
+    # tried SEQUENTIALLY at 10s each, so the documented four-provider setup
+    # needs 40s. At 30s the dispatcher cancelled a chain that was still
+    # working through healthy providers and the model got a bare "timed
+    # out". The chain is also handed an internal budget (below) so it stops
+    # deliberately rather than being killed.
+    timeout_seconds = 45.0
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         query = args.get("query")
@@ -135,7 +141,15 @@ class WebSearchTool(Tool):
         # other enabled provider gets a shot before we give up.
         try:
             results, provider = await run_search_with_failover(
-                ctx.db, ctx.user, query, count=count, primary=primary
+                ctx.db,
+                ctx.user,
+                query,
+                count=count,
+                primary=primary,
+                # Stop a few seconds short of our own dispatch deadline so
+                # the chain reports what it tried instead of being cancelled
+                # mid-request with nothing to show.
+                budget_s=(self.timeout_seconds or 45.0) - 5.0,
             )
         except SearchError as e:
             logger.warning(

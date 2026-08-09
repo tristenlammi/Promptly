@@ -21,6 +21,51 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-09
+
+### Fixed
+- **Web search and page fetching are no longer killed mid-recovery.** Both
+  tools allowed 30 seconds for work that can legitimately take longer:
+  search tries each provider in turn at 10s apiece, so the documented
+  four-provider setup needs 40s, and `fetch_url` may spend 12s on the
+  direct fetch before its Tavily and Ollama fallbacks (10s each) — the
+  steps that exist specifically to rescue a page that blocks crawlers. In
+  both cases the dispatcher cancelled the tool right as it was recovering
+  and the model got a bare "timed out", losing the reason and the fact
+  that the next provider might well have answered. Both budgets now cover
+  the real worst case, and the search chain is given an internal deadline
+  so it stops *before* starting a provider it can't finish and reports
+  what it tried — including the last provider's actual error — instead of
+  being cancelled with nothing to show.
+- **"Your file doesn't exist" — when it did.** `code_interpreter` dropped
+  input files it couldn't read without telling anyone, and the sandbox
+  stopped at its 64 MB total-input ceiling by discarding that file *and
+  every remaining one*. The script's `read_csv('sales.csv')` then raised
+  FileNotFoundError, and the model reported the file was missing while
+  the user's attachment chip sat visible in the thread — a missing file
+  and a typo'd filename produce the identical traceback, so it had no way
+  to tell them apart. The result now opens with what actually loaded and
+  what didn't, each with a reason, and the size ceiling no longer
+  disqualifies the small files queued behind a large one.
+- **Truncated output is no longer presented as complete.** The sandbox
+  already computed `stdout_truncated`/`stderr_truncated` and the tool
+  discarded them, so a clipped `df.to_string()` reached the model looking
+  like a finished table and it answered from a partial one. The
+  truncation is now stated explicitly.
+- **The AI can read a whole long page again.** `fetch_url` cut every page
+  at 6,000 characters and there was no way to see past it: the tool took
+  only a `url`, its description told the model the rest was unavailable,
+  and calling again replayed the identical prefix from the turn's dedup
+  cache. So "summarise this article" quietly answered from the first 15%
+  of a long one, with nothing to suggest the answer was partial. Pages
+  are now paginated rather than clipped — the truncation notice reports
+  the character range shown and the exact `offset` to pass to continue,
+  and the model has six fetches per turn to work through it. The
+  discovered-links block is only attached to the first chunk (it's
+  page-level, and repeating it burned the budget it exists to save), and
+  the citation snippet still comes from the top of the page so a
+  continuation doesn't retitle the source with mid-article text.
+
 ## [0.6.2] - 2026-08-09
 
 ### Fixed
