@@ -1760,15 +1760,28 @@ function ComposerMoreMenu({
                 >
                   <Check className="h-4 w-4" />
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <Wrench className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                  <span
-                    className={cn(
-                      "text-sm font-medium",
-                      toolsEnabled ? "text-[var(--accent)]" : "text-[var(--text)]"
-                    )}
-                  >
-                    AI tools
+                {/* Naming the capabilities is the only place in the product
+                    that does. Previously this was a bare "AI tools" checkbox
+                    with no tooltip and no description, so the only way to
+                    learn that Promptly can search the web, read pages, run
+                    Python or build a PDF was to have it happen by accident. */}
+                <span className="flex min-w-0 flex-col">
+                  <span className="flex items-center gap-1.5">
+                    <Wrench className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                    <span
+                      className={cn(
+                        "text-sm font-medium",
+                        toolsEnabled
+                          ? "text-[var(--accent)]"
+                          : "text-[var(--text)]"
+                      )}
+                    >
+                      AI tools
+                    </span>
+                  </span>
+                  <span className="mt-0.5 pl-5 text-[11px] leading-snug text-[var(--text-muted)]">
+                    Search the web, read pages, run Python, make PDFs and
+                    images, run research agents
                   </span>
                 </span>
               </button>

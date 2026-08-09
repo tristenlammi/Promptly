@@ -21,6 +21,29 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-09
+
+### Changed
+- **`echo` is no longer advertised to the model.** A Phase A1 smoke test
+  was being sent to every user in the tools payload *and* the tool-aware
+  system prompt on every Tools-on turn — the same hazard that got
+  `attach_demo` retired, since a model with a no-op tool in scope will
+  eventually "demonstrate" it instead of answering. It keeps a `debug`
+  category so it stays dispatchable for tests and diagnostics but is
+  never offered. Twelve real tools are advertised now.
+- **The tools switch says what it does.** It was a bare "AI tools"
+  checkbox in the composer's overflow menu with no tooltip and no
+  description, so the only way to discover that Promptly can search the
+  web, read pages, run Python, generate PDFs and images or fan out to
+  research agents was to have it happen by accident. It now names them,
+  and the Settings description does too instead of citing one example.
+
+### Removed
+- `ToolsToggle.tsx`, which nothing imported. It carried the original
+  "Enable AI tools (echo, file generation, more coming)" copy, so the
+  most misleading description of the tool system in the codebase was one
+  no user could ever see — only the next developer.
+
 ## [0.6.3] - 2026-08-09
 
 ### Fixed

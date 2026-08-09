@@ -15,6 +15,18 @@ from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 
 class EchoTool(Tool):
     name = "echo"
+    # ``debug`` is never added to the router's ``enabled_categories``, so
+    # this is registered-but-unadvertised: it stays dispatchable for tests
+    # and manual diagnostics, and the model never sees it in the tools[]
+    # payload or the tool-aware system prompt.
+    #
+    # It previously inherited the default ``artefact`` category, which meant
+    # a Phase A1 smoke test shipped to every user on every Tools-on turn —
+    # the exact hazard that got ``attach_demo`` retired from the registry
+    # (see the note there: models were invoking it for real user requests).
+    # Advertising a no-op tool costs tokens on every turn and invites the
+    # model to "demonstrate" it instead of answering.
+    category = "debug"
     description = (
         "Echoes a piece of text back unchanged. Use this only when the "
         "user explicitly asks you to test the tool system or to demonstrate "

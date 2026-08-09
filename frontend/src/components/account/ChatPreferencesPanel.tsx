@@ -219,10 +219,13 @@ export function ChatPreferencesPanel() {
           title="Tools"
           description={
             <>
-              Lets the assistant call server-side tools mid-reply — for
-              example, generating a downloadable PDF and attaching it to
-              its message. Off-by-default would mean the model has to
-              refuse those requests until you opt in for the turn.
+              Lets the assistant do things mid-reply instead of only
+              writing: search the web and read pages, run Python in a
+              sandbox to analyse a file or draw a chart, generate PDFs and
+              images, and fan out to parallel research agents. In a
+              workspace it can also read your notes and boards and draft
+              changes for you to approve. Turn this off and it can only
+              answer from what it already knows.
             </>
           }
           checked={tools}
