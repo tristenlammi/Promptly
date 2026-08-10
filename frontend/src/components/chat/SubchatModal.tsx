@@ -24,6 +24,11 @@ interface SubchatModalProps {
   /** Display name of the model the subchat will use (inherited from the
    *  parent). Purely informational. */
   modelName?: string | null;
+  /** Whether AI tools are on for this turn. Mirrors the main composer's
+   *  switch — without it the backend defaults to off, so a subchat
+   *  silently couldn't run code or fetch a page while the chat behind it
+   *  could. */
+  toolsEnabled?: boolean;
   /** Discard the subchat (parent deletes the ephemeral conversation). */
   onClose: () => void;
   /** Promote the subchat to a permanent chat (parent PATCHes
@@ -52,13 +57,17 @@ export function SubchatModal({
   subchat,
   parentTitle,
   modelName,
+  toolsEnabled = false,
   onClose,
   onKeep,
   onReset,
   onInsert,
 }: SubchatModalProps) {
   const { messages, streaming, streamingContent, error, send, stop } =
-    useSubchatStream(subchat.id);
+    useSubchatStream(subchat.id, {
+      toolsEnabled,
+      branchedAt: subchat.branched_at ?? null,
+    });
   const [draft, setDraft] = useState("");
 
   // ---- Geometry (position + size) ----
@@ -207,11 +216,26 @@ export function SubchatModal({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, streamingContent]);
 
-  // Esc closes (discards). Listen at document level so it fires even when
-  // focus is inside the textarea.
+  // Esc closes (discards) — but only when the keystroke was aimed at this
+  // window. The listener has to sit on ``document`` to catch events from
+  // the textarea, so it filters on the event target instead: nothing in the
+  // composer stops propagation, so a document-wide handler also fired for
+  // the Esc that dismisses the @-mention popover, the slash-command
+  // popover or a message action menu — quietly discarding a subchat the
+  // user never meant to touch.
+  const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      const root = rootRef.current;
+      const target = e.target as Node | null;
+      if (!root || !target) return;
+      // Inside the window, or nothing focused at all (clicking the drag
+      // header parks focus on <body>) — either way no other component is
+      // claiming this key, so it's ours.
+      const ours = root.contains(target) || target === document.body;
+      if (!ours) return;
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -241,6 +265,7 @@ export function SubchatModal({
 
   return (
     <div
+      ref={rootRef}
       role="dialog"
       aria-label="Subchat"
       className="fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl"

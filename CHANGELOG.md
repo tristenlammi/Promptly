@@ -21,6 +21,38 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-10
+
+### Fixed
+- **"Keep" no longer discards the subchat it was asked to save.** The
+  window closed and the transcript was purged *before* the promotion was
+  sent, so a failed request looked exactly like success — while the chat
+  stayed ephemeral and the sweeper deleted it within 24h. Everything else
+  about a subchat is meant to be thrown away, which made this the one
+  place a silent failure cost anything. It now promotes first and only
+  closes on success, and reports the failure instead of logging it to a
+  console nobody has open (as do Open and Reset).
+- **Subchats can use tools again.** The panel sent no `tools_enabled`, and
+  the backend defaults it off — so code execution, page fetching and image
+  generation silently didn't work in a subchat while the composer one
+  panel over had them. The hook's own documentation claimed the opposite.
+- **Escape meant for something else no longer closes a subchat.** The
+  handler listened on `document` and nothing in the composer stops
+  propagation, so the Escape that dismisses the @-mention popover, the
+  slash-command popover or a message action menu also discarded the
+  subchat. It now only closes when the keystroke was aimed at the window.
+- **A subchat reply is no longer lost when you switch chats mid-answer.**
+  The panel is torn down on navigation and dropping the reader tells the
+  backend nothing, so the reply finished and was saved while the panel
+  never heard — you'd come back to your question with no answer, forever,
+  with the answer sitting in the database. It now reattaches to a live
+  stream on return, or picks up the finished reply if it landed while you
+  were away.
+- **A dead connection no longer wedges the subchat on "Thinking…".** The
+  panel's SSE reader was copied from the main chat's without its stall
+  watchdog, so a half-closed proxy left the composer unusable until the
+  subchat was discarded. Same 75s budget as the main chat now.
+
 ## [0.7.1] - 2026-08-10
 
 ### Fixed

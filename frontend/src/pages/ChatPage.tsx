@@ -276,7 +276,7 @@ export function ChatPage({
       const sc = await spawnSubchat(id);
       if (sc) setSubchats((m) => ({ ...m, [id]: sc }));
     } catch (err) {
-      console.error("Failed to open subchat", err);
+      toast.error(apiErrorMessage(err, "Couldn't open a subchat. Try again."));
     }
   }, [id, subchats, spawnSubchat]);
 
@@ -336,24 +336,34 @@ export function ChatPage({
         });
       }
     } catch (err) {
-      console.error("Failed to reset subchat", err);
+      toast.error(apiErrorMessage(err, "Couldn't reset the subchat. Try again."));
     }
   }, [id, subchats, spawnSubchat]);
 
   // Keep: promote the subchat to a permanent chat, then navigate to it so
   // it surfaces in the sidebar as a branched chat.
+  //
+  // Everything else about a subchat is designed to be thrown away, which
+  // makes this the one operation where a silent failure costs the user
+  // something. So the promotion has to land *before* we close the window:
+  // dropping it first cleared the transcript and looked exactly like
+  // success, while the chat stayed ephemeral and the sweeper deleted it
+  // within 24h.
   const keepSubchat = useCallback(async () => {
     if (!id) return;
     const sc = subchats[id];
     if (!sc) return;
-    dropSubchat(id);
     try {
       await chatApi.update(sc.id, { temporary_mode: null });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      navigate(`/chat/${sc.id}`);
     } catch (err) {
-      console.error("Failed to keep subchat", err);
+      toast.error(
+        apiErrorMessage(err, "Couldn't keep this subchat. It's still open — try again.")
+      );
+      return;
     }
+    dropSubchat(id);
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    navigate(`/chat/${sc.id}`);
   }, [id, subchats, dropSubchat, queryClient, navigate]);
 
   // Drop a subchat answer into the main composer.
@@ -1464,6 +1474,7 @@ export function ChatPage({
           parentTitle={conversation?.title ?? null}
           modelName={selectedModel?.display_name ?? null}
           onClose={closeSubchat}
+          toolsEnabled={toolsEnabled}
           onKeep={keepSubchat}
           onReset={resetSubchat}
           onInsert={insertFromSubchat}
