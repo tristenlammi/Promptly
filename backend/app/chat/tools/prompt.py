@@ -95,6 +95,15 @@ def build_tools_system_prompt(
             "a <style> block unless they ask for separate files). "
             "The side panel's live preview renders it as a real page."
         )
+        guidelines.append(
+            "- For a React component or small React app, emit ONE "
+            "self-contained component in a ```jsx (or ```tsx) fence — "
+            "default-export it (or name it `App`) and import only from "
+            "'react'. The side panel renders it live. There is no bundler "
+            "and no network in that preview, so any other package import "
+            "(framer-motion, recharts, a UI kit) will fail: inline the "
+            "styles and write the behaviour by hand instead."
+        )
     if "code" in categories:
         guidelines.append(
             "- For anything that benefits from actually running code — "

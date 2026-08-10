@@ -41,6 +41,50 @@ function hunspellDictionaries(): Plugin {
   };
 }
 
+/**
+ * Expose React's UMD builds as virtual modules so the React artifact preview
+ * can inject a runtime into its sandboxed iframe.
+ *
+ * The iframe is ``sandbox="allow-scripts"`` with no ``allow-same-origin``, so
+ * it can't fetch anything from us — the runtime has to be inlined into the
+ * document. A CDN is not an option either: the app ships a strict CSP that
+ * blocks external hosts, and a self-hosted install has to work with no
+ * internet at all.
+ *
+ * A plain ``import "react/umd/react.production.min.js?raw"`` fails: React 18's
+ * ``exports`` map doesn't publish ``./umd/*``, so the bare specifier is
+ * unresolvable. Reading the file off disk at build time sidesteps that,
+ * exactly as ``hunspellDictionaries`` above does for the dictionary data.
+ */
+function reactUmdRuntime(): Plugin {
+  const PREFIX = "virtual:react-umd/";
+  const RESOLVED = "\0" + PREFIX;
+  const require = createRequire(path.resolve(__dirname, "package.json"));
+  const FILES: Record<string, [string, string]> = {
+    react: ["react", "umd/react.production.min.js"],
+    "react-dom": ["react-dom", "umd/react-dom.production.min.js"],
+  };
+  return {
+    name: "promptly-react-umd-runtime",
+    resolveId(id) {
+      return id.startsWith(PREFIX) ? "\0" + id : null;
+    },
+    load(id) {
+      if (!id.startsWith(RESOLVED)) return null;
+      const key = id.slice(RESOLVED.length);
+      const entry = FILES[key];
+      if (!entry) return null;
+      const [pkg, rel] = entry;
+      // ``require.resolve`` respects the exports map for the package root,
+      // which resolves fine — it's only the ``./umd/*` subpath that isn't
+      // published. Take the directory and read the file directly.
+      const dir = path.dirname(require.resolve(pkg));
+      const code = fs.readFileSync(path.join(dir, rel), "utf8");
+      return `export default ${JSON.stringify(code)};`;
+    },
+  };
+}
+
 // Single source of truth for the in-app version indicator. Read from
 // package.json at build time and injected via ``define`` below as the
 // ``__APP_VERSION__`` global (see ``src/vite-env.d.ts``). The repo-root
@@ -57,6 +101,7 @@ export default defineConfig({
   plugins: [
     react(),
     hunspellDictionaries(),
+    reactUmdRuntime(),
     VitePWA({
       // We need a handwritten service worker for the Web Push hooks
       // (``push`` + ``notificationclick`` events) — Workbox's
@@ -150,6 +195,10 @@ export default defineConfig({
           // last segment — ``virtual:hunspell/dictionary-en`` → ``dictionary-en-*.js``
           // — so the ignore must match ``dictionary-*``, not ``hunspell-*``.
           "**/dictionary-*.js",
+          // React artifact preview: ~350 KB, almost all of it React's UMD
+          // runtime inlined as text for the sandboxed iframe. Only needed
+          // when someone opens a jsx/tsx artifact, so same rationale again.
+          "**/ReactPreview-*.js",
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },

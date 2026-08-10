@@ -1,7 +1,7 @@
 {
   "name": "promptly-frontend",
   "private": true,
-  "version": "0.6.4",
+  "version": "0.7.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -86,6 +86,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
+    "sucrase": "^3.35.1",
     "tiptap-markdown": "^0.8.10",
     "unicode-emoji-json": "^0.6.0",
     "y-prosemirror": "^1.2.15",

@@ -21,6 +21,25 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-10
+
+### Added
+- **React artifacts render live.** A `jsx` / `tsx` code block now gets a
+  Preview tab in the artifact panel: the component is transformed with
+  Sucrase and mounted in the same sandboxed iframe posture as the HTML
+  preview (`allow-scripts`, no `allow-same-origin`). React's runtime is
+  inlined into the document rather than fetched, so it works under the
+  strict CSP and on an install with no internet. Plain `javascript` /
+  `typescript` blocks deliberately don't get the tab — most aren't
+  components. Imports other than React can't be resolved without a
+  bundler, so they're caught up front and named in a readable message
+  instead of failing as `require is not defined` at runtime; a component
+  that mounts itself with `createRoot` is left to do so. The preview is
+  lazy-loaded and excluded from the service-worker precache (~350 kB,
+  nearly all of it React), so nobody pays for it until they open one.
+  The tool-aware system prompt now steers models to emit one
+  self-contained component for React requests.
+
 ## [0.6.4] - 2026-08-09
 
 ### Changed

@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 
 import { ArtifactCodeEditor } from "./ArtifactCodeEditor";
 import { HtmlPreview } from "./previews/HtmlPreview";
+import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { SvgPreview } from "./previews/SvgPreview";
 import { MarkdownPreview } from "./previews/MarkdownPreview";
 import { JsonPreview } from "./previews/JsonPreview";
 import { CsvPreview } from "./previews/CsvPreview";
 import { RunOutputPane, type RunStatus } from "./RunOutputPane";
+
+const ReactPreview = lazyWithRetry(
+  () =>
+    import("./previews/ReactPreview").then((m) => ({ default: m.ReactPreview })),
+  "ReactPreview"
+);
 import {
   type ArtifactLanguage,
   humanLanguageLabel,
@@ -231,6 +238,23 @@ function PreviewForLanguage({
       return <JsonPreview source={source} />;
     case "csv":
       return <CsvPreview source={source} />;
+    case "jsx":
+    case "tsx":
+      return (
+        // Lazy: this preview carries React's UMD builds (~144 kB) plus the
+        // Sucrase transform, and only a fraction of artifacts are
+        // components. The fallback matches the other previews' framing so
+        // the panel doesn't jump while the chunk loads.
+        <Suspense
+          fallback={
+            <div className="flex h-full w-full items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg)] text-sm text-[var(--text-muted)]">
+              Preparing preview…
+            </div>
+          }
+        >
+          <ReactPreview source={source} />
+        </Suspense>
+      );
     default:
       return (
         <div className="flex h-full w-full items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg)] p-6 text-sm text-[var(--text-muted)]">

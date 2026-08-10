@@ -60,6 +60,13 @@ const PREVIEWABLE: ReadonlySet<ArtifactLanguage> = new Set([
   "markdown",
   "json",
   "csv",
+  // Rendered live by ReactPreview (Sucrase transform + sandboxed iframe).
+  // Deliberately NOT plain "javascript"/"typescript": most JS snippets are
+  // utilities or config, not components, and offering a Preview tab that
+  // fails on them is worse than not offering one. A React artifact is
+  // fenced as jsx/tsx in practice.
+  "jsx",
+  "tsx",
 ]);
 
 /** Fold the messy universe of highlight.js / markdown fence aliases
