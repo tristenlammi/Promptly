@@ -49,11 +49,11 @@ def _session(*, done: bool = False, flush=None) -> StreamSession:
 async def test_flushes_live_sessions_and_reports_count():
     calls: list[str] = []
 
-    async def flush_a() -> bool:
+    async def flush_a(reason: str) -> bool:
         calls.append("a")
         return True
 
-    async def flush_b() -> bool:
+    async def flush_b(reason: str) -> bool:
         calls.append("b")
         return True
 
@@ -70,7 +70,7 @@ async def test_skips_finished_sessions():
     """A completed generation already persisted itself."""
     called = False
 
-    async def flush() -> bool:
+    async def flush(reason: str) -> bool:
         nonlocal called
         called = True
         return True
@@ -92,7 +92,7 @@ async def test_callback_returning_false_is_not_counted():
     """No accumulated text yet → nothing written, so it mustn't be reported
     as a saved reply."""
 
-    async def flush() -> bool:
+    async def flush(reason: str) -> bool:
         return False
 
     _session(flush=flush)
@@ -103,10 +103,10 @@ async def test_one_failure_does_not_block_the_others():
     """Sessions are flushed independently; a single bad one must not cost
     everyone else their reply."""
 
-    async def boom() -> bool:
+    async def boom(reason: str) -> bool:
         raise RuntimeError("db exploded")
 
-    async def ok() -> bool:
+    async def ok(reason: str) -> bool:
         return True
 
     _session(flush=boom)
@@ -121,7 +121,7 @@ async def test_marks_flushed_so_the_generator_cannot_double_write():
     """``flushed`` is what the generator's own persist path checks to avoid
     writing a second copy of the same reply."""
 
-    async def flush() -> bool:
+    async def flush(reason: str) -> bool:
         return True
 
     s = _session(flush=flush)
@@ -135,7 +135,7 @@ async def test_marks_flushed_so_the_generator_cannot_double_write():
 async def test_already_flushed_session_is_not_flushed_again():
     calls = 0
 
-    async def flush() -> bool:
+    async def flush(reason: str) -> bool:
         nonlocal calls
         calls += 1
         return True
@@ -152,7 +152,7 @@ async def test_marks_flushed_before_awaiting_the_callback():
     finishes mid-flush races in a duplicate row."""
     seen_during_call = None
 
-    async def flush() -> bool:
+    async def flush(reason: str) -> bool:
         nonlocal seen_during_call
         seen_during_call = s.flushed
         return True
@@ -167,7 +167,7 @@ async def test_slow_flush_cannot_hang_shutdown():
     """The container's shutdown grace period is finite — losing a partial
     reply is bad, hanging the shutdown is worse."""
 
-    async def hangs() -> bool:
+    async def hangs(reason: str) -> bool:
         await asyncio.sleep(30)
         return True
 

@@ -110,6 +110,7 @@ from app.chat.stream_runner import (
     find_active_for_conversation,
     get_or_create_session,
     get_session,
+    stop_session,
 )
 from app.chat.personal_context import build_personal_context_prompt
 from app.chat.semantic_search import (
@@ -3233,15 +3234,18 @@ async def _load_message_attachments(
 # model produces neither text nor tool-calls on the forced hop.
 MAX_TOOL_HOPS = 8
 
-# Appended to a reply that was cut short because the server shut down while
-# it was still being written. There's no ``truncated`` column on ``messages``
-# to flag it structurally, and an answer that just stops mid-sentence reads
-# like the model broke — so the reason is stated inline where the reader
-# will actually see it.
-_INTERRUPTED_SUFFIX = (
-    "\n\n_[This reply was cut short — the server restarted while it was "
-    "being written.]_"
-)
+# Appended to a reply that was saved before it finished. There's no
+# ``truncated`` column on ``messages`` to flag it structurally, and an answer
+# that just stops mid-sentence reads like the model broke — so the reason is
+# stated inline where the reader will actually see it. Keyed by why it
+# happened: "the server restarted" would be a lie when the user pressed Stop.
+_INTERRUPTED_SUFFIXES = {
+    "shutdown": (
+        "\n\n_[This reply was cut short — the server restarted while it was "
+        "being written.]_"
+    ),
+    "stopped": "\n\n_[Stopped.]_",
+}
 
 # Token backstop for voice-mode turns when the client didn't set its own
 # cap. The brevity system prompt does the real work (replies end
@@ -4823,11 +4827,13 @@ async def _stream_generator(
         # cancelled and its session can't be trusted.
         if session is not None:
 
-            async def _flush_partial_reply() -> bool:
+            async def _flush_partial_reply(reason: str = "shutdown") -> bool:
                 text = _strip_leaked_tool_call_xml("".join(collected_text)).strip()
                 if not text:
                     return False
-                text += _INTERRUPTED_SUFFIX
+                text += _INTERRUPTED_SUFFIXES.get(
+                    reason, _INTERRUPTED_SUFFIXES["shutdown"]
+                )
                 reasoning = "".join(collected_reasoning) or None
                 async with SessionLocal() as fdb:
                     conv_row = await fdb.get(Conversation, conv_id)
@@ -4860,9 +4866,10 @@ async def _stream_generator(
                     await fdb.commit()
                 logger.info(
                     "Persisted partial reply (%d chars) for conversation %s "
-                    "after shutdown (stream=%s)",
+                    "(reason=%s stream=%s)",
                     len(text),
                     conv_id,
+                    reason,
                     stream_id,
                 )
                 return True
@@ -6545,6 +6552,55 @@ async def get_active_stream(
     await get_accessible_conversation(conversation_id, user, db)
     session = find_active_for_conversation(conversation_id=conversation_id)
     return {"stream_id": str(session.stream_id) if session else None}
+
+
+@router.post("/stream/{stream_id}/stop")
+async def stop_stream(
+    stream_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Stop an in-flight reply and keep the part that was already written.
+
+    The composer's Stop button used to only abort the browser's ``fetch``.
+    Generation doesn't live on that connection though — it runs as a
+    background task writing into an in-process buffer, which is what lets
+    a user navigate away and reattach — so the model kept going, the
+    tokens were still billed, and the *whole* reply was persisted. The
+    stream looked stopped until you reloaded and found the finished answer
+    sitting there.
+
+    Returns the partial assistant message when one was saved, so the
+    client can drop it straight into the transcript instead of showing a
+    gap until the next refetch.
+    """
+    session = get_session(stream_id)
+    if session is None:
+        # Already finished and evicted, or never existed. Nothing to stop
+        # is not an error — the user got what they asked for either way.
+        return {"stopped": False, "message": None}
+    if session.user_id != user.id:
+        # Collaborators can watch a shared stream (see get_active_stream),
+        # but only the person who started it may cut it off.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the sender can stop this reply.",
+        )
+
+    saved = await stop_session(session, done_event=_sse({"done": True}))
+    if not saved:
+        return {"stopped": True, "message": None}
+
+    conv = await db.get(Conversation, session.conversation_id)
+    if conv is None or conv.active_leaf_message_id is None:
+        return {"stopped": True, "message": None}
+    msg = await db.get(Message, conv.active_leaf_message_id)
+    if msg is None or msg.role != "assistant":
+        return {"stopped": True, "message": None}
+    return {
+        "stopped": True,
+        "message": MessageResponse.model_validate(msg).model_dump(mode="json"),
+    }
 
 
 # Keep the scaffold ping for sanity checks.

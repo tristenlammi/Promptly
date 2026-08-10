@@ -21,6 +21,26 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-10
+
+### Fixed
+- **Stop actually stops the reply now.** The button only aborted the
+  browser's `fetch`, and generation doesn't live on that connection — it
+  runs as a background task filling an in-process buffer, which is what
+  lets you navigate away mid-reply and reattach. So the model ran to
+  completion, the tokens were billed, the *whole* answer was saved, and
+  reloading the page produced the finished reply you thought you'd
+  stopped (revisiting the chat could even resume it on screen). Stop now
+  cancels the generation server-side and saves the text written up to
+  that moment as a real message marked `[Stopped.]`, so the reply ends
+  where you stopped it. The same fix covers the subchat panel — which
+  additionally threw the partial text away — and voice-mode barge-in.
+- **The composer no longer freezes after Stop.** Cancelling nulled the
+  turn's abort handle, so the turn's own cleanup couldn't recognise
+  itself and skipped tearing down the streaming state: `isStreaming`
+  stayed true forever, leaving the Stop button showing and the send
+  button unreachable until a reload.
+
 ## [0.7.0] - 2026-08-10
 
 ### Added

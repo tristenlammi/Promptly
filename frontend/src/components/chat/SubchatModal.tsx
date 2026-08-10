@@ -57,7 +57,7 @@ export function SubchatModal({
   onReset,
   onInsert,
 }: SubchatModalProps) {
-  const { messages, streaming, streamingContent, error, send, cancel } =
+  const { messages, streaming, streamingContent, error, send, stop } =
     useSubchatStream(subchat.id);
   const [draft, setDraft] = useState("");
 
@@ -391,7 +391,7 @@ export function SubchatModal({
           {streaming ? (
             <button
               type="button"
-              onClick={cancel}
+              onClick={() => void stop()}
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--text)] text-[var(--bg)] transition hover:opacity-90"
               aria-label="Stop generating"
               title="Stop generating"

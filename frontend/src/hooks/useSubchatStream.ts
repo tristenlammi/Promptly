@@ -87,7 +87,11 @@ export interface UseSubchatStreamResult {
   streamingContent: string;
   error: string | null;
   send: (text: string) => Promise<void>;
+  /** Drop the local reader only — the backend keeps generating. Used on
+   *  unmount and when a new turn takes over. */
   cancel: () => void;
+  /** Stop the reply for real and keep the text produced so far. */
+  stop: () => Promise<void>;
 }
 
 export function useSubchatStream(
@@ -109,11 +113,31 @@ export function useSubchatStream(
   const [streamingContent, setStreamingContent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // The server-side stream this reader is attached to. Aborting the fetch
+  // doesn't reach the backend — generation runs as a background task — so
+  // stopping for real means naming the stream.
+  const liveStreamRef = useRef<string | null>(null);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
   }, []);
+
+  /** Stop button: halt generation server-side and keep what was written.
+   *  ``cancel`` alone let the model run to completion — billed, saved in
+   *  full — while the panel threw the visible partial away. */
+  const stop = useCallback(async () => {
+    const streamId = liveStreamRef.current;
+    liveStreamRef.current = null;
+    cancel();
+    if (!streamId) return;
+    try {
+      const saved = await chatApi.stopStream(streamId);
+      if (saved) setStoredMessages((prev) => [...prev, saved]);
+    } catch (err) {
+      console.warn("Stopping the subchat stream failed", err);
+    }
+  }, [cancel, setStoredMessages]);
 
   // Clear only the transient in-flight state when switching subchats (or
   // closing); the persisted transcript is intentionally left in the store so
@@ -170,6 +194,7 @@ export function useSubchatStream(
           subchatId,
           { content: body }
         );
+        liveStreamRef.current = stream_id;
         // Swap the optimistic row for the persisted one (real id/metrics).
         setStoredMessages((prev) =>
           prev.map((m) => (m.id === optimistic.id ? user_message : m))
@@ -238,6 +263,7 @@ export function useSubchatStream(
           else clearTimeout(raf);
         }
         abortRef.current = null;
+        liveStreamRef.current = null;
         setStreaming(false);
         setStreamingContent("");
       }
@@ -245,5 +271,5 @@ export function useSubchatStream(
     [subchatId, streaming, cancel, setStoredMessages]
   );
 
-  return { messages, streaming, streamingContent, error, send, cancel };
+  return { messages, streaming, streamingContent, error, send, cancel, stop };
 }

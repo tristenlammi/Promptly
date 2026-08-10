@@ -372,6 +372,20 @@ export const chatApi = {
     );
     return data.stream_id;
   },
+  /** Stop an in-flight reply server-side and keep what was written.
+   *
+   *  Aborting the client's ``fetch`` alone doesn't stop anything —
+   *  generation runs as a background task on the server (that's what
+   *  makes reattach work), so it would run to completion, bill the
+   *  tokens, and save the full answer. Returns the saved partial
+   *  message when there was one to save. */
+  async stopStream(streamId: string): Promise<ChatMessage | null> {
+    const { data } = await apiClient.post<{
+      stopped: boolean;
+      message: ChatMessage | null;
+    }>(`/chat/stream/${streamId}/stop`);
+    return data.message;
+  },
   async search(
     q: string,
     limit = 20,

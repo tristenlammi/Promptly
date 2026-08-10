@@ -79,7 +79,10 @@ class StreamSession:
     # the provider already billed for the tokens. Returns True if a row
     # was written. ``None`` until the generator gets far enough to have
     # something worth saving.
-    flush_partial: Callable[[], Awaitable[bool]] | None = None
+    # Takes the reason for the flush ("shutdown" / "stopped") so the note
+    # appended to the saved text tells the user why their reply ends where
+    # it does — a restart and a deliberate Stop look identical otherwise.
+    flush_partial: Callable[[str], Awaitable[bool]] | None = None
     # Guards against double-writing if shutdown races the generator's own
     # persist step.
     flushed: bool = False
@@ -238,7 +241,7 @@ async def flush_in_flight(timeout: float = 8.0) -> int:
         session.flushed = True
         try:
             assert session.flush_partial is not None
-            return bool(await session.flush_partial())
+            return bool(await session.flush_partial("shutdown"))
         except Exception:  # noqa: BLE001 — shutdown must not raise
             logger.exception(
                 "Failed to persist partial reply for stream %s", session.stream_id
@@ -266,6 +269,51 @@ async def flush_in_flight(timeout: float = 8.0) -> int:
 def get_session(stream_id: uuid.UUID) -> StreamSession | None:
     """Return the live (or recently-finished) session, or ``None``."""
     return _sessions.get(stream_id)
+
+
+async def stop_session(session: StreamSession, *, done_event: str) -> bool:
+    """Halt generation now and persist whatever has been written so far.
+
+    This is what the composer's Stop button ends up calling. Dropping the
+    client's SSE connection is *not* enough on its own: generation runs as
+    a background task feeding an in-process buffer (that's what lets a
+    user navigate away and reattach), so an abandoned reader leaves the
+    model running to completion, bills the tokens, and saves the full
+    answer — the exact opposite of what Stop looks like it does.
+
+    Order matters here:
+
+    1. ``flushed`` first, so the generator's own persist path can't also
+       write a row if it happens to finish during the next few awaits.
+    2. Close the stream cleanly (``done`` + ``finish``) *before* cancelling.
+       The runner wrapper turns cancellation into ``finish(error=...)``,
+       and ``finish`` is first-write-wins — so a subscriber that's still
+       attached sees a normal end of stream rather than an error card.
+    3. Cancel the task, which is what actually stops the tokens.
+    4. Persist the snapshot. ``flush_partial`` closes over the generator's
+       accumulated text and uses its own DB session, so it stays valid
+       after the task it came from has been cancelled.
+
+    Returns True if a partial reply was written.
+    """
+    if session.done:
+        return False
+    session.flushed = True
+    session.push(done_event)
+    session.finish()
+    task = session.task
+    if task is not None and not task.done():
+        task.cancel()
+    if session.flush_partial is None:
+        return False
+    try:
+        return bool(await session.flush_partial("stopped"))
+    except Exception:  # noqa: BLE001 — a failed save must not fail the stop
+        logger.exception(
+            "Failed to persist partial reply for stopped stream %s",
+            session.stream_id,
+        )
+        return False
 
 
 def find_active_for_conversation(

@@ -161,6 +161,7 @@ export function ChatPage({
     continueGenerate,
     reattach,
     cancel,
+    stop,
   } = useStreamingChat();
   const selectedModel = useSelectedModel();
   const isMobile = useIsMobile();
@@ -1397,7 +1398,7 @@ export function ChatPage({
               streaming={viewIsStreaming}
               disabled={!selectedModel}
               onSend={handleSend}
-              onCancel={cancel}
+              onCancel={() => void stop()}
               webSearchMode={webSearchMode}
               onWebSearchModeChange={handleWebSearchModeChange}
               reasoningEffort={reasoningEffort}
@@ -1475,7 +1476,9 @@ export function ChatPage({
         <VoiceModeOverlay
           onClose={() => setVoiceModeOpen(false)}
           onSend={(text) => void handleSend(text, [], { voice: true })}
-          onCancelStream={cancel}
+          // Barge-in has to stop the reply for real, not just stop reading
+          // it — the user is interrupting because they don't want it.
+          onCancelStream={() => void stop()}
           modelReady={!!selectedModel}
         />
       )}

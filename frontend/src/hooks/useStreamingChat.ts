@@ -234,7 +234,15 @@ interface UseStreamingChatResult {
    *  user-message is assumed to already be in the conversation history
    *  (the caller's GET /conversations/<id> populated it). */
   reattach: (conversationId: string, streamId: string) => Promise<void>;
+  /** Drop the local reader without touching the server — used when a new
+   *  turn takes over the stream slot. The backend keeps generating, which
+   *  is deliberate: the takeover cares about this tab's single stream
+   *  slot, not about ending the reply. For the Stop button, use
+   *  {@link stop}. */
   cancel: () => void;
+  /** Stop the reply the user is watching: halt generation server-side and
+   *  keep the text produced so far as a real message. */
+  stop: () => Promise<void>;
 }
 
 /**
@@ -244,6 +252,12 @@ interface UseStreamingChatResult {
 export function useStreamingChat(): UseStreamingChatResult {
   const qc = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
+  // Which server-side stream the local reader is attached to. Needed by
+  // ``stop`` — aborting the fetch tells the backend nothing, so we have to
+  // name the stream we want halted.
+  const liveRef = useRef<{ conversationId: string; streamId: string } | null>(
+    null
+  );
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
@@ -265,6 +279,7 @@ export function useStreamingChat(): UseStreamingChatResult {
       ac: AbortController
     ): Promise<void> => {
       const store = useChatStore.getState();
+      liveRef.current = { conversationId, streamId };
       // Tag the stream with its conversation so the UI can scope streaming
       // state to it — switching to a different conversation mid-stream must
       // show *that* conversation, not this streaming one.
@@ -843,6 +858,66 @@ export function useStreamingChat(): UseStreamingChatResult {
     [cancel, drainStream, qc]
   );
 
+  const stop = useCallback(async () => {
+    const live = liveRef.current;
+    const store = useChatStore.getState();
+    // Fall back to the conversation the stream was tagged with. The gap
+    // this covers: Stop pressed during the send POST, before the drain
+    // loop has a stream id. The turn is already enqueued server-side by
+    // then, so without this it would keep generating unstoppably.
+    const conversationId =
+      live?.conversationId ?? store.streamingConversationId ?? store.activeId;
+
+    // Drop the reader first so no further tokens paint while we tear down.
+    cancel();
+    liveRef.current = null;
+
+    const finish = () => {
+      // ``cancel`` nulled abortRef, so the turn's own finally block skips
+      // its teardown (it can't tell itself from a successor). Owning the
+      // teardown here is what actually takes the UI out of the streaming
+      // state — without it the composer sits on the Stop button forever.
+      useChatStore.getState().setStreaming(false);
+      useChatStore.setState({
+        streamingContent: "",
+        streamingSources: null,
+        streamingAttachments: null,
+        toolInvocations: [],
+        visionRelayInvocations: [],
+        streamingConversationId: null,
+      });
+      if (conversationId) {
+        qc.invalidateQueries({ queryKey: ["conversations"] });
+        qc.invalidateQueries({ queryKey: ["conversation", conversationId] });
+      }
+    };
+
+    try {
+      let streamId = live?.streamId ?? null;
+      if (!streamId && conversationId) {
+        streamId = await chatApi.activeStream(conversationId);
+      }
+      if (!streamId) return;
+      const saved = await chatApi.stopStream(streamId);
+      // Held until the server answers so the partial swaps straight into a
+      // real bubble — clearing first would blank the reply for a round trip
+      // and read as "Stop threw my answer away".
+      if (saved && conversationId) {
+        if (useChatStore.getState().activeId === conversationId) {
+          useChatStore.getState().appendMessage(saved);
+        }
+        appendToConversationCache(qc, conversationId, saved);
+      }
+    } catch (err) {
+      // The reply is already stopped locally; a failed call just means the
+      // backend may still be finishing it. Don't surface an error card over
+      // an action the user meant to be quiet.
+      console.warn("Stopping the stream server-side failed", err);
+    } finally {
+      finish();
+    }
+  }, [cancel, qc]);
+
   return {
     sendMessage,
     editAndResend,
@@ -850,5 +925,6 @@ export function useStreamingChat(): UseStreamingChatResult {
     continueGenerate,
     reattach,
     cancel,
+    stop,
   };
 }
