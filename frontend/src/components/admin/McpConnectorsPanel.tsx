@@ -41,7 +41,7 @@ const PRESETS: {
     kind: "mcp",
     url: "https://api.githubcopilot.com/mcp/",
     auth_header_name: "Authorization",
-    hint: "Paste a GitHub token as 'Bearer <token>'.",
+    hint: "Paste a GitHub token — just the token, we add 'Bearer' for you.",
   },
   {
     label: "Home Assistant",
@@ -52,7 +52,7 @@ const PRESETS: {
     transport: "sse",
     url: "http://homeassistant.local:8123/mcp_server/sse",
     auth_header_name: "Authorization",
-    hint: "Enable 'Model Context Protocol Server' in Home Assistant, then paste a Long-Lived Access Token as 'Bearer <token>'. Your HA URL works as-is on the LAN.",
+    hint: "Enable 'Model Context Protocol Server' in Home Assistant, then paste a Long-Lived Access Token — just the token, we add 'Bearer' for you. Use your HA IP if the .local name doesn't resolve from Docker.",
   },
   {
     label: "UniFi",
@@ -525,8 +525,22 @@ function ConnectorForm({
               value={authValue}
               onChange={(e) => setAuthValue(e.target.value)}
               className={inputCls}
-              placeholder={isUnifi ? "UniFi API key" : "Bearer …"}
+              // The old placeholder said "Bearer …", which told people to
+              // type a scheme they shouldn't have to know about — and
+              // getting it wrong produced a 401 that reads like a bad
+              // token. The server adds it now.
+              placeholder={isUnifi ? "UniFi API key" : "Paste your token"}
             />
+            {!isUnifi &&
+              authHeader.trim().toLowerCase() === "authorization" && (
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                  Just the token — <code className="font-mono">Bearer</code> is
+                  added for you. Paste a full{" "}
+                  <code className="font-mono">Basic …</code> or{" "}
+                  <code className="font-mono">Token …</code> value and it's
+                  used as-is.
+                </p>
+              )}
           </Field>
         </div>
         <Field label="Availability">

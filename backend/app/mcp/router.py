@@ -29,7 +29,7 @@ from app.mcp.models import (
     McpConnector,
     WorkspaceMcpConnector,
 )
-from app.mcp.service import refresh_catalog, slugify
+from app.mcp.service import auth_header_value, refresh_catalog, slugify
 
 logger = logging.getLogger("promptly.mcp.router")
 
@@ -486,7 +486,11 @@ async def test_connection(
 
     headers: dict[str, str] = {}
     if payload.auth_header_name and payload.auth_value:
-        headers[payload.auth_header_name] = payload.auth_value
+        # Same normalisation the live path applies, so "Test connection"
+        # can't pass while the saved connector fails (or vice versa).
+        headers[payload.auth_header_name] = auth_header_value(
+            payload.auth_header_name, payload.auth_value
+        )
     try:
         tools = await fetch_tools(
             payload.url.strip(),

@@ -966,3 +966,85 @@ def test_the_model_still_cannot_call_destructive_tools():
         is False
     )
     assert _is_blocked_destructive({}) is False
+
+
+def test_connector_errors_name_the_actual_cause():
+    """The MCP SDK runs its transport in an anyio task group, so a 404,
+    a 401 or a refused connection all surface as "unhandled errors in a
+    task group" — which tells the person configuring a connector
+    nothing at the exact moment they most need to know whether it was
+    the URL, the token, or the server.
+    """
+    import httpx
+
+    from app.mcp.client import describe_error
+
+    request = httpx.Request("GET", "http://ha.local:8123/mcp_server/sse")
+    response = httpx.Response(404, request=request)
+    status = httpx.HTTPStatusError(
+        "Client error '404 Not Found' for url 'http://ha.local:8123/x'\n"
+        "For more information check: https://developer.mozilla.org/...",
+        request=request,
+        response=response,
+    )
+
+    # The shape the SDK actually raises.
+    grouped = ExceptionGroup("unhandled errors in a task group", [status])
+    described = describe_error(grouped)
+
+    assert "404" in described
+    assert "task group" not in described
+    # httpx's two-line MDN footer is noise in a one-line admin message.
+    assert "developer.mozilla.org" not in described
+    assert "\n" not in described
+
+
+def test_repeated_failures_are_not_repeated_back():
+    """A retrying transport reports the same refusal several times; the
+    admin needs to read it once."""
+    from app.mcp.client import describe_error
+
+    err = ConnectionRefusedError("All connection attempts failed")
+    grouped = ExceptionGroup("boom", [err, err, err])
+
+    assert describe_error(grouped).count("All connection attempts failed") == 1
+
+
+# ------------------------------------------- auth header normalisation
+
+
+def test_a_bare_token_gets_the_bearer_scheme():
+    """What you copy out of Home Assistant is the token, not
+    "Bearer <token>". Expecting every admin to know they must type the
+    scheme produces a 401 that reads like a bad token — the least
+    diagnosable failure in the whole setup."""
+    from app.mcp.service import auth_header_value
+
+    assert auth_header_value("Authorization", "eyJhbGciOi") == "Bearer eyJhbGciOi"
+    assert auth_header_value("authorization", "abc123") == "Bearer abc123"
+
+
+def test_a_scheme_the_user_supplied_is_left_alone():
+    """Anything with whitespace is a scheme they chose deliberately.
+    Second-guessing it would be worse than doing nothing."""
+    from app.mcp.service import auth_header_value
+
+    for value in ("Bearer abc123", "Basic dXNlcjpwYXNz", "Token abc123"):
+        assert auth_header_value("Authorization", value) == value
+
+
+def test_other_headers_are_never_prefixed():
+    """UniFi and friends take a raw key. Prefixing those would break a
+    connector that currently works."""
+    from app.mcp.service import auth_header_value
+
+    assert auth_header_value("X-API-KEY", "abc123") == "abc123"
+    assert auth_header_value("X-Api-Key", "abc123") == "abc123"
+    assert auth_header_value(None, "abc123") == "abc123"
+
+
+def test_an_empty_value_is_untouched():
+    from app.mcp.service import auth_header_value
+
+    assert auth_header_value("Authorization", "") == ""
+    assert auth_header_value("Authorization", "   ") == "   "

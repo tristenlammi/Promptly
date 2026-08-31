@@ -80,6 +80,40 @@ async def _open(url: str, headers: dict[str, str] | None, transport: str):
             yield read, write
 
 
+def describe_error(exc: BaseException) -> str:
+    """Flatten an exception into something an admin can act on.
+
+    The MCP SDK runs its transport inside an anyio task group, so any
+    real failure — a 404, a 401, a refused connection — comes back
+    wrapped as ``ExceptionGroup: unhandled errors in a task group``.
+    Printing that verbatim tells the person configuring a connector
+    absolutely nothing, which is exactly the moment they most need to
+    know whether it was the URL, the token, or the server.
+
+    So: walk the group, keep the leaves, and name their types.
+    """
+    leaves: list[str] = []
+
+    def _walk(e: BaseException) -> None:
+        inner = getattr(e, "exceptions", None)
+        if inner:
+            for sub in inner:
+                _walk(sub)
+            return
+        # First line only: httpx appends a two-line MDN footer to its
+        # status errors, which is noise in a one-line admin message.
+        text = str(e).strip().splitlines()[0].strip() if str(e).strip() else ""
+        name = type(e).__name__
+        leaves.append(f"{name}: {text}" if text else name)
+
+    _walk(exc)
+    # De-duplicate while keeping order — a retrying transport often
+    # reports the same refusal several times.
+    seen: set[str] = set()
+    unique = [x for x in leaves if not (x in seen or seen.add(x))]
+    return "; ".join(unique[:3]) or type(exc).__name__
+
+
 async def fetch_tools(
     url: str,
     *,
@@ -117,7 +151,7 @@ async def fetch_tools(
     except McpError:
         raise
     except Exception as e:  # noqa: BLE001 — surface a clean message to the admin
-        raise McpError(f"Couldn't list tools: {e}") from e
+        raise McpError(f"Couldn't list tools — {describe_error(e)}") from e
 
 
 async def call_tool(
@@ -150,7 +184,9 @@ async def call_tool(
     except McpError:
         raise
     except Exception as e:  # noqa: BLE001
-        raise McpError(f"Tool '{name}' failed: {e}") from e
+        raise McpError(
+            f"Tool '{name}' failed — {describe_error(e)}"
+        ) from e
 
 
 def _extract_text(result: Any) -> str:

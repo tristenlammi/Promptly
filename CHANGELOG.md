@@ -21,6 +21,26 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-31
+
+### Fixed
+- **Paste the token, not "Bearer <token>".** Connectors that authenticate
+  with an `Authorization` header now add the `Bearer` scheme for you —
+  what you copy out of Home Assistant or GitHub is the token, and having
+  to know you must type a word in front of it produced a 401 that reads
+  exactly like a bad token. The field used to say `Bearer …`, which made
+  the app the source of the confusion. A value you supply with its own
+  scheme (`Basic …`, `Token …`) is still used as-is, and headers like
+  `X-API-KEY` are never touched. It's applied when the request is sent
+  rather than when you save, so a connector already saved with a bare
+  token starts working without being re-entered.
+- **Connector errors say what actually went wrong.** "Couldn't list
+  tools: unhandled errors in a task group" was the app reporting the
+  wrapper around the real error rather than the error. It now names the
+  cause — `404 Not Found`, `401 Unauthorized`, `All connection attempts
+  failed` — which is the difference between knowing it's the URL, the
+  token, or the server, at the one moment that matters.
+
 ## [0.8.0] - 2026-08-31
 
 ### Added

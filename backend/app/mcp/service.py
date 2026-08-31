@@ -66,12 +66,40 @@ def _is_blocked_destructive(annotations: dict[str, Any]) -> bool:
     return False
 
 
+def auth_header_value(header_name: str | None, value: str) -> str:
+    """Add the ``Bearer`` scheme when the user pasted a bare token.
+
+    Home Assistant, GitHub and most MCP servers want
+    ``Authorization: Bearer <token>``, but the thing you copy out of
+    their UI is just ``<token>``. Expecting every admin to know they
+    must type the word "Bearer" in front of it produces a 401 that reads
+    like a bad token — the least diagnosable failure in the whole setup.
+
+    Applied at *send* time rather than on save, so connectors that were
+    already saved with a bare token start working without being
+    re-entered.
+
+    Only ever touches ``Authorization``: ``X-API-KEY`` and friends take
+    a raw value, and prefixing those would break them. A value that
+    already contains whitespace is left alone — that's a scheme the user
+    supplied deliberately (``Bearer``, ``Basic``, ``Token``…), and
+    second-guessing it would be worse than doing nothing.
+    """
+    if (header_name or "").strip().lower() != "authorization":
+        return value
+    token = value.strip()
+    if not token or " " in token or "	" in token:
+        return value
+    return f"Bearer {token}"
+
+
 def _auth_headers(connector: McpConnector) -> dict[str, str]:
     if connector.auth_header_name and connector.auth_value_encrypted:
         try:
             return {
-                connector.auth_header_name: decrypt_secret(
-                    connector.auth_value_encrypted
+                connector.auth_header_name: auth_header_value(
+                    connector.auth_header_name,
+                    decrypt_secret(connector.auth_value_encrypted),
                 )
             }
         except Exception:  # noqa: BLE001 — bad ciphertext shouldn't crash a turn
