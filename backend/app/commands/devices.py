@@ -94,8 +94,8 @@ def _entry(name: str, domain: str = "", area: str = "", state: str = "") -> dict
     }
 
 
-def parse_devices(raw: str) -> list[dict]:
-    """Best effort: JSON, then YAML, then a line scan.
+def parse_devices(raw: str, _depth: int = 0) -> list[dict]:
+    """Best effort: JSON, then YAML, then a line scan, then unwrap.
 
     Returns ``[]`` when nothing recognisable is found — the caller turns
     that into "couldn't read the list" plus the raw text, rather than an
@@ -112,7 +112,44 @@ def parse_devices(raw: str) -> list[dict]:
             continue
         if found:
             return _dedupe(found)[:_MAX_DEVICES]
+
+    # Envelope. Home Assistant actually answers with a JSON object whose
+    # "result" field is a STRING containing the whole device list, so
+    # walking the JSON structure finds nothing however well-formed it
+    # is — the entities aren't structure, they're text inside it. Retry
+    # on each embedded document.
+    if _depth < 2:
+        for payload in _embedded_documents(text):
+            found = parse_devices(payload, _depth + 1)
+            if found:
+                return found
     return []
+
+
+def _embedded_documents(text: str) -> list[str]:
+    """String values inside a JSON envelope that look like documents."""
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return []
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except Exception:  # noqa: BLE001
+        return []
+
+    out: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+        elif isinstance(node, str) and ":" in node and len(node) > 40:
+            out.append(node)
+
+    _walk(parsed)
+    return out
 
 
 def _walk_structure(node: Any, out: list[dict]) -> None:

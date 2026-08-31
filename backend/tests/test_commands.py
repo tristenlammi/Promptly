@@ -1210,3 +1210,54 @@ def test_only_connectors_publishing_live_context_offer_devices():
 
     assert supports_devices(["HassTurnOn", "GetLiveContext"]) is True
     assert supports_devices(["list_sites", "list_clients"]) is False
+
+
+def test_devices_parse_from_the_real_home_assistant_envelope():
+    """The shape a real Home Assistant actually returned.
+
+    GetLiveContext answers with a JSON object whose ``result`` field is
+    a *string* holding the entire device list. Every structural parser
+    walks that JSON correctly and finds nothing, because the entities
+    aren't structure — they're text inside it. This is the case that hit
+    in production, caught only because the UI shows the raw response
+    instead of claiming there are no devices.
+    """
+    import json
+
+    from app.commands.devices import parse_devices
+
+    inner = (
+        "Live Context: An overview of the areas and the devices in this "
+        "smart home:\n"
+        '- names: 100" Neo QLED\n'
+        "  domain: media_player\n"
+        "  state: 'off'\n"
+        "- names: Downstairs Speakers\n"
+        "  domain: media_player\n"
+        "  state: 'off'\n"
+        "  attributes:\n"
+        "    device_class: speaker\n"
+        "- names: Gym TV\n"
+        "  domain: media_player\n"
+        "  state: unavailable\n"
+        "- names: Kitchen Lamp\n"
+        "  domain: light\n"
+        "  state: 'on'\n"
+        "  areas: Lounge Room\n"
+        "  attributes:\n"
+        "    brightness: '255'\n"
+    )
+    raw = json.dumps({"success": True, "result": inner})
+
+    devices = parse_devices(raw)
+    by_name = {d["name"]: d for d in devices}
+
+    assert "Kitchen Lamp" in by_name
+    assert by_name["Kitchen Lamp"]["domain"] == "light"
+    assert by_name["Kitchen Lamp"]["area"] == "Lounge Room"
+    assert by_name["Downstairs Speakers"]["domain"] == "media_player"
+    # A name containing a quote character must survive intact.
+    assert '100" Neo QLED' in by_name
+    # Nested attributes are not entities.
+    assert "speaker" not in by_name
+    assert "255" not in by_name

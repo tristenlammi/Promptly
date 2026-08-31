@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-31
+
+### Fixed
+- **The device list reads Home Assistant's real response.** HA returns
+  its device list as a JSON object whose `result` field is a *string*
+  containing the whole list — so every parser walked the JSON correctly
+  and found nothing, because the devices aren't structure, they're text
+  inside it. Embedded documents are now unwrapped and parsed. Found
+  because the picker showed the raw response instead of claiming there
+  were no devices, which is the only reason it took one look rather than
+  a debugging session.
+
 ## [0.8.3] - 2026-08-31
 
 ### Added
