@@ -458,7 +458,17 @@ function ToolPicker({
                 // The device IS the argument. Filling it here is the
                 // whole point — otherwise you'd pick "Kitchen Lamp" and
                 // still have to retype it below.
-                onArgsChange({ ...args, name: device });
+                //
+                // Other targeting fields are cleared rather than kept:
+                // leaving a stale `area` next to a fresh `name` sends
+                // Home Assistant two contradictory ways to find the
+                // same thing, and it can only do what it's told.
+                const kept = Object.fromEntries(
+                  Object.entries(args).filter(
+                    ([key]) => !TARGETING_ARGS.has(key.toLowerCase())
+                  )
+                );
+                onArgsChange({ ...kept, name: device });
                 onPickDestructive(
                   !!active.tools.find((t) => t.name === action)?.destructive
                 );
@@ -500,6 +510,7 @@ function ToolPicker({
                 }
                 args={args}
                 slotNames={slotNames}
+                deviceChosen={supportsDevices && !!args.name}
                 onChange={onArgsChange}
               />
             </>
@@ -521,6 +532,25 @@ function ToolPicker({
     </Field>
   );
 }
+
+/** Arguments whose only job is to say *which thing* — exactly what the
+ *  device picker answers. Once a device is chosen these are noise, so
+ *  they fold away behind "target it another way".
+ *
+ *  Everything else — brightness, volume, temperature, the item to add —
+ *  is a real parameter of the action and stays on screen, because no
+ *  device picker can know what you meant by it.
+ *
+ *  Home-Assistant-shaped, and safe to be wrong: an argument not in this
+ *  set is simply shown, which is the behaviour every other connector
+ *  gets anyway. */
+const TARGETING_ARGS = new Set([
+  "name",
+  "area",
+  "floor",
+  "domain",
+  "device_class",
+]);
 
 /** Pick a device, then what to do to it.
  *
@@ -699,21 +729,50 @@ function ToolArgs({
   schema,
   args,
   slotNames,
+  deviceChosen,
   onChange,
 }: {
   schema: ToolSchema | undefined;
   args: Record<string, string>;
   slotNames: string[];
+  /** True once the device picker has answered "which thing". */
+  deviceChosen: boolean;
   onChange: (args: Record<string, string>) => void;
 }) {
+  const [showTargeting, setShowTargeting] = useState(false);
   const properties = schema?.properties ?? {};
-  const names = Object.keys(properties);
+  const allNames = Object.keys(properties);
   const required = new Set(schema?.required ?? []);
 
-  if (names.length === 0) {
+  // With a device chosen, the targeting fields have been answered — keep
+  // them reachable but out of the way, and leave the real parameters up
+  // front where they still need filling in.
+  const targeting = deviceChosen
+    ? allNames.filter((n) => TARGETING_ARGS.has(n.toLowerCase()))
+    : [];
+  const names = allNames.filter((n) => !targeting.includes(n));
+
+  if (allNames.length === 0) {
     return (
       <p className="text-[11px] text-[var(--text-muted)]">
         This tool takes no arguments.
+      </p>
+    );
+  }
+
+  if (names.length === 0 && targeting.length > 0 && !showTargeting) {
+    // Everything this tool takes is targeting, and the device picker
+    // already answered it. Say so in one line instead of a form.
+    return (
+      <p className="text-[11px] text-[var(--text-muted)]">
+        Targeting <span className="text-[var(--text)]">{args.name}</span>.{" "}
+        <button
+          type="button"
+          onClick={() => setShowTargeting(true)}
+          className="underline underline-offset-2 hover:text-[var(--text)]"
+        >
+          Target it another way
+        </button>
       </p>
     );
   }
@@ -723,7 +782,7 @@ function ToolArgs({
       <p className="text-[11px] font-medium text-[var(--text)]">
         Arguments
       </p>
-      {names.map((name) => {
+      {[...names, ...(showTargeting ? targeting : [])].map((name) => {
         const prop = properties[name];
         const filledBySlot = slotNames.includes(name.toLowerCase());
         return (
@@ -773,10 +832,21 @@ function ToolArgs({
           </label>
         );
       })}
-      <p className="text-[10px] text-[var(--text-muted)]">
-        For Home Assistant, <code className="font-mono">name</code> is the
-        device as it's named there — e.g. “Kitchen Lamp”.
-      </p>
+      {targeting.length > 0 && !showTargeting && (
+        <button
+          type="button"
+          onClick={() => setShowTargeting(true)}
+          className="self-start text-[10px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text)]"
+        >
+          Target it another way ({targeting.length} more)
+        </button>
+      )}
+      {!deviceChosen && (
+        <p className="text-[10px] text-[var(--text-muted)]">
+          For Home Assistant, <code className="font-mono">name</code> is the
+          device as it's named there — e.g. “Kitchen Lamp”.
+        </p>
+      )}
     </div>
   );
 }

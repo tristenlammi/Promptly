@@ -21,6 +21,24 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-08-31
+
+### Changed
+- **Picking a device now hides the arguments you no longer need.** Once
+  you've chosen a device, the fields that only exist to say *which
+  thing* — area, floor, domain, device class — fold away behind "target
+  it another way", leaving a single line: "Targeting Kitchen Lamp".
+  Arguments that are real parameters of the action, like brightness or
+  volume, stay on screen, because no device picker can know what you
+  meant by those.
+
+### Fixed
+- **Picking a device no longer leaves a contradictory target behind.**
+  Choosing a device filled in its name but left any area or floor you'd
+  already typed, so Home Assistant received two different ways to find
+  the same thing and could only do as it was told. Picking a device now
+  replaces the targeting rather than adding to it.
+
 ## [0.8.4] - 2026-08-31
 
 ### Fixed
