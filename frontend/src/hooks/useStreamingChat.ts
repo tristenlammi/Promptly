@@ -148,8 +148,9 @@ interface SSEPayload {
   title?: string;
   // vision_warning event (non-vision model + image attachment, etc.)
   message?: string;
-  // memory_saved event (Phase 6 + 2.2) — durable facts captured this turn.
-  // ``ids`` (Phase 2.2) maps 1:1 with ``facts`` so the UI can undo by id.
+  // memory_used event — which saved facts were injected this turn, shown
+  // in the composer's memory popover. Memory *writes* are deliberately
+  // silent: no chip, no tool card, nothing in scrollback.
   facts?: string[];
   ids?: string[];
   count?: number;
@@ -369,22 +370,6 @@ export function useStreamingChat(): UseStreamingChatResult {
 
         if (data.event === "vision_warning" && data.message) {
           store.addVisionWarning(data.message);
-          continue;
-        }
-        if (
-          data.event === "memory_saved" &&
-          data.facts &&
-          data.facts.length > 0
-        ) {
-          // Pair facts with their ids (Phase 2.2 — Undo support).
-          // Falls back to empty-string ids for older backends.
-          const items = data.facts.map(
-            (content: string, i: number) => ({
-              id: data.ids?.[i] ?? "",
-              content,
-            })
-          );
-          store.setMemorySaved(items);
           continue;
         }
         if (

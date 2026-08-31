@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 import {
   usePromoteTask,
@@ -51,6 +52,7 @@ function fmtDate(iso: string): string {
 export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [searchParams] = useSearchParams();
   const { data: task } = useTask(id);
   const runTask = useRunTask();
@@ -281,7 +283,23 @@ export function TaskDetailPage() {
                 </div>
               }
             >
-              <TaskFlowEditor taskId={id} />
+              {isMobile ? (
+                // The node graph needs a pointer and room to pan; on a
+                // phone it's unusable rather than merely cramped. The
+                // rest of this page — runs, reports, pause/resume —
+                // works fine, so only the canvas is withheld.
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                  <p className="text-sm font-medium text-[var(--text)]">
+                    The flow editor needs a bigger screen
+                  </p>
+                  <p className="max-w-xs text-xs text-[var(--text-muted)]">
+                    Open this automation on a desktop to edit its steps.
+                    Runs and reports below work here.
+                  </p>
+                </div>
+              ) : (
+                <TaskFlowEditor taskId={id} />
+              )}
             </Suspense>
           </div>
           <RunModal

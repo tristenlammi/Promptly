@@ -122,6 +122,7 @@ from app.memory.constants import RETRIEVAL_K as MEMORY_RETRIEVAL_K
 from app.memory.service import (
     build_memory_system_prompt,
     capture_memories,
+    resolve_memory_mode as _resolve_memory_mode,
     should_attempt_capture,
 )
 from app.chat.titler import fallback_title, generate_conversation_title
@@ -132,6 +133,7 @@ from app.chat.versioning import (
     version_meta,
 )
 from app.chat.tools import (
+    SILENT_TOOL_NAMES,
     ToolContext,
     ToolError,
     build_tools_system_prompt,
@@ -4612,6 +4614,11 @@ async def _stream_generator(
         if voice_turn and ctx.get("max_tokens") is None:
             ctx["max_tokens"] = VOICE_MAX_TOKENS
 
+        # Resolved once here: the tool-category gate, the tool-aware
+        # system prompt, the memory block, and the capture pass all key
+        # off it, and they're spread across a few hundred lines.
+        memory_mode = _resolve_memory_mode(user)
+
         enabled_categories: set[str] = set()
         # Real-time voice turns skip tools + web search entirely. A spoken
         # conversation needs a fast, direct reply, and letting the model
@@ -4634,6 +4641,14 @@ async def _stream_generator(
                 # so chats stay read-only until a human approves.
                 if conv.workspace_id is not None:
                     enabled_categories.add("workspace")
+            # Memory writes. Gated on the Tools toggle like every other
+            # category *and* on the user's own memory setting — a user
+            # with memory off must not have the model quietly saving
+            # facts about them. Advertised in "manual" mode too: manual
+            # means "don't volunteer new facts", and a deliberate save
+            # the user asked for is exactly what it's for.
+            if memory_mode != "off":
+                enabled_categories.add("memory")
             if web_search_mode != "off":
                 enabled_categories.add("search")
                 # Parallel research sub-agents ride on both toggles: they
@@ -4882,6 +4897,27 @@ async def _stream_generator(
         # persisted onto ``messages.tool_calls`` so scrollback keeps
         # the activity trail after the reply commits.
         tool_call_log: list[dict[str, Any]] = []
+
+        # Silent tools (memory writes) produce no tool-activity UI and no
+        # scrollback entry. Both filters live here, next to the log they
+        # guard, because there are two dispatch sites and the first
+        # attempt at this patched only one of them — leaving the card
+        # rendering from the persisted ``tool_calls`` even though the live
+        # SSE was suppressed. Filtering at the call sites rather than the
+        # ~8 emit sites keeps the dispatcher unaware of presentation; an
+        # empty string contributes nothing to the SSE body, so a
+        # suppressed event simply never reaches the client.
+        def _sse_visible(data: dict) -> str:
+            if (
+                data.get("event") in ("tool_started", "tool_finished")
+                and data.get("name") in SILENT_TOOL_NAMES
+            ):
+                return ""
+            return _sse(data)
+
+        def _log_visible(rec: dict) -> None:
+            if rec.get("name") not in SILENT_TOOL_NAMES:
+                tool_call_log.append(rec)
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
         # Sum of provider-reported USD cost across hops + tool
@@ -4983,11 +5019,11 @@ async def _stream_generator(
                         }
                     },
                     ctx=forced_tool_ctx,
-                    sse_yield=_sse,
+                    sse_yield=_sse_visible,
                     on_attachment=assistant_attachment_snaps.append,
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
-                    on_tool_event=tool_call_log.append,
+                    on_tool_event=_log_visible,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -5003,7 +5039,19 @@ async def _stream_generator(
         # artefacts even with a valid tools[] payload in scope.
         if enabled_categories:
             system_prompt = merge_system_prompt(
-                build_tools_system_prompt(enabled_categories, excluded_tools),
+                build_tools_system_prompt(
+                    enabled_categories,
+                    excluded_tools,
+                    # Two user-facing promises, one decision: "Self-managed"
+                    # mode and the per-chat capture pause both mean "never
+                    # captures on its own". The pause used to gate only the
+                    # post-turn extraction pass, so the tools walked
+                    # straight through a switch the UI said was off.
+                    memory_explicit_only=(
+                        memory_mode == "manual"
+                        or bool(conv.memory_capture_paused)
+                    ),
+                ),
                 system_prompt or "",
             )
 
@@ -5026,18 +5074,8 @@ async def _stream_generator(
         # personal context) so the assistant carries personalisation across
         # conversations. Gated by the per-user ``memory_enabled`` switch
         # (absent = on); returns ``None`` when the user has no memories, so
-        # there's zero token overhead for fresh accounts.
-        # Resolve the memory mode (off / auto / manual). ``memory_mode``
-        # supersedes the legacy ``memory_enabled`` boolean; fall back to
-        # it for accounts that predate the three-way setting.
-        _mem_settings = user.settings or {}
-        memory_mode = _mem_settings.get("memory_mode")
-        if memory_mode not in ("off", "auto", "manual"):
-            memory_mode = (
-                "off"
-                if _mem_settings.get("memory_enabled", True) is False
-                else "auto"
-            )
+        # there's zero token overhead for fresh accounts. ``memory_mode``
+        # was resolved up with the tool-category gate.
         # Resolve the triggering user message early — both memory
         # retrieval (below) and @-mention resolution (further down) key
         # off its text. Defined here so the memory block can use it.
@@ -5071,6 +5109,10 @@ async def _stream_generator(
                 user.id,
                 query=_mem_query,
                 k=MEMORY_RETRIEVAL_K,
+                # Only promise the model a `recall` tool it can actually
+                # call this turn — the memory category rides on the Tools
+                # toggle, so it isn't always there.
+                can_recall="memory" in enabled_categories,
             )
             if memory_block:
                 system_prompt = merge_system_prompt(
@@ -5509,11 +5551,11 @@ async def _stream_generator(
                     user=user,
                     pending_calls=pending_calls,
                     ctx=tool_ctx,
-                    sse_yield=_sse,
+                    sse_yield=_sse_visible,
                     on_attachment=assistant_attachment_snaps.append,
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
-                    on_tool_event=tool_call_log.append,
+                    on_tool_event=_log_visible,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -5948,6 +5990,12 @@ async def _stream_generator(
         # disturbs the reply that's already on disk.
         # capture_memories now returns list[dict] with {"id", "content"}
         # so the UI can undo individual facts by id (Phase 2.2).
+        # Memory writes are deliberately silent — no tool card, no chip,
+        # nothing in scrollback. Saving what someone told you is not an
+        # event worth interrupting the conversation for, and the Memory
+        # panel remains the one honest view of what is stored. The
+        # ``memory_saved`` event below is still emitted for the composer's
+        # memory popover; it no longer drives an in-chat banner.
         memory_saved: list[dict] = []
         if (
             # Auto-capture only in "auto" mode; "manual" injects saved
@@ -5961,7 +6009,7 @@ async def _stream_generator(
             and should_attempt_capture(trig_row.content)
         ):
             try:
-                memory_saved = await capture_memories(
+                captured = await capture_memories(
                     db,
                     user_id=user.id,
                     user_text=trig_row.content,
@@ -5970,11 +6018,14 @@ async def _stream_generator(
                     provider=provider,
                     model_id=ctx["model_id"],
                 )
-                if memory_saved:
+                if captured:
                     await db.commit()
+                memory_saved.extend(captured)
             except Exception:  # noqa: BLE001
                 logger.exception("Memory capture failed for user=%s", user.id)
-                memory_saved = []
+                # Leave any tool-written facts in place — the extraction
+                # pass failing says nothing about writes that already
+                # committed earlier in the turn.
         if memory_saved:
             yield _sse(
                 {

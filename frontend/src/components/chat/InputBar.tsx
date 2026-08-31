@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
+import type { Command as SlashCommand } from "@/api/commands";
+import { useRunCommandWithConfirm } from "@/hooks/useCommands";
 import { filesApi } from "@/api/files";
 import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
@@ -286,6 +288,33 @@ export function InputBar({
     },
     [value]
   );
+  // Picking a *command* from the ``/`` menu runs it rather than
+  // inserting text. The confirm-and-report sequence lives in
+  // ``useRunCommandWithConfirm`` so the menu, the library's Run button
+  // and (later) voice can't drift into confirming differently.
+  const { runCommand } = useRunCommandWithConfirm();
+  const runCommandFromSlash = useCallback(
+    async (command: SlashCommand, pick: SlashPickState) => {
+      // Drop the "/query" first: the menu closes and the composer
+      // shouldn't be left holding text the user never meant to send.
+      const rest = value.slice(pick.endIndex);
+      setValue(rest);
+      setCaret(0);
+      // Pass the open chat so the run lands in its transcript as a
+      // Tool Activity Card rather than only a toast that vanishes.
+      const ran = await runCommand(command, {
+        conversationId: currentConversationId,
+      });
+      if (!ran) {
+        // Backed out at the confirm — put their typing back rather than
+        // silently eating it.
+        setValue(value);
+        setCaret(pick.endIndex);
+      }
+    },
+    [value, runCommand, currentConversationId]
+  );
+
   const invalidateFiles = useInvalidateFiles();
   const isMobile = useIsMobile();
   // Mobile-only: the secondary composer actions (attach, enhance, voice
@@ -1022,6 +1051,7 @@ export function InputBar({
         value={value}
         caret={caret}
         onApply={handleSlashApply}
+        onRun={(command, pick) => void runCommandFromSlash(command, pick)}
         onKeyRegister={registerSlashKeys}
       />
 

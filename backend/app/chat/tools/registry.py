@@ -18,6 +18,7 @@ from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
+from app.chat.tools.memory import ForgetTool, RecallTool, RememberTool
 from app.chat.tools.query_board import QueryBoardCardsTool
 from app.chat.tools.read_workspace_item import ReadWorkspaceItemTool
 from app.chat.tools.run_agents import RunAgentsTool
@@ -65,6 +66,12 @@ REGISTRY: list[Tool] = [
     ReadWorkspaceItemTool(),
     # Structured board queries — count/filter cards for real (Track 1 P4).
     QueryBoardCardsTool(),
+    # Memory writes (category "memory") — the model's own hands on the
+    # cross-chat memory store. Advertised when the user has memory on AND
+    # tools enabled; see the category resolution in ``chat/router.py``.
+    RememberTool(),
+    ForgetTool(),
+    RecallTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the
@@ -114,4 +121,16 @@ def tools_in(categories: set[str]) -> list[Tool]:
     ]
 
 
-__all__ = ["REGISTRY", "get_tool", "list_openai_tools", "tools_in"]
+# Tools whose activity is never surfaced in the UI (see ``Tool.silent``).
+SILENT_TOOL_NAMES: frozenset[str] = frozenset(
+    t.name for t in REGISTRY if getattr(t, "silent", False)
+)
+
+
+__all__ = [
+    "REGISTRY",
+    "SILENT_TOOL_NAMES",
+    "get_tool",
+    "list_openai_tools",
+    "tools_in",
+]

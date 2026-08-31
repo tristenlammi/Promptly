@@ -24,6 +24,7 @@ from app.chat.models import (  # noqa: F401
     WorkspaceItem,
     WorkspaceShare,
 )
+from app.commands.models import Command  # noqa: F401
 from app.custom_models.models import (  # noqa: F401
     CustomModel,
     CustomModelFile,

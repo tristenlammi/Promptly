@@ -6,10 +6,10 @@ import {
   type RefObject,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { Command, Settings2 } from "lucide-react";
+import { Command as CommandIcon, FileText, Zap } from "lucide-react";
 
-import { useSavedPrompts } from "@/hooks/useSavedPrompts";
-import type { SavedPrompt } from "@/api/savedPrompts";
+import { isSideEffecting, type Command } from "@/api/commands";
+import { useCommands } from "@/hooks/useCommands";
 import { cn } from "@/utils/cn";
 
 export interface SlashPickState {
@@ -40,48 +40,74 @@ interface SlashCommandAutocompleteProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   value: string;
   caret: number;
-  /** Replace the ``/query`` run with the chosen prompt body. */
+  /** A ``prompt`` command: replace the ``/query`` run with its text. */
   onApply: (body: string, pick: SlashPickState) => void;
+  /** A side-effecting command: confirm, run it, report back. The menu
+   *  doesn't run anything itself — the composer owns that, because it
+   *  owns the confirmation and the toast. */
+  onRun: (command: Command, pick: SlashPickState) => void;
   onKeyRegister: (handler: (e: { key: string }) => boolean) => void;
 }
 
-/** Inline popover that lists the user's saved prompts when they type
- *  ``/`` at the start of the composer (Phase 3.1). Selecting one
- *  replaces the ``/query`` with the prompt's body. */
+/**
+ * The ``/`` menu — one list for the whole command library.
+ *
+ * Prompts and commands live together here on purpose. A voice-only
+ * library is invisible: you have to remember what you configured and
+ * phrase it exactly right. This menu is the browsable version of the
+ * same thing, which is what makes the library discoverable at all — and
+ * it's why the typed half ships before any microphone exists.
+ *
+ * The one distinction that must never blur: a prompt **inserts text you
+ * then edit**, a command **does something**. Picking the wrong one by
+ * accident is the difference between a paragraph appearing and a garage
+ * door opening, so action rows carry a bolt, say what they'll do, and
+ * confirm before running.
+ */
 export function SlashCommandAutocomplete({
   textareaRef,
   value,
   caret,
   onApply,
+  onRun,
   onKeyRegister,
 }: SlashCommandAutocompleteProps) {
   const navigate = useNavigate();
   const pick = useMemo(() => detectSlashTrigger(value, caret), [value, caret]);
-  const { data: prompts } = useSavedPrompts();
+  const { data: commands } = useCommands();
   const [highlighted, setHighlighted] = useState(0);
 
-  // Client-side filter by title (prompts are few + user-owned, so no
-  // server round-trip per keystroke).
-  const filtered = useMemo<SavedPrompt[]>(() => {
+  // Client-side filter (the library is small and user-owned, so no
+  // server round-trip per keystroke). Matches the name *or* any phrase,
+  // so typing what you'd say finds it as readily as typing its label.
+  const filtered = useMemo<Command[]>(() => {
     if (!pick) return [];
     const q = pick.query.trim().toLowerCase();
-    const all = prompts ?? [];
+    const all = (commands ?? []).filter((c) => c.enabled);
     if (!q) return all.slice(0, 8);
     return all
-      .filter((p) => p.title.toLowerCase().includes(q))
+      .filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.phrases ?? []).some((p) => p.toLowerCase().includes(q))
+      )
       .slice(0, 8);
-  }, [pick, prompts]);
+  }, [pick, commands]);
 
   useEffect(() => {
     setHighlighted(0);
   }, [pick?.query]);
 
-  const apply = useCallback(
-    (p: SavedPrompt) => {
+  const choose = useCallback(
+    (c: Command) => {
       if (!pick) return;
-      onApply(p.body, pick);
+      if (c.action_type === "prompt") {
+        onApply(c.body ?? "", pick);
+        return;
+      }
+      onRun(c, pick);
     },
-    [pick, onApply]
+    [pick, onApply, onRun]
   );
 
   useEffect(() => {
@@ -101,9 +127,9 @@ export function SlashCommandAutocomplete({
           return true;
         case "Enter":
         case "Tab": {
-          const p = filtered[highlighted];
-          if (p) {
-            apply(p);
+          const c = filtered[highlighted];
+          if (c) {
+            choose(c);
             return true;
           }
           return false;
@@ -114,7 +140,7 @@ export function SlashCommandAutocomplete({
           return false;
       }
     });
-  }, [pick, filtered, highlighted, onKeyRegister, apply]);
+  }, [pick, filtered, highlighted, onKeyRegister, choose]);
 
   if (!pick) return null;
 
@@ -127,16 +153,16 @@ export function SlashCommandAutocomplete({
     <div className="absolute bottom-full left-0 right-0 mx-auto mb-2 max-w-3xl px-4">
       <div
         role="listbox"
-        aria-label="Insert a saved prompt"
+        aria-label="Insert a prompt or run a command"
         className={cn(
           "max-h-72 overflow-y-auto rounded-card border shadow-lg",
           "border-[var(--border)] bg-[var(--surface)]"
         )}
       >
         <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
-          <Command className="h-3 w-3" />
+          <CommandIcon className="h-3 w-3" />
           <span>
-            Insert a saved prompt —{" "}
+            Prompts &amp; commands —{" "}
             <span className="font-mono text-[var(--text)]">
               {pick.query ? `/${pick.query}` : "type to filter"}
             </span>
@@ -145,34 +171,36 @@ export function SlashCommandAutocomplete({
 
         {filtered.length === 0 ? (
           <div className="px-3 py-4 text-xs text-[var(--text-muted)]">
-            {(prompts?.length ?? 0) === 0 ? (
+            {(commands?.length ?? 0) === 0 ? (
               <>
-                No saved prompts yet. Create some in{" "}
+                Nothing saved yet. Create prompts and commands in{" "}
                 <button
                   type="button"
                   onMouseDown={keepFocus}
-                  onClick={() => navigate("/account/security")}
+                  onClick={() => navigate("/tasks")}
                   className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
                 >
-                  account settings
+                  Automations
                 </button>
                 .
               </>
             ) : (
-              `No prompts matching "${pick.query}".`
+              `Nothing matching "${pick.query}".`
             )}
           </div>
         ) : (
           <div className="py-1">
-            {filtered.map((p, i) => {
+            {filtered.map((c, i) => {
               const active = i === highlighted;
+              const doesSomething = isSideEffecting(c.action_type);
+              const Icon = doesSomething ? Zap : FileText;
               return (
                 <button
-                  key={p.id}
+                  key={c.id}
                   role="option"
                   aria-selected={active}
                   onMouseDown={keepFocus}
-                  onClick={() => apply(p)}
+                  onClick={() => choose(c)}
                   onMouseEnter={() => setHighlighted(i)}
                   className={cn(
                     "flex w-full items-start gap-2 px-3 py-2 text-left text-xs transition",
@@ -181,18 +209,36 @@ export function SlashCommandAutocomplete({
                       : "text-[var(--text-muted)] hover:bg-[var(--accent)]/5 hover:text-[var(--text)]"
                   )}
                 >
-                  <Settings2
+                  <Icon
                     className={cn(
                       "mt-0.5 h-3.5 w-3.5 shrink-0",
-                      active ? "text-[var(--accent)]" : "text-[var(--text-muted)]"
+                      doesSomething
+                        ? "text-[var(--accent)]"
+                        : active
+                          ? "text-[var(--accent)]"
+                          : "text-[var(--text-muted)]"
                     )}
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-[var(--text)]">
-                      {p.title}
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate font-medium text-[var(--text)]">
+                        {c.name}
+                      </span>
+                      {doesSomething && (
+                        // Says what picking this will DO, before it's
+                        // picked. The whole risk of one menu holding both
+                        // is someone expecting text and getting an action.
+                        <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--accent)]">
+                          Runs
+                        </span>
+                      )}
                     </span>
                     <span className="mt-0.5 block truncate text-[10px] text-[var(--text-muted)]">
-                      {p.body}
+                      {c.action_type === "prompt"
+                        ? c.body
+                        : c.action_type === "automation"
+                          ? "Runs an automation"
+                          : "Calls a connected tool"}
                     </span>
                   </span>
                 </button>
@@ -201,7 +247,7 @@ export function SlashCommandAutocomplete({
           </div>
         )}
         <div className="border-t border-[var(--border)] px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
-          ↑↓ navigate · Enter or Tab to insert · Esc to close
+          ↑↓ navigate · Enter or Tab to use · Esc to close
         </div>
       </div>
     </div>

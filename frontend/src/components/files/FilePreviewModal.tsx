@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -375,44 +383,54 @@ function ImagePreview({ file }: { file: FileItem }) {
 }
 
 // ----------------------------------------------------------------
-// PDF — stream through auth header then point an <iframe> at the
-// resulting object URL. We could also use <object> but <iframe>
-// gets us Chromium's built-in toolbar for free.
+// PDF — fetch the bytes through the auth header and render them with
+// pdf.js.
+//
+// This used to hand a blob URL to an <iframe> and let the browser's
+// built-in plugin do the work. That plugin isn't ours to rely on:
+// Chrome's "Download PDFs instead of automatically opening them"
+// setting (and any other refusal to render a plugin document) makes
+// the browser *download the file and leave the frame blank* — so
+// opening a preview silently dropped a file in ~/Downloads and showed
+// a white rectangle. Downloading is what the Download button is for.
+//
+// pdf.js is lazy-loaded so the ~350 kB only arrives for people who
+// actually open a PDF.
 // ----------------------------------------------------------------
+const PdfCanvasPreview = lazy(() =>
+  import("./PdfCanvasPreview").then((m) => ({ default: m.PdfCanvasPreview }))
+);
+
 function PdfPreview({ file }: { file: FileItem }) {
-  const [url, setUrl] = useState<string | null>(null);
+  const [data, setData] = useState<ArrayBuffer | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    let revoked = false;
-    let blobUrl: string | null = null;
+    let cancelled = false;
+    setData(null);
+    setErr(null);
     (async () => {
       try {
-        const res = await apiClient.get<Blob>(
+        const res = await apiClient.get<ArrayBuffer>(
           filesApi.downloadUrl(file.id).replace(/^\/api/, ""),
-          { responseType: "blob" }
+          { responseType: "arraybuffer" }
         );
-        if (revoked) return;
-        blobUrl = URL.createObjectURL(res.data);
-        setUrl(blobUrl);
+        if (cancelled) return;
+        setData(res.data);
       } catch (e) {
-        if (!revoked) setErr(extractError(e));
+        if (!cancelled) setErr(extractError(e));
       }
     })();
     return () => {
-      revoked = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      cancelled = true;
     };
   }, [file.id]);
 
   if (err) return <PreviewError>{err}</PreviewError>;
-  if (!url) return <PreviewLoading />;
+  if (!data) return <PreviewLoading />;
   return (
-    <iframe
-      key={file.id}
-      src={url}
-      title={file.filename}
-      className="h-full w-full rounded-md border-0 bg-white shadow-2xl"
-    />
+    <Suspense fallback={<PreviewLoading />}>
+      <PdfCanvasPreview key={file.id} data={data} filename={file.filename} />
+    </Suspense>
   );
 }
 

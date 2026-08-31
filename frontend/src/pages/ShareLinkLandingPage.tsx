@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import {
   useNavigate,
@@ -441,8 +441,59 @@ function PublicFilePreview({
   );
 }
 
+// pdf.js again (see PdfCanvasPreview): a guest opening a shared PDF is
+// the *last* person who should have it silently land in their Downloads
+// instead of on screen — they have no app around them to explain what
+// happened. Lazy so the landing-page bundle only grows for PDF links.
+const PdfCanvasPreview = lazy(() =>
+  import("@/components/files/PdfCanvasPreview").then((m) => ({
+    default: m.PdfCanvasPreview,
+  }))
+);
+
+function PublicPdf({
+  blobUrl,
+  filename,
+}: {
+  blobUrl: string;
+  filename: string;
+}) {
+  const [data, setData] = useState<ArrayBuffer | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      // Same-origin blob: fetch — no auth involved, the link itself was
+      // already exchanged for these bytes upstream.
+      const buf = await (await fetch(blobUrl)).arrayBuffer();
+      if (!cancelled) setData(buf);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [blobUrl]);
+
+  if (!data) {
+    return (
+      <p className="flex items-center gap-2 text-sm text-white/80">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      </p>
+    );
+  }
+  return (
+    <Suspense
+      fallback={
+        <p className="flex items-center gap-2 text-sm text-white/80">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </p>
+      }
+    >
+      <PdfCanvasPreview data={data} filename={filename} />
+    </Suspense>
+  );
+}
+
 // Thin viewer for an already-resolved blob URL — images get an
-// ``<img>``, PDFs an ``<iframe>``, text a readable scroll. We don't
+// ``<img>``, PDFs a pdf.js canvas, text a readable scroll. We don't
 // attempt code highlighting here to keep the landing page bundle
 // small.
 function PublicBlobPreview({
@@ -521,13 +572,7 @@ function PublicBlobPreview({
             draggable={false}
           />
         )}
-        {isPdf && (
-          <iframe
-            src={blobUrl}
-            title={filename}
-            className="h-full w-full rounded-md border-0 bg-white shadow-2xl"
-          />
-        )}
+        {isPdf && <PublicPdf blobUrl={blobUrl} filename={filename} />}
         {isHtmlDoc && (
           <div className="h-full w-full max-w-4xl overflow-y-auto rounded-md bg-[var(--bg)] px-6 py-6 text-[var(--text)] shadow-2xl">
             {text === null ? (

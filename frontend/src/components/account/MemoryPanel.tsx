@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   Download,
+  Eraser,
   ExternalLink,
   Loader2,
   Pencil,
@@ -21,6 +22,7 @@ import {
   memoryApi,
   type Memory,
   type MemoryConsolidateResult,
+  type MemoryEditOp,
   type MemoryImportResult,
   MEMORY_CATEGORIES,
 } from "@/api/memory";
@@ -29,6 +31,7 @@ import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { useAuthStore } from "@/store/authStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 type MemoryMode = "off" | "auto" | "manual";
@@ -169,7 +172,7 @@ export function MemoryPanel() {
       void invalidate();
     },
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const updateMut = useMutation({
@@ -183,21 +186,21 @@ export function MemoryPanel() {
       void invalidate();
     },
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => memoryApi.remove(id),
     onSuccess: () => void invalidate(),
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const clearMut = useMutation({
     mutationFn: () => memoryApi.clear(),
     onSuccess: () => void invalidate(),
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const bulkDeleteMut = useMutation({
@@ -208,7 +211,7 @@ export function MemoryPanel() {
       void invalidate();
     },
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const pinMut = useMutation({
@@ -216,7 +219,42 @@ export function MemoryPanel() {
       memoryApi.update(id, { pinned }),
     onSuccess: () => void invalidate(),
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
+  });
+
+  // Plain-English editing. Deliberately propose-then-approve: an
+  // instruction like "forget the work stuff" is genuinely ambiguous about
+  // scope, and this is the one place a user bulk-edits durable state.
+  const [instruction, setInstruction] = useState("");
+  const [plan, setPlan] = useState<MemoryEditOp[] | null>(null);
+
+  const instructMut = useMutation({
+    mutationFn: (text: string) => memoryApi.instruct(text),
+    onSuccess: (changes) => setPlan(changes),
+    onError: (err) =>
+      setActionError(apiErrorMessage(err)),
+  });
+
+  const applyMut = useMutation({
+    mutationFn: (ops: MemoryEditOp[]) => memoryApi.applyInstruction(ops),
+    onSuccess: (result) => {
+      void invalidate();
+      setPlan(null);
+      setInstruction("");
+      const parts = [
+        result.added ? `${result.added} added` : "",
+        result.updated ? `${result.updated} updated` : "",
+        result.deleted ? `${result.deleted} removed` : "",
+      ].filter(Boolean);
+      pushToast({
+        message: parts.length
+          ? `Memory updated: ${parts.join(", ")}.`
+          : "Nothing changed.",
+        type: "success",
+      });
+    },
+    onError: (err) =>
+      setActionError(apiErrorMessage(err)),
   });
 
   const consolidateMut = useMutation({
@@ -233,7 +271,7 @@ export function MemoryPanel() {
       });
     },
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const importMut = useMutation({
@@ -248,7 +286,7 @@ export function MemoryPanel() {
       });
     },
     onError: (err) =>
-      setActionError(err instanceof Error ? err.message : String(err)),
+      setActionError(apiErrorMessage(err)),
   });
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -616,6 +654,121 @@ export function MemoryPanel() {
                         </ul>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Edit in your own words ───────────────────────────────── */}
+            {memories.length > 0 && !selectMode && (
+              <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] p-3">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[var(--text)]">
+                  <Eraser className="h-3.5 w-3.5 text-[var(--accent)]" />
+                  Change memory in your own words
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={instruction}
+                    onChange={(e) => {
+                      setInstruction(e.target.value);
+                      setPlan(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && instruction.trim()) {
+                        e.preventDefault();
+                        instructMut.mutate(instruction.trim());
+                      }
+                    }}
+                    placeholder="e.g. forget everything about my old job at Acme"
+                    className={cn(
+                      "min-w-0 flex-1 rounded-input border px-2.5 py-1.5 text-xs",
+                      "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
+                      "outline-none focus:border-[var(--accent)]/60"
+                    )}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!instruction.trim() || instructMut.isPending}
+                    onClick={() => instructMut.mutate(instruction.trim())}
+                    className="border border-[var(--border)] text-[var(--text-muted)]"
+                  >
+                    {instructMut.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Preview
+                  </Button>
+                </div>
+
+                {plan !== null && plan.length === 0 && (
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    Nothing saved matches that — memory is unchanged.
+                  </p>
+                )}
+
+                {plan !== null && plan.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <ul className="space-y-1.5 text-xs">
+                      {plan.map((change, i) => (
+                        <li
+                          key={`${change.op}-${change.id ?? i}`}
+                          className="leading-snug"
+                        >
+                          {change.op === "delete" && (
+                            <span className="text-[var(--text-muted)]">
+                              <span className="font-medium text-red-600 dark:text-red-400">
+                                Remove
+                              </span>{" "}
+                              <span className="line-through">
+                                {change.before}
+                              </span>
+                            </span>
+                          )}
+                          {change.op === "update" && (
+                            <span className="text-[var(--text-muted)]">
+                              <span className="font-medium text-[var(--accent)]">
+                                Change
+                              </span>{" "}
+                              <span className="line-through">
+                                {change.before}
+                              </span>{" "}
+                              → <span className="text-[var(--text)]">{change.after}</span>
+                            </span>
+                          )}
+                          {change.op === "add" && (
+                            <span className="text-[var(--text-muted)]">
+                              <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                                Add
+                              </span>{" "}
+                              <span className="text-[var(--text)]">{change.after}</span>
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        disabled={applyMut.isPending}
+                        onClick={() => applyMut.mutate(plan)}
+                      >
+                        {applyMut.isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
+                        Apply {plan.length}{" "}
+                        {plan.length === 1 ? "change" : "changes"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setPlan(null)}
+                        className="text-[var(--text-muted)]"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

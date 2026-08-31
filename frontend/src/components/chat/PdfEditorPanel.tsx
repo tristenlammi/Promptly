@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
@@ -27,6 +27,16 @@ import type { MessageAttachmentSnapshot } from "@/api/types";
 import { useEditorStore } from "@/store/editorStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+
+// Rendered with pdf.js rather than an <object>/<iframe> embed: browsers
+// that decline to render a blob: PDF inline download it instead and
+// leave the pane blank, which is exactly what the timeout-based
+// "embedFailed" dance below used to paper over. See PdfCanvasPreview.
+const PdfCanvasPreview = lazy(() =>
+  import("@/components/files/PdfCanvasPreview").then((m) => ({
+    default: m.PdfCanvasPreview,
+  }))
+);
 
 /**
  * Slide-in side panel for inspecting (and, where applicable, editing)
@@ -371,6 +381,10 @@ function PdfPreviewPanelInner({
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  // The bytes, kept alongside the blob URL: the URL still backs "open
+  // in a new tab" and the download button, while pdf.js renders from
+  // the buffer.
+  const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
   // Some Chromium-based browsers (notably Vivaldi with its built-in
   // shield, and Chrome with PDF viewer disabled) silently refuse to
   // render PDFs inside an embedded ``<object>`` / ``<iframe>`` that
@@ -380,7 +394,6 @@ function PdfPreviewPanelInner({
   // the "open in new tab" fallback. The user always has the inline
   // download / open buttons in the header regardless.
   const [embedFailed, setEmbedFailed] = useState(false);
-  const embedLoadedRef = useRef(false);
   const panelRef = useRef<HTMLElement | null>(null);
 
   // Fetch the PDF as a blob. We can't put the file id directly into
@@ -393,8 +406,8 @@ function PdfPreviewPanelInner({
     setLoadState("loading");
     setLoadError(null);
     setBlobUrl(null);
+    setBytes(null);
     setEmbedFailed(false);
-    embedLoadedRef.current = false;
     void (async () => {
       try {
         const path = filesApi.downloadUrl(attachment.id).replace(/^\/api/, "");
@@ -410,6 +423,7 @@ function PdfPreviewPanelInner({
             : res.data.slice(0, res.data.size, "application/pdf");
         createdUrl = window.URL.createObjectURL(typed);
         setBlobUrl(createdUrl);
+        setBytes(await typed.arrayBuffer());
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
@@ -422,19 +436,6 @@ function PdfPreviewPanelInner({
       if (createdUrl) window.URL.revokeObjectURL(createdUrl);
     };
   }, [attachment.id]);
-
-  // Embed-blocked detector. Once the blob is ready, give the browser
-  // a generous window to render the PDF viewer inside our object.
-  // If onLoad never fires, we assume something blocked it and show
-  // the fallback. 1.5s is well above the time it takes Chromium to
-  // hand the blob to its PDF viewer when the viewer is allowed.
-  useEffect(() => {
-    if (loadState !== "ready" || !blobUrl) return;
-    const timer = window.setTimeout(() => {
-      if (!embedLoadedRef.current) setEmbedFailed(true);
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [loadState, blobUrl]);
 
   const openInNewTab = useCallback(() => {
     if (!blobUrl) return;
@@ -487,23 +488,24 @@ function PdfPreviewPanelInner({
             onRetry={() => setLoadState("loading")}
           />
         )}
-        {loadState === "ready" && blobUrl && !embedFailed && (
-          <div className="flex-1 overflow-hidden bg-[var(--surface)]">
-            <object
-              data={blobUrl}
-              type="application/pdf"
-              className="h-full w-full"
-              aria-label={attachment.filename}
-              onLoad={() => {
-                embedLoadedRef.current = true;
-              }}
+        {loadState === "ready" && bytes && !embedFailed && (
+          <div className="flex-1 overflow-hidden bg-[var(--surface)] p-2">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading preview…
+                </div>
+              }
             >
-              <EmbedFallback
+              <PdfCanvasPreview
+                data={bytes}
                 filename={attachment.filename}
-                onOpenInNewTab={openInNewTab}
-                fileId={attachment.id}
+                // A PDF pdf.js can't parse is the one case the old
+                // "open in a new tab" escape hatch still helps with.
+                onError={() => setEmbedFailed(true)}
               />
-            </object>
+            </Suspense>
           </div>
         )}
         {loadState === "ready" && blobUrl && embedFailed && (

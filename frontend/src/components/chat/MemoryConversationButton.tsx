@@ -197,8 +197,8 @@ export function MemoryConversationButton({
             </button>
             <p className="mt-1 px-2 text-[11px] leading-snug text-[var(--text-muted)]">
               {capturePaused
-                ? "Auto-capture is off for this conversation. Saved memories are still active."
-                : "New facts won't be extracted from this conversation."}
+                ? "Nothing from this chat is saved to memory — not automatically, and not if you ask. Facts saved earlier are still used here."
+                : "Nothing from this chat will be saved to memory, even if you ask. Facts saved earlier stay active."}
             </p>
           </div>
         </div>

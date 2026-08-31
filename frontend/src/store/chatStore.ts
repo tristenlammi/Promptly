@@ -26,7 +26,6 @@ interface ChatState {
    *  (Phase 6 + 2.2). Drives the transient "saved to memory" affordance
    *  with Undo support. Each entry carries the DB id so the chip can
    *  delete individual facts. Cleared at the start of each new stream. */
-  memorySaved: Array<{ id: string; content: string }>;
   /** Facts that were retrieved and injected into this turn's system prompt
    *  (Phase 3.2). Drives the in-chat "🧠 N memories in context" chip.
    *  Cleared at the start of each new stream. */
@@ -96,8 +95,6 @@ interface ChatState {
   dismissVisionWarning: (index: number) => void;
   clearVisionWarnings: () => void;
   /** Record facts the backend just saved to memory this turn. */
-  setMemorySaved: (facts: Array<{ id: string; content: string }>) => void;
-  dismissMemorySaved: () => void;
   /** Record which facts were injected into this turn's system prompt (Phase 3.2). */
   setMemoriesUsed: (facts: Array<{ id: string; content: string }>) => void;
   dismissMemoriesUsed: () => void;
@@ -179,7 +176,6 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingContent: "",
   streamingSources: null,
   visionWarnings: [],
-  memorySaved: [],
   memoriesUsed: [],
   toolInvocations: [],
   visionRelayInvocations: [],
@@ -254,8 +250,6 @@ export const useChatStore = create<ChatState>((set) => ({
       visionWarnings: state.visionWarnings.filter((_, i) => i !== index),
     })),
   clearVisionWarnings: () => set({ visionWarnings: [] }),
-  setMemorySaved: (facts) => set({ memorySaved: facts }),
-  dismissMemorySaved: () => set({ memorySaved: [] }),
   setMemoriesUsed: (facts) => set({ memoriesUsed: facts }),
   dismissMemoriesUsed: () => set({ memoriesUsed: [] }),
   startToolInvocation: (id, name) =>
@@ -334,7 +328,6 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingContent: "",
       streamingSources: null,
       visionWarnings: [],
-      memorySaved: [],
       memoriesUsed: [],
       toolInvocations: [],
       visionRelayInvocations: [],

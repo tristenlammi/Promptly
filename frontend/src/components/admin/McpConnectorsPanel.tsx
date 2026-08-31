@@ -13,6 +13,7 @@ import {
   mcpApi,
   type ConnectorAvailability,
   type ConnectorKind,
+  type ConnectorTransport,
   type McpConnector,
   type McpToolInfo,
   type WorkspaceOption,
@@ -29,6 +30,8 @@ import { cn } from "@/utils/cn";
 const PRESETS: {
   label: string;
   kind: ConnectorKind;
+  /** Omitted means the default streamable-HTTP transport. */
+  transport?: ConnectorTransport;
   url: string;
   auth_header_name: string;
   hint: string;
@@ -39,6 +42,17 @@ const PRESETS: {
     url: "https://api.githubcopilot.com/mcp/",
     auth_header_name: "Authorization",
     hint: "Paste a GitHub token as 'Bearer <token>'.",
+  },
+  {
+    label: "Home Assistant",
+    kind: "mcp",
+    // HA ships an official Model Context Protocol Server integration, so
+    // it needs no bespoke connector — only the older SSE transport,
+    // which is what the generic MCP path lacked until now.
+    transport: "sse",
+    url: "http://homeassistant.local:8123/mcp_server/sse",
+    auth_header_name: "Authorization",
+    hint: "Enable 'Model Context Protocol Server' in Home Assistant, then paste a Long-Lived Access Token as 'Bearer <token>'. Your HA URL works as-is on the LAN.",
   },
   {
     label: "UniFi",
@@ -257,6 +271,9 @@ function ConnectorForm({
   const [name, setName] = useState(connector?.name ?? "");
   const [kind, setKind] = useState<ConnectorKind>(connector?.kind ?? "mcp");
   const [url, setUrl] = useState(connector?.url ?? "");
+  const [transport, setTransport] = useState<ConnectorTransport>(
+    connector?.transport ?? "http"
+  );
   const isUnifi = kind === "unifi";
   const [authHeader, setAuthHeader] = useState(
     connector?.auth_header_name ?? "Authorization"
@@ -320,6 +337,7 @@ function ConnectorForm({
       const r = await mcpApi.test({
         url: url.trim(),
         kind,
+        transport,
         auth_header_name: authHeader || null,
         auth_value: authValue || null,
       });
@@ -371,6 +389,7 @@ function ConnectorForm({
         await mcpApi.create({
           name: name.trim(),
           kind,
+          transport,
           url: url.trim(),
           auth_header_name: authHeader || null,
           auth_value: authValue || null,
@@ -419,6 +438,7 @@ function ConnectorForm({
                 onClick={() => {
                   setName((n) => n || p.label);
                   setKind(p.kind);
+                  setTransport(p.transport ?? "http");
                   setUrl(p.url);
                   setAuthHeader(p.auth_header_name);
                 }}
@@ -438,13 +458,7 @@ function ConnectorForm({
             placeholder="GitHub"
           />
         </Field>
-        <Field
-          label={
-            isUnifi
-              ? "Controller URL"
-              : "Server URL (streamable-HTTP MCP endpoint)"
-          }
-        >
+        <Field label={isUnifi ? "Controller URL" : "Server URL"}>
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -452,6 +466,38 @@ function ConnectorForm({
             placeholder={isUnifi ? "https://192.168.1.1" : "https://…/mcp/"}
           />
         </Field>
+        {!isUnifi && (
+          <Field label="Transport">
+            <div className="flex gap-1.5">
+              {(
+                [
+                  ["http", "Streamable HTTP", "The current standard"],
+                  ["sse", "SSE", "Older servers, incl. Home Assistant"],
+                ] as const
+              ).map(([value, label, note]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTransport(value)}
+                  title={note}
+                  className={cn(
+                    "rounded-md border px-2.5 py-1.5 text-xs transition",
+                    transport === value
+                      ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Most servers use streamable HTTP. Pick SSE if the endpoint
+              path ends in <code className="font-mono">/sse</code> — a
+              mismatch here looks like the server being unreachable.
+            </p>
+          </Field>
+        )}
         <div className={cn("grid gap-2", isUnifi ? "grid-cols-1" : "grid-cols-2")}>
           {!isUnifi && (
             <Field label="Auth header (optional)">

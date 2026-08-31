@@ -34,6 +34,15 @@ RETRIEVAL_K: Final[int] = 10
 # auto-capture add path; user-typed manual adds are never blocked this way.
 SEMANTIC_DUP_THRESHOLD: Final[float] = 0.90
 
+# Ceiling on pinned facts. Pinned rows are injected unconditionally, so
+# they compete with retrieval for the same K slots: with no cap, pinning
+# ten facts silently switched semantic retrieval off, and pinning twenty
+# doubled the injected block on top of that. The UI presents pinning as
+# "always keep this in mind", which gives no hint that it costs anything,
+# so the limit is enforced rather than advertised — the retrieval floor
+# in ``build_memory_system_prompt`` is the other half of the fix.
+MAX_PINNED_MEMORIES: Final[int] = 12
+
 # Controlled vocabulary for memory categories (Phase 2.1). Extraction
 # prompt asks the model to tag each fact; unrecognised values are coerced
 # to None (displayed as "Other" in the UI). Order here is the preferred

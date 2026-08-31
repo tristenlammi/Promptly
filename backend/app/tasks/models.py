@@ -239,7 +239,7 @@ class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="pending"
     )
-    # schedule | manual | webhook
+    # schedule | manual | webhook | command (voice or / command)
     trigger: Mapped[str] = mapped_column(
         String(10), nullable=False, default="schedule"
     )

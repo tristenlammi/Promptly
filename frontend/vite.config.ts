@@ -199,6 +199,12 @@ export default defineConfig({
           // runtime inlined as text for the sandboxed iframe. Only needed
           // when someone opens a jsx/tsx artifact, so same rationale again.
           "**/ReactPreview-*.js",
+          // pdf.js: the library chunk plus its worker asset (~1.4 MB
+          // together), fetched only when someone opens a PDF preview.
+          // The worker is emitted as a .mjs asset, which the default
+          // glob would otherwise sweep into the precache.
+          "**/pdfjs-*.js",
+          "**/pdf.worker*.mjs",
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
@@ -293,6 +299,12 @@ export default defineConfig({
           // async chunk instead of creating a reactflow↔charts cycle.
           if (id.includes("@xyflow")) {
             return "reactflow";
+          }
+          // pdf.js renders the Drive PDF preview. Lazy-loaded with the
+          // preview component, so keep it out of whatever chunk happens
+          // to import it first.
+          if (id.includes("pdfjs-dist")) {
+            return "pdfjs";
           }
           if (id.includes("@tiptap") || id.includes("prosemirror")) {
             return "tiptap";

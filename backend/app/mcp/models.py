@@ -54,6 +54,14 @@ class McpConnector(UUIDPKMixin, TimestampMixin, Base):
     # console URL (kind=unifi/omada).
     url: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # Wire protocol for kind='mcp': 'http' (streamable-HTTP, the current
+    # standard and the default) or 'sse' (the older transport that plenty
+    # of servers still expose — Home Assistant's among them). Ignored by
+    # native kinds, which don't speak MCP at all.
+    transport: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="http", server_default="http"
+    )
+
     # Optional single auth header (e.g. ``Authorization``). The value is
     # Fernet-encrypted at rest; NULL header name = no auth.
     auth_header_name: Mapped[str | None] = mapped_column(

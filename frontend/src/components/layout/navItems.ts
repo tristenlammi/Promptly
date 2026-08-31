@@ -107,9 +107,10 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Workflow,
     label: "Automations",
     section: "chat",
-    // The flow editor is a desktop canvas, and workspace-homed automations
-    // open inside the (desktop-gated) workspace shell.
-    desktopOnly: true,
+    // Deliberately NOT desktop-only. The page's Prompts and Commands
+    // tabs are mobile-first — `/` in chat is a phone gesture, and voice
+    // will be too — so the gate moved down to the flow canvas itself
+    // (see TaskDetailPage), which is the only part a phone can't render.
     optionalKey: "tasks",
   },
   {

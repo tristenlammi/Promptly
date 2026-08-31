@@ -13,21 +13,27 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
-from app.memory.constants import MAX_MEMORIES, MEMORY_CATEGORIES
+from app.memory.constants import (
+    MAX_MEMORIES,
+    MAX_PINNED_MEMORIES,
+    MEMORY_CATEGORIES,
+)
 from app.memory.models import UserMemory
 from app.memory.schemas import MemoryCreate, MemoryResponse, MemoryUpdate
 from app.memory.service import (
     _is_duplicate,
     _normalise,
+    apply_memory_edits,
     consolidate_memories,
     embed_memory_row,
     load_memories,
+    plan_memory_edits,
 )
 
 logger = logging.getLogger("promptly.memory")
@@ -46,6 +52,32 @@ async def _get_owned(
             status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
         )
     return row
+
+
+
+async def _guard_pin_cap(user: User, db: AsyncSession, exclude_id=None) -> None:
+    """Refuse to pin past the cap.
+
+    Pinned facts are injected into every turn unconditionally, competing
+    with retrieval for the same slots — so an uncapped pin list quietly
+    turns relevance off and inflates the prompt. The UI calls pinning
+    "always keep this in mind", which reads as free, so the limit has to
+    be enforced here rather than left to the user to infer.
+    """
+    stmt = select(func.count()).select_from(UserMemory).where(
+        UserMemory.user_id == user.id, UserMemory.pinned.is_(True)
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(UserMemory.id != exclude_id)
+    if int(await db.scalar(stmt) or 0) >= MAX_PINNED_MEMORIES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"You can pin up to {MAX_PINNED_MEMORIES} memories. Unpin "
+                "one to make room — pinned facts are added to every chat, "
+                "so a long list crowds out the ones picked for relevance."
+            ),
+        )
 
 
 @router.get("", response_model=list[MemoryResponse])
@@ -88,6 +120,9 @@ async def create_memory(
             status_code=status.HTTP_409_CONFLICT,
             detail="That's already in your memory.",
         )
+
+    if payload.pinned:
+        await _guard_pin_cap(user, db)
 
     # Coerce invalid categories to None silently.
     category = payload.category if payload.category in _VALID_CATEGORIES else None
@@ -137,6 +172,8 @@ async def update_memory(
         row.category = None
 
     if payload.pinned is not None:
+        if payload.pinned and not row.pinned:
+            await _guard_pin_cap(user, db, exclude_id=row.id)
         row.pinned = payload.pinned
 
     # Re-embed only when the text changed (vectors must track the text).
@@ -345,3 +382,82 @@ async def import_memories(
             pass
 
     return MemoryImportResponse(imported=imported, skipped=skipped, errors=errors)
+
+
+class MemoryInstructRequest(BaseModel):
+    instruction: str
+
+
+class MemoryEditOp(BaseModel):
+    """One proposed change, in the shape the preview renders.
+
+    ``before`` is the row's current text (updates and deletes); ``after``
+    is the proposed text (adds and updates). Ids are echoed back on apply
+    and re-validated server-side — the plan travels through the client, so
+    it is a suggestion, never an authority.
+    """
+
+    op: str
+    id: str | None = None
+    before: str | None = None
+    after: str | None = None
+    category: str | None = None
+
+
+class MemoryInstructPlan(BaseModel):
+    changes: list[MemoryEditOp]
+
+
+class MemoryApplyRequest(BaseModel):
+    ops: list[MemoryEditOp]
+
+
+class MemoryApplyResult(BaseModel):
+    added: int
+    updated: int
+    deleted: int
+
+
+@router.post("/instruct", response_model=MemoryInstructPlan)
+async def instruct_memory(
+    payload: MemoryInstructRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoryInstructPlan:
+    """Work out what a plain-English instruction would change.
+
+    Nothing is written — the caller shows the plan and calls
+    ``/instruct/apply`` if the user accepts. Editing durable state in bulk
+    from an ambiguous sentence ("forget the work stuff") is exactly where
+    a preview earns its keep.
+    """
+    try:
+        changes = await plan_memory_edits(
+            db, user_id=user.id, instruction=payload.instruction
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    return MemoryInstructPlan(
+        changes=[MemoryEditOp(**c) for c in changes]
+    )
+
+
+@router.post("/instruct/apply", response_model=MemoryApplyResult)
+async def apply_memory_instruction(
+    payload: MemoryApplyRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoryApplyResult:
+    """Apply a plan the user accepted.
+
+    Ops are re-validated against this user's own rows; an id that isn't
+    theirs is skipped rather than rejected, so a partially-stale plan
+    (they deleted a row in another tab) still applies what it can.
+    """
+    result = await apply_memory_edits(
+        db, user_id=user.id, ops=[op.model_dump() for op in payload.ops]
+    )
+    await db.commit()
+    return MemoryApplyResult(**result)

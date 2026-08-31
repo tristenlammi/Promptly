@@ -24,6 +24,14 @@ import {
 import { useAvailableModels } from "@/hooks/useProviders";
 import { tasksApi, type Task } from "@/api/tasks";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
+import { CommandEditorModal } from "@/components/commands/CommandEditorModal";
+import { CommandList } from "@/components/commands/CommandList";
+import {
+  duplicatePhrases,
+  filterByType,
+  useCommands,
+} from "@/hooks/useCommands";
+import type { Command, CommandActionType } from "@/api/commands";
 import { NewAutomationChooser } from "@/components/tasks/NewAutomationChooser";
 import { CredentialsModal } from "@/components/tasks/CredentialsModal";
 import { RunStatusChip, relativeTime } from "@/components/tasks/RunStatusChip";
@@ -35,7 +43,32 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
+type Tab = "prompts" | "commands" | "scheduled";
+
+/** The three tabs are filtered views of ONE library plus the scheduled
+ *  flows — not three features. What separates them for a user is simply
+ *  what starts the thing: Scheduled runs itself; Prompts and Commands
+ *  are started by you, by typing or (later) by speaking. */
+const TABS: { key: Tab; label: string; hint: string }[] = [
+  { key: "prompts", label: "Prompts", hint: "Text you insert with /" },
+  { key: "commands", label: "Commands", hint: "Things Promptly does when you ask" },
+  { key: "scheduled", label: "Scheduled", hint: "Runs on its own" },
+];
+
 export function TasksPage() {
+  // Prompts leads: it's the tab everyone uses daily, and Scheduled is
+  // the desktop-gated one.
+  const [tab, setTab] = useState<Tab>("prompts");
+  const [commandEditing, setCommandEditing] = useState<Command | null>(null);
+  const [commandEditorOpen, setCommandEditorOpen] = useState(false);
+  const { data: commands, isLoading: commandsLoading } = useCommands();
+  const duplicates = useMemo(() => duplicatePhrases(commands), [commands]);
+
+  const openCommandEditor = (existing: Command | null) => {
+    setCommandEditing(existing);
+    setCommandEditorOpen(true);
+  };
+
   // ``all`` so workspace-homed automations show too — this page is the one
   // place to audit everything that runs on the account.
   const { data: tasks, isLoading } = useTasks("all");
@@ -125,30 +158,78 @@ export function TasksPage() {
     <>
       <TopNav
         title="Automations"
-        subtitle="Scheduled prompts that produce a fresh report on their own"
+        subtitle={TABS.find((t) => t.key === tab)?.hint}
         actions={
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              leftIcon={<KeyRound className="h-4 w-4" />}
-              onClick={() => setCredsOpen(true)}
-              title="Manage API keys and tokens your automations use"
-            >
-              Credentials
-            </Button>
-            <Button
-              variant="primary"
-              leftIcon={<Plus className="h-4 w-4" />}
-              onClick={openNew}
-            >
-              New automation
-            </Button>
+            {tab === "scheduled" ? (
+              <>
+                <Button
+                  variant="ghost"
+                  leftIcon={<KeyRound className="h-4 w-4" />}
+                  onClick={() => setCredsOpen(true)}
+                  title="Manage API keys and tokens your automations use"
+                >
+                  Credentials
+                </Button>
+                <Button
+                  variant="primary"
+                  leftIcon={<Plus className="h-4 w-4" />}
+                  onClick={openNew}
+                >
+                  New automation
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                leftIcon={<Plus className="h-4 w-4" />}
+                onClick={() => openCommandEditor(null)}
+              >
+                {tab === "prompts" ? "New prompt" : "New command"}
+              </Button>
+            )}
           </div>
         }
       />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4 py-6">
-          {isLoading ? (
+          <div
+            role="tablist"
+            aria-label="Automations sections"
+            className="mb-5 flex gap-1 self-start rounded-lg bg-[var(--surface-2)] p-1"
+          >
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium transition",
+                  tab === t.key
+                    ? "bg-[var(--surface)] text-[var(--text)] shadow-sm"
+                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab !== "scheduled" && (
+            <CommandsTabBody
+              tab={tab}
+              loading={commandsLoading}
+              commands={filterByType(
+                commands,
+                tab === "prompts" ? "prompt" : "action"
+              )}
+              duplicates={duplicates}
+              onEdit={openCommandEditor}
+            />
+          )}
+
+          {tab === "scheduled" && (isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
@@ -324,7 +405,7 @@ export function TasksPage() {
               </section>
             ))}
         </div>
-      )}
+      ))}
 
           <NewAutomationChooser
             open={chooserOpen}
@@ -335,6 +416,15 @@ export function TasksPage() {
           <CredentialsModal
             open={credsOpen}
             onClose={() => setCredsOpen(false)}
+          />
+
+          <CommandEditorModal
+            open={commandEditorOpen}
+            onClose={() => setCommandEditorOpen(false)}
+            command={commandEditing}
+            defaultActionType={
+              (tab === "prompts" ? "prompt" : "automation") as CommandActionType
+            }
           />
 
           <TaskFormModal
@@ -348,6 +438,53 @@ export function TasksPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function CommandsTabBody({
+  tab,
+  loading,
+  commands,
+  duplicates,
+  onEdit,
+}: {
+  tab: Tab;
+  loading: boolean;
+  commands: Command[];
+  duplicates: Set<string>;
+  onEdit: (command: Command | null) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-20 w-full rounded-card" />
+        ))}
+      </div>
+    );
+  }
+  const isPrompts = tab === "prompts";
+  return (
+    <CommandList
+      commands={commands}
+      duplicates={duplicates}
+      emptyTitle={isPrompts ? "No saved prompts yet" : "No commands yet"}
+      emptyDescription={
+        isPrompts
+          ? "Save the prompts you retype. Insert one with / in any chat."
+          : "Teach Promptly to do something when you ask — run an automation, or call a connected tool. Pick one with / in chat."
+      }
+      emptyAction={
+        <Button
+          variant="primary"
+          leftIcon={<Plus className="h-4 w-4" />}
+          onClick={() => onEdit(null)}
+        >
+          {isPrompts ? "New prompt" : "New command"}
+        </Button>
+      }
+      onEdit={onEdit}
+    />
   );
 }
 

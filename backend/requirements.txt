@@ -151,3 +151,4 @@ mcp==1.12.4
 # suite). Both are pure-Python with no system dependencies.
 pytest==8.3.3
 pytest-asyncio==0.24.0
+wyoming==1.10.2

@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import { Loader2, Mic, Square, X } from "lucide-react";
 
 import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
+import { commandsApi, type Command as VoiceCommand } from "@/api/commands";
 import { useDictation } from "@/hooks/useDictation";
+import { apiErrorMessage } from "@/utils/apiError";
 import { useTextToSpeech, type TtsStream } from "@/hooks/useTextToSpeech";
 import { useChatStore } from "@/store/chatStore";
 import { cn } from "@/utils/cn";
@@ -44,9 +46,19 @@ type Phase =
   | "idle"
   | "listening"
   | "transcribing"
+  // A matched command is running — distinct from "thinking" because no
+  // model is involved and it should feel (and look) instant.
+  | "running"
+  // Waiting on a spoken yes/no for a command that asked first.
+  | "confirming"
   | "thinking"
   | "speaking"
   | "error";
+
+/** What counts as "yes" out loud. Anything else cancels: the safe
+ *  reading of an ambiguous answer to "shall I open the garage door?" is
+ *  no, so this stays a small closed list rather than a fuzzy guess. */
+const AFFIRMATIVE = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|confirm|affirmative)/i;
 
 export function VoiceModeOverlay({
   onClose,
@@ -74,6 +86,17 @@ export function VoiceModeOverlay({
   const streamCtlRef = useRef<TtsStream | null>(null);
 
   const tts = useTextToSpeech();
+  // A command awaiting a spoken yes/no. Mirrored into a ref because the
+  // dictation callback runs inside a stale closure.
+  const [pendingCommand, setPendingCommand] = useState<{
+    command: VoiceCommand;
+    slots: Record<string, string>;
+  } | null>(null);
+  const pendingRef = useRef<{
+    command: VoiceCommand;
+    slots: Record<string, string>;
+  } | null>(null);
+  const [runningCommand, setRunningCommand] = useState(false);
   // Live mic level → drive the orb halo + waveform directly via refs (no
   // React re-render per frame). The halo follows a fast-attack /
   // slow-release envelope of the raw RMS, so it swells with speech and
@@ -125,7 +148,42 @@ export function VoiceModeOverlay({
     void startDictation();
   }, [startDictation, modelReady]);
 
-  // Wire the transcription result: send it, or re-listen if nothing heard.
+  /** Speak one line, then re-open the mic for the next turn. */
+  const say = useCallback(
+    (line: string) => {
+      void tts.speak(line, { onDone: () => startListening() });
+    },
+    [tts, startListening]
+  );
+
+  /** Run a matched command and say what happened.
+   *
+   * Deliberately speaks the failure too. Across the room you can't see a
+   * toast, and a voice turn that goes quiet is indistinguishable from
+   * one that didn't hear you. */
+  const runMatched = useCallback(
+    async (command: VoiceCommand, slots: Record<string, string>) => {
+      setRunningCommand(true);
+      try {
+        const result = await commandsApi.run(command.id, {
+          slots,
+          confirmed: true,
+        });
+        say(
+          result.spoken ||
+            (result.output ? result.output.slice(0, 200) : `${command.name} done.`)
+        );
+      } catch (e) {
+        say(apiErrorMessage(e, `${command.name} didn't work.`));
+      } finally {
+        setRunningCommand(false);
+      }
+    },
+    [say]
+  );
+
+  // Wire the transcription result: answer a pending confirmation, run a
+  // command, or fall through to the model.
   useEffect(() => {
     onFinalRef.current = (text: string) => {
       if (closingRef.current) return;
@@ -136,15 +194,64 @@ export function VoiceModeOverlay({
         // try again.
         return;
       }
+
+      // Waiting on a yes/no? Then this turn is the answer, not a new
+      // instruction. Anything that isn't clearly affirmative cancels —
+      // the safe reading of an ambiguous answer to "shall I open the
+      // garage door?" is no.
+      const pending = pendingRef.current;
+      if (pending) {
+        pendingRef.current = null;
+        setPendingCommand(null);
+        if (AFFIRMATIVE.test(t)) {
+          void runMatched(pending.command, pending.slots);
+        } else {
+          say("Cancelled.");
+        }
+        return;
+      }
+
       setUserText(t);
       setReplyText("");
       // Drop any stale controller from a barged-in previous turn.
       streamCtlRef.current = null;
-      baselineAssistantIdRef.current = lastAssistant()?.id ?? null;
-      setThinking(true);
-      onSend(t);
+
+      void (async () => {
+        // THE FAST PATH. Ask the command library first, and only fall
+        // through to the model when nothing matches. A matched command
+        // never leaves this network: Whisper transcribed it locally, the
+        // matcher is local, the action is a LAN call, and Kokoro speaks
+        // the reply — no model, no cloud round trip, no token cost.
+        //
+        // Failing open is deliberate: if the match call itself errors we
+        // carry on to the model rather than dropping the turn, because a
+        // voice turn that silently does nothing is the worst outcome
+        // when you're across the room and can't see a screen.
+        try {
+          const found = await commandsApi.match(t);
+          if (found.matched && found.command) {
+            const command = found.command;
+            if (found.needs_confirmation) {
+              // Per-command and off by default. Asked out loud, because
+              // a dialog is no use to someone across the room.
+              pendingRef.current = { command, slots: found.slots };
+              setPendingCommand({ command, slots: found.slots });
+              say(`${command.name}? Say yes to run it.`);
+              return;
+            }
+            void runMatched(command, found.slots);
+            return;
+          }
+        } catch {
+          // Fall through to the model.
+        }
+
+        baselineAssistantIdRef.current = lastAssistant()?.id ?? null;
+        setThinking(true);
+        onSend(t);
+      })();
     };
-  }, [startListening, onSend, lastAssistant]);
+  }, [startListening, onSend, lastAssistant, runMatched, say]);
 
   // Feed the reply into streaming TTS as it arrives: open a controller on
   // the first tokens, then push the growing text so complete sentences are
@@ -246,8 +353,12 @@ export function VoiceModeOverlay({
     ? "error"
     : audioPlaying
       ? "speaking"
-      : thinking || tts.loading
-        ? "thinking"
+      : runningCommand
+        ? "running"
+        : pendingCommand && dictationStatus !== "recording"
+          ? "confirming"
+          : thinking || tts.loading
+            ? "thinking"
         : dictationStatus === "recording"
           ? "listening"
           : dictationStatus === "transcribing"
@@ -287,6 +398,13 @@ export function VoiceModeOverlay({
     idle: "Tap to talk",
     listening: "Listening… just pause when you're done",
     transcribing: "Transcribing…",
+    // Named for what's happening, not for a spinner. A command run is a
+    // different thing from the model thinking, and it should read that
+    // way when it takes a fraction of the time.
+    running: pendingCommand
+      ? `Running ${pendingCommand.command.name}…`
+      : "Running…",
+    confirming: "Say yes to run it",
     thinking: "Thinking…",
     speaking: "Speaking… tap to interrupt",
     error: errorMsg ?? "Something went wrong",

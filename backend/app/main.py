@@ -89,6 +89,14 @@ async def lifespan(_: FastAPI):
     # single orphaned row permanently blocks its schedule (see the
     # module docstring) with no error surfaced anywhere.
     stale_run_reaper_task = start_stale_run_reaper()
+    # Voice Phase 2 — the Wyoming listener, so Home Assistant satellites
+    # can run this instance's commands. Off unless explicitly enabled;
+    # start_wyoming() logs its own reason when it declines. Imported here
+    # rather than at module scope so the optional dependency behind it
+    # can't affect boot for the majority who never turn it on.
+    from app.wyoming_bridge.startup import start_wyoming, stop_wyoming
+
+    await start_wyoming()
     try:
         yield
     finally:
@@ -100,6 +108,7 @@ async def lifespan(_: FastAPI):
             await flush_in_flight()
         except Exception:  # noqa: BLE001 — never block shutdown
             logger.exception("Error while flushing in-flight streams")
+        await stop_wyoming()
         for bg in (
             sweeper_task,
             scheduler_task,
@@ -348,8 +357,8 @@ from app.mfa.router import router as mfa_router  # noqa: E402
 from app.feedback.router import router as feedback_router  # noqa: E402
 from app.models_config.router import router as models_router  # noqa: E402
 from app.notifications.router import router as notifications_router  # noqa: E402
-from app.saved_prompts.router import router as saved_prompts_router  # noqa: E402
 from app.search.router import router as search_router  # noqa: E402
+from app.commands.router import router as commands_router  # noqa: E402
 from app.memory.router import router as memory_router  # noqa: E402
 from app.tasks.router import router as tasks_router  # noqa: E402
 from app.voice.router import router as voice_router  # noqa: E402
@@ -383,9 +392,6 @@ app.include_router(
 # Inbound automation webhooks (0136) — the per-task random secret in the
 # path is the credential; see hooks_router for the safety model.
 app.include_router(hooks_router, prefix="/api/hooks", tags=["hooks"])
-app.include_router(
-    saved_prompts_router, prefix="/api/saved-prompts", tags=["saved-prompts"]
-)
 # In-app feedback → maintainer inbox via the instance's own SMTP.
 app.include_router(feedback_router, prefix="/api/feedback", tags=["feedback"])
 app.include_router(
@@ -491,6 +497,9 @@ app.include_router(
 )
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
+app.include_router(
+    commands_router, prefix="/api/commands", tags=["commands"]
+)
 # Voice — speech-to-text dictation (Phase 1). POST /api/voice/transcribe.
 app.include_router(voice_router, prefix="/api/voice", tags=["voice"])
 app.include_router(billing_router, prefix="/api/usage", tags=["usage"])

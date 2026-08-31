@@ -23,7 +23,13 @@ from __future__ import annotations
 
 from app.chat.tools.base import Tool, ToolContext, ToolResult, ToolError
 from app.chat.tools.prompt import build_tools_system_prompt
-from app.chat.tools.registry import REGISTRY, get_tool, list_openai_tools, tools_in
+from app.chat.tools.registry import (
+    REGISTRY,
+    SILENT_TOOL_NAMES,
+    get_tool,
+    list_openai_tools,
+    tools_in,
+)
 
 __all__ = [
     "Tool",
@@ -32,6 +38,7 @@ __all__ = [
     "ToolError",
     "REGISTRY",
     "get_tool",
+    "SILENT_TOOL_NAMES",
     "list_openai_tools",
     "tools_in",
     "build_tools_system_prompt",

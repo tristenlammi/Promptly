@@ -41,6 +41,10 @@ class ConnectorCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     url: str = Field(min_length=1, max_length=2000)
     kind: str = "mcp"  # 'mcp' | 'unifi'
+    # Wire protocol for kind='mcp'. Defaults to the current standard;
+    # 'sse' is needed by servers still on the older transport (Home
+    # Assistant among them).
+    transport: str = "http"  # 'http' | 'sse'
     auth_header_name: str | None = Field(default=None, max_length=64)
     auth_value: str | None = Field(default=None, max_length=4000)
     availability: str = "global"  # 'global' | 'restricted'
@@ -55,6 +59,7 @@ class ConnectorCreate(BaseModel):
 class ConnectorUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     url: str | None = Field(default=None, min_length=1, max_length=2000)
+    transport: str | None = None
     auth_header_name: str | None = Field(default=None, max_length=64)
     # Send a new value to replace; omit to keep; empty string clears.
     auth_value: str | None = Field(default=None, max_length=4000)
@@ -79,6 +84,7 @@ class ConnectorResponse(BaseModel):
     slug: str
     kind: str
     url: str
+    transport: str
     has_auth: bool
     auth_header_name: str | None
     enabled: bool
@@ -179,6 +185,7 @@ async def _to_response(
         slug=c.slug,
         kind=c.kind,
         url=c.url,
+        transport=c.transport or "http",
         has_auth=bool(c.auth_value_encrypted),
         auth_header_name=c.auth_header_name,
         enabled=c.enabled,
@@ -318,6 +325,7 @@ async def create_connector(
         name=payload.name.strip(),
         slug=await _unique_slug(db, payload.name),
         kind=payload.kind,
+        transport=payload.transport if payload.transport in ("http", "sse") else "http",
         url=payload.url.strip(),
         auth_header_name=(payload.auth_header_name or None),
         auth_value_encrypted=(
@@ -371,6 +379,8 @@ async def update_connector(
         c.name = payload.name.strip()
     if payload.url is not None:
         c.url = payload.url.strip()
+    if payload.transport in ("http", "sse"):
+        c.transport = payload.transport
     if payload.auth_header_name is not None:
         c.auth_header_name = payload.auth_header_name or None
     if payload.auth_value is not None:
@@ -442,6 +452,7 @@ async def refresh_connector(
 class TestRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
     kind: str = "mcp"
+    transport: str = "http"
     auth_header_name: str | None = Field(default=None, max_length=64)
     auth_value: str | None = Field(default=None, max_length=4000)
 
@@ -477,7 +488,11 @@ async def test_connection(
     if payload.auth_header_name and payload.auth_value:
         headers[payload.auth_header_name] = payload.auth_value
     try:
-        tools = await fetch_tools(payload.url.strip(), headers=headers)
+        tools = await fetch_tools(
+            payload.url.strip(),
+            headers=headers,
+            transport=(payload.transport or "http"),
+        )
     except McpError as e:
         return {"ok": False, "error": str(e), "tools": []}
     return {

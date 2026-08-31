@@ -141,6 +141,20 @@ services:
       # the backend POSTs assistant text to for read-aloud + voice mode.
       - TTS_URL=http://tts:8000
       - TTS_VOICE=${TTS_VOICE:-af_heart}
+      # Wyoming bridge (Voice Phase 2) — lets Home Assistant voice
+      # satellites run this instance's commands. OFF by default: the
+      # Wyoming protocol has no authentication, so anything that can
+      # reach the port can run the acting user's commands. To turn it
+      # on, set these AND publish the port below.
+      - WYOMING_ENABLED=${WYOMING_ENABLED:-false}
+      - WYOMING_PORT=${WYOMING_PORT:-10700}
+      - WYOMING_USER_ID=${WYOMING_USER_ID:-}
+    # Uncomment to let Home Assistant reach the Wyoming bridge. Left
+    # commented so enabling voice satellites is a deliberate act rather
+    # than a port that quietly appears on your network — see
+    # WYOMING_ENABLED above.
+    # ports:
+    #   - "${WYOMING_PORT:-10700}:10700"
     volumes:
       # Bind-mount user data into the project directory so it's
       # always next to the compose file — easy to back up, easy

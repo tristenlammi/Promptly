@@ -21,6 +21,273 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-31
+
+### Added
+- **Command library.** One place for the things you've taught
+  Promptly to do, whether you type them or (later) say them out loud. A
+  saved prompt and a voice command turn out to be the same object with
+  different action types — a prompt inserts text, an automation runs a
+  flow, a tool command calls a connector — so they now live in one table
+  behind one matcher, rather than two features that would have drifted
+  apart. Your existing saved prompts are copied in automatically and keep
+  working exactly as they do today; the old table is left untouched so
+  nothing is at risk. Find it under **Automations**, which now has
+  three tabs: Prompts, Commands, and the Scheduled flows that were
+  already there.
+  - **The matcher refuses to guess.** Matching is exact after
+    normalisation: case, punctuation, accents, and filler like "Promptly,
+    please…" are all levelled, so one phrase covers how people actually
+    talk — but there's no fuzzy matching, no edit distance, and no "did
+    you mean". Two commands claiming the same phrase match *nothing*
+    rather than the app picking one. This sits in front of things that
+    turn off lights and eventually unlock doors, where being right 95% of
+    the time means doing something nobody asked for one time in twenty.
+  - **A command never grants new capability.** It's a shortcut to
+    something you could already do, so it's checked against the *target*
+    every time it runs — you own that automation, that connector is
+    switched on — rather than being trusted from when it was created. A
+    command whose automation was deleted says so instead of looking like
+    it worked, and switching off a connector switches off every command
+    that used it without anyone hunting them down.
+- **`/` in chat now runs commands, not just inserts prompts.** The same
+  menu holds both: a prompt inserts text you then edit, exactly as
+  before, while a command *does something* — runs an automation, calls a
+  connected tool. Action rows are marked, say what they'll do before you
+  pick them, and confirm before anything happens, because the difference
+  between the two is a paragraph appearing versus a garage door opening.
+  A voice-only library would be invisible — you'd have to remember what
+  you set up and phrase it exactly right — so the typed menu is what
+  makes it discoverable, and it ships first.
+- **Commands you run from a chat land in the transcript.** Running one
+  from `/` now records it as an activity card in the thread — the same
+  card the assistant's own tool calls use — so the chat shows what
+  happened instead of a toast that vanishes. Failures are recorded too,
+  with the reason: a command that silently did nothing is the worst
+  outcome, because you can't tell whether it fired. Runs from the library
+  still just report back, since there's no thread to write to.
+- **Home Assistant is now a connector you can add.** Pick it from the
+  preset list in Settings → Connectors, paste a Long-Lived Access Token,
+  and its devices become tools Promptly can call — which is what makes
+  "turn the garage lights off" possible as a command. No bespoke
+  integration was needed: Home Assistant already ships an official MCP
+  server. What was missing was the **SSE transport** — Promptly only
+  spoke streamable-HTTP, and HA (like plenty of other real MCP servers)
+  speaks SSE. Both are supported now, picked per connector, with
+  streamable-HTTP staying the default so existing connectors are
+  untouched. Home Assistant on a LAN address works as-is.
+- **Voice runs commands now.** The hands-free voice mode checks your
+  command library before it asks a model anything. Say a phrase you've
+  saved and it just happens — and because Whisper, the matcher and the
+  speech reply all run on your own machine, and the action is a call on
+  your own network, a matched command never touches a cloud API at all.
+  Only speech that matches nothing falls through to the model, which is
+  where any real waiting happens. Failures are spoken, not swallowed:
+  across the room you can't see a toast, and a voice turn that goes
+  quiet is indistinguishable from one that didn't hear you.
+- **Commands that change something ask first, automatically.** Connectors
+  tell us which of their tools alter the world rather than just reading
+  it, and Promptly now uses that: pick one for a command and "ask before
+  running" switches itself on, with the tool marked in the list. You
+  shouldn't have to know which of a hundred Home Assistant services is
+  the one that opens a door. Turning it back off stays your call, and
+  picking a harmless tool afterwards never quietly un-guards a command
+  you deliberately guarded. The model still can't call those tools at
+  all — a shortcut you wrote and said out loud is a different thing from
+  a model deciding on its own.
+- **Home Assistant voice satellites can run your commands.** Promptly
+  now speaks the Wyoming protocol as an intent handler, so the wall-
+  mounted boxes and ESP32 satellites people already own can reach your
+  command library — no Promptly hardware, no satellite to install. Home
+  Assistant keeps doing the part it's good at (wake word, microphones,
+  audio); Promptly does the part only it can (your commands, your
+  documents). **Off by default, and it must stay that way unless you've
+  read why**: the Wyoming protocol carries no authentication, so anything
+  that can reach the port can run the acting user's commands. Keep it on
+  a trusted network. It only ever runs commands and never a chat turn,
+  so an exposed port can't be used to read documents or spend tokens,
+  and speech it doesn't recognise is handed back to Home Assistant
+  rather than answered.
+- **Commands with numbers in them work when spoken.** Speech-to-text
+  writes numbers as digits — "channel four" comes back as "channel 4" —
+  so a phrase you'd written in words matched when typed and silently
+  never fired when said out loud, which looks like voice being broken
+  rather than the phrase being wrong. Number words and digits are now
+  levelled to one form on both sides, the same way case and punctuation
+  already were.
+- **Spoken replies own up to not knowing.** Voice already answered in a
+  sentence or two with no markdown; four rules were missing, and each
+  only started to matter once answers began coming from your own
+  documents. It now says so plainly when something isn't in what it was
+  given, rather than filling three seconds with a confident guess — in
+  voice there's no screen to check an answer against, so a plausible
+  invention costs far more than it does in text. It also stops reading
+  citation markers, filenames, paths and ids aloud, and speaks numbers
+  and times the way a person does rather than as digits and ISO dates.
+- **"Ask before running this one" is now per command, off by default.**
+  Every side-effecting command used to confirm, which is the wrong shape
+  — a dialog on every light toggle just teaches people to dismiss
+  dialogs, so the one that mattered gets dismissed too. Tick the box for
+  the garage door and leave it off for the lights. The flag governs both
+  the typed and spoken paths, so a command can't be the kind that asks
+  in one place and not the other. Spoken confirmations are asked out
+  loud (a dialog is no use across the room), and anything that isn't a
+  clear "yes" cancels.
+- **Pick a tool from a list, not a UUID from an API.** Building a
+  tool-calling command used to mean typing `<connector-id>:<tool-name>`
+  by hand, which meant digging a UUID out of an admin endpoint first.
+  It's now two dropdowns — connector, then tool — with the tool's own
+  description underneath and a manual Refresh, since catalogs change
+  when an admin adds a connector, not while you're filling in a form.
+  The list shows only what you could already call by asking in a chat,
+  so building a shortcut never reaches further than you can.
+- **The library warns you when two commands share a phrase.** Promptly
+  refuses to act on an ambiguous phrase rather than guessing which you
+  meant, so a duplicate is a command that silently never fires. Both are
+  now flagged in the list, because from the outside a command that does
+  nothing looks identical to a broken app.
+- **Automations works on a phone.** The page was desktop-only because of
+  its flow canvas, but Prompts and Commands are things you reach for on a
+  phone. The gate moved down to the canvas itself — everything else,
+  including runs and pause/resume, now works on mobile.
+- **The assistant can write to your memory itself.** Two new tools —
+  `remember` and `forget` — let the model save a durable fact the moment
+  you state it, and correct or drop one that's no longer true. Until now
+  memory could only be written by a post-turn extraction pass sitting
+  behind a phrase-matching gate, and the model itself never touched the
+  store. Memory work runs silently — no tool card, no "ran 1 tool call" —
+  because it is plumbing, not work worth narrating. Everything saved is
+  still listed and editable in Settings → Memory. Advertised only when you
+  have both memory and the Tools switch on, and never when memory is off.
+  **Self-managed mode keeps its promise**: the tools are available there
+  so an explicit "remember that…" works, but the assistant is instructed
+  not to save anything you merely mention — automatic capture stays
+  exclusive to Auto.
+
+- **Edit your memory by describing the change.** Settings → Memory takes a
+  plain-English instruction — "forget everything about my old job at Acme",
+  "change my name to Tris" — and shows exactly what it would add, rewrite
+  and remove before anything happens. Editing one row at a time is fine
+  for a typo and tedious across a store of two hundred. Nothing is written
+  until you press Apply, and every id in the plan is re-checked against
+  your own memories server-side rather than trusted from the browser.
+
+### Removed
+- **The separate saved-prompts store is gone.** Its rows moved into the
+  command library in this same release and nothing has read the old table
+  since, so the table and its endpoints have been removed. Rolling the
+  migration back re-creates them and copies your prompts back, including
+  any written after the switch.
+
+### Changed
+- **Deep research reads its sources in parallel.** Each research angle
+  fetched its two full-page sources one after the other — up to ~25
+  seconds of serial waiting per angle on slow or anti-bot-walled pages,
+  gating the gap-check phase on the slowest chain. The reads within an
+  angle now run concurrently.
+- **The assistant can look up what it doesn't have in front of it.** Only
+  a handful of your saved facts are injected into any given chat — the
+  ones judged relevant to what you just said — but nothing told the model
+  that, so "what do you know about me?" was answered confidently from a
+  sample of ten out of a possible two hundred. The injected block now says
+  how many facts it is a selection of, and a new `recall` tool searches
+  the rest. Read-only, and silent like the other memory tools.
+- **Saved facts say how they were learned, not just when.** Memory has
+  always recorded whether you stated something outright or it was picked
+  up from conversation, and the prompt threw that away — so a month-old
+  inference arrived with exactly the same authority as something you
+  typed, with nothing to break the tie when they disagreed. Each line now
+  reads `(stated, Aug 2026)` or `(inferred, Aug 2026)`.
+- **Pinned memories no longer crowd out relevant ones.** Pinned facts are
+  injected into every chat unconditionally, and they were drawing from the
+  same ten slots as relevance — so pinning ten facts silently switched
+  semantic retrieval off entirely, and pinning twenty doubled the injected
+  block on top of that. Nothing in the UI hinted that "always keep this in
+  mind" had a cost. Half the slots are now reserved for relevance, and
+  pinning is capped at 12 with an explanation when you hit it.
+- **Memory eviction now discards the stalest fact, not the least-injected
+  one.** At the 200-fact cap the victim was chosen by an injection
+  counter — which is incremented *by* injection and rewarded *by* the
+  retrieval ranking, so a fact that kept being injected kept being
+  protected whether or not it ever helped, while a genuinely useful fact
+  that only fires for a rare topic looked like the cheapest thing to throw
+  away. Eviction now goes by least-recently-useful.
+
+### Fixed
+- **The assistant no longer gives up on a search because its query was
+  "too long".** The search tools declared hard character caps
+  (`web_search` 400, `deep_research` / `run_agents` 600) in their
+  schemas, and the server rejected any call that exceeded them before
+  the tool could run — so a model that pasted your whole question as
+  the query got back "exceeds maxLength", told you it went over the
+  limit, and often just stopped. Over-long queries and agent tasks are
+  now trimmed at a word boundary and searched anyway. Brave's own
+  400-character / 50-word API limit is also clamped at the adapter, so
+  a long query can't error there either.
+- **A broken search provider no longer slows down every search.** A
+  provider that timed out or returned zero results (the signature of a
+  rate-limited SearXNG) was still tried *first* on every search, so
+  every search paid its full 10-second timeout before failover kicked
+  in — deep research multiplied that by every angle. After two
+  consecutive transient failures a provider is now demoted to the back
+  of the failover chain for a few minutes: still available as a last
+  resort, no longer a toll booth in front of the providers that work.
+- **Searching or fetching a page no longer stalls other people's
+  replies.** The SSRF guard resolved DNS synchronously on the event
+  loop — on this deliberately single-worker backend, one slow lookup
+  froze every open chat stream. Resolution now runs off-loop.
+- **"Search: always" works with reasoning models.** The query
+  distiller didn't strip `<think>` blocks, so a reasoning model's
+  chain-of-thought could get sent to the search engine as the query.
+- **The failover chain budgets OpenRouter search at its real cost.**
+  OpenRouter's search is a chat completion with a 30s ceiling, but the
+  chain budgeted it like a 10s API call and could start a request it
+  couldn't afford to finish, turning a recoverable failover into a
+  bare "timed out". Its completion is also capped at fewer tokens now
+  — the citations arrive early, the essay after them was pure latency.
+- **Opening a PDF preview no longer downloads the file and shows a blank
+  page.** The preview handed the PDF to the browser's built-in plugin via
+  an ``<iframe>``, and a browser that declines to render one inline —
+  Chrome's "Download PDFs instead of automatically opening them" setting
+  is the common case — *downloads it and leaves the frame empty*. So
+  clicking a file to look at it silently dropped a copy in Downloads and
+  showed a white rectangle, for a button the user never pressed;
+  downloading is what the Download button is for. PDFs are now rendered
+  by pdf.js onto a canvas, with page count, zoom and scroll: same result
+  in every browser, no plugin involved. The same fix covers the chat
+  attachment panel and shared-link pages (a guest had the least context
+  for a file appearing in their Downloads). pdf.js is lazy-loaded and
+  excluded from the offline precache, so it only downloads for people who
+  open a PDF.
+- **The assistant can't delete a fact you pinned.** Pinning is the one
+  signal that a fact matters more than the rest, so removing it is a
+  decision for the person who pinned it — `forget` now refuses and says
+  so, rather than quietly dropping it.
+- **The per-chat memory pause now applies to the assistant too.** Pausing
+  capture stopped the post-turn extraction pass but not the `remember`
+  tool, so the assistant could still write to memory in a chat whose
+  toggle said capture was off. Self-managed mode and the per-chat pause
+  now resolve to the same rule in one place, rather than each path
+  deciding for itself. Pausing is a hard off: it refuses even an explicit
+  "remember this", which Self-managed mode still honours.
+- **Credentials are screened out of memory.** Anything shaped like an API
+  key, token, private key, card number or SSN is refused on both write
+  paths. Memory is replayed into every relevant future chat, so a secret
+  saved once is a secret re-injected indefinitely — and with the assistant
+  now able to write memory and read fetched pages in the same turn, "don't
+  save secrets" being a prompt instruction alone was the weakest link.
+- **Memory can be corrected now, not just added to.** The machinery to
+  rewrite and delete stale facts already existed, but the gate deciding
+  whether to run it recognised assertions and almost nothing else: "I use
+  Vim" was captured while "I don't use Vim any more", "I've switched from
+  Python to Go", "stop calling me Tris" and "actually, I no longer work
+  there" all passed straight through. So memory accumulated confidently
+  wrong facts and had no realistic way to retract them — worse than not
+  remembering, since a stale fact is injected into every relevant turn as
+  established background. `remember(replaces=…)` is now the direct route,
+  and the gate itself recognises corrections, negations and changes of
+  state in every language it already covered.
+
 ## [0.7.2] - 2026-08-10
 
 ### Fixed

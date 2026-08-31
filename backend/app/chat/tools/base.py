@@ -154,6 +154,14 @@ class Tool(abc.ABC):
     # useful signal fits in less — the cheapest token you'll ever save
     # is one you don't feed back eight times.
     max_content_chars: int | None = None
+    # Suppress the tool-activity UI for this tool: no ``tool_started`` /
+    # ``tool_finished`` SSE, and no entry in the persisted ``tool_calls``
+    # scrollback. For plumbing the user never asked to watch — memory
+    # writes in particular, where a card announcing "ran 1 tool call" is
+    # noise at best and, when the write is declined, actively misleading
+    # about what happened. The tool still runs, is still audited, and
+    # still logs server-side.
+    silent: bool = False
 
     def to_openai_schema(self) -> dict[str, Any]:
         """Render this tool as an entry in OpenAI's ``tools[]`` array."""

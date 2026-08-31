@@ -270,6 +270,7 @@ async def call_connector_tool(
         real_tool,
         arguments,
         headers=_auth_headers(connector),
+        transport=connector.transport or "http",
     )
 
 
@@ -292,7 +293,11 @@ async def refresh_catalog(db: AsyncSession, connector: McpConnector) -> int:
         await db.commit()
         return len(UNIFI_TOOLS)
 
-    tools = await fetch_tools(connector.url, headers=_auth_headers(connector))
+    tools = await fetch_tools(
+        connector.url,
+        headers=_auth_headers(connector),
+        transport=connector.transport or "http",
+    )
     connector.tool_catalog = tools
     connector.tools_refreshed_at = datetime.now(timezone.utc)
     await db.commit()

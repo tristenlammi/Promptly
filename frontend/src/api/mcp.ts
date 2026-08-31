@@ -8,12 +8,18 @@ export interface McpToolInfo {
 
 export type ConnectorKind = "mcp" | "unifi";
 
+/** Wire protocol an MCP server speaks. Streamable-HTTP is the current
+ *  standard and the default; SSE is the older transport that plenty of
+ *  real servers still expose — Home Assistant's among them. */
+export type ConnectorTransport = "http" | "sse";
+
 export interface McpConnector {
   id: string;
   name: string;
   slug: string;
   kind: ConnectorKind;
   url: string;
+  transport: ConnectorTransport;
   has_auth: boolean;
   auth_header_name: string | null;
   enabled: boolean;
@@ -33,6 +39,7 @@ export interface ConnectorCreatePayload {
   name: string;
   url: string;
   kind?: ConnectorKind;
+  transport?: ConnectorTransport;
   auth_header_name?: string | null;
   auth_value?: string | null;
   availability?: ConnectorAvailability;
@@ -45,6 +52,7 @@ export interface ConnectorCreatePayload {
 export interface ConnectorUpdatePayload {
   name?: string;
   url?: string;
+  transport?: ConnectorTransport;
   auth_header_name?: string | null;
   auth_value?: string | null;
   enabled?: boolean;
@@ -101,6 +109,7 @@ export const mcpApi = {
   async test(payload: {
     url: string;
     kind?: ConnectorKind;
+    transport?: ConnectorTransport;
     auth_header_name?: string | null;
     auth_value?: string | null;
   }): Promise<TestResult> {

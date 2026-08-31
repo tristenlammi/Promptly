@@ -29,7 +29,9 @@ from app.chat.tools.registry import tools_in
 
 
 def build_tools_system_prompt(
-    categories: set[str], exclude_tools: set[str] | None = None
+    categories: set[str],
+    exclude_tools: set[str] | None = None,
+    memory_explicit_only: bool = False,
 ) -> str:
     """Return a system message that primes the model to use tools.
 
@@ -43,6 +45,15 @@ def build_tools_system_prompt(
     category is active — used to withhold ``generate_image`` from users
     who don't have image-gen access, so the prompt never advertises a
     capability the model can't actually call this turn.
+
+    ``memory_explicit_only`` changes what the memory guideline *permits*,
+    not which tools are listed. Two separate promises land on it: the
+    "Self-managed" memory mode ("Promptly never captures on its own") and
+    the per-chat capture pause. Both mean the model may only write when
+    the user asks in so many words — and in both the tools stay available,
+    because an explicit "remember this" has to keep working. The caller
+    decides; this module only renders the consequence, so the two promises
+    can't drift apart the way they did when each path re-derived its own.
     """
     if not categories:
         return ""
@@ -103,6 +114,46 @@ def build_tools_system_prompt(
             "and no network in that preview, so any other package import "
             "(framer-motion, recharts, a UI kit) will fail: inline the "
             "styles and write the behaviour by hand instead."
+        )
+    if "memory" in categories:
+        if memory_explicit_only:
+            # Self-managed mode, or capture paused for this chat. Either
+            # way the user has been promised nothing is captured
+            # uninvited, so the proactive half of the tool's own
+            # description must be overridden here — an explicit save
+            # still has to work, and so does correcting or removing what
+            # is already saved.
+            guidelines.append(
+                "- This user manages their own memory. Call `remember` "
+                "ONLY when they explicitly ask you to save something "
+                "('remember that…', 'keep a note that…'), and `forget` "
+                "only when they ask you to remove something. Do NOT save "
+                "facts they merely mention in passing, however durable "
+                "they sound — capturing uninvited is exactly what this "
+                "user turned off. When they explicitly correct a fact you "
+                "already know, use `remember` with `replaces` so the old "
+                "one is rewritten rather than left to contradict it."
+            )
+        else:
+            guidelines.append(
+                "- You can write to the user's long-term memory yourself. "
+                "When they ask you to remember something, or state "
+                "something durable about themselves, call `remember`. When "
+                "they correct or retract something you already know — "
+                "changed job, switched tools, stopped wanting something, "
+                "'don't call me that' — call `remember` with `replaces` "
+                "(or `forget` when there's no replacement) rather than "
+                "leaving the stale fact in place. Don't save one-off task "
+                "details or transient state, and don't announce every "
+                "save; a brief mention is enough."
+            )
+        # Applies in both modes: reading what's saved is never uninvited.
+        guidelines.append(
+            "- The saved facts in your prompt are only the ones retrieval "
+            "judged relevant to this turn, not everything the user has "
+            "saved. Before answering what you know or remember about "
+            "them, or telling them you don't have something personal, "
+            "call `recall` and look."
         )
     if "code" in categories:
         guidelines.append(

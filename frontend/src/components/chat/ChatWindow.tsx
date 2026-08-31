@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Brain, Eye, RotateCcw, X } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { ArrowDown, Eye, X } from "lucide-react";
 
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
@@ -433,7 +432,6 @@ export function ChatWindow({
         })}
 
         <VisionWarningBanner />
-        <MemorySavedChip />
 
         {showStreamingBubble && (
           <MessageBubble
@@ -494,88 +492,6 @@ export function ChatWindow({
             onClose={() => setRememberText(null)}
           />
         ))}
-    </div>
-  );
-}
-
-function MemorySavedChip() {
-  const items = useChatStore((s) => s.memorySaved);
-  const dismiss = useChatStore((s) => s.dismissMemorySaved);
-  const qc = useQueryClient();
-  const [undoing, setUndoing] = useState(false);
-
-  if (items.length === 0) return null;
-
-  const hasIds = items.some((i) => i.id !== "");
-
-  const handleUndo = async () => {
-    const ids = items.map((i) => i.id).filter(Boolean);
-    if (!ids.length) {
-      dismiss();
-      return;
-    }
-    setUndoing(true);
-    try {
-      // Parallel-delete all captured facts from this turn.
-      await Promise.allSettled(
-        ids.map((id) =>
-          fetch(`/api/memory/${id}`, { method: "DELETE" }).catch(() => null)
-        )
-      );
-      void qc.invalidateQueries({ queryKey: ["memories"] });
-    } finally {
-      setUndoing(false);
-      dismiss();
-    }
-  };
-
-  return (
-    <div className="mx-4 mt-3">
-      <div
-        className={cn(
-          "flex items-start gap-2 rounded-card border px-3 py-2 text-xs",
-          "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--text)]"
-        )}
-        role="status"
-      >
-        <Brain className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
-        <div className="flex-1 leading-snug">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">
-              Saved to memory
-              {items.length > 1 ? ` · ${items.length} facts` : ""}
-            </span>
-            {hasIds && (
-              <button
-                type="button"
-                disabled={undoing}
-                onClick={() => void handleUndo()}
-                className={cn(
-                  "flex items-center gap-1 rounded px-1.5 py-0.5",
-                  "text-[var(--accent)] hover:bg-[var(--accent)]/15",
-                  "font-medium disabled:opacity-50"
-                )}
-              >
-                <RotateCcw className="h-3 w-3" />
-                Undo
-              </button>
-            )}
-          </div>
-          <ul className="mt-1 space-y-0.5 text-[var(--text-muted)]">
-            {items.map((item, i) => (
-              <li key={`${i}-${item.content.slice(0, 16)}`}>· {item.content}</li>
-            ))}
-          </ul>
-        </div>
-        <button
-          type="button"
-          onClick={dismiss}
-          className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--accent)]/15 hover:text-[var(--text)]"
-          aria-label="Dismiss"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      </div>
     </div>
   );
 }

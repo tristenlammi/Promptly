@@ -228,6 +228,26 @@ class Settings(BaseSettings):
     # How long we'll wait on the transcription backend before giving up.
     STT_TIMEOUT_S: int = 60
 
+    # ---- Wyoming bridge (Voice Phase 2) ----
+    # Exposes Promptly as a Wyoming ``handle`` service so Home Assistant
+    # voice satellites can run your commands. Off by default, and it must
+    # stay that way unless someone has read the trade-off:
+    #
+    #   **Wyoming carries no authentication.** Anything that can open a
+    #   socket to this port can run the acting user's commands. Keep it
+    #   on a trusted network and never publish it.
+    #
+    # It only ever runs commands — never a chat turn — so an exposed port
+    # can't be used to read documents or spend tokens (see
+    # ``wyoming_bridge/service.py``).
+    WYOMING_ENABLED: bool = False
+    WYOMING_HOST: str = "0.0.0.0"
+    WYOMING_PORT: int = 10700
+    # Which user's command library satellites reach. Required when
+    # enabled: without it there's no library to run and nothing to scope
+    # permission to.
+    WYOMING_USER_ID: str = ""
+
     # ---- Text-to-speech (Voice Phase 2) ----
     # Internal-only Kokoro worker the backend POSTs assistant text to for
     # read-aloud + voice mode. Empty disables TTS (the endpoint returns a

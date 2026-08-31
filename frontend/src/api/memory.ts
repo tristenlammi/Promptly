@@ -30,6 +30,25 @@ export interface MemoryConsolidateResult {
   changes: { kept_id: string; text: string; merged: string[] }[];
 }
 
+/** One proposed change from a plain-English edit instruction. ``before``
+ *  is the row's current text (updates + deletes), ``after`` the proposed
+ *  text (adds + updates). Sent back verbatim to apply — the server
+ *  re-validates every id against the caller's own rows, so this is a
+ *  suggestion, not an authority. */
+export interface MemoryEditOp {
+  op: "add" | "update" | "delete";
+  id?: string | null;
+  before?: string | null;
+  after?: string | null;
+  category?: string | null;
+}
+
+export interface MemoryApplyResult {
+  added: number;
+  updated: number;
+  deleted: number;
+}
+
 export interface MemoryPatch {
   content?: string;
   category?: string | null;
@@ -76,6 +95,23 @@ export const memoryApi = {
   /** Import memories from a parsed JSON array (Phase 3.5). */
   async import(items: unknown[]): Promise<MemoryImportResult> {
     const { data } = await apiClient.post<MemoryImportResult>("/memory/import", items);
+    return data;
+  },
+  /** Ask what a plain-English instruction would change. Read-only —
+   *  the caller previews the plan and applies it separately. */
+  async instruct(instruction: string): Promise<MemoryEditOp[]> {
+    const { data } = await apiClient.post<{ changes: MemoryEditOp[] }>(
+      "/memory/instruct",
+      { instruction }
+    );
+    return data.changes;
+  },
+  /** Apply a plan the user accepted. */
+  async applyInstruction(ops: MemoryEditOp[]): Promise<MemoryApplyResult> {
+    const { data } = await apiClient.post<MemoryApplyResult>(
+      "/memory/instruct/apply",
+      { ops }
+    );
     return data;
   },
   /** One model pass that merges near-duplicate facts (merge-only). */

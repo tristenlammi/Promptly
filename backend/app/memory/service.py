@@ -33,6 +33,7 @@ from app.chat.semantic_search import EmbeddingConfig, get_embedding_config
 from app.memory.constants import (
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
+    MAX_PINNED_MEMORIES,
     MAX_NEW_PER_TURN,
     MEMORY_CATEGORIES,
     SEMANTIC_DUP_THRESHOLD,
@@ -44,6 +45,66 @@ from app.models_config.provider import ChatMessage, model_router
 logger = logging.getLogger("promptly.memory")
 
 _VALID_CATEGORIES: frozenset[str] = frozenset(MEMORY_CATEGORIES)
+
+
+def resolve_memory_mode(user) -> str:
+    """The user's memory mode: ``off`` | ``auto`` | ``manual``.
+
+    ``memory_mode`` supersedes the legacy ``memory_enabled`` boolean;
+    accounts predating the three-way setting fall back to it. Lives here
+    rather than in the chat router because the memory tools need the same
+    answer, and a second copy of the fallback would drift.
+    """
+    settings = getattr(user, "settings", None) or {}
+    mode = settings.get("memory_mode")
+    if mode in ("off", "auto", "manual"):
+        return mode
+    return "off" if settings.get("memory_enabled", True) is False else "auto"
+
+
+# An explicit ask to save or drop something, as opposed to merely saying
+# something durable. This is the line "Self-managed" mode draws, and the
+# settings panel states it in writing: "Promptly never captures anything
+# on its own."
+#
+# It exists because prompting alone did not hold. With the tools offered
+# and a restraining system-prompt guideline in place, the model still
+# wrote two facts from "I've just started learning Portuguese and I
+# usually work from a café" — the guideline lost to the tool's own
+# description. A promise the UI makes should not depend on the model
+# agreeing with it, so this is checked server-side before the write.
+_EXPLICIT_MEMORY_REQUEST_RE: Final[re.Pattern[str]] = re.compile(
+    r"""
+    (
+        remember\b
+      | memoris[ez]|memoriz[ez]
+      | don'?t\s+forget
+      | forget\s+(that|what|about|my|the|it)
+      | keep\s+(in\s+mind|a\s+note|track\s+of)
+      | (make|take)\s+a\s+note
+      | note\s+(that|this|down)
+      | (save|store|record)\s+(this|that|it|my)
+      | add\s+(this|that|it)\s+to\s+(your\s+)?memory
+      | (update|change|fix|correct)\s+(your\s+)?memory
+      | from\s+now\s+on
+      | for\s+(future|next\s+time|reference)
+      | stop\s+(calling|saying|assuming|thinking)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def is_explicit_memory_request(text: str | None) -> bool:
+    """True when the user asked, in so many words, to change memory.
+
+    Used only in the modes that promise nothing is captured uninvited
+    (Self-managed, and a chat with capture paused). Deliberately generous
+    about phrasing: a false negative here refuses a save the user did
+    want, but the tool reports that back so the model can say so — while
+    a false positive silently breaks the promise, which nobody would see.
+    """
+    return bool(_EXPLICIT_MEMORY_REQUEST_RE.search(text or ""))
 
 
 def _content_hash(content: str) -> str:
@@ -160,6 +221,24 @@ _CAPTURE_HINT_RE: Final[re.Pattern[str]] = re.compile(
 
         # Passive / project context
       | (the\s+)?(project|app|system|repo|codebase|stack|database)\s+is\s+(called|named|built|using|based)
+
+        # Corrections, negations, and changes of state. The reconciliation
+        # pass can already rewrite and delete stale facts, but it only ever
+        # ran on turns that looked like assertions — so "I use Vim" was
+        # captured and "I don't use Vim any more" was not, and the store
+        # accumulated confidently-wrong facts with no way to retract them.
+        # These are the backstop for turns where the `remember` / `forget`
+        # tools aren't available (Tools toggle off).
+      | (i|we)\s+(no\s+longer|don'?t|do\s+not|used\s+to|never)\s
+      | not\s+(any\s?more|anymore|any\s+longer)
+      | (i|we)'?\s*(ve|m)?\s*(switched|moved|changed|migrated|left|quit|renamed)\b
+      | (stop|quit|don'?t)\s+(calling|call|using|use|suggesting|suggest|assuming|assume)
+      | (forget|disregard|ignore)\s+(that|what|the|my|about)
+      | scratch\s+that
+      | that'?s\s+(wrong|no\s+longer|not\s+right|outdated)
+      | actually,?\s+(i|we|my|it'?s)
+      | correction[:,\s]
+      | i\s+was\s+wrong
     )\b
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -214,6 +293,35 @@ _CAPTURE_HINT_INTL_RE: Final[re.Pattern[str]] = re.compile(
       | nhớ\s+r[aằ]ng | tên\s+tôi\s+là | tôi\s+là\s | tôi\s+thích\s
         # Indonesian / Malay
       | ingatlah\s | jangan\s+lupa | nama\s+saya | saya\s+(suka|bekerja)\s
+
+        # Corrections / negations, mirroring the English additions above.
+        # A store that can only learn and never unlearn is worse in every
+        # language, and the assertion bias was the same in all of them.
+        # Spanish
+      | ya\s+no\s | olv[ií]da\s+(que|lo)
+        # Portuguese
+      | j[aá]\s+n[ãa]o\s | esque[cç]a\s+(que|o)
+        # Italian
+      | non\s+\S{1,12}\s+pi[uù]\s | dimentica\s+(che|il)
+        # French
+      | ne\s+\S{1,12}\s+plus\s | oublie\s+(que|ça|ce)
+        # German
+      | nicht\s+mehr | vergiss\s+(dass|das)
+        # Dutch
+      | niet\s+meer | vergeet\s+dat
+        # Russian / Ukrainian
+      | больше\s+не | забудь\s+(что|о) | б[іi]льше\s+не
+        # Polish
+      | ju[zż]\s+nie | zapomnij\s+[oż]
+        # Chinese / Japanese / Korean
+      | 不再 | 已经不 | 已經不 | 忘记 | 忘記
+      | もう\S{0,4}ない | 忘れて
+      | 더\s?이상 | 잊어
+        # Vietnamese / Turkish / Arabic / Hindi
+      | kh[ôo]ng\s+c[òo]n | qu[êe]n\s
+      | art[iı]k\s+\S{1,12}\s+de[gğ]il | unut\s
+      | لم\s+أعد | انس\s
+      | अब\s+नहीं | भूल\s+जा
     )
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -233,6 +341,50 @@ def should_attempt_capture(user_text: str | None) -> bool:
         _CAPTURE_HINT_RE.search(user_text)
         or _CAPTURE_HINT_INTL_RE.search(user_text)
     )
+
+
+# Credential shapes that must never reach durable storage. Memory rows
+# outlive the conversation and are replayed into every relevant future
+# turn, so a secret saved once is a secret re-injected indefinitely — and
+# since the model can now write memory directly *and* read fetched pages
+# in the same turn, "don't save secrets" being prompt-only was the
+# weakest link in that chain.
+#
+# Deliberately limited to unambiguous token *shapes*. Phrase matching
+# ("password is …") is where the false positives live — it would refuse
+# to remember "User keeps their passwords in 1Password", which is an
+# ordinary durable fact — and a screen that fires on innocent text gets
+# loosened until it catches nothing.
+_SECRET_SHAPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"""
+    (
+        sk-[A-Za-z0-9_-]{16,}                  # OpenAI-style keys
+      | sk_(live|test)_[A-Za-z0-9]{16,}        # Stripe
+      | gh[pousr]_[A-Za-z0-9]{20,}             # GitHub tokens
+      | github_pat_[A-Za-z0-9_]{20,}
+      | xox[baprs]-[A-Za-z0-9-]{10,}           # Slack
+      | AKIA[0-9A-Z]{16}                       # AWS access key id
+      | AIza[0-9A-Za-z_-]{20,}                 # Google API key
+      | ey[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}  # JWT
+      | -----BEGIN[A-Z ]*PRIVATE\ KEY-----     # PEM private key
+      | \b\d{3}-\d{2}-\d{4}\b                  # US SSN
+      | \b(?:\d[\ -]?){13,19}\b                # card-length digit run
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def looks_sensitive(text: str) -> bool:
+    """True when ``text`` contains something that looks like a credential.
+
+    Used by both write paths — the post-turn extraction pass and the
+    ``remember`` tool — as a last line of defence behind the prompt-level
+    instruction. It only recognises token shapes, so it will not catch a
+    password spelled out in prose; that is a deliberate trade, not an
+    oversight (see the pattern's comment).
+    """
+    return bool(_SECRET_SHAPE_RE.search(text or ""))
 
 
 def _normalise(text: str) -> str:
@@ -256,21 +408,64 @@ def _is_duplicate(candidate: str, existing_keys: list[str]) -> bool:
     return False
 
 
-def build_memory_prompt(memories: list[UserMemory]) -> str | None:
+def build_memory_prompt(
+    memories: list[UserMemory],
+    *,
+    total: int | None = None,
+    can_recall: bool = False,
+) -> str | None:
     """Render saved facts into a system-prompt block, or ``None`` when the
     user has no memories. Phrased as background knowledge with an explicit
-    "don't recite it" instruction, matching the personal-context block."""
+    "don't recite it" instruction, matching the personal-context block.
+
+    Each fact carries *how* it was learned as well as when. The store has
+    always known whether a fact was stated by the user or inferred from
+    conversation, and the prompt threw that away — so an inference the
+    model made last month arrived with exactly the same authority as
+    something the user typed, and nothing broke the tie when they
+    disagreed.
+
+    ``total`` and ``can_recall`` tell the model this is a *selection*, not
+    the whole store, and that it can go and look. Without them a model
+    holding ten of two hundred facts answers "what do you know about me?"
+    confidently and incompletely, with no idea anything is missing.
+    """
     kept = [m for m in memories if m.content and m.content.strip()]
     if not kept:
         return None
+
+    header = (
+        "Saved memory about the user (durable facts from past "
+        "conversations — treat as background you already know)."
+    )
+    if total is not None and total > len(kept):
+        header += (
+            f" These are the {len(kept)} most relevant of {total} saved "
+            "facts, not the whole store"
+        )
+        header += (
+            "; call `recall` if you need something that isn't here."
+            if can_recall
+            else ", so don't imply this is everything you know."
+        )
     lines = [
-        "Saved memory about the user (durable facts learned from past "
-        "conversations — treat as background you already know; each notes "
-        "when it was learned, so prefer newer facts if any conflict):",
+        header,
+        "",
+        "Each line notes when it was learned, and whether the user stated "
+        'it outright ("stated") or it was picked up from conversation '
+        '("inferred"). Prefer newer facts over older ones if they '
+        "conflict, and stated over inferred — an inference can be wrong in "
+        "ways the user never had a chance to correct.",
+        "",
     ]
     for m in kept:
         learned = m.updated_at or m.created_at
-        stamp = f" (noted {learned.strftime('%b %Y')})" if learned else ""
+        origin = "stated" if m.source == "manual" else "inferred"
+        stamp = (
+            f" ({origin}, {learned.strftime('%b %Y')})"
+            if learned
+            else f" ({origin})"
+        )
         lines.append(f"- {m.content.strip()}{stamp}")
     lines.append("")
     lines.append(
@@ -303,11 +498,22 @@ async def load_memories(
 async def load_pinned_memories(
     db: AsyncSession, user_id
 ) -> list[UserMemory]:
-    """All pinned facts for a user (typically a small set).
+    """Pinned facts for a user, newest first, capped.
 
     These are always injected regardless of the top-K retrieval cap — the
     user's explicit "must-know" facts. Uses the partial index on
     ``(user_id) WHERE pinned = true`` added in migration 0061.
+
+    The cap is a backstop, not the primary guard: the API refuses to pin
+    past ``MAX_PINNED_MEMORIES``, but accounts that pinned freely before
+    that limit existed would otherwise keep injecting an unbounded block
+    forever.
+
+    It caps the *unconditional* half only. A fact pinned beyond the cap
+    isn't hidden — it stops riding free and competes for the retrieval
+    slots like any other fact, which is why the excluded set below is the
+    loaded pins rather than every pinned row. Making over-cap pins
+    unreachable would bury facts the user cared enough to pin.
     """
     rows = (
         (
@@ -315,6 +521,7 @@ async def load_pinned_memories(
                 select(UserMemory)
                 .where(UserMemory.user_id == user_id, UserMemory.pinned.is_(True))
                 .order_by(UserMemory.created_at.desc())
+                .limit(MAX_PINNED_MEMORIES)
             )
         )
         .scalars()
@@ -342,6 +549,7 @@ async def retrieve_relevant_memories(
     k: int,
     cfg: EmbeddingConfig | None = None,
     exclude_ids: set | None = None,
+    strict: bool = False,
 ) -> list[UserMemory]:
     """Return up to ``k`` memories most relevant to ``query`` by cosine
     similarity, falling back to most-recent-first when embeddings aren't
@@ -350,6 +558,14 @@ async def retrieve_relevant_memories(
 
     ``exclude_ids`` — skip these memory ids (used to avoid re-including
     pinned facts that are already being added separately).
+
+    ``strict`` — return ``[]`` instead of falling back to recency. Right
+    for background injection, wrong for a *search*: a caller that asked
+    "what do they drive?" and silently received the three most recent
+    facts has been handed an answer to a question nobody asked, with
+    nothing marking it as unrelated. The failure is easy to hit — an
+    embedder that is configured but unreachable takes this path on every
+    call — so the distinction is a parameter rather than a comment.
     """
     cleaned = normalise_for_embedding(query or "")
     if cfg is None:
@@ -357,9 +573,14 @@ async def retrieve_relevant_memories(
 
     _excl = exclude_ids or set()
 
+    def _fallback(rows: list[UserMemory]) -> list[UserMemory]:
+        if strict:
+            return []
+        return [m for m in rows if m.id not in _excl][:k]
+
     if cfg is None or not cleaned:
         rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return [m for m in rows if m.id not in _excl][:k]
+        return _fallback(rows)
 
     try:
         vectors = await embed_texts(
@@ -374,10 +595,10 @@ async def retrieve_relevant_memories(
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval embed failed user=%s: %s", user_id, exc)
         rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return [m for m in rows if m.id not in _excl][:k]
+        return _fallback(rows)
     if not vectors:
         rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return [m for m in rows if m.id not in _excl][:k]
+        return _fallback(rows)
 
     col = f"embedding_{cfg.dim}"
     # Over-fetch so the usage-aware re-rank below has candidates to promote
@@ -411,7 +632,7 @@ async def retrieve_relevant_memories(
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval query failed user=%s: %s", user_id, exc)
         rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return [m for m in rows if m.id not in _excl][:k]
+        return _fallback(rows)
 
     # Usage-aware re-rank (Dynamics batch): cosine relevance dominates, but
     # facts that keep proving useful get a small, bounded boost — enough to
@@ -434,7 +655,7 @@ async def retrieve_relevant_memories(
     ids = [r[0] for r in candidates][:k]
     if not ids:
         rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return [m for m in rows if m.id not in _excl][:k]
+        return _fallback(rows)
 
     fetched = (
         (await db.execute(select(UserMemory).where(UserMemory.id.in_(ids))))
@@ -452,6 +673,7 @@ async def build_memory_system_prompt(
     *,
     query: str | None = None,
     k: int = MAX_MEMORIES,
+    can_recall: bool = False,
 ) -> tuple[str | None, list[UserMemory]]:
     """Load, render, and stamp usage for a chat turn's system-prompt block.
 
@@ -467,7 +689,12 @@ async def build_memory_system_prompt(
     """
     pinned = await load_pinned_memories(db, user_id)
     pinned_ids = {m.id for m in pinned}
-    remaining_k = max(0, k - len(pinned))
+    # Pinned facts used to consume the whole budget: ten pins drove
+    # ``remaining_k`` to zero, so semantic retrieval never ran and the
+    # block was whatever happened to be pinned, on every turn, whatever
+    # the user asked. Reserve half the slots for relevance so pinning
+    # adds to the block instead of replacing it.
+    remaining_k = max(k // 2, k - len(pinned))
 
     if remaining_k > 0:
         retrieved = await retrieve_relevant_memories(
@@ -501,7 +728,13 @@ async def build_memory_system_prompt(
         except Exception:  # noqa: BLE001
             logger.warning("memory usage stamp failed user=%s", user_id)
 
-    return build_memory_prompt(all_memories), all_memories
+    # The count is what lets the block admit it's a selection. One
+    # indexed COUNT, and only when something was actually injected.
+    total = await count_memories(db, user_id) if all_memories else 0
+    return (
+        build_memory_prompt(all_memories, total=total, can_recall=can_recall),
+        all_memories,
+    )
 
 
 # Reconciliation prompt (Memory Overhaul 1.3 + 2.1). Unlike the append-only
@@ -579,12 +812,16 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
             confidence = (item.get("confidence") or "low").strip().lower()
             # Only save facts the model explicitly marks as high-confidence.
             # Anything borderline (low confidence or field absent) is dropped.
-            if txt and confidence == "high":
+            # Anything that looks like a credential is dropped whatever the
+            # model's confidence — the extraction prompt already asks it not
+            # to capture secrets, and this is the part that doesn't depend
+            # on the model having listened.
+            if txt and confidence == "high" and not looks_sensitive(txt):
                 ops.append({"op": "add", "text": txt[:MAX_CONTENT_CHARS], "category": category})
         elif op == "update":
             mid = str(item.get("id") or "")
             txt = (item.get("text") or "").strip()
-            if mid in valid_ids and txt:
+            if mid in valid_ids and txt and not looks_sensitive(txt):
                 ops.append(
                     {
                         "op": "update",
@@ -662,9 +899,15 @@ async def _evict_for_capture(
     )
     if protect_ids:
         stmt = stmt.where(UserMemory.id.not_in(protect_ids))
+    # Least recently useful first, and only then least used. Leading with
+    # ``times_used`` made eviction self-reinforcing: the counter increments
+    # on *injection*, injection is what the retrieval boost rewards, so a
+    # fact that kept being injected kept being protected whether or not it
+    # ever helped — while a genuinely on-point fact that only fires for a
+    # rare topic looked like the cheapest thing to throw away.
     stmt = stmt.order_by(
-        UserMemory.times_used.asc(),
         func.coalesce(UserMemory.last_used_at, UserMemory.created_at).asc(),
+        UserMemory.times_used.asc(),
     ).limit(1)
     row = (await db.execute(stmt)).scalars().first()
     if row is None:
@@ -684,15 +927,25 @@ async def resolve_memory_model(
     *,
     fallback_provider: ModelProvider | None = None,
     fallback_model_id: str | None = None,
+    user_id=None,
 ) -> tuple[ModelProvider, str] | None:
-    """The model that runs memory extraction / consolidation.
+    """The model that runs memory extraction / consolidation / editing.
 
     1. The dedicated memory model (admin-configured — ideally a fast/cheap
        one, since these are small strict-JSON extraction jobs).
     2. The caller-supplied fallback (capture passes the conversation's
        model — the historical behaviour).
-    3. The instance default chat model (consolidation has no conversation
-       to inherit from).
+    3. The instance default chat model.
+    4. The model this user last chatted with.
+
+    Step 4 exists because steps 1–3 all depend on an admin having set a
+    default, and a single-user self-hosted install often hasn't: the user
+    picks a model per chat and never visits Admin → Defaults. Capture
+    still worked for them (it passes the conversation's model at step 2),
+    so the gap only showed up on the surfaces with no conversation to
+    inherit from — Tidy up, and editing memory from settings — which
+    failed with a message pointing at an admin page they may not even be
+    able to reach.
 
     Returns ``None`` when nothing resolves — callers skip the pass.
     """
@@ -707,6 +960,25 @@ async def resolve_memory_model(
         provider = await db.get(ModelProvider, settings.default_chat_provider_id)
         if provider is not None and provider.enabled:
             return provider, settings.default_chat_model_id
+    if user_id is not None:
+        from app.chat.models import Conversation
+
+        row = (
+            await db.execute(
+                select(Conversation.provider_id, Conversation.model_id)
+                .where(
+                    Conversation.user_id == user_id,
+                    Conversation.provider_id.is_not(None),
+                    Conversation.model_id.is_not(None),
+                )
+                .order_by(Conversation.updated_at.desc())
+                .limit(1)
+            )
+        ).first()
+        if row is not None:
+            provider = await db.get(ModelProvider, row.provider_id)
+            if provider is not None and provider.enabled:
+                return provider, row.model_id
     return None
 
 
@@ -976,7 +1248,7 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
     if len(rows) < 2:
         return {"merged_groups": 0, "removed": 0, "changes": []}
 
-    resolved = await resolve_memory_model(db)
+    resolved = await resolve_memory_model(db, user_id=user_id)
     if resolved is None:
         raise ValueError(
             "No model available — set a Memory model (or a default chat "
@@ -1053,3 +1325,200 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
         removed,
     )
     return {"merged_groups": len(changes), "removed": removed, "changes": changes}
+
+
+# ----------------------------------------------------------------------
+# Editing memory by describing the change
+# ----------------------------------------------------------------------
+#
+# The management panel could already add, edit and delete facts one row at
+# a time — fine for a typo, tedious for "drop everything about my old job"
+# across a store of two hundred. This brings the capability the chat tools
+# gained to the place users actually go to tidy their memory, and reuses
+# their machinery: the model proposes ops and ``_parse_ops`` validates
+# them (ids must be the caller's own, credential shapes are refused)
+# before anything is written.
+#
+# Deliberately propose-then-approve rather than apply-on-send. An
+# instruction like "forget the stuff about work" is genuinely ambiguous
+# about scope, and this is the one surface where a user bulk-edits durable
+# state — the same reasoning behind the workspace write-back proposals.
+# Preview costs one model call; applying costs none.
+
+_MAX_INSTRUCT_TOKENS: Final[int] = 1200
+
+_INSTRUCT_SYSTEM_PROMPT: Final[str] = (
+    "You edit a user's saved long-term memory on their explicit "
+    "instruction. You are given every fact they have saved (each with an "
+    "id) and one instruction from them. Output ONLY a JSON array of "
+    "operation objects.\n\n"
+    "Operations:\n"
+    '  {"op": "add", "text": "<new fact>", "category": "<cat>", '
+    '"confidence": "high"}\n'
+    '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>", '
+    '"category": "<cat>"}\n'
+    '  {"op": "delete", "id": "<existing id>"}\n\n'
+    'Always set confidence to "high" on adds. The user asked for this '
+    "change directly, so there is nothing to be tentative about.\n"
+    f"Categories (use exactly one per add/update): {_CATEGORY_LIST}\n\n"
+    "Make the SMALLEST set of changes that satisfies the instruction. Do "
+    "not rewrite facts it doesn't touch, do not invent facts it doesn't "
+    "imply, and do not tidy up in passing. Only use ids that appear in "
+    "the list. Write each fact as one concise third-person statement "
+    "starting with 'User '. If the instruction doesn't apply to anything "
+    "saved, output []."
+)
+
+
+async def plan_memory_edits(
+    db: AsyncSession, *, user_id, instruction: str
+) -> list[dict]:
+    """Ask the memory model what ``instruction`` should change.
+
+    Returns enriched ops — each carrying the *current* text for updates
+    and deletes — so the caller can render a before/after preview. Nothing
+    is written. Raises ``ValueError`` when the instruction is empty or no
+    model is resolvable; this is user-triggered, so errors should be
+    visible rather than swallowed.
+    """
+    text = (instruction or "").strip()
+    if not text:
+        raise ValueError("Say what you'd like changed.")
+
+    rows = await load_memories(db, user_id)
+    if not rows:
+        return []
+
+    resolved = await resolve_memory_model(db, user_id=user_id)
+    if resolved is None:
+        raise ValueError(
+            "No model available — set a Memory model (or a default chat "
+            "model) under Admin → Defaults first."
+        )
+    provider, model_id = resolved
+
+    listing = "\n".join(
+        f"- id={m.id} [{m.category or 'other'}"
+        f"{', pinned' if m.pinned else ''}]: {m.content}"
+        for m in rows
+    )
+    chunks: list[str] = []
+    async for token in model_router.stream_chat(
+        provider=provider,
+        model_id=model_id,
+        messages=[
+            ChatMessage(
+                role="user",
+                content=(
+                    f"SAVED FACTS ({len(rows)}):\n{listing}\n\n"
+                    f"INSTRUCTION FROM THE USER:\n{text}"
+                ),
+            )
+        ],
+        system=_INSTRUCT_SYSTEM_PROMPT,
+        temperature=0.0,
+        max_tokens=_MAX_INSTRUCT_TOKENS,
+        reasoning_effort="off",
+    ):
+        chunks.append(token)
+
+    by_id = {str(m.id): m for m in rows}
+    ops = _parse_ops("".join(chunks), set(by_id))
+
+    enriched: list[dict] = []
+    for op in ops:
+        if op["op"] == "add":
+            enriched.append(
+                {"op": "add", "after": op["text"], "category": op["category"]}
+            )
+            continue
+        current = by_id.get(op["id"])
+        if current is None:  # pragma: no cover — _parse_ops already filters
+            continue
+        if op["op"] == "update":
+            # A no-op rewrite is noise in the preview: it reads as a change
+            # the user then has to check, and there's nothing to check.
+            if current.content.strip() == op["text"].strip():
+                continue
+            enriched.append(
+                {
+                    "op": "update",
+                    "id": op["id"],
+                    "before": current.content,
+                    "after": op["text"],
+                    "category": op["category"],
+                }
+            )
+        elif op["op"] == "delete":
+            enriched.append(
+                {"op": "delete", "id": op["id"], "before": current.content}
+            )
+    return enriched
+
+
+async def apply_memory_edits(
+    db: AsyncSession, *, user_id, ops: list[dict]
+) -> dict:
+    """Apply ops returned by :func:`plan_memory_edits`.
+
+    Every id is re-checked against this user's own rows rather than
+    trusted from the request — the plan travelled through the client, so
+    treating it as authoritative would let a crafted payload edit someone
+    else's memory. Text is re-screened for credential shapes for the same
+    reason. Flushes but does not commit.
+    """
+    rows = await load_memories(db, user_id)
+    by_id = {str(m.id): m for m in rows}
+    added = updated = deleted = 0
+
+    for op in ops:
+        kind = op.get("op")
+        if kind == "add":
+            content = (op.get("after") or "").strip()[:MAX_CONTENT_CHARS]
+            if not content or looks_sensitive(content):
+                continue
+            if _is_duplicate(content, [_normalise(m.content) for m in rows]):
+                continue
+            if len(rows) + added - deleted >= MAX_MEMORIES:
+                continue
+            category = op.get("category")
+            row = UserMemory(
+                user_id=user_id,
+                content=content,
+                # The user asked for this one by name, so it's theirs —
+                # which also keeps it out of the cap-eviction pool.
+                source="manual",
+                category=category if category in MEMORY_CATEGORIES else None,
+            )
+            db.add(row)
+            await db.flush()
+            await embed_memory_row(db, row)
+            added += 1
+        elif kind == "update":
+            row = by_id.get(str(op.get("id") or ""))
+            content = (op.get("after") or "").strip()[:MAX_CONTENT_CHARS]
+            if row is None or not content or looks_sensitive(content):
+                continue
+            row.content = content
+            category = op.get("category")
+            if category in MEMORY_CATEGORIES:
+                row.category = category
+            await db.flush()
+            await embed_memory_row(db, row)
+            updated += 1
+        elif kind == "delete":
+            row = by_id.get(str(op.get("id") or ""))
+            if row is None:
+                continue
+            await db.delete(row)
+            deleted += 1
+
+    if added or updated or deleted:
+        logger.info(
+            "memory instruct: +%d ~%d -%d for user=%s",
+            added,
+            updated,
+            deleted,
+            user_id,
+        )
+    return {"added": added, "updated": updated, "deleted": deleted}

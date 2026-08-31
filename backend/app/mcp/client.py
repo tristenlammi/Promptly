@@ -1,6 +1,6 @@
-"""Transport-level MCP client calls (remote / streamable-HTTP only).
+"""Transport-level MCP client calls (streamable-HTTP and SSE).
 
-Thin wrappers over the official ``mcp`` SDK's streamable-HTTP client. Each
+Thin wrappers over the official ``mcp`` SDK. Each
 call opens a short-lived session (connect → initialize → do → close) — MCP
 sessions are cheap and this keeps us stateless, which suits an admin-managed
 set of remote servers we poll occasionally + call per tool-use.
@@ -14,10 +14,12 @@ Every call is guarded:
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 from typing import Any
 
 from mcp import ClientSession
+from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.net.safe_fetch import assert_provider_url_safe
@@ -49,8 +51,40 @@ def _tool_annotations(tool: Any) -> dict[str, Any]:
     return out
 
 
+# Which wire protocol a server speaks. Streamable-HTTP is the current
+# standard and stays the default; SSE is the older transport that plenty
+# of real servers still expose — Home Assistant's MCP Server integration
+# among them — so supporting both is the difference between "works with
+# the servers people actually run" and "works in theory".
+TRANSPORTS: tuple[str, ...] = ("http", "sse")
+
+
+@asynccontextmanager
+async def _open(url: str, headers: dict[str, str] | None, transport: str):
+    """Open a session against ``url`` using the named transport.
+
+    The two SDK clients have the same shape but different arities
+    (streamable-HTTP yields a third element), so this normalises them to
+    one ``(read, write)`` contract and everything above stays
+    transport-agnostic.
+    """
+    if transport == "sse":
+        async with sse_client(url, headers=headers or {}) as (read, write):
+            yield read, write
+    else:
+        async with streamablehttp_client(url, headers=headers or {}) as (
+            read,
+            write,
+            _,
+        ):
+            yield read, write
+
+
 async def fetch_tools(
-    url: str, *, headers: dict[str, str] | None = None
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    transport: str = "http",
 ) -> list[dict[str, Any]]:
     """Connect and return the server's tool catalog (``tools/list``).
 
@@ -61,11 +95,7 @@ async def fetch_tools(
     assert_provider_url_safe(url)
 
     async def _do() -> list[dict[str, Any]]:
-        async with streamablehttp_client(url, headers=headers or {}) as (
-            read,
-            write,
-            _,
-        ):
+        async with _open(url, headers, transport) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.list_tools()
@@ -96,6 +126,7 @@ async def call_tool(
     arguments: dict[str, Any] | None = None,
     *,
     headers: dict[str, str] | None = None,
+    transport: str = "http",
 ) -> str:
     """Invoke ``name`` on the server and return a text result (capped).
 
@@ -106,11 +137,7 @@ async def call_tool(
     assert_provider_url_safe(url)
 
     async def _do() -> str:
-        async with streamablehttp_client(url, headers=headers or {}) as (
-            read,
-            write,
-            _,
-        ):
+        async with _open(url, headers, transport) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(name, arguments or {})
