@@ -35,12 +35,17 @@ import logging
 from typing import Any
 
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
-from app.chat.tools.validation import clean_model_text
+from app.chat.tools.validation import clean_model_text, truncate_at_word
 from app.search.providers import SearchError
 from app.search.service import pick_search_provider, run_search_with_failover
 
 logger = logging.getLogger("promptly.tools.web_search")
 
+# Soft cap, enforced by truncation in ``run`` — deliberately NOT a
+# schema ``maxLength``. A schema cap made the dispatch validator reject
+# the whole call when the model pasted a long user question as the
+# query, wasting a hop and often ending the search attempt. 400 chars
+# matches the tightest provider limit (Brave rejects q > 400 chars).
 _MAX_QUERY_CHARS = 400
 _MAX_RESULTS = 10
 
@@ -73,15 +78,15 @@ class WebSearchTool(Tool):
                     "The search query. Keep it concise and keyword-y "
                     "(under 15 words is ideal); a search engine, not a "
                     "chat assistant, is reading this. Drop pleasantries "
-                    "and conversational filler."
+                    "and conversational filler. Overly long queries are "
+                    "truncated to ~400 characters."
                 ),
-                "maxLength": _MAX_QUERY_CHARS,
             },
             "count": {
                 "type": "integer",
                 "description": (
                     "Number of results to return (1-10). Defaults to "
-                    "the user's configured search-result count if "
+                    "the admin-configured search-result count if "
                     "omitted; bump only when the question genuinely "
                     "needs a wide net."
                 ),
@@ -115,11 +120,9 @@ class WebSearchTool(Tool):
 
         if not isinstance(query, str) or not query.strip():
             raise ToolError("`query` is required and must be a non-empty string")
-        query = query.strip()
-        if len(query) > _MAX_QUERY_CHARS:
-            raise ToolError(
-                f"`query` exceeds {_MAX_QUERY_CHARS}-char limit"
-            )
+        # Truncate rather than reject — a long query still searches fine
+        # once clipped, and failing the call here just wastes a hop.
+        query = truncate_at_word(query.strip(), _MAX_QUERY_CHARS)
         if count is not None:
             if not isinstance(count, int) or isinstance(count, bool):
                 raise ToolError("`count`, when provided, must be an integer")

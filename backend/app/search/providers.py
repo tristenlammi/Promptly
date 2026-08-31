@@ -191,6 +191,17 @@ async def _search_brave(
     if not api_key:
         raise SearchError("Brave Search requires an API key")
 
+    # Brave hard-rejects queries over 400 characters OR 50 words with a
+    # 422. Clamp here (not just in the chat tool) so queries arriving
+    # from deep research / distillation can't kill the request either.
+    words = query.split()
+    if len(words) > 50:
+        query = " ".join(words[:50])
+    if len(query) > 400:
+        clipped = query[:400]
+        cut = clipped.rfind(" ")
+        query = (clipped[:cut] if cut > 0 else clipped).rstrip()
+
     url = "https://api.search.brave.com/res/v1/web/search"
     headers = {
         "Accept": "application/json",
@@ -511,7 +522,10 @@ async def _search_openrouter(
         ],
         # Enough tokens for the model to actually cite several sources (that's
         # what populates the annotations we harvest) without a long essay.
-        "max_tokens": 800,
+        # The ``url_citation`` annotations we keep are attached as soon as a
+        # source is referenced, so a shorter completion loses nothing — 800
+        # here just meant slower (and pricier) searches.
+        "max_tokens": 300,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -618,6 +632,21 @@ async def _search_ollama(
 # ------------------------------------------------------------------
 # Dispatcher
 # ------------------------------------------------------------------
+def provider_timeout_seconds(provider_type: str) -> float:
+    """Worst-case wall-clock for one search against this provider type.
+
+    Used by the failover chain's budget accounting. Almost every
+    adapter is bounded by ``SEARCH_TIMEOUT_SECONDS``; OpenRouter is the
+    exception — its "search" is a chat completion with its own 30s
+    timeout, and budgeting it at 10s let the chain start a request it
+    couldn't afford to finish (the dispatcher then cancelled the whole
+    chain with a bare "timed out").
+    """
+    if provider_type == "openrouter":
+        return _OPENROUTER_TIMEOUT_SECONDS
+    return SEARCH_TIMEOUT_SECONDS
+
+
 _ADAPTERS = {
     "searxng": _search_searxng,
     "brave": _search_brave,
@@ -755,6 +784,7 @@ async def run_search(
 __all__ = [
     "SearchError",
     "canonicalise_url",
+    "provider_timeout_seconds",
     "run_search",
 ]
 

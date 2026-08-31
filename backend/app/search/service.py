@@ -28,6 +28,45 @@ from app.search.schemas import SearchResult
 # give the notified admin time to fix it; short enough to self-heal.
 _PROVIDER_COOLDOWN = timedelta(days=7)
 
+# ---- Soft (in-process) cooldown for transient failures --------------
+# Hard cooldowns only cover permanent (auth/quota) errors, which left a
+# nasty latency hole: a primary that times out or returns HTTP-200-with-
+# zero-results (the blocked-SearXNG signature) was retried FIRST on
+# every single search, so every search paid that provider's full
+# timeout before failover even started. After a couple of consecutive
+# transient failures we now *demote* the provider to the back of the
+# chain for a few minutes — demoted, not skipped, so it's still the
+# last resort when everything else fails, and a legitimately-empty
+# obscure query can never take search fully offline. In-process state
+# is fine here: the backend deliberately runs a single uvicorn worker.
+_SOFT_COOLDOWN_SECONDS = 180.0
+_SOFT_FAILURE_THRESHOLD = 2
+# provider id -> {"fails": consecutive transient failures, "until": monotonic}
+_soft_cooldowns: dict[uuid.UUID, dict[str, float]] = {}
+
+
+def _soft_cooling(provider_id: uuid.UUID) -> bool:
+    state = _soft_cooldowns.get(provider_id)
+    return bool(state) and time.monotonic() < state.get("until", 0.0)
+
+
+def _note_soft_failure(provider_id: uuid.UUID, provider_type: str) -> None:
+    state = _soft_cooldowns.setdefault(provider_id, {"fails": 0, "until": 0.0})
+    state["fails"] += 1
+    if state["fails"] >= _SOFT_FAILURE_THRESHOLD:
+        state["until"] = time.monotonic() + _SOFT_COOLDOWN_SECONDS
+        logger.info(
+            "search: provider=%s demoted for %.0fs after %d consecutive "
+            "transient failures/empties",
+            provider_type,
+            _SOFT_COOLDOWN_SECONDS,
+            int(state["fails"]),
+        )
+
+
+def _note_soft_success(provider_id: uuid.UUID) -> None:
+    _soft_cooldowns.pop(provider_id, None)
+
 # Re-exported so the chat router can dedupe the per-stream sources
 # accumulator without reaching into ``app.search.providers`` directly.
 canonicalise_url = _canonicalise_url
@@ -72,11 +111,15 @@ def _order_candidates(
     primary: SearchProvider | None = None,
 ) -> list[SearchProvider]:
     """Build the failover chain: the admin-arranged order (``position``, lower
-    first), skipping any provider still inside its cooldown window, deduped by
-    type. An explicit ``primary`` is forced to the front (and tried even if
-    it's cooling down — a manual test should still run it)."""
+    first), skipping any provider still inside its (hard) cooldown window,
+    deduped by type. Providers inside a *soft* cooldown (recent transient
+    failures — see ``_note_soft_failure``) are demoted to the back of the
+    chain rather than dropped. An explicit ``primary`` is forced to the front
+    (and tried even if it's cooling down — a manual test should still run
+    it)."""
     ordered = sorted(rows, key=lambda r: (r.position, r.created_at))
     out: list[SearchProvider] = []
+    demoted: list[SearchProvider] = []
     seen: set[str] = set()
     if primary is not None:
         out.append(primary)
@@ -89,8 +132,8 @@ def _order_candidates(
         if sp.type in seen:
             continue
         seen.add(sp.type)
-        out.append(sp)
-    return out
+        (demoted if _soft_cooling(sp.id) else out).append(sp)
+    return out + demoted
 
 
 async def pick_search_provider(
@@ -158,23 +201,29 @@ async def run_search_with_failover(
 
     # Imported here (not module top) to keep this module's import-time
     # dependency on providers.py limited to the existing names.
-    from app.search.providers import SearchError, run_search
+    from app.search.providers import (
+        SearchError,
+        provider_timeout_seconds,
+        run_search,
+    )
 
     first_reachable: SearchProvider | None = None
     last_error: SearchError | None = None
-    from app.search.providers import SEARCH_TIMEOUT_SECONDS
 
     for i, sp in enumerate(candidates):
         # Don't start a provider we can't afford to finish. Being cancelled
         # by the caller mid-request throws away everything we learned; a
-        # deliberate stop can at least report it.
+        # deliberate stop can at least report it. The cost of a provider is
+        # type-specific: OpenRouter's "search" is a 30s chat completion,
+        # not a 10s API call.
+        need_s = provider_timeout_seconds(sp.type)
         if deadline is not None and i > 0:
             remaining = deadline - time.monotonic()
-            if remaining < SEARCH_TIMEOUT_SECONDS:
+            if remaining < need_s:
                 logger.warning(
                     "search failover: out of budget after %d provider(s) "
-                    "(%.1fs left, need %.0fs) — stopping",
-                    i, remaining, SEARCH_TIMEOUT_SECONDS,
+                    "(%.1fs left, %s needs %.0fs) — stopping",
+                    i, remaining, sp.type, need_s,
                 )
                 if last_error is not None:
                     raise SearchError(
@@ -197,8 +246,10 @@ async def run_search_with_failover(
                     "%d candidate(s) left",
                     sp.type, e, _PROVIDER_COOLDOWN, remaining,
                 )
+                _note_soft_success(sp.id)  # hard pause supersedes soft state
                 await _pause_provider(sp.id, sp.name, e)
             else:
+                _note_soft_failure(sp.id, sp.type)
                 logger.warning(
                     "search failover: provider=%s errored (%s); %d left",
                     sp.type, e, remaining,
@@ -207,12 +258,20 @@ async def run_search_with_failover(
         if first_reachable is None:
             first_reachable = sp
         if results:
+            _note_soft_success(sp.id)
             if i > 0:
                 logger.info(
                     "search failover: %s answered after %s returned nothing",
                     sp.type, candidates[0].type,
                 )
             return (results, sp)
+        # Empty result set — for the demotion counter this is a failure
+        # too: a blocked SearXNG returns 200-with-nothing forever, and
+        # paying its timeout first on every search was the single
+        # biggest source of slow searches. Two consecutive empties are
+        # required before demotion, so an obscure query can't demote a
+        # healthy provider on its own.
+        _note_soft_failure(sp.id, sp.type)
         logger.info(
             "search failover: provider=%s returned 0 results for %r; %d left",
             sp.type, query[:80], len(candidates) - i - 1,
@@ -341,7 +400,16 @@ async def distill_query(
             max_tokens=40,
         ):
             chunks.append(token)
-        distilled = "".join(chunks).strip().strip('"').strip("'")
+        raw = "".join(chunks)
+        # Reasoning models (DeepSeek et al) may spend the budget inside a
+        # <think> block; without stripping it the "query" fed to the
+        # search engine was chain-of-thought prose. Mirrors the research
+        # engine's decompose parsing. An unclosed block (clipped by the
+        # 40-token cap) leaves nothing useful, so it falls through to the
+        # keyword fallback below.
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        raw = re.sub(r"<think>.*", "", raw, flags=re.DOTALL)
+        distilled = raw.strip().strip('"').strip("'")
         return _augment_recency(distilled or _fallback_query(msg), now)
     except ProviderError as e:
         logger.warning("Query distillation failed, falling back to raw message: %s", e)

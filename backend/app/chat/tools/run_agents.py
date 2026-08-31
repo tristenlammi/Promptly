@@ -29,11 +29,16 @@ from typing import Any
 
 from app.chat.models import Conversation
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
+from app.chat.tools.validation import truncate_at_word
 from app.search.service import pick_search_provider
 
 logger = logging.getLogger("promptly.tools.run_agents")
 
 _MAX_AGENTS = 4
+# Soft cap, enforced by truncation in ``run`` — deliberately NOT a
+# schema ``maxLength``, which made the dispatch validator reject the
+# whole fan-out ("exceeds maxLength 600") before the truncation below
+# could ever run.
 _MAX_TASK_CHARS = 600
 
 # Per-AGENT tool budget — deliberately tighter than the top-level turn
@@ -107,9 +112,10 @@ class RunAgentsTool(Tool):
                             "description": (
                                 "A specific, self-contained research "
                                 "instruction for one sub-agent, phrased "
-                                "so it makes sense with no other context."
+                                "so it makes sense with no other context. "
+                                "Keep it under ~600 characters; anything "
+                                "longer is truncated."
                             ),
-                            "maxLength": _MAX_TASK_CHARS,
                         }
                     },
                     "required": ["task"],
@@ -131,7 +137,7 @@ class RunAgentsTool(Tool):
                 continue
             t = entry.get("task")
             if isinstance(t, str) and t.strip():
-                tasks.append(t.strip()[:_MAX_TASK_CHARS])
+                tasks.append(truncate_at_word(t.strip(), _MAX_TASK_CHARS))
         if not tasks:
             raise ToolError("no valid task strings in `tasks`")
 

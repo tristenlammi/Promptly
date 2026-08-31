@@ -22,9 +22,14 @@ from typing import Any
 
 from app.chat.models import Conversation
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
+from app.chat.tools.validation import truncate_at_word
 
 logger = logging.getLogger("promptly.tools.deep_research")
 
+# Soft cap, enforced by truncation in ``run`` — deliberately NOT a
+# schema ``maxLength``, which made the dispatch validator reject the
+# whole call ("exceeds maxLength 600") before the truncation below
+# could ever run.
 _MAX_QUERY_CHARS = 600
 
 
@@ -94,9 +99,9 @@ class DeepResearchTool(Tool):
                 "type": "string",
                 "description": (
                     "The research question or topic to investigate, phrased as "
-                    "a self-contained question."
+                    "a self-contained question. Keep it under ~600 characters; "
+                    "anything longer is truncated."
                 ),
-                "maxLength": _MAX_QUERY_CHARS,
             },
         },
         "required": ["query"],
@@ -107,7 +112,7 @@ class DeepResearchTool(Tool):
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ToolError("`query` is required and must be a non-empty string")
-        query = query.strip()[:_MAX_QUERY_CHARS]
+        query = truncate_at_word(query.strip(), _MAX_QUERY_CHARS)
 
         conv = await ctx.db.get(Conversation, ctx.conversation_id)
         if conv is None or conv.provider_id is None or not conv.model_id:

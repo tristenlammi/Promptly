@@ -448,23 +448,57 @@ async def gather_research_evidence(
     event_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
     all_seen_urls: set[str] = set()
 
+    tfetch = FetchUrlTool()
+
+    async def _read_full(idx: int, result: Any, url: str) -> dict[str, Any]:
+        """Fetch one URL's full text, falling back to its search snippet.
+
+        Runs concurrently with the angle's other read, so it opens its
+        OWN session — ``FetchUrlTool``'s anti-bot fallback path queries
+        the DB, and two coroutines must never share one AsyncSession.
+        """
+        event_q.put_nowait({
+            "event": "research_reading",
+            "index": idx,
+            "url": url,
+        })
+        try:
+            async with SessionLocal() as fdb:
+                fuser = await fdb.get(User, user.id)
+                if fuser is None:
+                    raise RuntimeError("user vanished mid-research")
+                fctx = ToolContext(
+                    db=fdb,
+                    user=fuser,
+                    conversation_id=conversation_id,
+                    user_message_id=placeholder_msg_id,
+                )
+                fr = await tfetch.run(fctx, {"url": url})
+            return {
+                "index": 0,  # assigned post-gather
+                "title": result.title or url,
+                "url": url,
+                "content": fr.content[:_MAX_CONTENT_CHARS],
+                "is_full": True,
+            }
+        except Exception:
+            return {
+                "index": 0,
+                "title": result.title or url,
+                "url": url,
+                "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
+                "is_full": False,
+            }
+
     async def _investigate(idx: int, sq: dict[str, Any]) -> dict[str, Any]:
         # Small stagger so five searches don't hit the provider in the
         # same instant (the burst signature that trips search rate limits).
         if idx:
             await asyncio.sleep(idx * 0.3)
-        items: list[dict[str, Any]] = []
         async with SessionLocal() as tdb:
             tuser = await tdb.get(User, user.id)
             if tuser is None:
-                return {"subquestion": sq["question"], "items": items}
-            tctx = ToolContext(
-                db=tdb,
-                user=tuser,
-                conversation_id=conversation_id,
-                user_message_id=placeholder_msg_id,
-            )
-            tfetch = FetchUrlTool()
+                return {"subquestion": sq["question"], "items": []}
             event_q.put_nowait({
                 "event": "research_searching",
                 "index": idx,
@@ -477,57 +511,53 @@ async def gather_research_evidence(
                 )
             except Exception:
                 results = []
-            event_q.put_nowait({
-                "event": "research_searched",
-                "index": idx,
-                "sources_found": len(results),
-            })
+        event_q.put_nowait({
+            "event": "research_searched",
+            "index": idx,
+            "sources_found": len(results),
+        })
 
-            reads = 0
-            for result in results[:_SEARCH_RESULTS_PER_SQ]:
-                url = (result.url or "").strip()
-                if not url:
-                    continue
-                can_read = (
-                    reads < _READS_PER_SQ
-                    and url not in all_seen_urls
-                    and url.startswith("http")
-                )
-                if can_read:
-                    all_seen_urls.add(url)
-                    event_q.put_nowait({
-                        "event": "research_reading",
-                        "index": idx,
-                        "url": url,
-                    })
-                    try:
-                        fr = await tfetch.run(tctx, {"url": url})
-                        items.append({
-                            "index": 0,  # assigned post-gather
-                            "title": result.title or url,
-                            "url": url,
-                            "content": fr.content[:_MAX_CONTENT_CHARS],
-                            "is_full": True,
-                        })
-                        reads += 1
-                    except Exception:
-                        items.append({
-                            "index": 0,
-                            "title": result.title or url,
-                            "url": url,
-                            "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
-                            "is_full": False,
-                        })
-                else:
-                    items.append({
-                        "index": 0,
-                        "title": result.title or url,
-                        "url": url,
-                        "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
-                        "is_full": False,
-                    })
-                if len(items) >= _READS_PER_SQ + 2:
-                    break
+        # Plan the reads synchronously (claiming URLs into the shared
+        # ``all_seen_urls`` set before any await, so two angles can't
+        # both pick the same page), then run the full-page fetches for
+        # this angle IN PARALLEL. The reads were previously sequential
+        # — up to 2 × (12s fetch + fallback chain) per angle, gating
+        # the gap-check phase on the slowest chain.
+        planned: list[tuple[bool, Any, str]] = []  # (read_full, result, url)
+        reads = 0
+        for result in results[:_SEARCH_RESULTS_PER_SQ]:
+            url = (result.url or "").strip()
+            if not url:
+                continue
+            can_read = (
+                reads < _READS_PER_SQ
+                and url not in all_seen_urls
+                and url.startswith("http")
+            )
+            if can_read:
+                all_seen_urls.add(url)
+                reads += 1
+            planned.append((can_read, result, url))
+            if len(planned) >= _READS_PER_SQ + 2:
+                break
+
+        async def _snippet_item(result: Any, url: str) -> dict[str, Any]:
+            return {
+                "index": 0,
+                "title": result.title or url,
+                "url": url,
+                "content": (result.snippet or "")[:_MAX_SNIPPET_CHARS],
+                "is_full": False,
+            }
+
+        items: list[dict[str, Any]] = list(
+            await asyncio.gather(*[
+                _read_full(idx, result, url)
+                if can_read
+                else _snippet_item(result, url)
+                for can_read, result, url in planned
+            ])
+        )
         event_q.put_nowait({"event": "research_question_done", "index": idx})
         return {"subquestion": sq["question"], "items": items}
 

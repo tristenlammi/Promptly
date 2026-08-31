@@ -148,6 +148,31 @@ def validate_tool_args(schema: dict[str, Any], args: dict[str, Any]) -> None:
 
 
 # --------------------------------------------------------------------
+# Free-text argument softening
+# --------------------------------------------------------------------
+def truncate_at_word(text: str, max_chars: int) -> str:
+    """Clip ``text`` to ``max_chars``, preferring a word boundary.
+
+    Used by the search-family tools to *soften* over-long free-text
+    arguments (queries, agent tasks) instead of rejecting the call.
+    Declaring ``maxLength`` in a tool's JSON schema turned out to be a
+    trap: the dispatch-layer validator rejected the call before
+    ``Tool.run`` could truncate, the model was told to surface the
+    error verbatim, and the user saw "went over the 600 char limit"
+    where they should have seen search results. A trailing partial
+    word is dropped when a space exists in the final 20% of the
+    window, so the query fed to the engine doesn't end mid-token.
+    """
+    if len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars]
+    cut = clipped.rfind(" ")
+    if cut > max_chars * 0.8:
+        clipped = clipped[:cut]
+    return clipped.rstrip()
+
+
+# --------------------------------------------------------------------
 # Third-party text hygiene
 # --------------------------------------------------------------------
 
@@ -174,4 +199,9 @@ def clean_model_text(text: str | None) -> str:
     return _UNSAFE_CHARS.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
-__all__ = ["ToolArgsInvalid", "validate_tool_args", "clean_model_text"]
+__all__ = [
+    "ToolArgsInvalid",
+    "validate_tool_args",
+    "clean_model_text",
+    "truncate_at_word",
+]

@@ -42,6 +42,7 @@ SNI / certificate validation. We accept the residual risk because:
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -422,7 +423,14 @@ async def safe_fetch(
     """
     method = method.upper()
     current_url = url
-    assert_url_is_safe(current_url, allow_private=allow_private)
+    # ``assert_url_is_safe`` runs a synchronous ``getaddrinfo``. On this
+    # deliberately single-worker backend a slow resolver would stall the
+    # entire event loop — every user's SSE stream included — so the
+    # validation (here and on every redirect hop) runs in a worker
+    # thread. ``assert_provider_url_safe`` documents the same hazard.
+    await asyncio.to_thread(
+        assert_url_is_safe, current_url, allow_private=allow_private
+    )
 
     own_client = client is None
     if own_client:
@@ -468,7 +476,9 @@ async def safe_fetch(
             next_url = str(httpx.URL(current_url).join(location))
             await response.aclose()
             response = None
-            assert_url_is_safe(next_url, allow_private=allow_private)
+            await asyncio.to_thread(
+                assert_url_is_safe, next_url, allow_private=allow_private
+            )
             current_url = next_url
             # On a redirect the body is not re-sent — drop ``json``.
             body_kwargs.clear()
