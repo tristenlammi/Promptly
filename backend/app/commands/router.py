@@ -164,6 +164,12 @@ async def list_available_tools(
                     (t.get("annotations") or {}).get("destructiveHint")
                 )
                 and not (t.get("annotations") or {}).get("readOnlyHint"),
+                # The tool's own JSON Schema, so the editor can ask for
+                # its arguments. Without this a Home Assistant command
+                # can say "turn something off" but never *which* thing —
+                # HA exposes intents (HassTurnOff), and the entity is an
+                # argument to them, not a tool of its own.
+                "input_schema": t.get("input_schema") or {},
             }
             for t in (connector.tool_catalog or [])
             if t.get("name")

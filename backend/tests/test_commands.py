@@ -1048,3 +1048,63 @@ def test_an_empty_value_is_untouched():
 
     assert auth_header_value("Authorization", "") == ""
     assert auth_header_value("Authorization", "   ") == "   "
+
+
+async def test_tool_argument_schemas_reach_the_editor(db, user):
+    """Home Assistant exposes *intents* — HassTurnOff — not entities, so
+    "which lamp" is an argument rather than a tool you pick. Without the
+    schema the editor can't ask for it, and a command ends up saying
+    "turn something off" without saying what."""
+    from app.commands.router import list_available_tools
+    from app.mcp.models import McpConnector
+
+    connector = McpConnector(
+        name="Home",
+        slug=f"home{uuid.uuid4().hex[:6]}",
+        kind="mcp",
+        url="http://stub.invalid/sse",
+        transport="sse",
+        enabled=True,
+        tool_catalog=[
+            {
+                "name": "HassTurnOff",
+                "description": "Turns off a device",
+                "annotations": {"destructiveHint": True},
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                },
+            }
+        ],
+    )
+    db.add(connector)
+    await db.commit()
+
+    sources = await list_available_tools(db=db, user=user)
+    tool = sources[0]["tools"][0]
+
+    assert tool["input_schema"]["required"] == ["name"]
+    assert "name" in tool["input_schema"]["properties"]
+
+
+async def test_fixed_arguments_are_sent_and_slots_win(db, user):
+    """``action_args`` carries what the editor collected; a spoken slot
+    of the same name overrides it, so "turn off the {room} lights" can
+    reuse one command for every room."""
+    from app.commands.service import execute
+
+    row = await _cmd(
+        db,
+        user,
+        name="Kitchen lamp off",
+        action_type="prompt",
+        body="off: {name}",
+        action_args={"name": "Kitchen Lamp"},
+    )
+
+    fixed = await execute(db, row, user)
+    assert fixed["text"] == "off: Kitchen Lamp"
+
+    overridden = await execute(db, row, user, slots={"name": "Lounge Lamp"})
+    assert overridden["text"] == "off: Lounge Lamp"

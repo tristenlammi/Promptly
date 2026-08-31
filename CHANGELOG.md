@@ -21,6 +21,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-08-31
+
+### Fixed
+- **You can now say *which* device a command acts on.** Home Assistant
+  exposes intents — `HassTurnOff` — rather than one tool per device, so
+  the lamp is an *argument* to the tool, not something you pick from the
+  tool list. The editor didn't ask for those arguments, which left you
+  able to build a command that says "turn something off" without ever
+  saying what. Choosing a tool now shows a field for each argument it
+  declares, marks the required ones, and offers a dropdown where the tool
+  gives a fixed set of choices. A phrase slot of the same name overrides
+  the fixed value when spoken, so one command can cover every room.
+
 ## [0.8.1] - 2026-08-31
 
 ### Fixed

@@ -6,6 +6,7 @@ import {
   type Command,
   type CommandActionType,
   type CommandInput,
+  type ToolSchema,
 } from "@/api/commands";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/shared/Button";
@@ -58,6 +59,7 @@ export function CommandEditorModal({
             phrases: [...(command.phrases ?? [])],
             action_type: command.action_type,
             action_ref: command.action_ref,
+            action_args: command.action_args ?? {},
             body: command.body,
             response_template: command.response_template,
             enabled: command.enabled,
@@ -240,7 +242,17 @@ export function CommandEditorModal({
         {actionType === "mcp_tool" && (
           <ToolPicker
             value={form.action_ref ?? ""}
-            onChange={(ref) => setForm({ ...form, action_ref: ref })}
+            args={(form.action_args ?? {}) as Record<string, string>}
+            onArgsChange={(action_args) =>
+              setForm((f) => ({ ...f, action_args }))
+            }
+            slotNames={slots}
+            onChange={(ref) =>
+              // Clear the arguments with the tool: they belong to the
+              // schema of the tool that was chosen, and silently keeping
+              // them would send another tool's fields.
+              setForm({ ...form, action_ref: ref, action_args: {} })
+            }
             onPickDestructive={(destructive) => {
               // Only ever switches confirmation ON. Picking a harmless
               // tool afterwards shouldn't quietly undo a deliberate
@@ -371,11 +383,20 @@ export function CommandEditorModal({
  */
 function ToolPicker({
   value,
+  args,
+  slotNames,
   onChange,
+  onArgsChange,
   onPickDestructive,
 }: {
   value: string;
+  args: Record<string, string>;
+  /** Slots declared in the phrases. A slot capture overrides a fixed
+   *  argument of the same name at run time, so the form says so rather
+   *  than letting someone fill a box that will be ignored. */
+  slotNames: string[];
   onChange: (ref: string) => void;
+  onArgsChange: (args: Record<string, string>) => void;
   /** Fired when the chosen tool is one the connector flags as changing
    *  something, so the editor can switch confirmation on for it. */
   onPickDestructive: (destructive: boolean) => void;
@@ -443,10 +464,20 @@ function ToolPicker({
           )}
 
           {active && toolName && (
-            <p className="text-[11px] text-[var(--text-muted)]">
-              {active.tools.find((t) => t.name === toolName)?.description ||
-                "No description provided by the connector."}
-            </p>
+            <>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {active.tools.find((t) => t.name === toolName)?.description ||
+                  "No description provided by the connector."}
+              </p>
+              <ToolArgs
+                schema={
+                  active.tools.find((t) => t.name === toolName)?.input_schema
+                }
+                args={args}
+                slotNames={slotNames}
+                onChange={onArgsChange}
+              />
+            </>
           )}
         </div>
       )}
@@ -463,6 +494,104 @@ function ToolPicker({
         {isFetching ? "Refreshing…" : "Refresh list"}
       </button>
     </Field>
+  );
+}
+
+/** A field per argument the tool declares.
+ *
+ * This is what makes a Home Assistant command specific. HA exposes
+ * *intents* — `HassTurnOff` — not entities, so "which lamp" is an
+ * argument (`name: Kitchen Lamp`) rather than a tool you pick. Without
+ * this form a command could say "turn something off" and never say
+ * what, which is a command that either fails or acts on the wrong
+ * thing.
+ *
+ * Rendered from the tool's own JSON Schema rather than anything
+ * HA-specific, so it works for whatever connector an admin adds next.
+ */
+function ToolArgs({
+  schema,
+  args,
+  slotNames,
+  onChange,
+}: {
+  schema: ToolSchema | undefined;
+  args: Record<string, string>;
+  slotNames: string[];
+  onChange: (args: Record<string, string>) => void;
+}) {
+  const properties = schema?.properties ?? {};
+  const names = Object.keys(properties);
+  const required = new Set(schema?.required ?? []);
+
+  if (names.length === 0) {
+    return (
+      <p className="text-[11px] text-[var(--text-muted)]">
+        This tool takes no arguments.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex flex-col gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
+      <p className="text-[11px] font-medium text-[var(--text)]">
+        Arguments
+      </p>
+      {names.map((name) => {
+        const prop = properties[name];
+        const filledBySlot = slotNames.includes(name.toLowerCase());
+        return (
+          <label key={name} className="block">
+            <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+              <code className="font-mono text-[var(--text)]">{name}</code>
+              {required.has(name) && (
+                <span className="text-[var(--accent)]">required</span>
+              )}
+              {filledBySlot && (
+                <span className="rounded-full bg-[var(--surface-2)] px-1.5 text-[10px]">
+                  from “{"{"}
+                  {name}
+                  {"}"}” when spoken
+                </span>
+              )}
+            </span>
+            {prop?.enum ? (
+              <select
+                value={args[name] ?? ""}
+                onChange={(e) =>
+                  onChange({ ...args, [name]: e.target.value })
+                }
+                className={cn(inputClass, "mt-0.5")}
+              >
+                <option value="">—</option>
+                {prop.enum.map((option) => (
+                  <option key={String(option)} value={String(option)}>
+                    {String(option)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={args[name] ?? ""}
+                onChange={(e) =>
+                  onChange({ ...args, [name]: e.target.value })
+                }
+                placeholder={
+                  filledBySlot
+                    ? "Overridden by the spoken value"
+                    : prop?.description || ""
+                }
+                className={cn(inputClass, "mt-0.5")}
+              />
+            )}
+          </label>
+        );
+      })}
+      <p className="text-[10px] text-[var(--text-muted)]">
+        For Home Assistant, <code className="font-mono">name</code> is the
+        device as it's named there — e.g. “Kitchen Lamp”.
+      </p>
+    </div>
   );
 }
 

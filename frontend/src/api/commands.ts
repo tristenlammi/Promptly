@@ -80,6 +80,21 @@ export interface CommandRunResult {
  *  the same path the chat pipeline uses, so it lists exactly what the
  *  caller could already call — building a shortcut never surfaces a tool
  *  you couldn't otherwise reach. */
+/** The subset of JSON Schema an MCP tool realistically declares. */
+export interface ToolSchema {
+  type?: string;
+  properties?: Record<
+    string,
+    {
+      type?: string;
+      description?: string;
+      enum?: (string | number)[];
+      title?: string;
+    }
+  >;
+  required?: string[];
+}
+
 export interface CommandToolSource {
   connector_id: string;
   connector_name: string;
@@ -91,6 +106,10 @@ export interface CommandToolSource {
      *  Drives the "ask before running" default so the user doesn't have
      *  to know which of a hundred services opens a door. */
     destructive: boolean;
+    /** The tool's own JSON Schema. Home Assistant exposes intents
+     *  (`HassTurnOff`) rather than entities, so *which lamp* is an
+     *  argument — the editor renders a field per property from this. */
+    input_schema: ToolSchema;
   }[];
 }
 
