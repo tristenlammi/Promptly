@@ -1108,3 +1108,105 @@ async def test_fixed_arguments_are_sent_and_slots_win(db, user):
 
     overridden = await execute(db, row, user, slots={"name": "Lounge Lamp"})
     assert overridden["text"] == "off: Lounge Lamp"
+
+
+# --------------------------------------------------- device picking
+#
+# Home Assistant's GetLiveContext returns prose-ish text whose exact
+# shape varies by version, so the parser tries three strategies and the
+# endpoint hands back the raw text when all three come up empty. An
+# empty list and an unreadable response look identical from the UI and
+# need opposite fixes.
+
+
+def test_devices_parse_from_yaml_ish_output():
+    """The shape Home Assistant actually emits: a prose preamble, then
+    entities keyed with the plural "names"/"areas"."""
+    from app.commands.devices import parse_devices
+
+    raw = """Live Context: An overview of the areas and devices in this home:
+- names: Kitchen Lamp
+  domain: light
+  state: 'off'
+  areas: Lounge Room
+- names: Kitchen Speaker
+  domain: media_player
+  state: idle
+  areas: Kitchen
+"""
+    devices = parse_devices(raw)
+
+    assert [d["name"] for d in devices] == ["Kitchen Lamp", "Kitchen Speaker"]
+    assert devices[0]["domain"] == "light"
+    assert devices[0]["area"] == "Lounge Room"
+    assert devices[1]["domain"] == "media_player"
+
+
+def test_devices_parse_from_json_output():
+    from app.commands.devices import parse_devices
+
+    raw = '{"entities": [{"name": "Hue Bridge", "domain": "light", "state": "on"}]}'
+
+    devices = parse_devices(raw)
+
+    assert devices == [
+        {"name": "Hue Bridge", "domain": "light", "area": "", "state": "on"}
+    ]
+
+
+def test_unreadable_output_yields_nothing_rather_than_junk():
+    """The caller turns an empty parse into "couldn't read the list" plus
+    the raw text. Inventing a device from prose would be worse."""
+    from app.commands.devices import parse_devices
+
+    assert parse_devices("I'm sorry, I can't help with that.") == []
+    assert parse_devices("") == []
+
+
+def test_duplicate_entities_are_collapsed():
+    from app.commands.devices import parse_devices
+
+    raw = """- names: Kitchen Lamp
+  domain: light
+- names: Kitchen Lamp
+  domain: light
+"""
+    assert len(parse_devices(raw)) == 1
+
+
+def test_actions_are_filtered_to_what_the_connector_really_has():
+    """The domain map is a *preference*, not a claim. Filtering it
+    against the real catalog means a stale entry costs nothing and can
+    never offer an action that would fail."""
+    from app.commands.devices import actions_for
+
+    catalog = ["HassTurnOn", "HassTurnOff", "GetLiveContext"]
+
+    # HassLightSet is preferred for lights but absent here, so it's
+    # simply not offered.
+    assert actions_for("light", catalog) == ["HassTurnOn", "HassTurnOff"]
+    # An unknown domain still gets the universal pair.
+    assert actions_for("doorbell", catalog) == ["HassTurnOn", "HassTurnOff"]
+    # A connector with none of them offers none.
+    assert actions_for("light", ["GetLiveContext"]) == []
+
+
+def test_media_players_offer_media_actions_first():
+    from app.commands.devices import actions_for
+
+    catalog = ["HassTurnOn", "HassTurnOff", "HassMediaPause", "HassMediaNext"]
+
+    actions = actions_for("media_player", catalog)
+
+    assert actions[0] == "HassMediaPause"
+    assert "HassMediaNext" in actions
+
+
+def test_only_connectors_publishing_live_context_offer_devices():
+    """UniFi and other connectors have no device list to read, so the
+    editor falls back to picking a tool rather than showing an empty
+    picker."""
+    from app.commands.devices import supports_devices
+
+    assert supports_devices(["HassTurnOn", "GetLiveContext"]) is True
+    assert supports_devices(["list_sites", "list_clients"]) is False

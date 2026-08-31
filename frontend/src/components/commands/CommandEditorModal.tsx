@@ -12,6 +12,7 @@ import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/shared/Button";
 import {
   useCommandTools,
+  useConnectorDevices,
   useCreateCommand,
   useUpdateCommand,
 } from "@/hooks/useCommands";
@@ -409,6 +410,12 @@ function ToolPicker({
 
   const active = (sources ?? []).find((s) => s.connector_id === connectorId);
   const withTools = (sources ?? []).filter((s) => s.tools.length > 0);
+  // Home Assistant publishes its entities through GetLiveContext; other
+  // connectors have no device list to read, so they go straight to
+  // picking a tool.
+  const supportsDevices = !!active?.tools.some(
+    (t) => t.name === "GetLiveContext"
+  );
 
   return (
     <Field
@@ -440,6 +447,24 @@ function ToolPicker({
               </option>
             ))}
           </select>
+
+          {active && supportsDevices && (
+            <DevicePicker
+              connectorId={connectorId}
+              toolName={toolName}
+              deviceName={args.name ?? ""}
+              onPick={(device, action) => {
+                onChange(`${connectorId}:${action}`);
+                // The device IS the argument. Filling it here is the
+                // whole point — otherwise you'd pick "Kitchen Lamp" and
+                // still have to retype it below.
+                onArgsChange({ ...args, name: device });
+                onPickDestructive(
+                  !!active.tools.find((t) => t.name === action)?.destructive
+                );
+              }}
+            />
+          )}
 
           {active && (
             <select
@@ -495,6 +520,167 @@ function ToolPicker({
       </button>
     </Field>
   );
+}
+
+/** Pick a device, then what to do to it.
+ *
+ * Home Assistant exposes intents (``HassTurnOff``) rather than one tool
+ * per device, so without this you'd pick "turn something off" and type
+ * the entity name by hand — having to know both HA's intent vocabulary
+ * and the exact device name. Its own ``GetLiveContext`` tool lists
+ * everything exposed to Assist, so the devices are there for the asking.
+ *
+ * The actions offered per device come from the server, already filtered
+ * to the intents this Home Assistant actually publishes — so nothing
+ * here can offer an action that would fail.
+ *
+ * Deliberately a shortcut *on top of* the tool picker, never a
+ * replacement: an unusual device, a connector without a device list, or
+ * a stale action map all fall back to choosing the tool by hand.
+ */
+function DevicePicker({
+  connectorId,
+  toolName,
+  deviceName,
+  onPick,
+}: {
+  connectorId: string;
+  toolName: string;
+  deviceName: string;
+  onPick: (device: string, action: string) => void;
+}) {
+  const { data, isLoading, isFetching, refetch, error } =
+    useConnectorDevices(connectorId);
+  const [open, setOpen] = useState(true);
+
+  if (isLoading) {
+    return (
+      <p className="text-xs text-[var(--text-muted)]">Loading devices…</p>
+    );
+  }
+  if (error) {
+    return (
+      <p className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
+        Couldn't reach the connector for its device list —{" "}
+        {apiErrorMessage(error, "unknown error")}. Pick a tool below
+        instead.
+      </p>
+    );
+  }
+  if (!data?.supported) return null;
+
+  const devices = data.devices ?? [];
+  const selected = devices.find((d) => d.name === deviceName);
+
+  return (
+    <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-1.5 flex w-full items-center justify-between text-[11px] font-medium text-[var(--text)]"
+      >
+        <span>Pick a device {devices.length ? `(${devices.length})` : ""}</span>
+        <span className="text-[var(--text-muted)]">{open ? "hide" : "show"}</span>
+      </button>
+
+      {open && (
+        <>
+          {devices.length === 0 ? (
+            // Says which of the two it is: nothing exposed, versus a
+            // response we couldn't read. They need opposite fixes.
+            <div className="text-[11px] text-[var(--text-muted)]">
+              {data.raw ? (
+                <>
+                  <p>{data.detail}</p>
+                  <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-[var(--surface-2)] p-1.5 text-[10px]">
+                    {data.raw.slice(0, 600)}
+                  </pre>
+                </>
+              ) : (
+                <p>
+                  No devices exposed. In Home Assistant, expose them under
+                  Settings → Voice assistants → Expose.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <select
+                value={deviceName}
+                onChange={(e) => {
+                  const device = devices.find((d) => d.name === e.target.value);
+                  if (device) onPick(device.name, device.actions[0] ?? toolName);
+                }}
+                className={inputClass}
+              >
+                <option value="">Choose a device…</option>
+                {devices.map((d) => (
+                  <option key={`${d.name}:${d.domain}`} value={d.name}>
+                    {d.name}
+                    {d.area ? ` — ${d.area}` : ""}
+                    {d.domain ? ` (${d.domain})` : ""}
+                  </option>
+                ))}
+              </select>
+
+              {selected && (
+                <div className="flex flex-wrap gap-1.5">
+                  {selected.actions.map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => onPick(selected.name, action)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1 text-[11px] transition",
+                        toolName === action
+                          ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                      )}
+                    >
+                      {friendlyAction(action)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)] transition hover:text-[var(--text)] disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-3 w-3", isFetching && "animate-spin")} />
+            {isFetching ? "Refreshing…" : "Refresh devices"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** "HassMediaPause" reads like an API. People pick actions, not
+ *  identifiers. */
+function friendlyAction(action: string): string {
+  const known: Record<string, string> = {
+    HassTurnOn: "Turn on",
+    HassTurnOff: "Turn off",
+    HassLightSet: "Set brightness / colour",
+    HassMediaPause: "Pause",
+    HassMediaUnpause: "Play",
+    HassMediaNext: "Next",
+    HassMediaPrevious: "Previous",
+    HassSetVolume: "Set volume",
+    HassMediaPlayerMute: "Mute",
+    HassMediaPlayerUnmute: "Unmute",
+    HassMediaSearchAndPlay: "Search and play",
+    HassClimateSetTemperature: "Set temperature",
+    HassListAddItem: "Add item",
+    HassListCompleteItem: "Complete item",
+    HassListRemoveItem: "Remove item",
+  };
+  return known[action] ?? action;
 }
 
 /** A field per argument the tool declares.

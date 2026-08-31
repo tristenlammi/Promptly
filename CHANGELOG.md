@@ -21,6 +21,27 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-08-31
+
+### Added
+- **Pick a device, then what to do to it.** Building a Home Assistant
+  command no longer means knowing HA's intent vocabulary and typing an
+  entity name by hand. Choose the connector and your devices are listed —
+  "Kitchen Lamp — Lounge Room (light)" — and picking one offers the
+  actions that make sense for it in plain English: Turn on, Turn off, Set
+  brightness. Choosing an action fills in the tool and the device for
+  you. Home Assistant already publishes this through its own
+  `GetLiveContext`, so nothing extra needs enabling.
+  - The actions offered are filtered against the intents your Home
+    Assistant actually publishes, so the list can never offer something
+    that would fail — and it stays a shortcut over the tool picker, not a
+    replacement. An unusual device, a connector with no device list, or
+    an action we haven't mapped all fall back to choosing the tool by
+    hand.
+  - If the device list can't be read, it says so and shows what came
+    back, because "no devices exposed" and "unreadable response" look
+    identical from the outside and need opposite fixes.
+
 ## [0.8.2] - 2026-08-31
 
 ### Fixed

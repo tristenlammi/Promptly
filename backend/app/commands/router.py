@@ -187,6 +187,81 @@ async def list_available_tools(
     return out
 
 
+@router.get("/tools/{connector_id}/devices")
+async def list_connector_devices(
+    connector_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The devices behind a connector, so you can pick one by name.
+
+    Home Assistant exposes intents rather than one tool per device, so
+    without this the editor can only offer "turn something off" and ask
+    you to type which thing. ``GetLiveContext`` is HA's own tool for
+    listing everything exposed to Assist — the device list is a tool
+    call away, with nothing extra to enable.
+
+    Returns ``raw`` alongside the parsed list whenever parsing finds
+    nothing, because an empty list and an unreadable response look
+    identical from the UI and need opposite fixes.
+    """
+    from app.commands.devices import (
+        LIVE_CONTEXT_TOOL,
+        actions_for,
+        parse_devices,
+        supports_devices,
+    )
+    from app.mcp.service import McpError, call_connector_tool, connectors_for_turn
+
+    # Resolved the same way the tool list is, so this can't reach a
+    # connector the caller couldn't already use.
+    connectors = await connectors_for_turn(db, user_id=user.id)
+    connector = next((c for c in connectors if c.id == connector_id), None)
+    if connector is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found"
+        )
+
+    catalog = [t.get("name", "") for t in (connector.tool_catalog or [])]
+    if not supports_devices(catalog):
+        return {
+            "supported": False,
+            "devices": [],
+            "raw": "",
+            "detail": (
+                "This connector doesn't publish a device list, so pick a "
+                "tool instead."
+            ),
+        }
+
+    try:
+        raw = await call_connector_tool(
+            db,
+            connector_id=connector.id,
+            real_tool=LIVE_CONTEXT_TOOL,
+            arguments={},
+        )
+    except McpError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    devices = parse_devices(raw)
+    return {
+        "supported": True,
+        "devices": [
+            {**d, "actions": actions_for(d["domain"], catalog)} for d in devices
+        ],
+        # Only when we failed — otherwise it's a large blob nobody reads.
+        "raw": "" if devices else raw[:4000],
+        "detail": (
+            ""
+            if devices
+            else "Couldn't read the device list from this connector."
+        ),
+    }
+
+
 @router.post("/match", response_model=CommandMatchResponse)
 async def match_command(
     body: CommandMatchRequest,

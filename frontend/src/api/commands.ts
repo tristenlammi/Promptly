@@ -113,7 +113,32 @@ export interface CommandToolSource {
   }[];
 }
 
+/** One device behind a connector, with the actions that make sense for
+ *  it — filtered to what the connector actually publishes. */
+export interface ConnectorDevice {
+  name: string;
+  domain: string;
+  area: string;
+  state: string;
+  actions: string[];
+}
+
+export interface ConnectorDevices {
+  supported: boolean;
+  devices: ConnectorDevice[];
+  /** Only populated when parsing failed, so the UI can show what came
+   *  back instead of claiming there are no devices. */
+  raw: string;
+  detail: string;
+}
+
 export const commandsApi = {
+  async devices(connectorId: string): Promise<ConnectorDevices> {
+    const { data } = await apiClient.get<ConnectorDevices>(
+      `/commands/tools/${connectorId}/devices`
+    );
+    return data;
+  },
   async tools(): Promise<CommandToolSource[]> {
     const { data } = await apiClient.get<CommandToolSource[]>(
       "/commands/tools"

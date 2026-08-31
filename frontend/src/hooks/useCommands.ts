@@ -54,6 +54,18 @@ export function useCommandTools() {
   });
 }
 
+/** Devices behind one connector. Manual-refresh like the tool list —
+ *  and only fetched once a connector is actually chosen, since it costs
+ *  a live call out to that service. */
+export function useConnectorDevices(connectorId: string | null) {
+  return useQuery({
+    queryKey: ["commands", "devices", connectorId],
+    queryFn: () => commandsApi.devices(connectorId as string),
+    enabled: !!connectorId,
+    staleTime: Infinity,
+  });
+}
+
 export function useCreateCommand() {
   const qc = useQueryClient();
   return useMutation({
