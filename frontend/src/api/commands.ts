@@ -32,6 +32,15 @@ export interface Command {
    *  the typed and spoken paths so a command can't ask in one place and
    *  not the other. */
   confirm_before_run: boolean;
+  /** Visible to everyone on this instance, read-only for them. Shares
+   *  the phrasing, not the access behind it — the server re-checks the
+   *  target against whoever runs it. */
+  shared: boolean;
+  /** False when this one reached you by being shared. Rendering only;
+   *  the server enforces edit rights regardless. */
+  owned: boolean;
+  /** Who shared it, when it isn't yours. */
+  owner_name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +55,7 @@ export interface CommandInput {
   response_template?: string | null;
   enabled?: boolean;
   confirm_before_run?: boolean;
+  shared?: boolean;
 }
 
 export interface CommandMatch {
@@ -53,6 +63,9 @@ export interface CommandMatch {
   command: Command | null;
   slots: Record<string, string>;
   needs_confirmation: boolean;
+  /** Set only on a miss: a command close enough to be worth asking
+   *  about. Offered as a question, never run automatically. */
+  did_you_mean?: Command | null;
 }
 
 export interface CommandRunResult {
@@ -132,7 +145,31 @@ export interface ConnectorDevices {
   detail: string;
 }
 
+/** One past run, as the History tab shows it. */
+export interface CommandRunLogEntry {
+  id: string;
+  /** Null once the command itself is deleted — the name is kept either
+   *  way so old entries stay readable. */
+  command_id: string | null;
+  command_name: string;
+  /** "voice", "chat" or "wyoming". Worth showing: "works when I type it,
+   *  never when I say it" is the commonest failure here. */
+  source: string;
+  ok: boolean;
+  utterance: string | null;
+  slots: Record<string, unknown>;
+  detail: string | null;
+  created_at: string;
+}
+
 export const commandsApi = {
+  async history(limit = 50): Promise<CommandRunLogEntry[]> {
+    const { data } = await apiClient.get<CommandRunLogEntry[]>(
+      "/commands/history",
+      { params: { limit } }
+    );
+    return data;
+  },
   async devices(connectorId: string): Promise<ConnectorDevices> {
     const { data } = await apiClient.get<ConnectorDevices>(
       `/commands/tools/${connectorId}/devices`
@@ -178,6 +215,10 @@ export const commandsApi = {
       confirmed?: boolean;
       /** Record the run in this chat's transcript. */
       conversationId?: string | null;
+      /** Where this came from, for history. */
+      source?: string;
+      /** What was said or typed, for history. */
+      utterance?: string | null;
     } = {}
   ): Promise<CommandRunResult> {
     const { data } = await apiClient.post<CommandRunResult>(
@@ -186,6 +227,8 @@ export const commandsApi = {
         slots: opts.slots ?? {},
         confirmed: opts.confirmed ?? false,
         conversation_id: opts.conversationId ?? null,
+        source: opts.source ?? "chat",
+        utterance: opts.utterance ?? null,
       }
     );
     return data;

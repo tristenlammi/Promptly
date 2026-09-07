@@ -22,6 +22,7 @@ from app.commands.matcher import (
     MatchCandidate,
     compile_phrase,
     match,
+    near_matches,
     normalise,
     slot_names,
 )
@@ -1261,3 +1262,136 @@ def test_devices_parse_from_the_real_home_assistant_envelope():
     # Nested attributes are not entities.
     assert "speaker" not in by_name
     assert "255" not in by_name
+
+
+# --- Slot bounds ------------------------------------------------------
+
+
+def test_slot_refuses_a_clause_it_cannot_mean():
+    """A slot holds a name, not a list of rooms."""
+    cands = [
+        MatchCandidate(command_id=1, phrases=["turn off the {room} lights"])
+    ]
+    assert match("turn off the kitchen lights", cands).slots == {
+        "room": "kitchen"
+    }
+    # "kitchen and the bathroom" fits the pattern perfectly but means two
+    # rooms; acting on one made-up entity name is worse than not acting.
+    assert match("turn off the kitchen and the bathroom lights", cands) is None
+
+
+def test_slot_does_not_swallow_a_long_run_of_words():
+    cands = [MatchCandidate(command_id=1, phrases=["play {track} now"])]
+    assert match("play one two three four five six now", cands) is None
+    assert match("play the dark side now", cands).slots == {
+        "track": "the dark side"
+    }
+
+
+# --- Near misses (questions, never actions) ---------------------------
+
+
+def test_near_match_catches_reordered_words():
+    cands = [MatchCandidate(command_id=7, phrases=["turn the lights off"])]
+    # Not a match — the matcher refuses to guess...
+    assert match("turn off the lights", cands) is None
+    # ...but it is close enough to ask about.
+    assert [cid for cid, _ in near_matches("turn off the lights", cands)] == [7]
+
+
+def test_near_match_stays_quiet_on_unrelated_speech():
+    cands = [MatchCandidate(command_id=7, phrases=["turn the lights off"])]
+    assert near_matches("what is the weather tomorrow", cands) == []
+
+
+def test_near_match_ignores_disabled_commands():
+    cands = [
+        MatchCandidate(
+            command_id=7, phrases=["turn the lights off"], enabled=False
+        )
+    ]
+    assert near_matches("turn off the lights", cands) == []
+
+
+# ------------------------------------------------------------- sharing
+
+
+async def _other_user(db):
+    from app.auth.models import User
+
+    other = User(
+        email=f"other-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"other-{uuid.uuid4().hex[:8]}",
+        password_hash="x",
+        role="user",
+    )
+    db.add(other)
+    await db.commit()
+    await db.refresh(other)
+    return other
+
+
+async def test_a_shared_command_is_visible_and_runnable_by_someone_else(
+    db, user
+):
+    """Sharing shares the *phrasing*. That's the whole promise."""
+    other = await _other_user(db)
+    await _cmd(
+        db,
+        other,
+        name="Goodnight",
+        phrases=["goodnight"],
+        body="Turning everything off.",
+        shared=True,
+    )
+
+    command, _ = await resolve(db, user.id, "goodnight")
+
+    assert command is not None and command.name == "Goodnight"
+    result = await execute(db, command, user)
+    assert result["text"] == "Turning everything off."
+
+
+async def test_sharing_does_not_share_the_access_behind_it(db, user):
+    """The capability rule outranks the share.
+
+    Someone else's automation is still someone else's — a shared command
+    pointing at it fails for you exactly as it would have without the
+    shortcut, and says so rather than doing nothing.
+    """
+    from app.tasks.models import Task
+
+    other = await _other_user(db)
+    task = Task(
+        user_id=other.id, title="Theirs", prompt="x", frequency="daily"
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    row = await _cmd(
+        db,
+        other,
+        name="Run theirs",
+        phrases=["run theirs"],
+        action_type="automation",
+        action_ref=str(task.id),
+        shared=True,
+    )
+
+    # Visible to us...
+    command, _ = await resolve(db, user.id, "run theirs")
+    assert command is not None
+
+    # ...but not runnable by us.
+    with pytest.raises(CommandError):
+        await assert_runnable(db, row, user)
+
+
+async def test_an_unshared_command_stays_invisible(db, user):
+    other = await _other_user(db)
+    await _cmd(db, other, name="Private", phrases=["private thing"])
+
+    command, _ = await resolve(db, user.id, "private thing")
+
+    assert command is None

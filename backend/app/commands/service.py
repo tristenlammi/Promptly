@@ -18,11 +18,16 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.commands.constants import SIDE_EFFECTING
-from app.commands.matcher import MatchCandidate, match
+from app.commands.matcher import (
+    MatchCandidate,
+    match,
+    near_matches,
+    slot_names,
+)
 from app.commands.models import Command
 
 logger = logging.getLogger("promptly.commands")
@@ -35,7 +40,16 @@ class CommandError(Exception):
 async def load_commands(
     db: AsyncSession, user_id, *, action_type: str | None = None
 ) -> list[Command]:
-    stmt = select(Command).where(Command.user_id == user_id)
+    """Everything this user can say: their own, plus anything shared.
+
+    Shared rows are included here rather than in a separate list so the
+    matcher, the ``/`` menu and the library all see the same set. A
+    shared command that matched by voice but was missing from the menu
+    would be the worst of both.
+    """
+    stmt = select(Command).where(
+        or_(Command.user_id == user_id, Command.shared.is_(True))
+    )
     if action_type:
         stmt = stmt.where(Command.action_type == action_type)
     rows = (
@@ -64,6 +78,34 @@ async def resolve(db: AsyncSession, user_id, utterance: str):
         return None, {}
     by_id = {r.id: r for r in rows}
     return by_id.get(result.command_id), result.slots
+
+
+async def nearest(db: AsyncSession, user_id, utterance: str, limit: int = 1):
+    """Commands that nearly matched — for asking, never for acting.
+
+    The matcher's refusal to guess is only defensible if a miss can be
+    explained. This turns "nothing happened" into "did you mean Kitchen
+    Lamp Off?", which is the difference between a system you can learn
+    and one you can only be surprised by.
+    """
+    rows = await load_commands(db, user_id)
+    candidates = [
+        MatchCandidate(
+            command_id=r.id, phrases=list(r.phrases or []), enabled=r.enabled
+        )
+        for r in rows
+        # Slotted commands are excluded on purpose. A suggestion is only
+        # useful if saying "yes" can run it, and we have no slot values
+        # from an utterance that didn't match — "did you mean turn off
+        # the {room} lights?" could only ever run with no room.
+        if r.phrases and not any(slot_names(p) for p in r.phrases)
+    ]
+    by_id = {r.id: r for r in rows}
+    return [
+        by_id[cid]
+        for cid, _score in near_matches(utterance, candidates)[:limit]
+        if cid in by_id
+    ]
 
 
 async def assert_runnable(db: AsyncSession, command: Command, user) -> None:

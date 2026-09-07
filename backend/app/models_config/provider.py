@@ -801,17 +801,19 @@ def _detect_vision_by_id(provider_type: str, model_id: str) -> bool:
         )
         return any(k in mid for k in keywords)
     if provider_type == "deepseek":
-        # DeepSeek's hosted ``api.deepseek.com`` chat-completions
-        # endpoint is text-only as of 2026-05 — the V4 family (and the
-        # legacy ``deepseek-chat`` / ``deepseek-reasoner``) do not
-        # accept image content parts and silently drop them. Vision
-        # only lights up for the open-weight ``deepseek-vl*`` family,
-        # which an operator would typically host themselves behind
-        # vLLM. We surface the badge regardless of where the model is
-        # actually served so the future case (DeepSeek adds vision to
-        # the hosted API, or the operator points the deepseek provider
-        # at their own VL2 deployment) just works.
-        return "deepseek-vl" in mid or "vl2" in mid
+        # Most of DeepSeek's hosted line is still text-only: the plain V4
+        # family and the legacy ``deepseek-chat`` / ``deepseek-reasoner``
+        # ids don't accept image content parts and silently drop them.
+        #
+        # ``deepseek-v4-flash-vision-exp`` (2026-08-21) is the exception —
+        # it takes images on the same ``/chat/completions`` endpoint in
+        # the usual OpenAI ``image_url`` shape, so nothing but this flag
+        # needed changing. Verified against api-docs.deepseek.com/guides/
+        # vision. Matching on ``vision`` rather than that exact id so the
+        # non-experimental release doesn't land back here; the open-weight
+        # ``deepseek-vl*`` family stays matched for operators pointing
+        # this provider at their own vLLM deployment.
+        return "vision" in mid or "deepseek-vl" in mid or "vl2" in mid
     # openrouter / openai_compatible / anything else → let the richer
     # catalog logic decide (openrouter) or default off.
     return False

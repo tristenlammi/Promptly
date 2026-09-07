@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarClock,
+  Check,
   Copy,
+  History,
   LayoutGrid,
   Globe,
   KeyRound,
@@ -11,6 +13,7 @@ import {
   Play,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 
 import {
@@ -29,6 +32,7 @@ import { CommandList } from "@/components/commands/CommandList";
 import {
   duplicatePhrases,
   filterByType,
+  useCommandHistory,
   useCommands,
 } from "@/hooks/useCommands";
 import type { Command, CommandActionType } from "@/api/commands";
@@ -43,16 +47,30 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
-type Tab = "prompts" | "commands" | "scheduled";
+type Tab = "prompts" | "commands" | "scheduled" | "history";
 
 /** The three tabs are filtered views of ONE library plus the scheduled
  *  flows — not three features. What separates them for a user is simply
  *  what starts the thing: Scheduled runs itself; Prompts and Commands
  *  are started by you, by typing or (later) by speaking. */
-const TABS: { key: Tab; label: string; hint: string }[] = [
+const TABS: {
+  key: Tab;
+  label: string;
+  hint: string;
+  quiet?: boolean;
+}[] = [
   { key: "prompts", label: "Prompts", hint: "Text you insert with /" },
   { key: "commands", label: "Commands", hint: "Things Promptly does when you ask" },
   { key: "scheduled", label: "Scheduled", hint: "Runs on its own" },
+  // Set apart deliberately — italic and dimmed. History is a record, not
+  // a place you build things, and it shouldn't compete with the three
+  // tabs that are actually the feature.
+  {
+    key: "history",
+    label: "History",
+    hint: "What has run recently",
+    quiet: true,
+  },
 ];
 
 export function TasksPage() {
@@ -161,7 +179,7 @@ export function TasksPage() {
         subtitle={TABS.find((t) => t.key === tab)?.hint}
         actions={
           <div className="flex items-center gap-2">
-            {tab === "scheduled" ? (
+            {tab === "history" ? null : tab === "scheduled" ? (
               <>
                 <Button
                   variant="ghost"
@@ -206,9 +224,15 @@ export function TasksPage() {
                 onClick={() => setTab(t.key)}
                 className={cn(
                   "rounded-md px-3 py-1.5 text-sm font-medium transition",
+                  t.quiet && "italic",
                   tab === t.key
                     ? "bg-[var(--surface)] text-[var(--text)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                    : t.quiet
+                      // Dimmed via opacity rather than a colour token —
+                      // there is no subtler text colour in the palette,
+                      // and inventing one for a single tab isn't worth it.
+                      ? "text-[var(--text-muted)] opacity-60 hover:opacity-100"
+                      : "text-[var(--text-muted)] hover:text-[var(--text)]"
                 )}
               >
                 {t.label}
@@ -216,7 +240,9 @@ export function TasksPage() {
             ))}
           </div>
 
-          {tab !== "scheduled" && (
+          {tab === "history" && <HistoryTabBody />}
+
+          {tab !== "scheduled" && tab !== "history" && (
             <CommandsTabBody
               tab={tab}
               loading={commandsLoading}
@@ -438,6 +464,86 @@ export function TasksPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** What has run, most recent first.
+ *
+ * The one thing this has to make legible is *why* something did or
+ * didn't do what was expected — so the utterance sits next to the
+ * command name and the source, rather than the run being reduced to a
+ * timestamp and a tick. "Works when I type it, never when I say it" is
+ * a diagnosis you can reach from this list and nowhere else.
+ */
+function HistoryTabBody() {
+  const { data, isLoading } = useCommandHistory();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data?.length) {
+    return (
+      <EmptyState
+        icon={<History className="h-6 w-6" />}
+        title="Nothing has run yet"
+        description="Prompts and commands you run — by typing or by voice — show up here."
+      />
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
+      {data.map((run) => (
+        <li key={run.id} className="flex items-start gap-3 px-4 py-3">
+          <span className="mt-0.5 shrink-0" title={run.ok ? "Ran" : "Failed"}>
+            {run.ok ? (
+              <Check className="h-4 w-4 text-[var(--success,#16a34a)]" />
+            ) : (
+              <X className="h-4 w-4 text-[var(--danger,#dc2626)]" />
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <span className="truncate text-sm font-medium text-[var(--text)]">
+                {run.command_name}
+              </span>
+              <span className="text-xs text-[var(--text-muted)]">
+                {run.source === "voice" ? "by voice" : "typed"}
+              </span>
+            </div>
+            {run.utterance && (
+              <p className="mt-0.5 truncate text-xs italic text-[var(--text-muted)]">
+                “{run.utterance}”
+              </p>
+            )}
+            {run.detail && (
+              <p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-muted)]">
+                {run.detail}
+              </p>
+            )}
+          </div>
+          <time
+            className="shrink-0 text-xs text-[var(--text-muted)]"
+            dateTime={run.created_at}
+            title={new Date(run.created_at).toLocaleString()}
+          >
+            {new Date(run.created_at).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+          </time>
+        </li>
+      ))}
+    </ul>
   );
 }
 

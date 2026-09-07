@@ -60,6 +60,15 @@ type Phase =
  *  no, so this stays a small closed list rather than a fuzzy guess. */
 const AFFIRMATIVE = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|confirm|affirmative)/i;
 
+/** How long a spoken "shall I?" stays answerable.
+ *
+ * Without this the question waits forever: ask "Open garage?", walk
+ * away, and the next thing said — minutes later, about something else
+ * entirely — is consumed as the answer. That swallows a real request and,
+ * worse, lets a stray "yes" run something nobody was thinking about. A
+ * question you've forgotten was asked is not a question you can answer. */
+const PENDING_TTL_MS = 20_000;
+
 export function VoiceModeOverlay({
   onClose,
   onSend,
@@ -95,6 +104,11 @@ export function VoiceModeOverlay({
   const pendingRef = useRef<{
     command: VoiceCommand;
     slots: Record<string, string>;
+    askedAt: number;
+    /** A "did you mean…?" rather than a guarded command. Declining one
+     *  should still let the model answer what was actually asked. */
+    suggestion?: boolean;
+    utterance?: string;
   } | null>(null);
   const [runningCommand, setRunningCommand] = useState(false);
   // Live mic level → drive the orb halo + waveform directly via refs (no
@@ -162,12 +176,14 @@ export function VoiceModeOverlay({
    * toast, and a voice turn that goes quiet is indistinguishable from
    * one that didn't hear you. */
   const runMatched = useCallback(
-    async (command: VoiceCommand, slots: Record<string, string>) => {
+    async (command: VoiceCommand, slots: Record<string, string>, utterance?: string) => {
       setRunningCommand(true);
       try {
         const result = await commandsApi.run(command.id, {
           slots,
           confirmed: true,
+          source: "voice",
+          utterance: utterance ?? null,
         });
         say(
           result.spoken ||
@@ -199,16 +215,33 @@ export function VoiceModeOverlay({
       // instruction. Anything that isn't clearly affirmative cancels —
       // the safe reading of an ambiguous answer to "shall I open the
       // garage door?" is no.
+      //
+      // Unless it went stale. A question asked twenty seconds ago has
+      // been forgotten, and treating the next thing said as its answer
+      // both swallows a real request and risks running something off an
+      // unrelated "yes".
       const pending = pendingRef.current;
-      if (pending) {
+      const stale = pending && Date.now() - pending.askedAt > PENDING_TTL_MS;
+      // Set when this turn is a "no" to a suggestion: the fast path is
+      // skipped so we don't re-suggest the same command in a loop.
+      let declinedSuggestion = false;
+      if (pending && !stale) {
         pendingRef.current = null;
         setPendingCommand(null);
         if (AFFIRMATIVE.test(t)) {
-          void runMatched(pending.command, pending.slots);
-        } else {
-          say("Cancelled.");
+          void runMatched(pending.command, pending.slots, pending.utterance ?? t);
+          return;
         }
-        return;
+        if (!pending.suggestion) {
+          say("Cancelled.");
+          return;
+        }
+        // They declined a guess, not a command — so answer what they
+        // actually said instead of saying "cancelled" at them.
+        declinedSuggestion = true;
+      } else if (stale) {
+        pendingRef.current = null;
+        setPendingCommand(null);
       }
 
       setUserText(t);
@@ -228,18 +261,42 @@ export function VoiceModeOverlay({
         // voice turn that silently does nothing is the worst outcome
         // when you're across the room and can't see a screen.
         try {
-          const found = await commandsApi.match(t);
-          if (found.matched && found.command) {
+          const found = declinedSuggestion ? null : await commandsApi.match(t);
+          if (found?.matched && found.command) {
             const command = found.command;
             if (found.needs_confirmation) {
               // Per-command and off by default. Asked out loud, because
               // a dialog is no use to someone across the room.
-              pendingRef.current = { command, slots: found.slots };
+              pendingRef.current = {
+                command,
+                slots: found.slots,
+                askedAt: Date.now(),
+                utterance: t,
+              };
               setPendingCommand({ command, slots: found.slots });
               say(`${command.name}? Say yes to run it.`);
               return;
             }
-            void runMatched(command, found.slots);
+            void runMatched(command, found.slots, t);
+            return;
+          }
+          // Nothing matched, but something was close. The matcher won't
+          // guess — so ask instead of leaving the user wondering why a
+          // command they're sure they set up did nothing.
+          if (found && !found.matched && found.did_you_mean) {
+            const command = found.did_you_mean;
+            pendingRef.current = {
+              command,
+              slots: {},
+              askedAt: Date.now(),
+              suggestion: true,
+              utterance: t,
+            };
+            setPendingCommand({ command, slots: {} });
+            // Same wording either way: "yes" here is the confirmation,
+            // so a guarded command isn't run on a weaker question than
+            // it would normally get.
+            say(`Did you mean ${command.name}? Say yes to run it.`);
             return;
           }
         } catch {

@@ -21,6 +21,30 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-09-08
+
+### Added
+
+- Commands: a **History** tab in Automations showing what has run recently — the
+  command, what was actually said or typed, whether it came by voice or typing,
+  and whether it worked. Entries survive the command being renamed or deleted.
+- Commands: **share a command with everyone on this instance** (read-only for
+  everyone else). Sharing shares the phrasing, not the access — whatever the
+  command points at is still checked against whoever runs it.
+- Voice: **"Did you mean…?"** — when nothing matches but a command is close, it
+  asks instead of going silent. Only ever a question; it never runs on a guess.
+
+### Fixed
+
+- Models: DeepSeek's `deepseek-v4-flash-vision-exp` is now detected as
+  vision-capable, so attaching an image no longer shows the "this model can't
+  see images" warning. Refresh the provider's model list to pick it up.
+- Voice: an unanswered spoken confirmation now expires after 20 seconds instead
+  of waiting forever and consuming the next unrelated thing you say.
+- Commands: a phrase slot no longer swallows a whole clause — "turn off the
+  kitchen and the bathroom lights" no longer matches "turn off the {room}
+  lights" with a room name that can't exist.
+
 ## [0.8.5] - 2026-08-31
 
 ### Changed

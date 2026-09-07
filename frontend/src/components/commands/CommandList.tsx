@@ -1,4 +1,4 @@
-import { AlertTriangle, Pencil, Play, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Pencil, Play, Trash2, Users, Zap } from "lucide-react";
 
 import { isSideEffecting, type Command } from "@/api/commands";
 import { Button } from "@/components/shared/Button";
@@ -102,6 +102,27 @@ export function CommandList({
                       Off
                     </span>
                   )}
+                  {command.owned === false ? (
+                    <span
+                      title="Shared with you — you can run it, only its owner can change it"
+                      className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]"
+                    >
+                      <Users className="h-2.5 w-2.5" />
+                      {command.owner_name
+                        ? `from ${command.owner_name}`
+                        : "shared with you"}
+                    </span>
+                  ) : (
+                    command.shared && (
+                      <span
+                        title="Everyone here can say and run this"
+                        className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]"
+                      >
+                        <Users className="h-2.5 w-2.5" />
+                        Shared
+                      </span>
+                    )
+                  )}
                 </div>
 
                 {command.action_type === "prompt" && command.body && (
@@ -157,22 +178,26 @@ export function CommandList({
                     Run
                   </Button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => onEdit(command)}
-                  aria-label={`Edit ${command.name}`}
-                  className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onDelete(command)}
-                  aria-label={`Delete ${command.name}`}
-                  className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-red-500"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                {command.owned !== false && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onEdit(command)}
+                      aria-label={`Edit ${command.name}`}
+                      className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onDelete(command)}
+                      aria-label={`Delete ${command.name}`}
+                      className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-red-500"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </li>

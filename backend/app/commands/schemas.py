@@ -47,6 +47,9 @@ class CommandBase(BaseModel):
     response_template: str | None = Field(default=None, max_length=280)
     enabled: bool = True
     confirm_before_run: bool = False
+    # Visible to everyone on the instance, read-only. Sharing a command
+    # shares the phrasing, not the access behind it.
+    shared: bool = False
 
     @field_validator("phrases")
     @classmethod
@@ -77,6 +80,7 @@ class CommandUpdate(BaseModel):
     response_template: str | None = Field(default=None, max_length=280)
     enabled: bool | None = None
     confirm_before_run: bool | None = None
+    shared: bool | None = None
 
     @field_validator("phrases")
     @classmethod
@@ -93,6 +97,13 @@ class CommandUpdate(BaseModel):
 
 class CommandResponse(CommandBase):
     model_config = ConfigDict(from_attributes=True)
+
+    # False when this row belongs to someone else and reached you by
+    # being shared. The client renders those read-only; the server
+    # enforces it regardless.
+    owned: bool = True
+    # Who shared it, for the "from Ana" line. Empty for your own.
+    owner_name: str | None = None
 
     id: uuid.UUID
     created_at: datetime
@@ -117,6 +128,10 @@ class CommandMatchResponse(BaseModel):
     command: CommandResponse | None = None
     slots: dict[str, str] = Field(default_factory=dict)
     needs_confirmation: bool = False
+    # Populated only on a miss: something close enough to be worth
+    # ASKING about. Never acted on automatically — the point is to turn
+    # a silent miss into a question.
+    did_you_mean: CommandResponse | None = None
 
 
 class CommandRunRequest(BaseModel):
@@ -129,6 +144,13 @@ class CommandRunRequest(BaseModel):
     # because commands also run from the library, where there's no
     # conversation to write to.
     conversation_id: uuid.UUID | None = None
+    # Where the run came from, for the history tab. "works when typed,
+    # never when spoken" is the commonest way this feature fails, and
+    # that's invisible unless the entry point is recorded.
+    source: str = "chat"
+    # What was actually said or typed. The other half of a mis-match
+    # report — without it, history says a command ran but not why.
+    utterance: str | None = None
 
 
 class CommandRunResponse(BaseModel):
@@ -144,3 +166,21 @@ class CommandRunResponse(BaseModel):
     # The transcript message this run was recorded as, when it ran from
     # a chat. The client appends it rather than refetching the thread.
     message: dict | None = None
+
+
+class CommandRunLogEntry(BaseModel):
+    """One past run, as history shows it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    # Null once the command itself is deleted; the name is kept either
+    # way so old rows stay readable.
+    command_id: uuid.UUID | None = None
+    command_name: str
+    source: str
+    ok: bool
+    utterance: str | None = None
+    slots: dict[str, Any] = Field(default_factory=dict)
+    detail: str | None = None
+    created_at: datetime

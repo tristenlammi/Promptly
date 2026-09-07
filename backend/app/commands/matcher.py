@@ -24,7 +24,10 @@ from typing import Iterable
 
 from app.commands.constants import (
     LEADING_FILLER,
+    MAX_SLOT_WORDS,
     MAX_SLOTS_PER_PHRASE,
+    NEAR_MATCH_THRESHOLD,
+    SLOT_CONNECTIVES,
     SLOT_NAME_MAX,
     TRAILING_FILLER,
 )
@@ -161,7 +164,13 @@ def compile_phrase(phrase: str) -> re.Pattern[str] | None:
     cursor = 0
     for match in _SLOT_RE.finditer(normalised):
         out.append(re.escape(normalised[cursor : match.start()]))
-        out.append(f"(?P<{match.group(1).lower()}>.+?)")
+        # Bounded to a handful of words. ``.+?`` let one slot swallow a
+        # whole clause — "kitchen and the bathroom" arriving as a
+        # single room name — which reaches Home Assistant as an
+        # entity that cannot exist.
+        out.append(
+            rf"(?P<{match.group(1).lower()}>\S+(?:\s+\S+){{0,{MAX_SLOT_WORDS - 1}}})"
+        )
         cursor = match.end()
     out.append(re.escape(normalised[cursor:]))
     out.append("$")
@@ -169,6 +178,23 @@ def compile_phrase(phrase: str) -> re.Pattern[str] | None:
         return re.compile("".join(out))
     except re.error:
         return None
+
+
+def _slots_are_sane(captured: dict[str, str | None]) -> bool:
+    """Refuse a capture that is obviously a list rather than a name.
+
+    "turn off the kitchen and the bathroom lights" fits the shape of
+    "turn off the {room} lights" perfectly — the pattern can't tell the
+    difference, but the *meaning* is two rooms, and acting on one made-up
+    name is worse than not acting.
+    """
+    for value in captured.values():
+        if not value:
+            continue
+        padded = f" {value.strip()} "
+        if any(word in padded for word in SLOT_CONNECTIVES):
+            return False
+    return True
 
 
 @dataclass
@@ -187,6 +213,51 @@ class MatchResult:
     slots: dict[str, str] = field(default_factory=dict)
     # ``exact`` beats ``slot``; used to break ties before refusing.
     kind: str = "exact"
+
+
+def near_matches(
+    utterance: str, candidates: Iterable[MatchCandidate]
+) -> list[tuple[object, float]]:
+    """Commands that *nearly* matched, best first.
+
+    This never causes an action. Its only job is to turn a silent miss
+    into a question — "did you mean Kitchen Lamp Off?" — because the
+    matcher's refusal to guess is only defensible if the user can find
+    out why nothing happened.
+
+    Scored by token overlap rather than edit distance, so the most
+    common near miss — the same words in a different order — scores
+    1.0. That's the case worth catching: "turn off the lights" against a
+    phrase written "turn the lights off".
+
+    The threshold is high on purpose. A wrong suggestion still hijacks a
+    turn the model should have answered, so this errs toward saying
+    nothing.
+    """
+    said = set(normalise(utterance).split())
+    if not said:
+        return []
+
+    scored: dict[object, float] = {}
+    for cand in candidates:
+        if not cand.enabled:
+            continue
+        for phrase in cand.phrases or []:
+            # Slot placeholders aren't words the user said; comparing
+            # against "{room}" would penalise every slotted phrase.
+            words = set(
+                w
+                for w in normalise(_SLOT_RE.sub(" ", phrase)).split()
+                if w
+            )
+            if not words:
+                continue
+            overlap = len(said & words) / len(said | words)
+            if overlap >= NEAR_MATCH_THRESHOLD:
+                best = scored.get(cand.command_id, 0.0)
+                scored[cand.command_id] = max(best, overlap)
+
+    return sorted(scored.items(), key=lambda pair: -pair[1])
 
 
 def match(
@@ -221,7 +292,7 @@ def match(
                     )
                 continue
             found = pattern.match(said)
-            if found:
+            if found and _slots_are_sane(found.groupdict()):
                 slotted.append(
                     MatchResult(
                         command_id=cand.command_id,

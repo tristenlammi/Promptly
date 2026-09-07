@@ -65,6 +65,7 @@ export function CommandEditorModal({
             response_template: command.response_template,
             enabled: command.enabled,
             confirm_before_run: command.confirm_before_run,
+            shared: command.shared,
           }
         : {
             name: "",
@@ -347,6 +348,25 @@ export function CommandEditorModal({
             </span>
           </label>
         )}
+
+        <label className="flex items-start gap-2.5 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={!!form.shared}
+            onChange={(e) => setForm({ ...form, shared: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm text-[var(--text)]">
+              Share with everyone here
+            </span>
+            <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+              Everyone on this instance can say it and run it; only you can
+              change it. It shares the phrasing, not access — whatever it
+              points at is still checked against whoever runs it.
+            </span>
+          </span>
+        </label>
 
         {isSideEffecting(actionType) && (
           <Field label="Spoken reply" hint="Optional — keeps it model-free and instant">

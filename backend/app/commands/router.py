@@ -22,12 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.commands.constants import ACTION_TYPES, MAX_COMMANDS_PER_USER
-from app.commands.models import Command
+from app.commands.models import Command, CommandRun
 from app.commands.schemas import (
     CommandCreate,
     CommandMatchRequest,
     CommandMatchResponse,
     CommandResponse,
+    CommandRunLogEntry,
     CommandRunRequest,
     CommandRunResponse,
     CommandUpdate,
@@ -36,6 +37,7 @@ from app.commands.service import (
     CommandError,
     execute,
     load_commands,
+    nearest,
     needs_confirmation,
     resolve,
 )
@@ -57,6 +59,51 @@ async def _get_owned(
     return row
 
 
+async def _get_runnable(
+    command_id: uuid.UUID, user: User, db: AsyncSession
+) -> Command:
+    """Yours, or shared with you. Editing still requires ownership.
+
+    Safe to widen here and not on PATCH/DELETE because running is where
+    the capability rule bites: ``assert_runnable`` re-checks the target
+    against *this* caller, so a shared command grants a phrasing and
+    nothing else.
+    """
+    row = await db.get(Command, command_id)
+    if row is None or (row.user_id != user.id and not row.shared):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Command not found"
+        )
+    return row
+
+
+async def _as_responses(
+    db: AsyncSession, rows: list[Command], user: User
+) -> list[CommandResponse]:
+    """Attach ownership to each row.
+
+    Shared commands arrive in the same list as your own, so the client
+    needs to know which ones it may edit. The server enforces this
+    independently — ``owned`` is for rendering, not for permission.
+    """
+    foreign = {r.user_id for r in rows if r.user_id != user.id}
+    names: dict[uuid.UUID, str] = {}
+    if foreign:
+        found = (
+            await db.execute(
+                select(User.id, User.username).where(User.id.in_(foreign))
+            )
+        ).all()
+        names = {uid: username for uid, username in found}
+    out: list[CommandResponse] = []
+    for row in rows:
+        item = CommandResponse.model_validate(row)
+        item.owned = row.user_id == user.id
+        item.owner_name = None if item.owned else names.get(row.user_id)
+        out.append(item)
+    return out
+
+
 @router.get("", response_model=list[CommandResponse])
 async def list_commands(
     action_type: str | None = Query(
@@ -64,13 +111,14 @@ async def list_commands(
     ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[Command]:
+) -> list[CommandResponse]:
     if action_type is not None and action_type not in ACTION_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unknown action type: {action_type}",
         )
-    return await load_commands(db, user.id, action_type=action_type)
+    rows = await load_commands(db, user.id, action_type=action_type)
+    return await _as_responses(db, rows, user)
 
 
 @router.post(
@@ -276,13 +324,41 @@ async def match_command(
     """
     command, slots = await resolve(db, user.id, body.utterance)
     if command is None:
-        return CommandMatchResponse(matched=False)
+        close = await nearest(db, user.id, body.utterance)
+        return CommandMatchResponse(
+            matched=False,
+            did_you_mean=(
+                CommandResponse.model_validate(close[0]) if close else None
+            ),
+        )
     return CommandMatchResponse(
         matched=True,
         command=CommandResponse.model_validate(command),
         slots=slots,
         needs_confirmation=needs_confirmation(command),
     )
+
+
+@router.get("/history", response_model=list[CommandRunLogEntry])
+async def command_history(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[CommandRunLogEntry]:
+    """What ran, most recent first.
+
+    Declared before ``/{command_id}`` routes would shadow it — "history"
+    is not a UUID, but the path parameter would still claim it and 422.
+    """
+    rows = (
+        await db.execute(
+            select(CommandRun)
+            .where(CommandRun.user_id == user.id)
+            .order_by(CommandRun.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [CommandRunLogEntry.model_validate(r) for r in rows]
 
 
 @router.post("/{command_id}/run", response_model=CommandRunResponse)
@@ -292,7 +368,7 @@ async def run_command(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CommandRunResponse:
-    row = await _get_owned(command_id, user, db)
+    row = await _get_runnable(command_id, user, db)
 
     if needs_confirmation(row) and not body.confirmed:
         # 409 rather than 400: the request is well-formed, the state
@@ -312,8 +388,8 @@ async def run_command(
         message = await _record_in_conversation(
             db, row, user, body.conversation_id, ok=False, detail=str(exc)
         )
-        if message is not None:
-            await db.commit()
+        _log_run(db, row, user, body, ok=False, detail=str(exc))
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
@@ -327,14 +403,44 @@ async def run_command(
     message = await _record_in_conversation(
         db, row, user, body.conversation_id, ok=True, detail=summary
     )
+    _log_run(db, row, user, body, ok=True, detail=summary)
+    await db.commit()
     if message is not None:
-        await db.commit()
         await db.refresh(message)
 
     return CommandRunResponse(
         **result,
         spoken=spoken,
         message=_message_payload(message) if message is not None else None,
+    )
+
+
+def _log_run(
+    db: AsyncSession,
+    row: Command,
+    user: User,
+    body: CommandRunRequest,
+    *,
+    ok: bool,
+    detail: str,
+) -> None:
+    """Add this run to history.
+
+    The command *name* is copied rather than joined so the entry still
+    reads correctly after a rename or a delete — history that rewrites
+    itself is worse than no history.
+    """
+    db.add(
+        CommandRun(
+            user_id=user.id,
+            command_id=row.id,
+            command_name=row.name[:120],
+            source=(body.source or "chat")[:16],
+            ok=ok,
+            utterance=(body.utterance or None) and body.utterance[:500],
+            slots=dict(body.slots or {}),
+            detail=(detail or "")[:500] or None,
+        )
     )
 
 

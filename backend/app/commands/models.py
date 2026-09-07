@@ -16,7 +16,15 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -89,8 +97,25 @@ class Command(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # Share with everyone on this instance. Read-only for them: they can
+    # see it, say it and run it, but only the owner can change it.
+    #
+    # Safe because of the capability rule — the *target* is re-checked
+    # against whoever is running, so a shared command is a shared
+    # phrasing, not shared access. Someone else's "run the backup flow"
+    # fails for them exactly as it would have without the shortcut.
+    #
+    # Instance-wide rather than a per-user share list on purpose: this is
+    # a household or a small team, where "everyone can say goodnight" is
+    # the actual requirement, and a share table would be a permissions
+    # system nobody asked for.
+    shared: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     __table_args__ = (
         Index("ix_commands_user_action", "user_id", "action_type"),
+        Index("ix_commands_shared", "shared"),
     )
 
     @property
@@ -101,3 +126,60 @@ class Command(UUIDPKMixin, TimestampMixin, Base):
 
     def __repr__(self) -> str:
         return f"<Command id={self.id} name={self.name!r} {self.action_type}>"
+
+
+class CommandRun(UUIDPKMixin, Base):
+    """One time a command actually ran, kept so it can be looked back at.
+
+    History exists because the matcher deliberately refuses to guess. A
+    command that didn't fire and a command that fired and failed look
+    identical from across the room, and a spoken "that didn't work" is
+    gone the moment it's said. This is the record you check afterwards.
+
+    ``command_id`` is nullable on purpose: deleting a command shouldn't
+    rewrite the past, so the row survives with its name copied in.
+    """
+
+    __tablename__ = "command_runs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    command_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("commands.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Copied rather than joined, so history reads correctly after a
+    # command is renamed or deleted.
+    command_name: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    # Where it came from: "voice", "chat" or "wyoming". Worth keeping
+    # separate — "works when typed, never when spoken" is the single most
+    # common way this feature goes wrong, and it's invisible without this.
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="chat", server_default="chat"
+    )
+
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # What was said or typed, when we know it, plus any slot captures.
+    # The utterance is the other half of a mis-matching bug report.
+    utterance: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    slots: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+
+    # The spoken/shown summary, or the error. Capped at the same width as
+    # a response template.
+    detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[Any] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_command_runs_user_created", "user_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CommandRun {self.command_name!r} ok={self.ok}>"

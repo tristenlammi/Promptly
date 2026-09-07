@@ -26,6 +26,32 @@ MAX_BODY_CHARS: Final[int] = 20_000
 # types, no defaults, no regex — because a phrase a user can't read back
 # at a glance is a phrase they can't debug when it stops matching.
 MAX_SLOTS_PER_PHRASE: Final[int] = 3
+
+# How many words a single slot may swallow. Unbounded, "turn off the
+# {room} lights" happily captures "kitchen and the bathroom" as one room
+# and posts that to Home Assistant as an entity name. A slot is meant to
+# hold a name, not a clause.
+MAX_SLOT_WORDS: Final[int] = 4
+
+# Words that mean the user asked for more than one thing. A slot
+# spanning one of these has captured a list, and sending a list where a
+# name belongs is exactly the quiet nonsense the matcher exists to
+# refuse.
+SLOT_CONNECTIVES: Final[tuple[str, ...]] = (
+    " and ",
+    " or ",
+    " then ",
+    " plus ",
+    " also ",
+)
+
+# How close an utterance must be to a phrase before we offer it as
+# "did you mean…". Deliberately high: this only ever produces a
+# QUESTION, never an action, but a wrong suggestion still hijacks a turn
+# the model should have answered. Word-order differences — the common
+# near miss — score 1.0, so this catches them without reaching for
+# anything loose.
+NEAR_MATCH_THRESHOLD: Final[float] = 0.72
 SLOT_NAME_MAX: Final[int] = 32
 
 # Filler stripped before matching, so "Promptly, please turn the lights

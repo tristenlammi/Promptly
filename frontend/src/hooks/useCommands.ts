@@ -66,6 +66,18 @@ export function useConnectorDevices(connectorId: string | null) {
   });
 }
 
+/** Past runs. History is a record, not a live view — refetched when the
+ *  tab is opened rather than polled, since nothing arrives here except
+ *  by the user's own action. */
+export function useCommandHistory(enabled = true) {
+  return useQuery({
+    queryKey: ["commands", "history"],
+    queryFn: () => commandsApi.history(),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 export function useCreateCommand() {
   const qc = useQueryClient();
   return useMutation({
@@ -92,6 +104,7 @@ export function useDeleteCommand() {
 }
 
 export function useRunCommand() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
       id,
@@ -104,6 +117,10 @@ export function useRunCommand() {
       confirmed?: boolean;
       conversationId?: string | null;
     }) => commandsApi.run(id, { slots, confirmed, conversationId }),
+    // A run the History tab doesn't show reads as a run that didn't
+    // happen, which is the exact confusion history exists to remove.
+    onSettled: () =>
+      qc.invalidateQueries({ queryKey: ["commands", "history"] }),
   });
 }
 
