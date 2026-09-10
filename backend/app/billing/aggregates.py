@@ -19,8 +19,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import (
+    AnalyticsFeedbackRow,
     AnalyticsModelRow,
     AnalyticsTimeseriesPoint,
+    FeedbackNoteRow,
 )
 from app.billing.models import UsageDaily
 from app.chat.models import Conversation, Message
@@ -136,6 +138,97 @@ async def by_model(
             cost_usd_window=micros_to_usd(r[4]),
         )
         for r in rows
+    ]
+
+
+async def feedback_by_model(
+    db: AsyncSession,
+    *,
+    start: datetime,
+) -> list[AnalyticsFeedbackRow]:
+    """Thumbs up / down per model over the window.
+
+    Grouped by ``messages.model_id`` rather than the conversation's,
+    because the rating is about *this reply*: a conversation's model can
+    change mid-thread, and each regenerated sibling stamps its own. Old
+    rows predating that column fall back to the conversation's model so
+    they land somewhere honest rather than under "unknown".
+
+    Ordered worst-first — the whole point of the screen is to surface
+    the model that's letting people down, and that shouldn't be
+    something you scan a table to find. Ties break on volume so a
+    single angry rating doesn't outrank a sustained problem.
+    """
+    model = func.coalesce(Message.model_id, Conversation.model_id, "unknown")
+    ups = func.coalesce(func.sum(case((Message.feedback == "up", 1), else_=0)), 0)
+    downs = func.coalesce(
+        func.sum(case((Message.feedback == "down", 1), else_=0)), 0
+    )
+    stmt = (
+        select(model, ups, downs)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Message.created_at >= start,
+            Message.feedback.is_not(None),
+        )
+        .group_by(model)
+    )
+
+    out: list[AnalyticsFeedbackRow] = []
+    for raw_model, up, down in (await db.execute(stmt)).all():
+        up, down = int(up or 0), int(down or 0)
+        rated = up + down
+        if rated == 0:
+            # Only reachable if feedback holds some third value. Skip
+            # rather than divide by zero.
+            continue
+        out.append(
+            AnalyticsFeedbackRow(
+                model_id=str(raw_model),
+                up=up,
+                down=down,
+                rated=rated,
+                down_rate=down / rated,
+            )
+        )
+    out.sort(key=lambda r: (-r.down_rate, -r.rated))
+    return out
+
+
+async def feedback_notes(
+    db: AsyncSession,
+    *,
+    start: datetime,
+    limit: int = 50,
+) -> list[FeedbackNoteRow]:
+    """Recent thumbs-down that came with a written note, newest first.
+
+    The counts say *which* model is failing; only these say *how*. A
+    rate with no examples tells you to switch models without ever
+    telling you what was wrong, which is how you end up switching to
+    one that fails the same way.
+    """
+    model = func.coalesce(Message.model_id, Conversation.model_id)
+    stmt = (
+        select(Message.id, model, Message.feedback_reason, Message.created_at)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Message.created_at >= start,
+            Message.feedback == "down",
+            Message.feedback_reason.is_not(None),
+            func.length(func.trim(Message.feedback_reason)) > 0,
+        )
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    )
+    return [
+        FeedbackNoteRow(
+            message_id=r[0],
+            model_id=str(r[1]) if r[1] else None,
+            reason=str(r[2]).strip(),
+            created_at=r[3],
+        )
+        for r in (await db.execute(stmt)).all()
     ]
 
 

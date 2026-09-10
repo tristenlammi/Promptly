@@ -482,6 +482,43 @@ class AnalyticsModelRow(BaseModel):
     cost_usd_window: float
 
 
+class AnalyticsFeedbackRow(BaseModel):
+    """Thumbs up / down on one model's replies over the window.
+
+    ``rated`` is the denominator that matters: a model with two
+    downvotes out of four replies is in far worse shape than one with
+    ten out of a thousand, and a raw count can't tell them apart.
+    Models nobody rated are omitted entirely rather than shown at 0%,
+    which would read as "perfect" when it means "no signal".
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_id: str
+    up: int
+    down: int
+    rated: int
+    # Share of rated replies that were thumbed down, 0.0–1.0.
+    down_rate: float
+
+
+class FeedbackNoteRow(BaseModel):
+    """One thumbs-down, with the note the user chose to leave.
+
+    Deliberately carries **no message content**. The reason was written
+    to be read by whoever runs the instance; the conversation around it
+    was not, and an admin screen that quietly exposes everyone's chats
+    would be a much bigger change than a feedback loop.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    message_id: uuid.UUID
+    model_id: str | None = None
+    reason: str
+    created_at: datetime
+
+
 # --------------------------------------------------------------------
 # Observability (admin "Console" tab)
 # --------------------------------------------------------------------

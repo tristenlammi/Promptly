@@ -21,6 +21,29 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-09-10
+
+### Fixed
+
+- Models: DeepSeek's `deepseek-flash` (V4.1-Flash, released 2026-09-10) is now
+  detected as vision-capable. It has native multimodal understanding but dropped
+  "vision" from its name, which defeated the rule added six days earlier — so
+  the whole hosted `*flash*` family is matched now, including the
+  `deepseek-v4-flash*` ids that DeepSeek keeps as aliases routed to V4.1.
+  Refresh the provider's model list to pick it up.
+
+### Added
+
+- Admin → Analytics: **Response quality**. The thumbs on assistant replies have
+  been collected since Phase 2.5 and read by nothing — they now show up as
+  up/down per model, worst down-rate first, so "which model is letting people
+  down" is a glance rather than a hunch. The rate is against *rated* replies,
+  not everything sent, and replies are attributed to the model that actually
+  produced them rather than whichever the conversation currently has selected.
+- Admin → Analytics: **What people said** — the notes left on a thumbs-down.
+  Counts tell you which model is failing; only the notes tell you how. Shows
+  the note and the model, never the message content.
+
 ## [0.8.6] - 2026-09-08
 
 ### Added

@@ -801,19 +801,34 @@ def _detect_vision_by_id(provider_type: str, model_id: str) -> bool:
         )
         return any(k in mid for k in keywords)
     if provider_type == "deepseek":
-        # Most of DeepSeek's hosted line is still text-only: the plain V4
-        # family and the legacy ``deepseek-chat`` / ``deepseek-reasoner``
-        # ids don't accept image content parts and silently drop them.
+        # The hosted line has converged on one multimodal model. As of
+        # 2026-09-10, ``deepseek-flash`` (V4.1-Flash) has *native* vision,
+        # and the older ``deepseek-v4-flash`` / ``deepseek-v4-flash-
+        # vision-exp`` ids are kept as aliases routed to it — so the whole
+        # ``*flash*`` family reads images. Verified against
+        # api-docs.deepseek.com/updates + /quick_start/pricing.
         #
-        # ``deepseek-v4-flash-vision-exp`` (2026-08-21) is the exception —
-        # it takes images on the same ``/chat/completions`` endpoint in
-        # the usual OpenAI ``image_url`` shape, so nothing but this flag
-        # needed changing. Verified against api-docs.deepseek.com/guides/
-        # vision. Matching on ``vision`` rather than that exact id so the
-        # non-experimental release doesn't land back here; the open-weight
-        # ``deepseek-vl*`` family stays matched for operators pointing
-        # this provider at their own vLLM deployment.
-        return "vision" in mid or "deepseek-vl" in mid or "vl2" in mid
+        # Matching the family rather than exact ids, because this is the
+        # second id in three weeks: ``vision`` alone missed the model that
+        # dropped the word from its name. ``deepseek-vl*`` stays matched
+        # for operators pointing this provider at their own vLLM box.
+        #
+        # NOT matched, deliberately:
+        #   deepseek-v4-pro         — text-only today. DeepSeek routes it
+        #                             to V4.1-Flash from 2026-09-14, after
+        #                             which this under-reports it by one
+        #                             badge; that beats claiming vision on
+        #                             a model that would drop the image.
+        #                             It's being retired, so it should
+        #                             leave the catalog rather than get a
+        #                             date-dependent rule here.
+        #   deepseek-chat/-reasoner — legacy text-only aliases.
+        return (
+            "flash" in mid
+            or "vision" in mid
+            or "deepseek-vl" in mid
+            or "vl2" in mid
+        )
     # openrouter / openai_compatible / anything else → let the richer
     # catalog logic decide (openrouter) or default off.
     return False

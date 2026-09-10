@@ -11,22 +11,34 @@ from __future__ import annotations
 from app.models_config.provider import _detect_vision_by_id
 
 
-def test_deepseeks_vision_model_is_recognised():
-    """``deepseek-v4-flash-vision-exp`` reads images on the normal endpoint.
+def test_deepseeks_vision_models_are_recognised():
+    """The whole hosted ``*flash*`` family reads images.
 
-    Released 2026-08-21. Before this, the DeepSeek branch only matched the
-    open-weight ``deepseek-vl*`` family, so selecting the hosted vision
-    model still produced the "can't see images" warning.
+    Two releases in three weeks, each of which broke a narrower rule:
+    ``deepseek-v4-flash-vision-exp`` (2026-08-21) defeated matching on
+    ``deepseek-vl``, and ``deepseek-flash`` (V4.1, 2026-09-10) defeated
+    matching on ``vision`` by dropping the word from its name. The older
+    ids are now aliases routed to V4.1-Flash, so all three see images.
     """
-    assert _detect_vision_by_id("deepseek", "deepseek-v4-flash-vision-exp")
+    for model_id in (
+        "deepseek-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    ):
+        assert _detect_vision_by_id("deepseek", model_id), model_id
 
 
 def test_deepseeks_text_models_are_still_text_only():
-    """The rest of the line has not gained vision — don't blanket-enable."""
+    """Don't blanket-enable the provider — these would drop the image.
+
+    ``deepseek-v4-pro`` is the interesting one: DeepSeek routes it to
+    V4.1-Flash from 2026-09-14, so this assertion is deliberately
+    conservative rather than permanently true. Under-reporting a badge
+    beats claiming a capability the model doesn't have yet.
+    """
     for model_id in (
         "deepseek-chat",
         "deepseek-reasoner",
-        "deepseek-v4-flash",
         "deepseek-v4-pro",
     ):
         assert not _detect_vision_by_id("deepseek", model_id), model_id

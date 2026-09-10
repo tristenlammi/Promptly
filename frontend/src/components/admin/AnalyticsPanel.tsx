@@ -21,6 +21,8 @@ import {
 
 import {
   useAnalyticsByModel,
+  useAnalyticsFeedback,
+  useAnalyticsFeedbackNotes,
   useAnalyticsSummary,
   useAnalyticsTimeseries,
   useAnalyticsUsers,
@@ -69,6 +71,8 @@ export function AnalyticsPanel() {
   const perUserSeries = useAnalyticsUserTimeseries(chartUserId, days);
   const users = useAnalyticsUsers(days);
   const byModel = useAnalyticsByModel(days);
+  const feedback = useAnalyticsFeedback(days);
+  const feedbackNotes = useAnalyticsFeedbackNotes(days);
 
   const activeSeries = chartUserId ? perUserSeries : allUsersSeries;
 
@@ -293,6 +297,122 @@ export function AnalyticsPanel() {
                 </tbody>
               </table>
               </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* The thumbs, finally read. Counts on the left tell you WHICH
+          model is being rejected; the notes on the right are the only
+          thing that tells you why, which is what stops "switch models"
+          from being a guess. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Response quality"
+            subtitle="Thumbs on assistant replies, worst first."
+          />
+          <div className="max-h-72 overflow-y-auto px-1 pb-2">
+            {feedback.isLoading ? (
+              <ChartLoading />
+            ) : (feedback.data ?? []).length === 0 ? (
+              <EmptyState message="Nobody has rated a reply in this window." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-left uppercase tracking-wider text-[10px] text-[var(--text-muted)]">
+                    <tr>
+                      <th className="px-2 py-1.5 font-semibold">Model</th>
+                      <th className="px-2 py-1.5 font-semibold text-right">Up</th>
+                      <th className="px-2 py-1.5 font-semibold text-right">Down</th>
+                      <th className="px-2 py-1.5 font-semibold text-right">
+                        Down rate
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(feedback.data ?? []).map((row) => (
+                      <tr
+                        key={row.model_id}
+                        className="border-t border-[var(--border)] first:border-t-0"
+                      >
+                        <td
+                          className="px-2 py-1.5 font-mono text-[11px] text-[var(--text)]"
+                          title={row.model_id}
+                        >
+                          <span className="block max-w-[20ch] truncate">
+                            {row.model_id}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]">
+                          {formatInt(row.up)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]">
+                          {formatInt(row.down)}
+                        </td>
+                        <td
+                          className="px-2 py-1.5 text-right tabular-nums font-medium"
+                          // Only colour it once there's enough to mean
+                          // something. One downvote out of one reply is
+                          // 100% and tells you nothing.
+                          title={`${row.rated} rated`}
+                        >
+                          <span
+                            className={cn(
+                              row.rated >= 5 && row.down_rate >= 0.34
+                                ? "text-red-500"
+                                : "text-[var(--text)]"
+                            )}
+                          >
+                            {Math.round(row.down_rate * 100)}%
+                          </span>
+                          <span className="ml-1 text-[10px] text-[var(--text-muted)]">
+                            of {formatInt(row.rated)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="What people said"
+            subtitle="Notes left on a thumbs-down. No message content."
+          />
+          <div className="max-h-72 overflow-y-auto px-3 pb-3">
+            {feedbackNotes.isLoading ? (
+              <ChartLoading />
+            ) : (feedbackNotes.data ?? []).length === 0 ? (
+              <EmptyState message="No written feedback in this window." />
+            ) : (
+              <ul className="space-y-2">
+                {(feedbackNotes.data ?? []).map((note) => (
+                  <li
+                    key={note.message_id}
+                    className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-2"
+                  >
+                    <p className="text-xs text-[var(--text)]">{note.reason}</p>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-[var(--text-muted)]">
+                      {note.model_id && (
+                        <span className="font-mono">{note.model_id}</span>
+                      )}
+                      <span>
+                        {new Date(note.created_at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </p>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </Card>

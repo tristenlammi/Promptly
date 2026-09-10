@@ -12,10 +12,12 @@ import type {
   AdminModelOption,
   AdminUser,
   AdminUserUsage,
+  AnalyticsFeedbackRow,
   AnalyticsModelRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
+  FeedbackNoteRow,
   AppSettings,
   AuthEvent,
   ErrorEventDetail,
@@ -210,6 +212,25 @@ export function useAnalyticsByModel(days = 30) {
   return useQuery<AnalyticsModelRow[]>({
     queryKey: ["admin", "analytics", "by-model", days] as const,
     queryFn: () => adminApi.analyticsByModel(days),
+    staleTime: 60_000,
+  });
+}
+
+/** Thumbs up / down per model. Worst down-rate first, server-side. */
+export function useAnalyticsFeedback(days = 30) {
+  return useQuery<AnalyticsFeedbackRow[]>({
+    queryKey: ["admin", "analytics", "feedback", days] as const,
+    queryFn: () => adminApi.analyticsFeedback(days),
+    staleTime: 60_000,
+  });
+}
+
+/** The notes people left on a thumbs-down. Counts say which model is
+ *  failing; only these say how. */
+export function useAnalyticsFeedbackNotes(days = 30) {
+  return useQuery<FeedbackNoteRow[]>({
+    queryKey: ["admin", "analytics", "feedback-notes", days] as const,
+    queryFn: () => adminApi.analyticsFeedbackNotes(days),
     staleTime: 60_000,
   });
 }

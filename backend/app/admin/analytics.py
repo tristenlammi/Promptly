@@ -18,10 +18,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import (
+    AnalyticsFeedbackRow,
     AnalyticsModelRow,
     AnalyticsSummary,
     AnalyticsTimeseriesPoint,
     AnalyticsUserRow,
+    FeedbackNoteRow,
 )
 from app.auth.deps import get_current_user
 from app.auth.models import User
@@ -207,6 +209,49 @@ async def analytics_by_model(
     """
     _analytics_scope(user)
     return await aggregates.by_model(db, start=_window_start(days))
+
+
+# --------------------------------------------------------------------
+# Response quality (the thumbs)
+# --------------------------------------------------------------------
+# The thumbs were collected for two years before anything read them.
+# These two endpoints are the consumption side: which model is being
+# thumbed down, and what people actually said about it. Counts alone
+# tell you to switch models without telling you what was wrong.
+@router.get(
+    "/analytics/feedback",
+    response_model=list[AnalyticsFeedbackRow],
+)
+async def analytics_feedback(
+    days: int = Query(default=30, ge=1, le=180),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[AnalyticsFeedbackRow]:
+    """Thumbs up / down per model, worst down-rate first."""
+    _analytics_scope(user)
+    return await aggregates.feedback_by_model(db, start=_window_start(days))
+
+
+@router.get(
+    "/analytics/feedback/notes",
+    response_model=list[FeedbackNoteRow],
+)
+async def analytics_feedback_notes(
+    days: int = Query(default=30, ge=1, le=180),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[FeedbackNoteRow]:
+    """Recent thumbs-down notes, newest first.
+
+    Returns the note and the model, never the message body — the note
+    was written to be read by whoever runs the instance; the
+    conversation around it was not.
+    """
+    _analytics_scope(user)
+    return await aggregates.feedback_notes(
+        db, start=_window_start(days), limit=limit
+    )
 
 
 # --------------------------------------------------------------------

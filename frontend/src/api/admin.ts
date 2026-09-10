@@ -3,10 +3,12 @@ import type {
   AdminModelOption,
   AdminUser,
   AdminUserUsage,
+  AnalyticsFeedbackRow,
   AnalyticsModelRow,
   AnalyticsSummary,
   AnalyticsTimeseriesPoint,
   AnalyticsUserRow,
+  FeedbackNoteRow,
   AppSettings,
   AuthEvent,
   ErrorEventDetail,
@@ -361,6 +363,23 @@ export const adminApi = {
     const { data } = await apiClient.get<AnalyticsModelRow[]>(
       "/admin/analytics/by-model",
       { params: { days } }
+    );
+    return data;
+  },
+  async analyticsFeedback(days = 30): Promise<AnalyticsFeedbackRow[]> {
+    const { data } = await apiClient.get<AnalyticsFeedbackRow[]>(
+      "/admin/analytics/feedback",
+      { params: { days } }
+    );
+    return data;
+  },
+  async analyticsFeedbackNotes(
+    days = 30,
+    limit = 50
+  ): Promise<FeedbackNoteRow[]> {
+    const { data } = await apiClient.get<FeedbackNoteRow[]>(
+      "/admin/analytics/feedback/notes",
+      { params: { days, limit } }
     );
     return data;
   },
