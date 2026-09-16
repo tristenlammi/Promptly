@@ -52,3 +52,41 @@ def test_an_unknown_model_defaults_to_no_vision():
     """Err closed: a missing badge beats an image the model silently drops."""
     assert not _detect_vision_by_id("deepseek", "some-future-model")
     assert not _detect_vision_by_id("openai_compatible", "anything-at-all")
+
+
+# --- The stale-catalog fallback ---------------------------------------
+#
+# ``supports_vision`` is cached on the provider row at fetch time, so it
+# is only ever as current as the build that wrote it. These pin the
+# fallback that makes a deploy enough — without it, a model that gained
+# vision reads as text-only until an admin happens to re-fetch, which is
+# how the same DeepSeek bug shipped three times.
+
+
+def _available_vision(catalog_value, provider_type="deepseek", model_id="deepseek-flash"):
+    """What the model picker would show for one catalog row."""
+    return bool(catalog_value) or _detect_vision_by_id(provider_type, model_id)
+
+
+def test_a_stale_catalog_flag_is_corrected_by_the_heuristic():
+    """The catalog says text-only because it was written before the fix."""
+    assert _available_vision(False) is True
+
+
+def test_a_catalog_that_already_knows_is_left_alone():
+    assert _available_vision(True) is True
+
+
+def test_a_genuinely_text_only_model_stays_text_only():
+    assert _available_vision(False, model_id="deepseek-v4-pro") is False
+
+
+def test_openrouter_catalog_values_are_never_overridden():
+    """OpenRouter ships real modality data, so its ``False`` is a fact.
+
+    ``_detect_vision_by_id`` returns False for openrouter precisely so
+    the OR above can't promote a text-only model on a name that happens
+    to contain "flash" (``gemini-2.0-flash``, say).
+    """
+    assert _detect_vision_by_id("openrouter", "google/gemini-2.0-flash") is False
+    assert _available_vision(False, "openrouter", "google/gemini-2.0-flash") is False

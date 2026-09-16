@@ -30,6 +30,7 @@ from app.models_config.provider import (
     SUPPORTED_PROVIDER_TYPES,
     ProviderError,
     _detect_reasoning_by_id,
+    _detect_vision_by_id,
     _known_context_window,
     model_router,
 )
@@ -365,7 +366,22 @@ async def list_available_models_for(
                     # without needing the admin to re-fetch the catalog.
                     context_window=m.get("context_window")
                     or _known_context_window(provider.type, model_id),
-                    supports_vision=bool(m.get("supports_vision", False)),
+                    # Same fallback as the window above, and for the same
+                    # reason — the cached flag was written by an older
+                    # build of the very heuristic below, so a model that
+                    # has since gained vision reads as text-only until
+                    # someone thinks to re-fetch the catalog. Nobody does;
+                    # they just see "can't see images" and assume it's
+                    # true. DeepSeek renamed its vision model twice in a
+                    # month and this stayed stale through both.
+                    #
+                    # Safe to OR because the two sources never disagree in
+                    # the other direction: OpenRouter ships real modality
+                    # data and ``_detect_vision_by_id`` returns False for
+                    # it, so a genuine catalog ``False`` is never
+                    # overridden.
+                    supports_vision=bool(m.get("supports_vision", False))
+                    or _detect_vision_by_id(provider.type, model_id),
                     supports_image_output=bool(
                         m.get("supports_image_output", False)
                     ),
@@ -457,7 +473,11 @@ async def list_available_models_for(
                 display_name=cm.display_name,
                 context_window=(base_entry or {}).get("context_window")
                 or _known_context_window(base_provider.type, cm.base_model_id),
-                supports_vision=bool((base_entry or {}).get("supports_vision", False)),
+                # Same stale-catalog fallback as the base-model loop.
+                supports_vision=bool(
+                    (base_entry or {}).get("supports_vision", False)
+                )
+                or _detect_vision_by_id(base_provider.type, cm.base_model_id),
                 supports_image_output=bool(
                     (base_entry or {}).get("supports_image_output", False)
                 ),

@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-09-16
+
+### Fixed
+
+- Models: vision support no longer depends on someone remembering to re-fetch
+  the model catalog. The flag is cached on the provider row, so it was only ever
+  as current as the build that wrote it — a model that gained vision kept
+  reading as text-only until an admin re-fetched, which nobody thinks to do
+  because the UI states it as fact. It now falls back to live id-based detection
+  the same way the context window and reasoning flags already did, so a deploy
+  is enough. This is why the DeepSeek fix appeared not to work twice.
+
 ## [0.8.8] - 2026-09-16
 
 ### Fixed
