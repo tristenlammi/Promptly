@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-09-16
+
+### Fixed
+
+- Files: PDF previews render again. nginx's stock `mime.types` has no entry for
+  `.mjs`, so pdf.js's worker — the one asset shipped with that extension — was
+  served as `application/octet-stream`, and browsers refuse to execute an ES
+  module that isn't a JavaScript type. It surfaced as "Failed to fetch
+  dynamically imported module", which is misleading: the fetch returned 200.
+  **After deploying, affected browsers need a hard refresh** — the bad response
+  was cached under `immutable` for a year and the filename hash doesn't change.
+
 ## [0.8.7] - 2026-09-10
 
 ### Fixed
